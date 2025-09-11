@@ -1,13 +1,23 @@
 import csv
 import io
-from flask import Blueprint, render_template, request, redirect, url_for, flash, Response
-from sqlalchemy import func
-from sqlalchemy.orm import joinedload
-from invapp.models import db, Item, Location, Batch, Movement, Printer
-from invapp.printing.zebra import generate_batch_label, send_zpl
 from datetime import datetime
 
+from flask import Blueprint, render_template, request, redirect, url_for, flash, Response
+from flask_login import login_required
+from sqlalchemy import func
+from sqlalchemy.orm import joinedload
+
+from invapp.models import db, Item, Location, Batch, Movement, Printer
+from invapp.printing.zebra import generate_batch_label, send_zpl
+
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
+
+
+@bp.before_request
+@login_required
+def require_login():
+    """Ensure all inventory routes require authentication."""
+    pass
 
 ############################
 # HOME

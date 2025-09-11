@@ -1,5 +1,46 @@
+"""Database models for the application."""
+
 from datetime import datetime
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_login import UserMixin
+
 from invapp.extensions import db
+
+
+# Association table for many-to-many relationship between users and roles
+user_roles = db.Table(
+    "user_roles",
+    db.Column("user_id", db.Integer, db.ForeignKey("user.id")),
+    db.Column("role_id", db.Integer, db.ForeignKey("role.id")),
+)
+
+
+class Role(db.Model):
+    """Simple role model."""
+
+    __tablename__ = "role"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(64), unique=True, nullable=False)
+
+
+class User(db.Model, UserMixin):
+    """Application user with password hashing and roles."""
+
+    __tablename__ = "user"
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password_hash = db.Column(db.String(128), nullable=False)
+    roles = db.relationship("Role", secondary=user_roles, backref="users")
+
+    def set_password(self, password: str) -> None:
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password: str) -> bool:
+        return check_password_hash(self.password_hash, password)
+
+    def has_role(self, role_name: str) -> bool:
+        return any(r.name == role_name for r in self.roles)
+
 
 class Item(db.Model):
     __tablename__ = "item"

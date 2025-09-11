@@ -1,8 +1,16 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash
+from flask_login import login_required
+
 from invapp.extensions import db
 from invapp.models import Receiving, Item, Stock, Location
 
 bp = Blueprint("receiving", __name__, url_prefix="/receiving")
+
+
+@bp.before_request
+@login_required
+def require_login():
+    pass
 
 @bp.route("/")
 def receiving_home():
