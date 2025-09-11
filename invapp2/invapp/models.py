@@ -45,3 +45,12 @@ class Movement(db.Model):
     item = db.relationship("Item", backref="movements")
     batch = db.relationship("Batch", backref="movements")
     location = db.relationship("Location", backref="movements")
+
+
+class Printer(db.Model):
+    __tablename__ = "printer"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String, nullable=False)
+    connection = db.Column(db.String, nullable=False)  # IP address or USB path
+    label_width = db.Column(db.Float, default=4.0)
+    label_height = db.Column(db.Float, default=6.0)

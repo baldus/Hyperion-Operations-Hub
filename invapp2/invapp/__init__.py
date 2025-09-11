@@ -1,6 +1,6 @@
 from flask import Flask, render_template
 from .extensions import db
-from .routes import inventory, reports, orders, work, settings
+from .routes import inventory, reports, orders, work, settings, printers
 
 def create_app():
     app = Flask(__name__)
@@ -19,6 +19,7 @@ def create_app():
     app.register_blueprint(orders.bp)
     app.register_blueprint(work.bp)
     app.register_blueprint(settings.bp)
+    app.register_blueprint(printers.bp)
 
     @app.route("/")
     def home():

@@ -3,7 +3,8 @@ import io
 from flask import Blueprint, render_template, request, redirect, url_for, flash, Response
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
-from invapp.models import db, Item, Location, Batch, Movement
+from invapp.models import db, Item, Location, Batch, Movement, Printer
+from invapp.printing.zebra import generate_batch_label, send_zpl
 from datetime import datetime
 
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
@@ -551,6 +552,14 @@ def receiving():
         db.session.add(mv)
         db.session.commit()
 
+        printer = Printer.query.first()
+        if printer:
+            try:
+                zpl = generate_batch_label(batch)
+                send_zpl(zpl, printer)
+            except Exception as exc:
+                flash(f"Label print failed: {exc}", "warning")
+
         flash(f"Receiving recorded! Lot: {lot_number}", "success")
         return redirect(url_for("inventory.receiving"))
 
@@ -573,6 +582,22 @@ def receiving():
         loc_map=loc_map,
         batch_map=batch_map
     )
+
+
+@bp.post("/batches/<int:batch_id>/print-label")
+def print_batch_label(batch_id):
+    batch = Batch.query.get_or_404(batch_id)
+    printer = Printer.query.first()
+    if not printer:
+        flash("No printer configured", "danger")
+        return redirect(request.referrer or url_for("inventory.inventory_home"))
+    try:
+        zpl = generate_batch_label(batch)
+        send_zpl(zpl, printer)
+        flash("Label printed", "success")
+    except Exception as exc:
+        flash(f"Label print failed: {exc}", "danger")
+    return redirect(request.referrer or url_for("inventory.inventory_home"))
 
 ############################
 # MOVE / TRANSFER ROUTES
@@ -631,6 +656,15 @@ def move_home():
         db.session.add(mv_out)
         db.session.add(mv_in)
         db.session.commit()
+
+        if request.form.get("print_label"):
+            printer = Printer.query.first()
+            if printer:
+                try:
+                    zpl = generate_batch_label(batch)
+                    send_zpl(zpl, printer)
+                except Exception as exc:
+                    flash(f"Label print failed: {exc}", "warning")
 
         flash(f"Moved {qty} of {sku} (Lot {batch.lot_number}) to new location.", "success")
         return redirect(url_for("inventory.move_home"))

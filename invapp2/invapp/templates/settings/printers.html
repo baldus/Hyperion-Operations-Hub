@@ -2,11 +2,38 @@
 
 {% block content %}
 <h2>Printer Settings</h2>
-<p>Here you can configure your printers.</p>
 
-<div class="button-grid">
-    <button class="action-btn">Add Printer</button>
-    <button class="action-btn">Remove Printer</button>
-    <button class="action-btn">Test Print</button>
-</div>
+<table>
+  <tr>
+    <th>Name</th>
+    <th>Connection</th>
+    <th>Label WxH</th>
+    <th>Actions</th>
+  </tr>
+  {% for p in printers %}
+  <tr>
+    <td>{{ p.name }}</td>
+    <td>{{ p.connection }}</td>
+    <td>{{ p.label_width }} x {{ p.label_height }}</td>
+    <td>
+      <form method="post" action="{{ url_for('printers.test_printer', printer_id=p.id) }}">
+        <button type="submit">Test</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h3>Add Printer</h3>
+<form method="post">
+  <label>Name:</label><br>
+  <input type="text" name="name" required><br><br>
+  <label>Connection (IP or USB path):</label><br>
+  <input type="text" name="connection" required><br><br>
+  <label>Label Width:</label><br>
+  <input type="number" step="0.1" name="label_width" value="4"><br><br>
+  <label>Label Height:</label><br>
+  <input type="number" step="0.1" name="label_height" value="6"><br><br>
+  <button type="submit" class="bubble-btn">Save</button>
+</form>
 {% endblock %}
