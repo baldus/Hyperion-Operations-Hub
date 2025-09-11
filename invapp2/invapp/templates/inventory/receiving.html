@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Receiving</h2>
+
+<form method="POST">
+  <label>SKU:</label><br>
+  <input type="text" name="sku" required><br><br>
+
+  <label>Quantity:</label><br>
+  <input type="number" name="qty" required><br><br>
+
+  <label>Location:</label><br>
+  <select name="location_id" required>
+    {% for loc in locations %}
+      <option value="{{ loc.id }}">{{ loc.code }}</option>
+    {% endfor %}
+  </select><br><br>
+
+  <label>Person Receiving:</label><br>
+  <input type="text" name="person" required><br><br>
+
+  <label>PO Number (optional):</label><br>
+  <input type="text" name="po_number"><br><br>
+
+  <button type="submit" class="bubble-btn">Submit</button>
+</form>
+
+<hr>
+
+<h3>Recent Receipts</h3>
+<style>
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-top: 15px;
+  }
+  th, td {
+    border: 1px solid #888;
+    padding: 6px 10px;
+    text-align: left;
+  }
+  th {
+    background: #333;
+    color: #fff;
+  }
+  tr:nth-child(even) {
+    background: #2a2a2a;
+  }
+</style>
+
+<table>
+  <tr>
+    <th>Date</th>
+    <th>SKU</th>
+    <th>Item</th>
+    <th>Lot / Batch</th>
+    <th>Quantity</th>
+    <th>Location</th>
+    <th>Person</th>
+    <th>PO Number</th>
+  </tr>
+  {% for rec in records %}
+  <tr>
+    <td>{{ rec.date.strftime("%Y-%m-%d %H:%M") }}</td>
+    <td>{{ item_map[rec.item_id].sku if rec.item_id in item_map else "???" }}</td>
+    <td>{{ item_map[rec.item_id].name if rec.item_id in item_map else "Unknown" }}</td>
+    <td>{{ batch_map[rec.batch_id].lot_number if rec.batch_id in batch_map else "-" }}</td>
+    <td>{{ rec.quantity }}</td>
+    <td>{{ loc_map[rec.location_id].code if rec.location_id in loc_map else "-" }}</td>
+    <td>{{ rec.person or "-" }}</td>
+    <td>{{ rec.po_number or "-" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Stock List</h2>
+<table border="1" cellpadding="5">
+    <tr>
+        <th>ID</th>
+        <th>Item ID</th>
+        <th>Location ID</th>
+        <th>Quantity</th>
+    </tr>
+    {% for s in stocks %}
+    <tr>
+        <td>{{ s.id }}</td>
+        <td>{{ s.item_id }}</td>
+        <td>{{ s.location_id }}</td>
+        <td>{{ s.quantity }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endblock %}
