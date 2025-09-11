@@ -2,13 +2,16 @@ from flask import Flask, render_template
 from .extensions import db
 from .routes import inventory, reports, orders, work, settings
 
-def create_app():
+
+def create_app(config=None):
     app = Flask(__name__)
 
     # database config (example: using PostgreSQL)
     app.config["SQLALCHEMY_DATABASE_URI"] = "postgresql+psycopg2://inv:change_me@localhost/invdb"
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.secret_key = "supersecret"  # needed for flash()
+    if config:
+        app.config.update(config)
 
     # ✅ init db with app
     db.init_app(app)
