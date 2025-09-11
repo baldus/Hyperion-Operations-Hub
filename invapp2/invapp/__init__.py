@@ -1,3 +1,5 @@
+import os
+
 from flask import Flask, render_template
 from .extensions import db
 from .routes import inventory, reports, orders, work, settings
@@ -16,7 +18,8 @@ def create_app():
     # register blueprints
     app.register_blueprint(inventory.bp)
     app.register_blueprint(reports.bp)
-    app.register_blueprint(orders.bp)
+    if os.getenv("ENABLE_ORDERS", "true").lower() in ("1", "true", "yes"):
+        app.register_blueprint(orders.bp)
     app.register_blueprint(work.bp)
     app.register_blueprint(settings.bp)
 

@@ -90,7 +90,7 @@ invapp2/
    pip install -r requirements.txt
    ```
 
-3. Set up your database:  
+3. Set up your database:
    ```bash
    export DB_URL="postgresql+psycopg2://USER:PASSWORD@localhost/invdb"
    flask shell
@@ -98,12 +98,17 @@ invapp2/
    >>> db.create_all()
    ```
 
-4. Run the app:  
+4. (Optional) Disable the experimental Orders module:
+   ```bash
+   export ENABLE_ORDERS=false
+   ```
+
+5. Run the app:
    ```bash
    flask run --host=0.0.0.0 --port=5000
    ```
 
-5. Access via browser:  
+6. Access via browser:
    ```
    http://<raspberry-pi-ip>:5000
    ```
