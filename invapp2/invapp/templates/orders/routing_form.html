@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>{% if step %}Edit Routing Step{% else %}Add Routing Step{% endif %}</h2>
+<form method="POST">
+  <label>Finished Good SKU:</label><br>
+  <input type="text" name="item_sku" value="{{ item_sku or '' }}" required><br><br>
+  <label>Step Number:</label><br>
+  <input type="number" name="step_number" value="{{ step.step_number if step else 1 }}" required><br><br>
+  <label>Description:</label><br>
+  <input type="text" name="description" value="{{ step.description if step else '' }}" required><br><br>
+  <button type="submit" class="bubble-btn">Save</button>
+</form>
+{% endblock %}

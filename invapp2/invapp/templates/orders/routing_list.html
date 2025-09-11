@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Routing Steps</h2>
+<div>
+  <a href="{{ url_for('orders.add_routing') }}" class="bubble-btn">Add Routing Step</a>
+</div>
+<br>
+<table>
+  <tr>
+    <th>Finished Good</th>
+    <th>Step</th>
+    <th>Description</th>
+    <th>Actions</th>
+  </tr>
+  {% for step in steps %}
+  <tr>
+    <td>{{ step.item.sku }} - {{ step.item.name }}</td>
+    <td>{{ step.step_number }}</td>
+    <td>{{ step.description }}</td>
+    <td>
+      <a href="{{ url_for('orders.edit_routing', step_id=step.id) }}">Edit</a>
+      <form method="post" action="{{ url_for('orders.delete_routing', step_id=step.id) }}" style="display:inline;">
+        <button type="submit">Delete</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

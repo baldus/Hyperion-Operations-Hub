@@ -45,3 +45,30 @@ class Movement(db.Model):
     item = db.relationship("Item", backref="movements")
     batch = db.relationship("Batch", backref="movements")
     location = db.relationship("Location", backref="movements")
+
+
+class BOMLine(db.Model):
+    __tablename__ = "bom_line"
+    id = db.Column(db.Integer, primary_key=True)
+    parent_item_id = db.Column(
+        db.Integer, db.ForeignKey("item.id"), nullable=False
+    )
+    component_item_id = db.Column(
+        db.Integer, db.ForeignKey("item.id"), nullable=False
+    )
+    quantity = db.Column(db.Float, nullable=False, default=1)
+
+    parent_item = db.relationship(
+        "Item", foreign_keys=[parent_item_id], backref="bom_lines"
+    )
+    component_item = db.relationship("Item", foreign_keys=[component_item_id])
+
+
+class RoutingStep(db.Model):
+    __tablename__ = "routing_step"
+    id = db.Column(db.Integer, primary_key=True)
+    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    step_number = db.Column(db.Integer, nullable=False)
+    description = db.Column(db.String, nullable=False)
+
+    item = db.relationship("Item", backref="routing_steps")

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>{% if line %}Edit BOM Line{% else %}Add BOM Line{% endif %}</h2>
+<form method="POST">
+  <label>Finished Good SKU:</label><br>
+  <input type="text" name="fg_sku" value="{{ fg_sku or '' }}" required><br><br>
+  <label>Component SKU:</label><br>
+  <input type="text" name="component_sku" value="{{ component_sku or '' }}" required><br><br>
+  <label>Quantity:</label><br>
+  <input type="number" step="any" name="quantity" value="{{ line.quantity if line else 1 }}" required><br><br>
+  <button type="submit" class="bubble-btn">Save</button>
+</form>
+{% endblock %}

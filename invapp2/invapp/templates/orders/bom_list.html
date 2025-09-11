@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>BOM Lines</h2>
+<div>
+  <a href="{{ url_for('orders.add_bom') }}" class="bubble-btn">Add BOM Line</a>
+</div>
+<br>
+<table>
+  <tr>
+    <th>Finished Good</th>
+    <th>Component</th>
+    <th>Quantity</th>
+    <th>Actions</th>
+  </tr>
+  {% for line in bom_lines %}
+  <tr>
+    <td>{{ line.parent_item.sku }} - {{ line.parent_item.name }}</td>
+    <td>{{ line.component_item.sku }} - {{ line.component_item.name }}</td>
+    <td>{{ line.quantity }}</td>
+    <td>
+      <a href="{{ url_for('orders.edit_bom', bom_id=line.id) }}">Edit</a>
+      <form method="post" action="{{ url_for('orders.delete_bom', bom_id=line.id) }}" style="display:inline;">
+        <button type="submit">Delete</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}
