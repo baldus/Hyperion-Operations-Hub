@@ -90,9 +90,10 @@ invapp2/
    pip install -r requirements.txt
    ```
 
-3. Set up your database:  
+3. Set up your database (tables are created automatically on startup):
    ```bash
    export DB_URL="postgresql+psycopg2://USER:PASSWORD@localhost/invdb"
+   # optional: create tables manually
    flask shell
    >>> from invapp.extensions import db
    >>> db.create_all()

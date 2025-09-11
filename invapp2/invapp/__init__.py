@@ -13,6 +13,10 @@ def create_app():
     # ✅ init db with app
     db.init_app(app)
 
+    # ensure tables exist for all models
+    with app.app_context():
+        db.create_all()
+
     # register blueprints
     app.register_blueprint(inventory.bp)
     app.register_blueprint(reports.bp)
