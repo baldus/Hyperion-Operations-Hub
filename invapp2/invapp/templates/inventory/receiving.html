@@ -58,6 +58,7 @@
     <th>Location</th>
     <th>Person</th>
     <th>PO Number</th>
+    <th>Actions</th>
   </tr>
   {% for rec in records %}
   <tr>
@@ -69,6 +70,13 @@
     <td>{{ loc_map[rec.location_id].code if rec.location_id in loc_map else "-" }}</td>
     <td>{{ rec.person or "-" }}</td>
     <td>{{ rec.po_number or "-" }}</td>
+    <td>
+      {% if rec.batch_id %}
+      <form method="POST" action="{{ url_for('inventory.print_batch_label', batch_id=rec.batch_id) }}">
+        <button type="submit" class="bubble-btn">Print Label</button>
+      </form>
+      {% else %}-{% endif %}
+    </td>
   </tr>
   {% endfor %}
 </table>

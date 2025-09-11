@@ -3,7 +3,8 @@ import io
 from flask import Blueprint, render_template, request, redirect, url_for, flash, Response
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
-from invapp.models import db, Item, Location, Batch, Movement
+from invapp.models import db, Item, Location, Batch, Movement, Printer
+from invapp.printing.zebra import generate_batch_label, send_zpl
 from datetime import datetime
 
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
@@ -722,3 +723,17 @@ def export_history():
     response = Response(output.getvalue(), mimetype="text/csv")
     response.headers["Content-Disposition"] = "attachment; filename=transaction_history.csv"
     return response
+
+
+@bp.route("/batches/<int:batch_id>/print-label", methods=["POST"])
+def print_batch_label(batch_id):
+    """Generate a ZPL label for the batch and send it to the configured printer."""
+    batch = Batch.query.get_or_404(batch_id)
+    printer = Printer.query.first()
+    if not printer:
+        flash("No printer configured.", "danger")
+    else:
+        zpl = generate_batch_label(batch)
+        send_zpl(zpl, printer)
+        flash("Label sent to printer.", "success")
+    return redirect(request.referrer or url_for("inventory.inventory_home"))
