@@ -45,3 +45,34 @@ class Movement(db.Model):
     item = db.relationship("Item", backref="movements")
     batch = db.relationship("Batch", backref="movements")
     location = db.relationship("Location", backref="movements")
+
+
+class WorkOrder(db.Model):
+    """Simple work order used for reserving and consuming inventory."""
+
+    __tablename__ = "work_order"
+
+    id = db.Column(db.Integer, primary_key=True)
+    description = db.Column(db.String, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    completed = db.Column(db.Boolean, default=False)
+
+
+class Reservation(db.Model):
+    """Represents a reserved quantity of a batch at a location for an order."""
+
+    __tablename__ = "reservation"
+
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("work_order.id"), nullable=False)
+    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    batch_id = db.Column(db.Integer, db.ForeignKey("batch.id"), nullable=True)
+    location_id = db.Column(db.Integer, db.ForeignKey("location.id"), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+    consumed = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    order = db.relationship("WorkOrder", backref="reservations")
+    item = db.relationship("Item")
+    batch = db.relationship("Batch")
+    location = db.relationship("Location")

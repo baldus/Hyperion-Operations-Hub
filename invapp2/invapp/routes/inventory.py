@@ -3,7 +3,7 @@ import io
 from flask import Blueprint, render_template, request, redirect, url_for, flash, Response
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
-from invapp.models import db, Item, Location, Batch, Movement
+from invapp.models import db, Item, Location, Batch, Movement, Reservation
 from datetime import datetime
 
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
@@ -328,7 +328,7 @@ def list_stock():
         .all()
     )
 
-    totals = dict(
+    totals_on_hand = dict(
         db.session.query(
             Movement.item_id,
             func.sum(Movement.quantity).label("total_on_hand")
@@ -337,21 +337,61 @@ def list_stock():
         .all()
     )
 
+    reserved_rows = (
+        db.session.query(
+            Reservation.item_id,
+            Reservation.batch_id,
+            Reservation.location_id,
+            func.sum(Reservation.quantity).label("reserved")
+        )
+        .filter_by(consumed=False)
+        .group_by(Reservation.item_id, Reservation.batch_id, Reservation.location_id)
+        .all()
+    )
+
+    reserved_totals = dict(
+        db.session.query(
+            Reservation.item_id,
+            func.sum(Reservation.quantity).label("total_reserved")
+        )
+        .filter_by(consumed=False)
+        .group_by(Reservation.item_id)
+        .all()
+    )
+
+    reserved_map = {
+        (r.item_id, r.batch_id, r.location_id): r.reserved for r in reserved_rows
+    }
+
     balances = []
     items = {i.id: i for i in Item.query.all()}
     locations = {l.id: l for l in Location.query.all()}
     batches = {b.id: b for b in Batch.query.all()}
 
     for item_id, batch_id, location_id, on_hand in rows:
+        key = (item_id, batch_id, location_id)
+        reserved = reserved_map.get(key, 0)
         balances.append({
             "item": items.get(item_id),
             "batch": batches.get(batch_id) if batch_id else None,
             "location": locations.get(location_id),
             "on_hand": int(on_hand),
-            "total_on_hand": int(totals.get(item_id, 0)),
+            "reserved": int(reserved),
+            "available": int(on_hand - reserved),
+            "total_on_hand": int(totals_on_hand.get(item_id, 0)),
+            "total_reserved": int(reserved_totals.get(item_id, 0)),
+            "total_available": int(
+                totals_on_hand.get(item_id, 0) - reserved_totals.get(item_id, 0)
+            ),
         })
 
-    return render_template("inventory/list_stock.html", balances=balances, totals=totals, items=items)
+    return render_template(
+        "inventory/list_stock.html",
+        balances=balances,
+        totals=totals_on_hand,
+        totals_reserved=reserved_totals,
+        items=items,
+    )
 
 
 @bp.route("/stock/adjust", methods=["GET", "POST"])
@@ -478,9 +518,32 @@ def export_stock():
         .all()
     )
 
+    reserved_rows = (
+        db.session.query(
+            Reservation.item_id,
+            Reservation.batch_id,
+            Reservation.location_id,
+            func.sum(Reservation.quantity).label("reserved")
+        )
+        .filter_by(consumed=False)
+        .group_by(Reservation.item_id, Reservation.batch_id, Reservation.location_id)
+        .all()
+    )
+    reserved_map = {
+        (r.item_id, r.batch_id, r.location_id): r.reserved for r in reserved_rows
+    }
+
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["sku", "item_name", "location", "lot_number", "on_hand"])
+    writer.writerow([
+        "sku",
+        "item_name",
+        "location",
+        "lot_number",
+        "on_hand",
+        "reserved",
+        "available",
+    ])
 
     items = {i.id: i for i in Item.query.all()}
     locations = {l.id: l for l in Location.query.all()}
@@ -491,7 +554,9 @@ def export_stock():
         name = items[item_id].name if item_id in items else "UNKNOWN"
         loc = locations[location_id].code if location_id in locations else "UNKNOWN"
         lot = batches[batch_id].lot_number if batch_id and batch_id in batches else "-"
-        writer.writerow([sku, name, loc, lot, on_hand])
+        reserved = reserved_map.get((item_id, batch_id, location_id), 0)
+        available = on_hand - reserved
+        writer.writerow([sku, name, loc, lot, on_hand, reserved, available])
 
     response = Response(output.getvalue(), mimetype="text/csv")
     response.headers["Content-Disposition"] = "attachment; filename=stock.csv"

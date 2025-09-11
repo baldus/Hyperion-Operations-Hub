@@ -41,14 +41,18 @@
     <th>SKU</th>
     <th>Item</th>
     <th>Total On Hand</th>
+    <th>Total Reserved</th>
+    <th>Total Available</th>
     <th>Min Stock</th>
   </tr>
   {% for item_id, total in totals.items() %}
     {% set item = items[item_id] %}
+    {% set reserved = totals_reserved.get(item_id, 0) %}
+    {% set available = total - reserved %}
     {% set min_stock = item.min_stock or 0 %}
-    {% if total < (min_stock * 1.05) %}
+    {% if available < (min_stock * 1.05) %}
       {% set row_class = "low-red" %}
-    {% elif total < (min_stock * 1.25) %}
+    {% elif available < (min_stock * 1.25) %}
       {% set row_class = "low-yellow" %}
     {% else %}
       {% set row_class = "" %}
@@ -57,6 +61,8 @@
       <td>{{ item.sku }}</td>
       <td>{{ item.name }}</td>
       <td>{{ total }}</td>
+      <td>{{ reserved }}</td>
+      <td>{{ available }}</td>
       <td>{{ min_stock }}</td>
     </tr>
   {% endfor %}
@@ -70,7 +76,9 @@
     <th>Item</th>
     <th>Batch / Lot</th>
     <th>Location</th>
-    <th>Quantity</th>
+    <th>On Hand</th>
+    <th>Reserved</th>
+    <th>Available</th>
   </tr>
   {% for bal in balances %}
   <tr>
@@ -79,6 +87,8 @@
     <td>{{ bal.batch.lot_number if bal.batch else "-" }}</td>
     <td>{{ bal.location.code if bal.location else "-" }}</td>
     <td>{{ bal.on_hand }}</td>
+    <td>{{ bal.reserved }}</td>
+    <td>{{ bal.available }}</td>
   </tr>
   {% endfor %}
 </table>
