@@ -88,10 +88,10 @@
     {% endif %}
     <tr class="{{ 'mismatch' if rec.movement_type == 'CYCLE_COUNT_ADJUSTMENT' else 'match' }}">
       <td>{{ rec.date.strftime("%Y-%m-%d %H:%M") }}</td>
-      <td>{{ items_map[rec.item_id].sku if rec.item_id in items_map else "???" }}</td>
-      <td>{{ items_map[rec.item_id].name if rec.item_id in items_map else "Unknown" }}</td>
-      <td>{{ batches_map[rec.batch_id].lot_number if rec.batch_id in batches_map else "-" }}</td>
-      <td>{{ locations_map[rec.location_id].code if rec.location_id in locations_map else "-" }}</td>
+      <td>{{ rec.item.sku if rec.item else "???" }}</td>
+      <td>{{ rec.item.name if rec.item else "Unknown" }}</td>
+      <td>{{ rec.batch.lot_number if rec.batch else "-" }}</td>
+      <td>{{ rec.location.code if rec.location else "-" }}</td>
       <td>Book={{ book }} | Counted={{ counted }} | Diff={{ diff }}</td>
       <td>{{ rec.person or "-" }}</td>
       <td>{{ rec.movement_type }}</td>
