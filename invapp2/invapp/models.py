@@ -45,3 +45,35 @@ class Movement(db.Model):
     item = db.relationship("Item", backref="movements")
     batch = db.relationship("Batch", backref="movements")
     location = db.relationship("Location", backref="movements")
+
+
+class Order(db.Model):
+    __tablename__ = "order"
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String, unique=True, nullable=False)
+    description = db.Column(db.String)
+
+    steps = db.relationship("OrderStep", backref="order", order_by="OrderStep.sequence")
+
+
+class OrderStep(db.Model):
+    __tablename__ = "order_step"
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("order.id"), nullable=False)
+    step_name = db.Column(db.String, nullable=False)
+    sequence = db.Column(db.Integer, nullable=False)
+    status = db.Column(db.String, default="PENDING")  # PENDING, WAITING, COMPLETE
+    activated_at = db.Column(db.DateTime)
+    completed_at = db.Column(db.DateTime)
+
+    items = db.relationship("OrderStepItem", backref="order_step")
+
+
+class OrderStepItem(db.Model):
+    __tablename__ = "order_step_item"
+    id = db.Column(db.Integer, primary_key=True)
+    order_step_id = db.Column(db.Integer, db.ForeignKey("order_step.id"), nullable=False)
+    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    quantity = db.Column(db.Integer, default=1)
+
+    item = db.relationship("Item")

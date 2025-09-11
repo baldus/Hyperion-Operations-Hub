@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Process Step: {{ step_name|capitalize }}</h2>
+
+{% if steps %}
+<table class="table">
+    <tr>
+        <th>Order</th>
+        <th>Required Items</th>
+        <th>Complete</th>
+    </tr>
+    {% for step in steps %}
+    <tr>
+        <td>{{ step.order.code }}</td>
+        <td>
+            <ul>
+            {% for req in step.items %}
+                <li>{{ req.item.sku }} {{ req.item.name }} x {{ req.quantity }}</li>
+            {% endfor %}
+            </ul>
+        </td>
+        <td>
+            <form method="post">
+                <input type="hidden" name="step_id" value="{{ step.id }}">
+                <button type="submit" class="action-btn">Complete</button>
+            </form>
+        </td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<p>No orders waiting for this step.</p>
+{% endif %}
+
+{% endblock %}
+
