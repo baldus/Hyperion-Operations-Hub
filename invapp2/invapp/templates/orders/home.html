@@ -3,7 +3,8 @@
 {% block content %}
 <h2>Orders</h2>
 <div class="button-grid">
-    <a href="#" class="action-btn">Open Orders</a>
-    <a href="#" class="action-btn">Closed Orders</a>
+    <a href="{{ url_for('orders.open_orders') }}" class="action-btn">Open Orders</a>
+    <a href="{{ url_for('orders.closed_orders') }}" class="action-btn">Closed Orders</a>
+    <a href="{{ url_for('orders.new_order') }}" class="action-btn">New Order</a>
 </div>
 {% endblock %}

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Order {{ order.order_number }}</h2>
+<p>Status: {{ order.status }}</p>
+<a href="{{ url_for('orders.edit_order', order_id=order.id) }}" class="action-btn">Edit</a>
+<form method="post" action="{{ url_for('orders.delete_order', order_id=order.id) }}" style="display:inline;">
+    <button type="submit">Delete</button>
+</form>
+<h3>Items</h3>
+<ul>
+{% for item in order.items %}
+<li>{{ item.item.sku }} - Qty {{ item.quantity }}
+    {% if item.bom_components %}
+    <ul>
+        {% for comp in item.bom_components %}
+        <li>BOM: {{ comp.component_item.sku }} x {{ comp.quantity }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+    {% if item.reservations %}
+    <ul>
+        {% for res in item.reservations %}
+        <li>Reserved: {{ res.item.sku }} x {{ res.quantity }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</li>
+{% endfor %}
+</ul>
+<h3>Routing Steps</h3>
+<ol>
+{% for step in order.steps %}
+<li>{{ step.description }} {% if step.completed %}(done){% endif %}</li>
+{% endfor %}
+</ol>
+{% endblock %}
