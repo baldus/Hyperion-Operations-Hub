@@ -1,8 +1,16 @@
 import io, csv, zipfile
 from flask import Blueprint, Response, render_template
+from flask_login import login_required
+
 from invapp.models import db, Item, Location, Batch, Movement
 
 bp = Blueprint("reports", __name__, url_prefix="/reports")
+
+
+@bp.before_request
+@login_required
+def require_login():
+    pass
 
 @bp.route("/")
 def reports_home():

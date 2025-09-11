@@ -1,7 +1,15 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash
+from flask_login import login_required
+
 from invapp.models import db, Item, Order, OrderItem, BOMComponent, RoutingStep, Reservation
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
+
+
+@bp.before_request
+@login_required
+def require_login():
+    pass
 
 
 @bp.route("/")
