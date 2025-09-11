@@ -62,10 +62,10 @@ class Location(db.Model):
 class Batch(db.Model):
     __tablename__ = "batch"
     id = db.Column(db.Integer, primary_key=True)
-    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False, index=True)
     lot_number = db.Column(db.String, nullable=True)  # supplier batch/lot reference
     quantity = db.Column(db.Integer, default=0)
-    received_date = db.Column(db.DateTime, default=datetime.utcnow)
+    received_date = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     item = db.relationship("Item", backref="batches")
 
@@ -73,15 +73,15 @@ class Batch(db.Model):
 class Movement(db.Model):
     __tablename__ = "movement"
     id = db.Column(db.Integer, primary_key=True)
-    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
-    batch_id = db.Column(db.Integer, db.ForeignKey("batch.id"), nullable=True)
-    location_id = db.Column(db.Integer, db.ForeignKey("location.id"), nullable=False)
+    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False, index=True)
+    batch_id = db.Column(db.Integer, db.ForeignKey("batch.id"), nullable=True, index=True)
+    location_id = db.Column(db.Integer, db.ForeignKey("location.id"), nullable=False, index=True)
     quantity = db.Column(db.Integer, nullable=False)
     movement_type = db.Column(db.String, nullable=False)  # RECEIPT, ISSUE, MOVE, ADJUST
     person = db.Column(db.String, nullable=True)
     po_number = db.Column(db.String, nullable=True)
     reference = db.Column(db.String, nullable=True)
-    date = db.Column(db.DateTime, default=datetime.utcnow)
+    date = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     item = db.relationship("Item", backref="movements")
     batch = db.relationship("Batch", backref="movements")
