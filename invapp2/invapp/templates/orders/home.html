@@ -3,6 +3,7 @@
 {% block content %}
 <h2>Orders</h2>
 <div class="button-grid">
+    <a href="{{ url_for('orders.create_order') }}" class="action-btn">Create Order</a>
     <a href="#" class="action-btn">Open Orders</a>
     <a href="#" class="action-btn">Closed Orders</a>
 </div>

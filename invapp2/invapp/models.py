@@ -45,3 +45,35 @@ class Movement(db.Model):
     item = db.relationship("Item", backref="movements")
     batch = db.relationship("Batch", backref="movements")
     location = db.relationship("Location", backref="movements")
+
+
+class Order(db.Model):
+    """Simple production order for finished goods."""
+
+    __tablename__ = "order"
+
+    id = db.Column(db.Integer, primary_key=True)
+    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    item = db.relationship("Item", backref="orders")
+    steps = db.relationship(
+        "OrderStep",
+        backref="order",
+        cascade="all, delete-orphan",
+        order_by="OrderStep.sequence",
+    )
+
+
+class OrderStep(db.Model):
+    """Individual steps for an :class:`Order` derived from routing data."""
+
+    __tablename__ = "order_step"
+
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("order.id"), nullable=False)
+    sequence = db.Column(db.Integer, nullable=False)
+    name = db.Column(db.String, nullable=False)
+    status = db.Column(db.String, default="PENDING")
+
