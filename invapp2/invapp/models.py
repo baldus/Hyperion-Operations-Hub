@@ -45,3 +45,14 @@ class Movement(db.Model):
     item = db.relationship("Item", backref="movements")
     batch = db.relationship("Batch", backref="movements")
     location = db.relationship("Location", backref="movements")
+
+
+class Order(db.Model):
+    __tablename__ = "order"
+    id = db.Column(db.Integer, primary_key=True)
+    order_number = db.Column(db.String, unique=True, nullable=False)
+    sku = db.Column(db.String, nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+    status = db.Column(db.String, nullable=False)
+    current_step = db.Column(db.String, nullable=True)
+    due_date = db.Column(db.Date, nullable=True)

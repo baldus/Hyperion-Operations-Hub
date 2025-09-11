@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>{{ title }}</h2>
+<form method="get" class="filter-form">
+    <label>Due Date: <input type="date" name="due_date" value="{{ filters.due_date or '' }}"></label>
+    <label>SKU: <input type="text" name="sku" value="{{ filters.sku or '' }}"></label>
+    <label>Status:
+        <select name="status">
+            <option value="" {% if not filters.status %}selected{% endif %}>All</option>
+            <option value="open" {% if filters.status == 'open' %}selected{% endif %}>Open</option>
+            <option value="closed" {% if filters.status == 'closed' %}selected{% endif %}>Closed</option>
+        </select>
+    </label>
+    <button type="submit">Filter</button>
+</form>
+<table>
+    <thead>
+        <tr>
+            <th>Order #</th>
+            <th>SKU</th>
+            <th>Quantity</th>
+            <th>Current Step</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for order in orders %}
+        <tr>
+            <td>{{ order.order_number }}</td>
+            <td>{{ order.sku }}</td>
+            <td>{{ order.quantity }}</td>
+            <td>{{ order.current_step or '' }}</td>
+        </tr>
+    {% else %}
+        <tr><td colspan="4">No orders found.</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
