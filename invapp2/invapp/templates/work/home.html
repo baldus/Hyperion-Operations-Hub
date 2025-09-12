@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Work Instructions</h2>
+
+<form action="{{ url_for('work.upload_instruction') }}" method="post" enctype="multipart/form-data">
+    <input type="file" name="file" accept="application/pdf" required>
+    <button type="submit">Upload PDF</button>
+    </form>
+
+{% if instructions %}
+<ul>
+    {% for instr in instructions %}
+    <li>
+        <a href="{{ url_for('static', filename='work_instructions/' ~ instr.filename) }}" target="_blank">
+            {{ instr.original_name }}
+        </a>
+        <form action="{{ url_for('work.delete_instruction', instruction_id=instr.id) }}" method="post" style="display:inline;">
+            <button type="submit">Delete</button>
+        </form>
+    </li>
+    {% endfor %}
+    </ul>
+{% else %}
+<p>No work instructions uploaded.</p>
+{% endif %}
+{% endblock %}
+
