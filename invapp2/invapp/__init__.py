@@ -6,7 +6,7 @@ support user sessions and authentication across the application.
 
 from flask import Flask, render_template
 from .extensions import db, login_manager
-from .routes import inventory, reports, orders, work, settings, auth
+from .routes import inventory, reports, orders, work, settings, printers, auth
 from .models import User
 
 
@@ -36,6 +36,7 @@ def create_app(config=None):
     app.register_blueprint(orders.bp)
     app.register_blueprint(work.bp)
     app.register_blueprint(settings.bp)
+    app.register_blueprint(printers.bp)
     app.register_blueprint(auth.bp)
 
     @app.route("/")
