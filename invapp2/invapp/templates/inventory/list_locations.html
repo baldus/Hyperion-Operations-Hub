@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Locations</h2>
+
+<div>
+  <a href="{{ url_for('inventory.add_location') }}" class="bubble-btn">Add Location</a>
+  <a href="{{ url_for('inventory.import_locations') }}" class="bubble-btn">Bulk Import Locations (CSV)</a>
+  <a href="{{ url_for('inventory.export_locations') }}" class="bubble-btn">Export Locations</a>
+</div>
+<br>
+
+<table>
+  <tr>
+    <th>Code</th>
+    <th>Description</th>
+  </tr>
+  {% for loc in locations %}
+  <tr>
+    <td>{{ loc.code }}</td>
+    <td>{{ loc.description }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

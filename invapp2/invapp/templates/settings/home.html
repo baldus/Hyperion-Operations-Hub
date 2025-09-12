@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Settings</h2>
+<div class="button-grid">
+    <a href="{{ url_for('settings.printers_home') }}" class="action-btn">Printers</a>
+    <a href="{{ url_for('settings.toggle_theme') }}" class="action-btn">
+        Toggle Theme ({{ 'Dark' if session.get('theme', 'dark') == 'dark' else 'Light' }})
+    </a>
+</div>
+{% endblock %}

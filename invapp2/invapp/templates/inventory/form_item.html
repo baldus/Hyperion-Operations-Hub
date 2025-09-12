@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Add New Item</h2>
+<form method="POST">
+    <label>SKU:</label><br>
+    <input type="text" name="sku" required><br><br>
+
+    <label>Name:</label><br>
+    <input type="text" name="name" required><br><br>
+
+    <label>Unit:</label><br>
+    <input type="text" name="unit" value="ea"><br><br>
+
+    <label>Description:</label><br>
+    <textarea name="description"></textarea><br><br>
+
+    <label>Min Stock:</label><br>
+    <input type="number" name="min_stock" value="0"><br><br>
+
+    <button type="submit">Save</button>
+</form>
+{% endblock %}
