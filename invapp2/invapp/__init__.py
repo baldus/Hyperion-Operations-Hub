@@ -2,6 +2,7 @@ from flask import Flask, render_template
 from .extensions import db
 from .routes import inventory, reports, orders, work, settings
 from config import Config
+from . import models  # ensure models are registered with SQLAlchemy
 
 def create_app():
     app = Flask(__name__)
@@ -11,6 +12,9 @@ def create_app():
 
     # ✅ init db with app
     db.init_app(app)
+    # create tables if they do not exist
+    with app.app_context():
+        db.create_all()
 
     # register blueprints
     app.register_blueprint(inventory.bp)
