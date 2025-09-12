@@ -1,6 +1,6 @@
 from flask import Flask, render_template
 from .extensions import db
-from .routes import inventory, reports, orders, work, settings, printers
+from .routes import inventory, reports, orders, work, settings, printers, receiving
 from config import Config
 from . import models  # ensure models are registered with SQLAlchemy
 
@@ -23,6 +23,7 @@ def create_app():
     app.register_blueprint(work.bp)
     app.register_blueprint(settings.bp)
     app.register_blueprint(printers.bp)
+    app.register_blueprint(receiving.bp)
 
     @app.route("/")
     def home():
