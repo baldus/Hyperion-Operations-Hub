@@ -605,23 +605,47 @@ def receiving():
 
     # Display recent receipts
     records = (
-        Movement.query
+        Movement.query.options(
+            joinedload(Movement.item).load_only(Item.sku, Item.name),
+            joinedload(Movement.location).load_only(Location.code),
+            joinedload(Movement.batch).load_only(Batch.lot_number),
+        )
         .filter_by(movement_type="RECEIPT")
         .order_by(Movement.date.desc())
         .limit(50)
         .all()
     )
-    item_map = {i.id: i for i in Item.query.all()}
-    loc_map = {l.id: l for l in Location.query.all()}
-    batch_map = {b.id: b for b in Batch.query.all()}
+
     return render_template(
         "inventory/receiving.html",
         records=records,
         locations=locations,
-        item_map=item_map,
-        loc_map=loc_map,
-        batch_map=batch_map
     )
+
+
+@bp.post("/receiving/<int:receipt_id>/reprint")
+def reprint_receiving_label(receipt_id: int):
+    """Reprint a previously generated receiving label."""
+    rec = (
+        Movement.query.options(joinedload(Movement.item).load_only(Item.sku, Item.name))
+        .filter_by(id=receipt_id, movement_type="RECEIPT")
+        .first_or_404()
+    )
+
+    item = rec.item
+    qty = rec.quantity
+
+    try:
+        from invapp.printing.zebra import print_receiving_label
+
+        if not print_receiving_label(item.sku, item.name, qty):
+            flash("Failed to print receiving label.", "warning")
+        else:
+            flash("Label reprinted.", "success")
+    except Exception:
+        flash("Failed to print receiving label.", "warning")
+
+    return redirect(url_for("inventory.receiving"))
 
 ############################
 # MOVE / TRANSFER ROUTES

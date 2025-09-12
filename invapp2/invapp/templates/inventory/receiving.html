@@ -58,17 +58,23 @@
     <th>Location</th>
     <th>Person</th>
     <th>PO Number</th>
+    <th>Action</th>
   </tr>
   {% for rec in records %}
   <tr>
     <td>{{ rec.date.strftime("%Y-%m-%d %H:%M") }}</td>
-    <td>{{ item_map[rec.item_id].sku if rec.item_id in item_map else "???" }}</td>
-    <td>{{ item_map[rec.item_id].name if rec.item_id in item_map else "Unknown" }}</td>
-    <td>{{ batch_map[rec.batch_id].lot_number if rec.batch_id in batch_map else "-" }}</td>
+    <td>{{ rec.item.sku if rec.item else "???" }}</td>
+    <td>{{ rec.item.name if rec.item else "Unknown" }}</td>
+    <td>{{ rec.batch.lot_number if rec.batch else "-" }}</td>
     <td>{{ rec.quantity }}</td>
-    <td>{{ loc_map[rec.location_id].code if rec.location_id in loc_map else "-" }}</td>
+    <td>{{ rec.location.code if rec.location else "-" }}</td>
     <td>{{ rec.person or "-" }}</td>
     <td>{{ rec.po_number or "-" }}</td>
+    <td>
+      <form method="post" action="{{ url_for('inventory.reprint_receiving_label', receipt_id=rec.id) }}">
+        <button type="submit" class="bubble-btn">Reprint Label</button>
+      </form>
+    </td>
   </tr>
   {% endfor %}
 </table>
