@@ -198,6 +198,9 @@ def import_items():
         stream = io.StringIO(file.stream.read().decode("UTF8"))
         csv_input = csv.DictReader(stream)
 
+        max_sku_val = db.session.query(db.func.max(Item.sku.cast(db.Integer))).scalar()
+        next_sku = int(max_sku_val) + 1 if max_sku_val else 1
+
         count_new, count_updated = 0, 0
         for row in csv_input:
             sku = row.get("sku", "").strip()
@@ -215,9 +218,15 @@ def import_items():
                 count_updated += 1
             else:
                 if not sku:
-                    max_sku = db.session.query(db.func.max(Item.sku.cast(db.Integer))).scalar()
-                    sku = str(int(max_sku) + 1) if max_sku else "1"
-                item = Item(sku=sku, name=name, unit=unit, description=description, min_stock=min_stock)
+                    sku = str(next_sku)
+                    next_sku += 1
+                item = Item(
+                    sku=sku,
+                    name=name,
+                    unit=unit,
+                    description=description,
+                    min_stock=min_stock,
+                )
                 db.session.add(item)
                 count_new += 1
 
