@@ -595,8 +595,9 @@ def receiving():
         try:
             from invapp.printing.zebra import print_receiving_label
 
-            if not print_receiving_label(item.sku, item.name, qty):
-                flash("Failed to print receiving label.", "warning")
+            ok, err = print_receiving_label(item.sku, item.name, qty)
+            if not ok:
+                flash(f"Failed to print receiving label: {err}", "warning")
         except Exception:
             flash("Failed to print receiving label.", "warning")
 
@@ -638,8 +639,9 @@ def reprint_receiving_label(receipt_id: int):
     try:
         from invapp.printing.zebra import print_receiving_label
 
-        if not print_receiving_label(item.sku, item.name, qty):
-            flash("Failed to print receiving label.", "warning")
+        ok, err = print_receiving_label(item.sku, item.name, qty)
+        if not ok:
+            flash(f"Failed to print receiving label: {err}", "warning")
         else:
             flash("Label reprinted.", "success")
     except Exception:

@@ -114,7 +114,14 @@ def print_label():
     copies = int(data.get("copies", 1))
 
     success = True
+    errors = []
     for _ in range(copies):
-        success = print_receiving_label(sku, description, qty) and success
+        ok, err = print_receiving_label(sku, description, qty)
+        success = ok and success
+        if err:
+            errors.append(err)
 
-    return jsonify({"printed": success})
+    resp = {"printed": success}
+    if errors:
+        resp["error"] = errors[0] if len(errors) == 1 else errors
+    return jsonify(resp)

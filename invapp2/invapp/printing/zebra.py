@@ -2,6 +2,7 @@
 
 from flask import current_app
 import socket
+from typing import Optional, Tuple
 
 from .labels import build_receiving_label
 from urllib.request import Request, urlopen
@@ -11,7 +12,7 @@ def send_zpl(
     zpl: str,
     host: str = current_app.config["ZEBRA_PRINTER_HOST"],
     port: int = current_app.config["ZEBRA_PRINTER_PORT"],
-) -> bool:
+) -> Tuple[bool, Optional[str]]:
     """Send raw ZPL to a networked Zebra printer.
 
     Parameters
@@ -25,21 +26,49 @@ def send_zpl(
 
     Returns
     -------
-    bool
-        ``True`` if the data was sent successfully, ``False`` otherwise.
+    Tuple[bool, Optional[str]]
+        A tuple of success flag and an error message. On success the
+        message will be ``None``.
     """
 
     try:
         with socket.create_connection((host, port)) as sock:
             sock.sendall(zpl.encode("utf-8"))
-        return True
+        return True, None
+    except socket.gaierror as exc:
+        msg = (
+            f"Unable to resolve printer host '{host}': {exc}. "
+            "Verify the printer's hostname/IP in the application configuration."
+        )
+    except ConnectionRefusedError as exc:
+        msg = (
+            f"Connection to {host}:{port} was refused: {exc}. "
+            "Ensure the printer is powered on and accepting connections on the configured port."
+        )
+    except TimeoutError as exc:
+        msg = (
+            f"Timed out while connecting to {host}:{port}: {exc}. "
+            "Check network connectivity and printer settings."
+        )
     except OSError as exc:
-        current_app.logger.error("Failed to send ZPL to printer: %s", exc)
-        return False
+        msg = (
+            f"Failed to send ZPL to printer at {host}:{port}: {exc}. "
+            "Verify printer network configuration."
+        )
+
+    current_app.logger.error(msg)
+    return False, msg
 
 
-def print_receiving_label(sku: str, description: str, qty: int) -> bool:
-    """Generate and send a receiving label to the configured Zebra printer."""
+def print_receiving_label(sku: str, description: str, qty: int) -> Tuple[bool, Optional[str]]:
+    """Generate and send a receiving label to the configured Zebra printer.
+
+    Returns
+    -------
+    Tuple[bool, Optional[str]]
+        ``True``/``False`` indicating if the label was printed and an
+        optional error message.
+    """
 
     zpl = build_receiving_label(sku, description, qty)
     return send_zpl(zpl)

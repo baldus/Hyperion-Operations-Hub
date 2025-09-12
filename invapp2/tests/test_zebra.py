@@ -84,10 +84,11 @@ def test_print_receiving_label_sends_zpl(monkeypatch):
 
         monkeypatch.setattr(zebra.socket, "create_connection", fake_create_connection)
 
-        result = zebra.print_receiving_label("ABC123", "Widget", 5)
+        success, err = zebra.print_receiving_label("ABC123", "Widget", 5)
 
     expected = zebra.build_receiving_label("ABC123", "Widget", 5)
     assert sent["addr"] == ("printer.local", 9101)
     assert sent["data"] == expected.encode("utf-8")
-    assert result is True
+    assert success is True
+    assert err is None
 
