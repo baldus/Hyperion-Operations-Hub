@@ -7,3 +7,8 @@ class Config:
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SECRET_KEY = os.getenv("SECRET_KEY", "supersecret")
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    WORK_INSTRUCTION_UPLOAD_FOLDER = os.path.join(
+        BASE_DIR, "invapp", "static", "work_instructions"
+    )
+    WORK_INSTRUCTION_ALLOWED_EXTENSIONS = {"pdf"}
