@@ -1,33 +1,16 @@
-{% extends "base.html" %}
+from flask import Blueprint, render_template, request, session
 
-{% block content %}
-<h2>Printer Settings</h2>
+from invapp.auth import role_required
 
-<!-- Dark/Light Mode Toggle -->
-<form method="POST">
-    <label for="theme">Theme:</label>
-    <select name="theme" id="theme" onchange="this.form.submit()">
-        <option value="dark" {% if theme == 'dark' %}selected{% endif %}>Dark</option>
-        <option value="light" {% if theme == 'light' %}selected{% endif %}>Light</option>
-    </select>
-</form>
+bp = Blueprint("printers", __name__, url_prefix="/settings")
 
-<hr>
 
-<!-- Admin Login -->
-{% if not is_admin %}
-<form method="POST" class="login-form">
-    <h3>Admin Login</h3>
-    <label for="username">Username:</label>
-    <input type="text" name="username" id="username" required>
-    
-    <label for="password">Password:</label>
-    <input type="password" name="password" id="password" required>
-    
-    <button type="submit" class="action-btn">Login</button>
-</form>
-{% else %}
-<p><strong>Admin logged in.</strong></p>
-<button onclick="alert('Here you could add printer setup options')">Configure Printers</button>
-{% endif %}
-{% endblock %}
+@bp.route("/printers", methods=["GET", "POST"])
+@role_required("admin")
+def printers_home():
+    if request.method == "POST":
+        theme = request.form.get("theme")
+        if theme:
+            session["theme"] = theme
+    theme = session.get("theme", "dark")
+    return render_template("settings/printers.html", theme=theme, is_admin=True)
