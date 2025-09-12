@@ -1,33 +1,43 @@
-{% extends "base.html" %}
+from flask import Blueprint, render_template, request, session, current_app
 
-{% block content %}
-<h2>Printer Settings</h2>
+bp = Blueprint("printers", __name__, url_prefix="/settings/printers")
 
-<!-- Dark/Light Mode Toggle -->
-<form method="POST">
-    <label for="theme">Theme:</label>
-    <select name="theme" id="theme" onchange="this.form.submit()">
-        <option value="dark" {% if theme == 'dark' %}selected{% endif %}>Dark</option>
-        <option value="light" {% if theme == 'light' %}selected{% endif %}>Light</option>
-    </select>
-</form>
+@bp.route("/", methods=["GET", "POST"])
+def printer_settings():
+    theme = session.get("theme", "dark")
+    is_admin = session.get("is_admin", False)
+    printer_host = current_app.config.get("ZEBRA_PRINTER_HOST", "")
+    printer_port = current_app.config.get("ZEBRA_PRINTER_PORT", "")
+    message = None
 
-<hr>
+    if request.method == "POST":
+        if "theme" in request.form:
+            theme = request.form["theme"]
+            session["theme"] = theme
+        elif not is_admin:
+            username = request.form.get("username")
+            password = request.form.get("password")
+            if username == current_app.config.get("ADMIN_USER", "admin") and password == current_app.config.get("ADMIN_PASSWORD", "password"):
+                session["is_admin"] = True
+                is_admin = True
+            else:
+                message = "Invalid credentials"
+        else:
+            printer_host = request.form.get("printer_host", printer_host)
+            printer_port = request.form.get("printer_port", printer_port)
+            current_app.config["ZEBRA_PRINTER_HOST"] = printer_host
+            if printer_port:
+                try:
+                    current_app.config["ZEBRA_PRINTER_PORT"] = int(printer_port)
+                except ValueError:
+                    message = "Port must be a number"
+            message = message or "Settings updated"
 
-<!-- Admin Login -->
-{% if not is_admin %}
-<form method="POST" class="login-form">
-    <h3>Admin Login</h3>
-    <label for="username">Username:</label>
-    <input type="text" name="username" id="username" required>
-    
-    <label for="password">Password:</label>
-    <input type="password" name="password" id="password" required>
-    
-    <button type="submit" class="action-btn">Login</button>
-</form>
-{% else %}
-<p><strong>Admin logged in.</strong></p>
-<button onclick="alert('Here you could add printer setup options')">Configure Printers</button>
-{% endif %}
-{% endblock %}
+    return render_template(
+        "settings/printer_settings.html",
+        theme=theme,
+        is_admin=is_admin,
+        printer_host=printer_host,
+        printer_port=printer_port,
+        message=message,
+    )
