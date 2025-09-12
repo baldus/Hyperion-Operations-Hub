@@ -154,8 +154,16 @@ def export_cycle_counts():
 ############################
 @bp.route("/items")
 def list_items():
-    items = Item.query.all()
-    return render_template("inventory/list_items.html", items=items)
+    page = request.args.get("page", 1, type=int)
+    size = request.args.get("size", 20, type=int)
+    pagination = Item.query.paginate(page=page, per_page=size, error_out=False)
+    return render_template(
+        "inventory/list_items.html",
+        items=pagination.items,
+        page=page,
+        size=size,
+        pages=pagination.pages,
+    )
 
 
 @bp.route("/item/add", methods=["GET", "POST"])
@@ -258,8 +266,16 @@ def export_items():
 ############################
 @bp.route("/locations")
 def list_locations():
-    locations = Location.query.all()
-    return render_template("inventory/list_locations.html", locations=locations)
+    page = request.args.get("page", 1, type=int)
+    size = request.args.get("size", 20, type=int)
+    pagination = Location.query.paginate(page=page, per_page=size, error_out=False)
+    return render_template(
+        "inventory/list_locations.html",
+        locations=pagination.items,
+        page=page,
+        size=size,
+        pages=pagination.pages,
+    )
 
 
 @bp.route("/location/add", methods=["GET", "POST"])
@@ -331,7 +347,9 @@ def export_locations():
 ############################
 @bp.route("/stock")
 def list_stock():
-    rows = (
+    page = request.args.get("page", 1, type=int)
+    size = request.args.get("size", 20, type=int)
+    rows_query = (
         db.session.query(
             Movement.item_id,
             Movement.batch_id,
@@ -340,8 +358,9 @@ def list_stock():
         )
         .group_by(Movement.item_id, Movement.batch_id, Movement.location_id)
         .having(func.sum(Movement.quantity) != 0)
-        .all()
     )
+    pagination = rows_query.paginate(page=page, per_page=size, error_out=False)
+    rows = pagination.items
 
     totals = dict(
         db.session.query(
@@ -366,7 +385,15 @@ def list_stock():
             "total_on_hand": int(totals.get(item_id, 0)),
         })
 
-    return render_template("inventory/list_stock.html", balances=balances, totals=totals, items=items)
+    return render_template(
+        "inventory/list_stock.html",
+        balances=balances,
+        totals=totals,
+        items=items,
+        page=page,
+        size=size,
+        pages=pagination.pages,
+    )
 
 
 @bp.route("/stock/adjust", methods=["GET", "POST"])
