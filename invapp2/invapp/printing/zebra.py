@@ -4,6 +4,7 @@ from flask import current_app
 import socket
 
 from .labels import build_receiving_label
+from urllib.request import Request, urlopen
 
 
 def send_zpl(
@@ -42,4 +43,14 @@ def print_receiving_label(sku: str, description: str, qty: int) -> bool:
 
     zpl = build_receiving_label(sku, description, qty)
     return send_zpl(zpl)
+
+
+def render_receiving_label_png(sku: str, description: str, qty: int) -> bytes:
+    """Render a receiving label as a PNG using the Labelary API."""
+
+    zpl = build_receiving_label(sku, description, qty)
+    url = "http://api.labelary.com/v1/printers/8dpmm/labels/4x6/0/"
+    request = Request(url, data=zpl.encode("utf-8"), headers={"Accept": "image/png"})
+    with urlopen(request) as response:
+        return response.read()
 
