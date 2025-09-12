@@ -12,3 +12,6 @@ class Config:
         BASE_DIR, "invapp", "static", "work_instructions"
     )
     WORK_INSTRUCTION_ALLOWED_EXTENSIONS = {"pdf"}
+
+    ZEBRA_PRINTER_HOST = os.getenv("ZEBRA_PRINTER_HOST", "localhost")
+    ZEBRA_PRINTER_PORT = int(os.getenv("ZEBRA_PRINTER_PORT", 9100))
