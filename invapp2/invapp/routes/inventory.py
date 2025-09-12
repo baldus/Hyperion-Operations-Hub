@@ -592,6 +592,13 @@ def receiving():
         )
         db.session.add(mv)
         db.session.commit()
+        try:
+            from invapp.printing.zebra import print_receiving_label
+
+            if not print_receiving_label(item.sku, item.name, qty):
+                flash("Failed to print receiving label.", "warning")
+        except Exception:
+            flash("Failed to print receiving label.", "warning")
 
         flash(f"Receiving recorded! Lot: {lot_number}", "success")
         return redirect(url_for("inventory.receiving"))

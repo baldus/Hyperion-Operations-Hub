@@ -56,6 +56,14 @@ def add_receiving():
             db.session.add(stock)
 
         db.session.commit()
+        try:
+            from invapp.printing.zebra import print_receiving_label
+
+            if not print_receiving_label(item.sku, item.name, qty):
+                flash("Failed to print receiving label.", "warning")
+        except Exception:
+            flash("Failed to print receiving label.", "warning")
+
         flash("Receiving recorded and stock updated!", "success")
         return redirect(url_for("receiving.receiving_home"))
 
