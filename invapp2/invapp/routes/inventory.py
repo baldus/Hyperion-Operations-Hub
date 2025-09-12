@@ -2,6 +2,7 @@ import csv
 import io
 from flask import Blueprint, render_template, request, redirect, url_for, flash, Response
 from sqlalchemy import func
+from sqlalchemy.orm import load_only, joinedload
 from invapp.models import db, Item, Location, Batch, Movement
 from datetime import datetime
 
@@ -19,9 +20,9 @@ def inventory_home():
 ############################
 @bp.route("/cycle-count", methods=["GET", "POST"])
 def cycle_count_home():
-    items = Item.query.all()
-    locations = Location.query.all()
-    batches = Batch.query.all()
+    items = Item.query.options(load_only(Item.id, Item.sku, Item.name)).all()
+    locations = Location.query.options(load_only(Location.id, Location.code)).all()
+    batches = Batch.query.options(load_only(Batch.id, Batch.lot_number)).all()
 
     if request.method == "POST":
         sku = request.form["sku"].strip()
@@ -73,15 +74,20 @@ def cycle_count_home():
 
     # Recent cycle counts
     records = (
-        Movement.query
-        .filter(Movement.movement_type.in_(["CYCLE_COUNT_CONFIRM", "CYCLE_COUNT_ADJUSTMENT"]))
+        Movement.query.options(
+            joinedload(Movement.item).load_only(Item.sku, Item.name),
+            joinedload(Movement.location).load_only(Location.code),
+            joinedload(Movement.batch).load_only(Batch.lot_number),
+        )
+        .filter(
+            Movement.movement_type.in_(
+                ["CYCLE_COUNT_CONFIRM", "CYCLE_COUNT_ADJUSTMENT"]
+            )
+        )
         .order_by(Movement.date.desc())
         .limit(50)
         .all()
     )
-    items_map = {i.id: i for i in Item.query.all()}
-    locations_map = {l.id: l for l in Location.query.all()}
-    batches_map = {b.id: b for b in Batch.query.all()}
 
     return render_template(
         "inventory/cycle_count.html",
@@ -89,16 +95,21 @@ def cycle_count_home():
         locations=locations,
         batches=batches,
         records=records,
-        items_map=items_map,
-        locations_map=locations_map,
-        batches_map=batches_map,
     )
 
 @bp.route("/cycle-count/export")
 def export_cycle_counts():
     records = (
-        Movement.query
-        .filter(Movement.movement_type.in_(["CYCLE_COUNT_CONFIRM", "CYCLE_COUNT_ADJUSTMENT"]))
+        Movement.query.options(
+            joinedload(Movement.item).load_only(Item.sku, Item.name),
+            joinedload(Movement.location).load_only(Location.code),
+            joinedload(Movement.batch).load_only(Batch.lot_number),
+        )
+        .filter(
+            Movement.movement_type.in_(
+                ["CYCLE_COUNT_CONFIRM", "CYCLE_COUNT_ADJUSTMENT"]
+            )
+        )
         .order_by(Movement.date.desc())
         .all()
     )
@@ -116,15 +127,11 @@ def export_cycle_counts():
         "movement_type"
     ])
 
-    items_map = {i.id: i for i in Item.query.all()}
-    locations_map = {l.id: l for l in Location.query.all()}
-    batches_map = {b.id: b for b in Batch.query.all()}
-
     for rec in records:
-        sku = items_map[rec.item_id].sku if rec.item_id in items_map else "???"
-        item_name = items_map[rec.item_id].name if rec.item_id in items_map else "Unknown"
-        lot = batches_map[rec.batch_id].lot_number if rec.batch_id in batches_map else "-"
-        loc = locations_map[rec.location_id].code if rec.location_id in locations_map else "-"
+        sku = rec.item.sku if rec.item else "???"
+        item_name = rec.item.name if rec.item else "Unknown"
+        lot = rec.batch.lot_number if rec.batch else "-"
+        loc = rec.location.code if rec.location else "-"
         writer.writerow([
             rec.date.strftime("%Y-%m-%d %H:%M"),
             sku,
@@ -133,7 +140,7 @@ def export_cycle_counts():
             loc,
             rec.reference,
             rec.person or "-",
-            rec.movement_type
+            rec.movement_type,
         ])
 
     response = Response(output.getvalue(), mimetype="text/csv")
