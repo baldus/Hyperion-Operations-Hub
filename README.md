@@ -90,9 +90,10 @@ invapp2/
    pip install -r requirements.txt
    ```
 
-3. Set up your database:  
+3. Set up your database and environment variables:
    ```bash
    export DB_URL="postgresql+psycopg2://USER:PASSWORD@localhost/invdb"
+   export SECRET_KEY="change_me"
    flask shell
    >>> from invapp.extensions import db
    >>> db.create_all()

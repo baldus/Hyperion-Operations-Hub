@@ -6,3 +6,4 @@ class Config:
         "postgresql+psycopg2://inv:change_me@localhost/invdb"
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SECRET_KEY = os.getenv("SECRET_KEY", "supersecret")
