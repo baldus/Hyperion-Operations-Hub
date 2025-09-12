@@ -6,8 +6,19 @@ bp = Blueprint("receiving", __name__, url_prefix="/receiving")
 
 @bp.route("/")
 def receiving_home():
-    records = Receiving.query.order_by(Receiving.date_received.desc()).all()
-    return render_template("receiving/home.html", records=records)
+    page = request.args.get("page", 1, type=int)
+    size = request.args.get("size", 20, type=int)
+    pagination = (
+        Receiving.query.order_by(Receiving.date_received.desc())
+        .paginate(page=page, per_page=size, error_out=False)
+    )
+    return render_template(
+        "receiving/home.html",
+        records=pagination.items,
+        page=page,
+        size=size,
+        pages=pagination.pages,
+    )
 
 @bp.route("/add", methods=["GET", "POST"])
 def add_receiving():

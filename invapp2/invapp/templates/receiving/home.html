@@ -23,4 +23,12 @@
   </tr>
   {% endfor %}
 </table>
+<div class="pagination">
+  {% if page > 1 %}
+    <a href="{{ url_for('receiving.receiving_home', page=page-1, size=size) }}">Previous</a>
+  {% endif %}
+  {% if page < pages %}
+    <a href="{{ url_for('receiving.receiving_home', page=page+1, size=size) }}">Next</a>
+  {% endif %}
+</div>
 {% endblock %}
