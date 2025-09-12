@@ -542,110 +542,13 @@ def export_stock():
 
 
 ############################
-# RECEIVING ROUTES
+# RECEIVING ROUTES (LEGACY)
 ############################
-@bp.route("/receiving", methods=["GET", "POST"])
+@bp.route("/receiving")
 def receiving():
-    locations = Location.query.all()
+    """Legacy receiving endpoint; redirect to the new receiving module."""
+    return redirect(url_for("receiving.receiving_home"))
 
-    if request.method == "POST":
-        sku = request.form["sku"].strip()
-        qty = int(request.form["qty"])
-        person = request.form["person"].strip()
-        po_number = request.form.get("po_number", "").strip() or None
-        location_id = int(request.form["location_id"])
-
-        item = Item.query.filter_by(sku=sku).first()
-        if not item:
-            flash(f"Item with SKU {sku} not found.", "danger")
-            return redirect(url_for("inventory.receiving"))
-
-        # ?? Auto-generate lot number: SKU-YYMMDD-##
-        today_str = datetime.now().strftime("%y%m%d")
-        base_lot = f"{item.sku}-{today_str}"
-
-        existing_lots = Batch.query.filter(
-            Batch.item_id == item.id,
-            Batch.lot_number.like(f"{base_lot}-%")
-        ).count()
-
-        seq_num = existing_lots + 1
-        lot_number = f"{base_lot}-{seq_num:02d}"
-
-        # Create or update batch
-        batch = Batch(item_id=item.id, lot_number=lot_number, quantity=0)
-        db.session.add(batch)
-        db.session.flush()
-        batch_id = batch.id
-        batch.quantity = (batch.quantity or 0) + qty
-
-        # Record movement
-        mv = Movement(
-            item_id=item.id,
-            batch_id=batch_id,
-            location_id=location_id,
-            quantity=qty,
-            movement_type="RECEIPT",
-            person=person,
-            po_number=po_number,
-            reference="PO Receipt" if po_number else "Receipt"
-        )
-        db.session.add(mv)
-        db.session.commit()
-        try:
-            from invapp.printing.zebra import print_receiving_label
-
-            if not print_receiving_label(item.sku, item.name, qty):
-                flash("Failed to print receiving label.", "warning")
-        except Exception:
-            flash("Failed to print receiving label.", "warning")
-
-        flash(f"Receiving recorded! Lot: {lot_number}", "success")
-        return redirect(url_for("inventory.receiving"))
-
-    # Display recent receipts
-    records = (
-        Movement.query.options(
-            joinedload(Movement.item).load_only(Item.sku, Item.name),
-            joinedload(Movement.location).load_only(Location.code),
-            joinedload(Movement.batch).load_only(Batch.lot_number),
-        )
-        .filter_by(movement_type="RECEIPT")
-        .order_by(Movement.date.desc())
-        .limit(50)
-        .all()
-    )
-
-    return render_template(
-        "inventory/receiving.html",
-        records=records,
-        locations=locations,
-    )
-
-
-@bp.post("/receiving/<int:receipt_id>/reprint")
-def reprint_receiving_label(receipt_id: int):
-    """Reprint a previously generated receiving label."""
-    rec = (
-        Movement.query.options(joinedload(Movement.item).load_only(Item.sku, Item.name))
-        .filter_by(id=receipt_id, movement_type="RECEIPT")
-        .first_or_404()
-    )
-
-    item = rec.item
-    qty = rec.quantity
-
-    try:
-        from invapp.printing.zebra import print_receiving_label
-
-        if not print_receiving_label(item.sku, item.name, qty):
-            flash("Failed to print receiving label.", "warning")
-        else:
-            flash("Label reprinted.", "success")
-    except Exception:
-        flash("Failed to print receiving label.", "warning")
-
-    return redirect(url_for("inventory.receiving"))
 
 ############################
 # MOVE / TRANSFER ROUTES
