@@ -695,10 +695,24 @@ def export_history():
     """
     Export all transactions (Movement table) to CSV.
     """
-    records = Movement.query.order_by(Movement.date.desc()).all()
-    items = {i.id: i for i in Item.query.all()}
-    locations = {l.id: l for l in Location.query.all()}
-    batches = {b.id: b for b in Batch.query.all()}
+    query = (
+        db.session.query(
+            Movement.date,
+            Item.sku,
+            Item.name,
+            Movement.movement_type,
+            Movement.quantity,
+            Location.code,
+            Batch.lot_number,
+            Movement.person,
+            Movement.reference,
+            Movement.po_number,
+        )
+        .join(Item, Movement.item_id == Item.id)
+        .join(Location, Movement.location_id == Location.id)
+        .outerjoin(Batch, Movement.batch_id == Batch.id)
+        .order_by(Movement.date.desc())
+    )
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -707,22 +721,29 @@ def export_history():
         "location", "lot_number", "person", "reference", "po_number"
     ])
 
-    for mv in records:
-        sku = items[mv.item_id].sku if mv.item_id in items else "???"
-        name = items[mv.item_id].name if mv.item_id in items else "Unknown Item"
-        loc = locations[mv.location_id].code if mv.location_id in locations else "-"
-        lot = batches[mv.batch_id].lot_number if mv.batch_id and mv.batch_id in batches else "-"
+    for (
+        date,
+        sku,
+        item_name,
+        movement_type,
+        quantity,
+        location_code,
+        lot_number,
+        person,
+        reference,
+        po_number,
+    ) in query:
         writer.writerow([
-            mv.date.strftime("%Y-%m-%d %H:%M"),
+            date.strftime("%Y-%m-%d %H:%M"),
             sku,
-            name,
-            mv.movement_type,
-            mv.quantity,
-            loc,
-            lot,
-            mv.person or "-",
-            mv.reference or "-",
-            mv.po_number or "-"
+            item_name,
+            movement_type,
+            quantity,
+            location_code,
+            lot_number or "-",
+            person or "-",
+            reference or "-",
+            po_number or "-",
         ])
 
     response = Response(output.getvalue(), mimetype="text/csv")

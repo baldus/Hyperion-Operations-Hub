@@ -44,18 +44,47 @@ def generate_reports():
             "date", "sku", "item_name", "movement_type", "quantity",
             "location", "lot_number", "person", "reference", "po_number"
         ])
-        for mv in Movement.query.all():
+        query = (
+            db.session.query(
+                Movement.date,
+                Item.sku,
+                Item.name,
+                Movement.movement_type,
+                Movement.quantity,
+                Location.code,
+                Batch.lot_number,
+                Movement.person,
+                Movement.reference,
+                Movement.po_number,
+            )
+            .join(Item, Movement.item_id == Item.id)
+            .join(Location, Movement.location_id == Location.id)
+            .outerjoin(Batch, Movement.batch_id == Batch.id)
+            .order_by(Movement.date.desc())
+        )
+        for (
+            date,
+            sku,
+            item_name,
+            movement_type,
+            quantity,
+            location_code,
+            lot_number,
+            person,
+            reference,
+            po_number,
+        ) in query:
             writer.writerow([
-                mv.date.strftime("%Y-%m-%d %H:%M"),
-                mv.item.sku if mv.item else "???",
-                mv.item.name if mv.item else "Unknown",
-                mv.movement_type,
-                mv.quantity,
-                mv.location.code if mv.location else "-",
-                mv.batch.lot_number if mv.batch else "-",
-                mv.person or "-",
-                mv.reference or "-",
-                mv.po_number or "-"
+                date.strftime("%Y-%m-%d %H:%M"),
+                sku,
+                item_name,
+                movement_type,
+                quantity,
+                location_code,
+                lot_number or "-",
+                person or "-",
+                reference or "-",
+                po_number or "-"
             ])
         zf.writestr("movements.csv", output.getvalue())
 
