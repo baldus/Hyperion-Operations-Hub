@@ -94,6 +94,8 @@ invapp2/
    ```bash
    export DB_URL="postgresql+psycopg2://USER:PASSWORD@localhost/invdb"
    export SECRET_KEY="change_me"
+   export ZEBRA_PRINTER_HOST="printer.local"  # network address of your Zebra printer
+   export ZEBRA_PRINTER_PORT=9100              # port for the printer connection
    flask shell
    >>> from invapp.extensions import db
    >>> db.create_all()

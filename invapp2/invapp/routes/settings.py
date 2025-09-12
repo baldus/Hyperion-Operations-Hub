@@ -6,10 +6,6 @@ bp = Blueprint("settings", __name__, url_prefix="/settings")
 def settings_home():
     return render_template("settings/home.html")
 
-@bp.route("/printers")
-def printers_home():
-    return render_template("settings/printers.html")
-
 # --- Dark/Light Mode Toggle ---
 @bp.route("/toggle-theme")
 def toggle_theme():
