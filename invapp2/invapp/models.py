@@ -45,3 +45,11 @@ class Movement(db.Model):
     item = db.relationship("Item", backref="movements")
     batch = db.relationship("Batch", backref="movements")
     location = db.relationship("Location", backref="movements")
+
+
+class WorkInstruction(db.Model):
+    __tablename__ = "work_instruction"
+    id = db.Column(db.Integer, primary_key=True)
+    filename = db.Column(db.String, nullable=False)
+    original_name = db.Column(db.String, nullable=False)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
