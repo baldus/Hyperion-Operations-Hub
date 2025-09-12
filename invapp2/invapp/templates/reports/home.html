@@ -1,8 +1,0 @@
-{% extends "base.html" %}
-{% block content %}
-<h2>Reports</h2>
-
-<p>You can generate a full export of all tables as CSVs in a single ZIP file.</p>
-
-<a href="{{ url_for('reports.generate_reports') }}" class="bubble-btn">Generate Reports (ZIP)</a>
-{% endblock %}
