@@ -156,13 +156,41 @@ def export_cycle_counts():
 def list_items():
     page = request.args.get("page", 1, type=int)
     size = request.args.get("size", 20, type=int)
-    pagination = Item.query.paginate(page=page, per_page=size, error_out=False)
+    selected_type = request.args.get("type", type=str)
+    sort_param = request.args.get("sort", "sku")
+
+    query = Item.query
+    if selected_type:
+        query = query.filter(Item.type == selected_type)
+
+    sort_columns = {
+        "sku": Item.sku.asc(),
+        "name": Item.name.asc(),
+        "type": Item.type.asc(),
+        "unit": Item.unit.asc(),
+        "min_stock": Item.min_stock.asc(),
+    }
+    query = query.order_by(sort_columns.get(sort_param, Item.sku.asc()))
+
+    pagination = query.paginate(page=page, per_page=size, error_out=False)
+
+    types_query = (
+        db.session.query(Item.type)
+        .filter(Item.type.isnot(None))
+        .filter(Item.type != "")
+        .distinct()
+        .order_by(Item.type.asc())
+    )
+    available_types = [row[0] for row in types_query]
     return render_template(
         "inventory/list_items.html",
         items=pagination.items,
         page=page,
         size=size,
         pages=pagination.pages,
+        available_types=available_types,
+        selected_type=selected_type,
+        sort=sort_param,
     )
 
 
@@ -172,12 +200,19 @@ def add_item():
         max_sku = db.session.query(db.func.max(Item.sku.cast(db.Integer))).scalar()
         next_sku = str(int(max_sku) + 1) if max_sku else "1"
 
+        min_stock_raw = request.form.get("min_stock", 0)
+        try:
+            min_stock = int(min_stock_raw or 0)
+        except (TypeError, ValueError):
+            min_stock = 0
+
         item = Item(
             sku=next_sku,
             name=request.form["name"],
+            type=request.form.get("type", "").strip() or None,
             unit=request.form.get("unit", "ea"),
             description=request.form.get("description", ""),
-            min_stock=request.form.get("min_stock", 0)
+            min_stock=min_stock,
         )
         db.session.add(item)
         db.session.commit()
@@ -215,7 +250,14 @@ def import_items():
             name = row.get("name", "").strip()
             unit = row.get("unit", "ea").strip()
             description = row.get("description", "").strip()
-            min_stock = int(row.get("min_stock", 0))
+            min_stock_raw = row.get("min_stock", 0)
+            try:
+                min_stock = int(min_stock_raw or 0)
+            except (TypeError, ValueError):
+                min_stock = 0
+
+            has_type_column = "type" in row
+            item_type = (row.get("type") or "").strip() if has_type_column else None
 
             existing = Item.query.filter_by(sku=sku).first() if sku else None
             if existing:
@@ -223,6 +265,8 @@ def import_items():
                 existing.unit = unit or existing.unit
                 existing.description = description or existing.description
                 existing.min_stock = min_stock or existing.min_stock
+                if has_type_column:
+                    existing.type = item_type or None
                 count_updated += 1
             else:
                 if not sku:
@@ -231,6 +275,7 @@ def import_items():
                 item = Item(
                     sku=sku,
                     name=name,
+                    type=(item_type or None) if has_type_column else None,
                     unit=unit,
                     description=description,
                     min_stock=min_stock,
@@ -253,9 +298,9 @@ def export_items():
     items = Item.query.all()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["sku", "name", "unit", "description", "min_stock"])
+    writer.writerow(["sku", "name", "type", "unit", "description", "min_stock"])
     for i in items:
-        writer.writerow([i.sku, i.name, i.unit, i.description, i.min_stock])
+        writer.writerow([i.sku, i.name, i.type or "", i.unit, i.description, i.min_stock])
     response = Response(output.getvalue(), mimetype="text/csv")
     response.headers["Content-Disposition"] = "attachment; filename=items.csv"
     return response
