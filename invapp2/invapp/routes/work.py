@@ -2,10 +2,12 @@ import os
 import uuid
 from flask import (
     Blueprint,
+    abort,
     current_app,
     redirect,
     render_template,
     request,
+    session,
     url_for,
 )
 from werkzeug.utils import secure_filename
@@ -33,7 +35,11 @@ def list_instructions():
     instructions = WorkInstruction.query.order_by(
         WorkInstruction.uploaded_at.desc()
     ).all()
-    return render_template("work/home.html", instructions=instructions)
+    return render_template(
+        "work/home.html",
+        instructions=instructions,
+        is_admin=session.get("is_admin", False),
+    )
 
 
 @bp.route("/instructions/upload", methods=["POST"])
@@ -58,6 +64,9 @@ def upload_instruction():
 
 @bp.route("/instructions/<int:instruction_id>/delete", methods=["POST"])
 def delete_instruction(instruction_id):
+    if not session.get("is_admin"):
+        abort(403)
+
     wi = WorkInstruction.query.get_or_404(instruction_id)
     file_path = os.path.join(
         current_app.config["WORK_INSTRUCTION_UPLOAD_FOLDER"], wi.filename
