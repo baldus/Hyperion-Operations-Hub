@@ -9,18 +9,20 @@
     </form>
 
 {% if instructions %}
-<ul>
+<div class="button-grid">
     {% for instr in instructions %}
-    <li>
-        <a href="{{ url_for('static', filename='work_instructions/' ~ instr.filename) }}" target="_blank">
-            {{ instr.original_name }}
-        </a>
+    <div class="instruction-item">
+        <div class="action-btn">
+            <a href="{{ url_for('static', filename='work_instructions/' ~ instr.filename) }}" target="_blank">
+                {{ instr.original_name }}
+            </a>
+        </div>
         <form action="{{ url_for('work.delete_instruction', instruction_id=instr.id) }}" method="post" style="display:inline;">
             <button type="submit">Delete</button>
         </form>
-    </li>
+    </div>
     {% endfor %}
-    </ul>
+</div>
 {% else %}
 <p>No work instructions uploaded.</p>
 {% endif %}
