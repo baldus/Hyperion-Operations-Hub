@@ -6,6 +6,7 @@ class Item(db.Model):
     id = db.Column(db.Integer, primary_key=True)  # system key
     sku = db.Column(db.String, unique=True, nullable=False)  # part number
     name = db.Column(db.String, nullable=False)
+    type = db.Column(db.String)
     unit = db.Column(db.String, default="ea")
     description = db.Column(db.String)
     min_stock = db.Column(db.Integer, default=0)
