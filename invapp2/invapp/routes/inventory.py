@@ -425,6 +425,8 @@ def list_stock():
     page = request.args.get("page", 1, type=int)
     size = request.args.get("size", 20, type=int)
     status = request.args.get("status", "all")
+    search = request.args.get("search", "")
+    like_pattern = f"%{search}%" if search else None
     if status not in {"all", "low", "near"}:
         status = "all"
     rows_query = (
@@ -434,9 +436,21 @@ def list_stock():
             Movement.location_id,
             func.sum(Movement.quantity).label("on_hand")
         )
+        .join(Item, Item.id == Movement.item_id)
+        .outerjoin(Batch, Batch.id == Movement.batch_id)
+        .outerjoin(Location, Location.id == Movement.location_id)
         .group_by(Movement.item_id, Movement.batch_id, Movement.location_id)
         .having(func.sum(Movement.quantity) != 0)
     )
+    if like_pattern:
+        rows_query = rows_query.filter(
+            or_(
+                Item.sku.ilike(like_pattern),
+                Item.name.ilike(like_pattern),
+                Batch.lot_number.ilike(like_pattern),
+                Location.code.ilike(like_pattern),
+            )
+        )
     pagination = rows_query.paginate(page=page, per_page=size, error_out=False)
     rows = pagination.items
 
@@ -445,6 +459,21 @@ def list_stock():
             Movement.item_id,
             func.sum(Movement.quantity).label("total_on_hand")
         )
+        .join(Item, Item.id == Movement.item_id)
+        .outerjoin(Batch, Batch.id == Movement.batch_id)
+        .outerjoin(Location, Location.id == Movement.location_id)
+    )
+    if like_pattern:
+        totals_query = totals_query.filter(
+            or_(
+                Item.sku.ilike(like_pattern),
+                Item.name.ilike(like_pattern),
+                Batch.lot_number.ilike(like_pattern),
+                Location.code.ilike(like_pattern),
+            )
+        )
+    totals_query = (
+        totals_query
         .group_by(Movement.item_id)
         .all()
     )
@@ -492,6 +521,7 @@ def list_stock():
         page=page,
         size=size,
         pages=pagination.pages,
+        search=search,
     )
 
 
