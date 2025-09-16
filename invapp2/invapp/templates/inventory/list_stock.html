@@ -2,6 +2,18 @@
 {% block content %}
 <h2>Stock Overview</h2>
 
+<div class="stock-filters" style="margin-bottom: 15px;">
+  <form method="get" class="status-filter-form" style="display: inline-flex; gap: 8px; align-items: center;">
+    <label for="status">Show:</label>
+    <select id="status" name="status" onchange="this.form.submit()">
+      <option value="all" {% if status == 'all' %}selected{% endif %}>All stock</option>
+      <option value="low" {% if status == 'low' %}selected{% endif %}>Low stock (&lt;105% of min)</option>
+      <option value="near" {% if status == 'near' %}selected{% endif %}>Near minimum (&lt;125% of min)</option>
+    </select>
+    <input type="hidden" name="size" value="{{ size }}">
+  </form>
+</div>
+
 <!-- Action buttons -->
 <div style="margin-bottom: 15px;">
   <a href="{{ url_for('inventory.adjust_stock') }}" class="bubble-btn">Manual Adjustment</a>
@@ -43,23 +55,29 @@
     <th>Total On Hand</th>
     <th>Min Stock</th>
   </tr>
-  {% for item_id, total in totals.items() %}
-    {% set item = items[item_id] %}
-    {% set min_stock = item.min_stock or 0 %}
-    {% if total < (min_stock * 1.05) %}
-      {% set row_class = "low-red" %}
-    {% elif total < (min_stock * 1.25) %}
-      {% set row_class = "low-yellow" %}
-    {% else %}
-      {% set row_class = "" %}
-    {% endif %}
-    <tr class="{{ row_class }}">
-      <td>{{ item.sku }}</td>
-      <td>{{ item.name }}</td>
-      <td>{{ total }}</td>
-      <td>{{ min_stock }}</td>
+  {% if totals %}
+    {% for item_id, total in totals.items() %}
+      {% set item = items[item_id] %}
+      {% set min_stock = item.min_stock or 0 %}
+      {% if total < (min_stock * 1.05) %}
+        {% set row_class = "low-red" %}
+      {% elif total < (min_stock * 1.25) %}
+        {% set row_class = "low-yellow" %}
+      {% else %}
+        {% set row_class = "" %}
+      {% endif %}
+      <tr class="{{ row_class }}">
+        <td>{{ item.sku }}</td>
+        <td>{{ item.name }}</td>
+        <td>{{ total }}</td>
+        <td>{{ min_stock }}</td>
+      </tr>
+    {% endfor %}
+  {% else %}
+    <tr>
+      <td colspan="4">No items match the selected filter.</td>
     </tr>
-  {% endfor %}
+  {% endif %}
 </table>
 
 <!-- Detailed balances by batch/location -->
@@ -72,22 +90,28 @@
     <th>Location</th>
     <th>Quantity</th>
   </tr>
-  {% for bal in balances %}
-  <tr>
-    <td>{{ bal.item.sku if bal.item else "???" }}</td>
-    <td>{{ bal.item.name if bal.item else "Unknown" }}</td>
-    <td>{{ bal.batch.lot_number if bal.batch else "-" }}</td>
-    <td>{{ bal.location.code if bal.location else "-" }}</td>
-    <td>{{ bal.on_hand }}</td>
-  </tr>
-  {% endfor %}
+  {% if balances %}
+    {% for bal in balances %}
+    <tr>
+      <td>{{ bal.item.sku if bal.item else "???" }}</td>
+      <td>{{ bal.item.name if bal.item else "Unknown" }}</td>
+      <td>{{ bal.batch.lot_number if bal.batch else "-" }}</td>
+      <td>{{ bal.location.code if bal.location else "-" }}</td>
+      <td>{{ bal.on_hand }}</td>
+    </tr>
+    {% endfor %}
+  {% else %}
+    <tr>
+      <td colspan="5">No location-level balances for the selected filter.</td>
+    </tr>
+  {% endif %}
 </table>
 <div class="pagination">
   {% if page > 1 %}
-    <a href="{{ url_for('inventory.list_stock', page=page-1, size=size) }}">Previous</a>
+    <a href="{{ url_for('inventory.list_stock', page=page-1, size=size, status=status) }}">Previous</a>
   {% endif %}
   {% if page < pages %}
-    <a href="{{ url_for('inventory.list_stock', page=page+1, size=size) }}">Next</a>
+    <a href="{{ url_for('inventory.list_stock', page=page+1, size=size, status=status) }}">Next</a>
   {% endif %}
 </div>
 {% endblock %}

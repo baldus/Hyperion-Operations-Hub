@@ -394,6 +394,9 @@ def export_locations():
 def list_stock():
     page = request.args.get("page", 1, type=int)
     size = request.args.get("size", 20, type=int)
+    status = request.args.get("status", "all")
+    if status not in {"all", "low", "near"}:
+        status = "all"
     rows_query = (
         db.session.query(
             Movement.item_id,
@@ -407,7 +410,7 @@ def list_stock():
     pagination = rows_query.paginate(page=page, per_page=size, error_out=False)
     rows = pagination.items
 
-    totals = dict(
+    totals_query = (
         db.session.query(
             Movement.item_id,
             func.sum(Movement.quantity).label("total_on_hand")
@@ -415,19 +418,39 @@ def list_stock():
         .group_by(Movement.item_id)
         .all()
     )
+    totals_map = {item_id: int(total or 0) for item_id, total in totals_query}
 
-    balances = []
     items = {i.id: i for i in Item.query.all()}
     locations = {l.id: l for l in Location.query.all()}
     batches = {b.id: b for b in Batch.query.all()}
 
+    def matches_status(item_obj, total_qty):
+        if status == "all":
+            return True
+        if not item_obj:
+            return False
+        min_stock = item_obj.min_stock or 0
+        multiplier = 1.05 if status == "low" else 1.25
+        return total_qty < (min_stock * multiplier)
+
+    totals = {
+        item_id: total
+        for item_id, total in totals_map.items()
+        if matches_status(items.get(item_id), total)
+    }
+
+    balances = []
     for item_id, batch_id, location_id, on_hand in rows:
+        item = items.get(item_id)
+        total_on_hand = totals_map.get(item_id, 0)
+        if not matches_status(item, total_on_hand):
+            continue
         balances.append({
-            "item": items.get(item_id),
+            "item": item,
             "batch": batches.get(batch_id) if batch_id else None,
             "location": locations.get(location_id),
             "on_hand": int(on_hand),
-            "total_on_hand": int(totals.get(item_id, 0)),
+            "total_on_hand": total_on_hand,
         })
 
     return render_template(
@@ -435,6 +458,7 @@ def list_stock():
         balances=balances,
         totals=totals,
         items=items,
+        status=status,
         page=page,
         size=size,
         pages=pagination.pages,
