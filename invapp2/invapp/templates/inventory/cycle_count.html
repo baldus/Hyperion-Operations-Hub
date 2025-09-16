@@ -39,30 +39,6 @@
   <a href="{{ url_for('inventory.export_cycle_counts') }}" class="bubble-btn">Export Cycle Counts (CSV)</a>
 </div>
 
-<style>
-  table {
-    border-collapse: collapse;
-    width: 100%;
-    margin-top: 15px;
-  }
-  th, td {
-    border: 1px solid #888;
-    padding: 6px 10px;
-    text-align: left;
-  }
-  th {
-    background: #333;
-    color: #fff;
-  }
-  tr.match {
-    background-color: #2a2a2a; /* dark gray for matches */
-  }
-  tr.mismatch {
-    background-color: #b33a3a; /* red for mismatches */
-    color: #fff;
-  }
-</style>
-
 <table>
   <tr>
     <th>Date</th>
