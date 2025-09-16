@@ -1,7 +1,7 @@
 import csv
 import io
 from flask import Blueprint, render_template, request, redirect, url_for, flash, Response
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import load_only, joinedload
 from invapp.models import db, Item, Location, Batch, Movement
 from datetime import datetime
@@ -158,10 +158,16 @@ def list_items():
     size = request.args.get("size", 20, type=int)
     selected_type = request.args.get("type", type=str)
     sort_param = request.args.get("sort", "sku")
+    search = request.args.get("search", "")
 
     query = Item.query
     if selected_type:
         query = query.filter(Item.type == selected_type)
+    if search:
+        like_pattern = f"%{search}%"
+        query = query.filter(
+            or_(Item.sku.ilike(like_pattern), Item.name.ilike(like_pattern))
+        )
 
     sort_columns = {
         "sku": Item.sku.asc(),
@@ -191,6 +197,7 @@ def list_items():
         available_types=available_types,
         selected_type=selected_type,
         sort=sort_param,
+        search=search,
     )
 
 
