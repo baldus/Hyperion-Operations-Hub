@@ -224,6 +224,29 @@ def add_item():
     return render_template("inventory/add_item.html", next_sku=next_sku)
 
 
+@bp.route("/item/<int:item_id>/edit", methods=["GET", "POST"])
+def edit_item(item_id):
+    item = Item.query.get_or_404(item_id)
+
+    if request.method == "POST":
+        item.name = request.form["name"]
+        item.type = request.form.get("type", "").strip() or None
+        item.unit = request.form.get("unit", "ea").strip() or "ea"
+        item.description = request.form.get("description", "").strip()
+
+        min_stock_raw = request.form.get("min_stock", 0)
+        try:
+            item.min_stock = int(min_stock_raw or 0)
+        except (TypeError, ValueError):
+            item.min_stock = 0
+
+        db.session.commit()
+        flash(f"Item {item.sku} updated successfully", "success")
+        return redirect(url_for("inventory.list_items"))
+
+    return render_template("inventory/edit_item.html", item=item)
+
+
 @bp.route("/items/import", methods=["GET", "POST"])
 def import_items():
     """

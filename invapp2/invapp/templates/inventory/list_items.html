@@ -44,7 +44,7 @@
   </tr>
   {% for item in items %}
   <tr>
-    <td>{{ item.sku }}</td>
+    <td><a href="{{ url_for('inventory.edit_item', item_id=item.id) }}">{{ item.sku }}</a></td>
     <td>{{ item.name }}</td>
     <td>{{ item.type or '-' }}</td>
     <td>{{ item.unit }}</td>
