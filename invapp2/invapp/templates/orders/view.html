@@ -2,6 +2,11 @@
 {% block content %}
 <h2>Order {{ order.order_number }}</h2>
 <p>Status: {{ order.status }}</p>
+<div class="order-metadata">
+    <p><strong>Promised Ship Date:</strong> {{ order.promised_date or 'TBD' }}</p>
+    <p><strong>Scheduled Start:</strong> {{ order.scheduled_start_date or 'TBD' }}</p>
+    <p><strong>Scheduled Completion:</strong> {{ order.scheduled_completion_date or 'TBD' }}</p>
+</div>
 <a href="{{ url_for('orders.edit_order', order_id=order.id) }}" class="action-btn">Edit</a>
 <form method="post" action="{{ url_for('orders.delete_order', order_id=order.id) }}" style="display:inline;">
     <button type="submit">Delete</button>
@@ -28,9 +33,36 @@
 {% endfor %}
 </ul>
 <h3>Routing Steps</h3>
-<ol>
-{% for step in order.steps %}
-<li>{{ step.description }} {% if step.completed %}(done){% endif %}</li>
-{% endfor %}
-</ol>
+<table class="form-table">
+    <thead>
+        <tr>
+            <th>Sequence</th>
+            <th>Work Cell</th>
+            <th>Instructions</th>
+            <th>Components</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for step in order.steps %}
+        <tr>
+            <td>{{ step.sequence }}</td>
+            <td>{{ step.work_cell or '—' }}</td>
+            <td>{{ step.description }}</td>
+            <td>
+                {% if step.component_usages %}
+                    <ul>
+                    {% for usage in step.component_usages %}
+                        <li>{{ usage.bom_component.component_item.sku }} ({{ usage.bom_component.quantity }} per)</li>
+                    {% endfor %}
+                    </ul>
+                {% else %}
+                    —
+                {% endif %}
+            </td>
+            <td>{% if step.completed %}Complete{% else %}Open{% endif %}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
 {% endblock %}

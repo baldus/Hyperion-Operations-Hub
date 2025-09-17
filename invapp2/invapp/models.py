@@ -150,6 +150,12 @@ class OrderBOMComponent(db.Model):
 
     order_item = db.relationship("OrderItem", back_populates="bom_components")
     component_item = db.relationship("Item")
+    step_usages = db.relationship(
+        "OrderStepComponent",
+        back_populates="bom_component",
+        cascade="all, delete-orphan",
+        order_by="OrderStepComponent.id",
+    )
 
     def __repr__(self):
         return (
@@ -164,11 +170,18 @@ class OrderStep(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     order_id = db.Column(db.Integer, db.ForeignKey("order.id"), nullable=False)
     sequence = db.Column(db.Integer, nullable=False)
+    work_cell = db.Column(db.String, nullable=True)
     description = db.Column(db.String, nullable=False)
     completed = db.Column(db.Boolean, default=False, nullable=False)
     completed_at = db.Column(db.DateTime, nullable=True)
 
     order = db.relationship("Order", back_populates="steps")
+    component_usages = db.relationship(
+        "OrderStepComponent",
+        back_populates="order_step",
+        cascade="all, delete-orphan",
+        order_by="OrderStepComponent.id",
+    )
 
     def __repr__(self):
         return (
@@ -193,4 +206,23 @@ class Reservation(db.Model):
         return (
             f"<Reservation order_item={self.order_item_id} item={self.item_id} "
             f"qty={self.quantity}>"
+        )
+
+
+class OrderStepComponent(db.Model):
+    __tablename__ = "order_step_component"
+
+    id = db.Column(db.Integer, primary_key=True)
+    order_step_id = db.Column(db.Integer, db.ForeignKey("order_step.id"), nullable=False)
+    order_bom_component_id = db.Column(
+        db.Integer, db.ForeignKey("order_bom_component.id"), nullable=False
+    )
+
+    order_step = db.relationship("OrderStep", back_populates="component_usages")
+    bom_component = db.relationship("OrderBOMComponent", back_populates="step_usages")
+
+    def __repr__(self):
+        return (
+            f"<OrderStepComponent step={self.order_step_id} "
+            f"bom_component={self.order_bom_component_id}>"
         )
