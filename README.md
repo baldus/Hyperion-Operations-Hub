@@ -106,14 +106,26 @@ invapp2/
    flask run --host=0.0.0.0 --port=5000
    ```
 
-5. Access via browser:  
+5. Access via browser:
    ```
    http://<raspberry-pi-ip>:5000
    ```
 
 ---
 
-## 🗺 Roadmap  
+## 🔄 Upgrading Existing Installations
+
+Existing deployments created before the introduction of item notes need a one-time
+database migration. Run the following SQL against your production database (or
+allow the application to run once so it can apply the change automatically):
+
+```sql
+ALTER TABLE item ADD COLUMN notes TEXT;
+```
+
+---
+
+## 🗺 Roadmap
 
 - [x] Inventory module (MVP complete)  
 - [x] Reports module (ZIP export)  

@@ -1,3 +1,5 @@
+import csv
+import io
 import os
 import sys
 
@@ -90,3 +92,108 @@ def test_list_stock_all_filter(client, stock_items):
     assert stock_items["low"] in page
     assert stock_items["near"] in page
     assert stock_items["ok"] in page
+
+
+def test_add_item_with_notes(client, app):
+    response = client.post(
+        "/inventory/item/add",
+        data={
+            "name": "Widget",
+            "type": "Component",
+            "unit": "ea",
+            "description": "Sample widget",
+            "min_stock": "5",
+            "notes": "Handle with care",
+        },
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        item = Item.query.filter_by(name="Widget").one()
+        assert item.notes == "Handle with care"
+
+
+def test_edit_item_updates_notes(client, app):
+    with app.app_context():
+        item = Item(sku="200", name="Existing", notes="Old notes")
+        db.session.add(item)
+        db.session.commit()
+        item_id = item.id
+
+    response = client.post(
+        f"/inventory/item/{item_id}/edit",
+        data={
+            "name": "Existing",
+            "type": "",
+            "unit": "ea",
+            "description": "",
+            "min_stock": "0",
+            "notes": "Updated notes",
+        },
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        updated = Item.query.get(item_id)
+        assert updated.notes == "Updated notes"
+
+    response = client.post(
+        f"/inventory/item/{item_id}/edit",
+        data={
+            "name": "Existing",
+            "type": "",
+            "unit": "ea",
+            "description": "",
+            "min_stock": "0",
+            "notes": "",
+        },
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        cleared = Item.query.get(item_id)
+        assert cleared.notes is None
+
+
+def test_import_export_items_with_notes(client, app):
+    with app.app_context():
+        existing = Item(sku="300", name="Existing Item", notes="Legacy notes")
+        db.session.add(existing)
+        db.session.commit()
+
+    csv_data = io.StringIO()
+    writer = csv.writer(csv_data)
+    writer.writerow(["sku", "name", "type", "unit", "description", "min_stock", "notes"])
+    writer.writerow(["300", "Existing Item", "", "ea", "Updated description", "12", "Updated legacy note"])
+    writer.writerow(["", "New Item", "", "ea", "Brand new", "3", "Fresh notes"])
+
+    response = client.post(
+        "/inventory/items/import",
+        data={"file": (io.BytesIO(csv_data.getvalue().encode("utf-8")), "items.csv")},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        updated_existing = Item.query.filter_by(sku="300").one()
+        assert updated_existing.description == "Updated description"
+        assert updated_existing.min_stock == 12
+        assert updated_existing.notes == "Updated legacy note"
+
+        new_item = Item.query.filter(Item.sku != "300").one()
+        assert new_item.notes == "Fresh notes"
+
+    export_response = client.get("/inventory/items/export")
+    assert export_response.status_code == 200
+
+    exported = list(csv.reader(io.StringIO(export_response.data.decode("utf-8"))))
+    header = exported[0]
+    assert header == ["sku", "name", "type", "unit", "description", "min_stock", "notes"]
+
+    rows = {row[0]: row for row in exported[1:]}  # keyed by sku
+    assert rows["300"][6] == "Updated legacy note"
+
+    # new SKU is auto-generated; grab its notes from the remaining row
+    new_rows = [row for sku, row in rows.items() if sku != "300"]
+    assert len(new_rows) == 1
+    assert new_rows[0][6] == "Fresh notes"
