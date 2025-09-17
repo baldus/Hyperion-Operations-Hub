@@ -90,3 +90,10 @@ def test_list_stock_all_filter(client, stock_items):
     assert stock_items["low"] in page
     assert stock_items["near"] in page
     assert stock_items["ok"] in page
+
+
+def test_inventory_scan_page(client):
+    response = client.get("/inventory/scan")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "cameraPreview" in body
