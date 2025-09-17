@@ -106,14 +106,18 @@ invapp2/
    cd invapp2
    ```
 
-2. Create a virtual environment & install dependencies:  
+2. Create a virtual environment & install Python dependencies from `invapp2/requirements.txt`:
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
+   # upgrade packaging tools on fresh environments
+   pip install --upgrade pip setuptools wheel
    pip install -r requirements.txt
    ```
 
-3. Set up your database and environment variables:
+   > **Note:** The app expects PostgreSQL connectivity via `psycopg2-binary`. On Debian/Raspberry Pi systems ensure the `libpq` client libraries are installed (e.g. `sudo apt install libpq5`).
+
+3. Set up your database and environment variables (see [`config.py`](invapp2/config.py) for all available options):
    ```bash
    export DB_URL="postgresql+psycopg2://USER:PASSWORD@localhost/invdb"
    export SECRET_KEY="change_me"
@@ -124,14 +128,19 @@ invapp2/
    >>> db.create_all()
    ```
 
-4. Run the app:  
+4. Run the app:
    ```bash
    flask run --host=0.0.0.0 --port=5000
    ```
 
-5. Access via browser:  
+5. Access via browser:
    ```
    http://<raspberry-pi-ip>:5000
+   ```
+
+6. (Optional) Run the automated tests once the app dependencies are installed:
+   ```bash
+   pytest
    ```
 
 ---
