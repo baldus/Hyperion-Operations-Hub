@@ -1,4 +1,5 @@
 from datetime import datetime
+
 from invapp.extensions import db
 
 class Item(db.Model):
@@ -54,3 +55,142 @@ class WorkInstruction(db.Model):
     filename = db.Column(db.String, nullable=False)
     original_name = db.Column(db.String, nullable=False)
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class OrderStatus:
+    OPEN = "OPEN"
+    CLOSED = "CLOSED"
+    CANCELLED = "CANCELLED"
+
+    ACTIVE_STATES = {OPEN}
+
+
+class Order(db.Model):
+    __tablename__ = "order"
+
+    id = db.Column(db.Integer, primary_key=True)
+    order_number = db.Column(db.String, unique=True, nullable=False)
+    status = db.Column(db.String, nullable=False, default=OrderStatus.OPEN)
+    promised_date = db.Column(db.Date, nullable=True)
+    scheduled_start_date = db.Column(db.Date, nullable=True)
+    scheduled_completion_date = db.Column(db.Date, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    items = db.relationship(
+        "OrderItem",
+        back_populates="order",
+        cascade="all, delete-orphan",
+        order_by="OrderItem.id",
+    )
+    steps = db.relationship(
+        "OrderStep",
+        back_populates="order",
+        cascade="all, delete-orphan",
+        order_by="OrderStep.sequence",
+    )
+
+    def __repr__(self):
+        return f"<Order {self.order_number} status={self.status}>"
+
+    @property
+    def primary_item(self):
+        return self.items[0] if self.items else None
+
+    @property
+    def routing_progress(self):
+        if not self.steps:
+            return None
+        completed = sum(1 for step in self.steps if step.completed)
+        total = len(self.steps)
+        if total == 0:
+            return None
+        return completed / total
+
+
+class OrderItem(db.Model):
+    __tablename__ = "order_item"
+
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("order.id"), nullable=False)
+    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+    promised_date = db.Column(db.Date, nullable=True)
+    scheduled_start_date = db.Column(db.Date, nullable=True)
+    scheduled_completion_date = db.Column(db.Date, nullable=True)
+
+    order = db.relationship("Order", back_populates="items")
+    item = db.relationship("Item")
+    bom_components = db.relationship(
+        "OrderBOMComponent",
+        back_populates="order_item",
+        cascade="all, delete-orphan",
+        order_by="OrderBOMComponent.id",
+    )
+    reservations = db.relationship(
+        "Reservation",
+        back_populates="order_item",
+        cascade="all, delete-orphan",
+        order_by="Reservation.id",
+    )
+
+    def __repr__(self):
+        return f"<OrderItem order={self.order_id} item={self.item_id} qty={self.quantity}>"
+
+
+class OrderBOMComponent(db.Model):
+    __tablename__ = "order_bom_component"
+
+    id = db.Column(db.Integer, primary_key=True)
+    order_item_id = db.Column(db.Integer, db.ForeignKey("order_item.id"), nullable=False)
+    component_item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+
+    order_item = db.relationship("OrderItem", back_populates="bom_components")
+    component_item = db.relationship("Item")
+
+    def __repr__(self):
+        return (
+            f"<OrderBOMComponent order_item={self.order_item_id} "
+            f"component={self.component_item_id} qty={self.quantity}>"
+        )
+
+
+class OrderStep(db.Model):
+    __tablename__ = "order_step"
+
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("order.id"), nullable=False)
+    sequence = db.Column(db.Integer, nullable=False)
+    description = db.Column(db.String, nullable=False)
+    completed = db.Column(db.Boolean, default=False, nullable=False)
+    completed_at = db.Column(db.DateTime, nullable=True)
+
+    order = db.relationship("Order", back_populates="steps")
+
+    def __repr__(self):
+        return (
+            f"<OrderStep order={self.order_id} seq={self.sequence} "
+            f"completed={self.completed}>"
+        )
+
+
+class Reservation(db.Model):
+    __tablename__ = "reservation"
+
+    id = db.Column(db.Integer, primary_key=True)
+    order_item_id = db.Column(db.Integer, db.ForeignKey("order_item.id"), nullable=False)
+    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    order_item = db.relationship("OrderItem", back_populates="reservations")
+    item = db.relationship("Item")
+
+    def __repr__(self):
+        return (
+            f"<Reservation order_item={self.order_item_id} item={self.item_id} "
+            f"qty={self.quantity}>"
+        )
