@@ -1,7 +1,7 @@
 import csv
 import io
 from flask import Blueprint, render_template, request, redirect, url_for, flash, Response
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import load_only, joinedload
 from invapp.models import db, Item, Location, Batch, Movement
 from datetime import datetime
@@ -158,10 +158,16 @@ def list_items():
     size = request.args.get("size", 20, type=int)
     selected_type = request.args.get("type", type=str)
     sort_param = request.args.get("sort", "sku")
+    search = request.args.get("search", "")
 
     query = Item.query
     if selected_type:
         query = query.filter(Item.type == selected_type)
+    if search:
+        like_pattern = f"%{search}%"
+        query = query.filter(
+            or_(Item.sku.ilike(like_pattern), Item.name.ilike(like_pattern))
+        )
 
     sort_columns = {
         "sku": Item.sku.asc(),
@@ -191,6 +197,7 @@ def list_items():
         available_types=available_types,
         selected_type=selected_type,
         sort=sort_param,
+        search=search,
     )
 
 
@@ -222,6 +229,29 @@ def add_item():
     max_sku = db.session.query(db.func.max(Item.sku.cast(db.Integer))).scalar()
     next_sku = str(int(max_sku) + 1) if max_sku else "1"
     return render_template("inventory/add_item.html", next_sku=next_sku)
+
+
+@bp.route("/item/<int:item_id>/edit", methods=["GET", "POST"])
+def edit_item(item_id):
+    item = Item.query.get_or_404(item_id)
+
+    if request.method == "POST":
+        item.name = request.form["name"]
+        item.type = request.form.get("type", "").strip() or None
+        item.unit = request.form.get("unit", "ea").strip() or "ea"
+        item.description = request.form.get("description", "").strip()
+
+        min_stock_raw = request.form.get("min_stock", 0)
+        try:
+            item.min_stock = int(min_stock_raw or 0)
+        except (TypeError, ValueError):
+            item.min_stock = 0
+
+        db.session.commit()
+        flash(f"Item {item.sku} updated successfully", "success")
+        return redirect(url_for("inventory.list_items"))
+
+    return render_template("inventory/edit_item.html", item=item)
 
 
 @bp.route("/items/import", methods=["GET", "POST"])
@@ -395,6 +425,8 @@ def list_stock():
     page = request.args.get("page", 1, type=int)
     size = request.args.get("size", 20, type=int)
     status = request.args.get("status", "all")
+    search = request.args.get("search", "")
+    like_pattern = f"%{search}%" if search else None
     if status not in {"all", "low", "near"}:
         status = "all"
     rows_query = (
@@ -404,9 +436,21 @@ def list_stock():
             Movement.location_id,
             func.sum(Movement.quantity).label("on_hand")
         )
+        .join(Item, Item.id == Movement.item_id)
+        .outerjoin(Batch, Batch.id == Movement.batch_id)
+        .outerjoin(Location, Location.id == Movement.location_id)
         .group_by(Movement.item_id, Movement.batch_id, Movement.location_id)
         .having(func.sum(Movement.quantity) != 0)
     )
+    if like_pattern:
+        rows_query = rows_query.filter(
+            or_(
+                Item.sku.ilike(like_pattern),
+                Item.name.ilike(like_pattern),
+                Batch.lot_number.ilike(like_pattern),
+                Location.code.ilike(like_pattern),
+            )
+        )
     pagination = rows_query.paginate(page=page, per_page=size, error_out=False)
     rows = pagination.items
 
@@ -415,6 +459,21 @@ def list_stock():
             Movement.item_id,
             func.sum(Movement.quantity).label("total_on_hand")
         )
+        .join(Item, Item.id == Movement.item_id)
+        .outerjoin(Batch, Batch.id == Movement.batch_id)
+        .outerjoin(Location, Location.id == Movement.location_id)
+    )
+    if like_pattern:
+        totals_query = totals_query.filter(
+            or_(
+                Item.sku.ilike(like_pattern),
+                Item.name.ilike(like_pattern),
+                Batch.lot_number.ilike(like_pattern),
+                Location.code.ilike(like_pattern),
+            )
+        )
+    totals_query = (
+        totals_query
         .group_by(Movement.item_id)
         .all()
     )
@@ -462,6 +521,7 @@ def list_stock():
         page=page,
         size=size,
         pages=pagination.pages,
+        search=search,
     )
 
 
