@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import pytest
 
 # ensure package path
@@ -88,3 +89,21 @@ def test_admin_login_button_route(client):
 
     with client.session_transaction() as session:
         assert session.get('is_admin') is True
+
+
+def test_admin_session_timeout(client):
+    client.post(
+        '/admin/login',
+        data={'username': 'admin', 'password': 'password'},
+        follow_redirects=False,
+    )
+
+    with client.session_transaction() as session:
+        session['admin_last_active'] = time.time() - 301
+
+    response = client.get('/settings/printers', follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers['Location'].startswith('/admin/login')
+
+    with client.session_transaction() as session:
+        assert not session.get('is_admin')

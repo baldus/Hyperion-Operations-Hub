@@ -19,6 +19,7 @@
             <a href="{{ url_for('settings.settings_home') }}" class="nav-btn">Settings</a>
             {% if session.get('is_admin') %}
                 <a href="{{ url_for('printers.printer_settings') }}" class="nav-btn">Admin Tools</a>
+                <a href="{{ url_for('admin.logout', next=request.path) }}" class="nav-btn">Admin Logout</a>
             {% else %}
                 {% if request.endpoint != 'admin.login' %}
                     {% set admin_login_url = url_for('admin.login', next=request.path) %}

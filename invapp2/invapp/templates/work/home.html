@@ -12,14 +12,12 @@
 <div class="button-grid">
     {% for instr in instructions %}
     <div class="instruction-item">
-        <div class="action-btn">
-            <a href="{{ url_for('static', filename='work_instructions/' ~ instr.filename) }}" target="_blank">
-                {{ instr.original_name }}
-            </a>
-        </div>
+        <a href="{{ url_for('static', filename='work_instructions/' ~ instr.filename) }}" target="_blank" rel="noopener" class="instruction-btn">
+            {{ instr.original_name }}
+        </a>
         {% if is_admin %}
-        <form action="{{ url_for('work.delete_instruction', instruction_id=instr.id) }}" method="post" style="display:inline;">
-            <button type="submit" class="action-btn">Delete</button>
+        <form action="{{ url_for('work.delete_instruction', instruction_id=instr.id) }}" method="post">
+            <button type="submit" class="instruction-btn instruction-btn--danger">Delete</button>
         </form>
         {% endif %}
     </div>

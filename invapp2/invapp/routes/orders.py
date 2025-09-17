@@ -1,4 +1,5 @@
 import json
+from collections import defaultdict
 from datetime import datetime
 
 from flask import (
@@ -15,7 +16,9 @@ from sqlalchemy.orm import joinedload
 
 from invapp.extensions import db
 from invapp.models import (
+    Batch,
     Item,
+    Location,
     Movement,
     Order,
     OrderComponent,
@@ -24,6 +27,7 @@ from invapp.models import (
     Reservation,
     RoutingStep,
     RoutingStepComponent,
+    RoutingStepConsumption,
 )
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
@@ -64,6 +68,135 @@ def _available_quantity(item_id: int) -> int:
     ) or 0
 
     return max(0, int(total_on_hand) - int(reserved_total))
+
+
+def _component_requirement(usage: RoutingStepComponent) -> int:
+    bom_component = usage.bom_component
+    order_line = bom_component.order_line
+    return int(bom_component.quantity) * int(order_line.quantity)
+
+
+def _position_balance(item_id: int, batch_id: int | None, location_id: int) -> int:
+    filters = [Movement.item_id == item_id, Movement.location_id == location_id]
+    if batch_id is None:
+        filters.append(Movement.batch_id.is_(None))
+    else:
+        filters.append(Movement.batch_id == batch_id)
+
+    balance = (
+        db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+        .filter(*filters)
+        .scalar()
+    ) or 0
+    return int(balance)
+
+
+def _inventory_options(item_id: int):
+    rows = (
+        db.session.query(
+            Movement.batch_id,
+            Movement.location_id,
+            func.coalesce(func.sum(Movement.quantity), 0).label("on_hand"),
+        )
+        .filter(Movement.item_id == item_id)
+        .group_by(Movement.batch_id, Movement.location_id)
+        .having(func.coalesce(func.sum(Movement.quantity), 0) > 0)
+        .all()
+    )
+
+    batch_ids = {row.batch_id for row in rows if row.batch_id is not None}
+    location_ids = {row.location_id for row in rows if row.location_id is not None}
+
+    batches = {
+        batch.id: batch
+        for batch in Batch.query.filter(Batch.id.in_(batch_ids)).all()
+    } if batch_ids else {}
+    locations = {
+        location.id: location
+        for location in Location.query.filter(Location.id.in_(location_ids)).all()
+    } if location_ids else {}
+
+    options = []
+    for batch_id, location_id, on_hand in rows:
+        batch_label = "Unbatched"
+        if batch_id is not None:
+            batch = batches.get(batch_id)
+            batch_label = batch.lot_number if batch else f"Batch {batch_id}"
+        location_label = "Unknown"
+        if location_id is not None:
+            location = locations.get(location_id)
+            location_label = location.code if location else f"Loc {location_id}"
+
+        options.append(
+            {
+                "value": f"{batch_id if batch_id is not None else 'none'}::{location_id}",
+                "batch_id": batch_id,
+                "location_id": location_id,
+                "label": f"{batch_label} @ {location_label} (avail {int(on_hand)})",
+                "available": int(on_hand),
+            }
+        )
+
+    return sorted(options, key=lambda entry: entry["label"])
+
+
+def _prepare_order_detail(order: Order, *, pending_completed_ids=None, selected_batches=None):
+    if selected_batches is None:
+        selected_batches = {}
+
+    component_options = {}
+    component_requirements = {}
+    component_consumptions = {}
+
+    for step in order.routing_steps:
+        for usage in step.component_usages:
+            component_item = usage.bom_component.component_item
+            component_options[usage.id] = _inventory_options(component_item.id)
+            component_requirements[usage.id] = _component_requirement(usage)
+            consumption_rows = []
+            for consumption in usage.consumptions:
+                movement = consumption.movement
+                batch = movement.batch
+                location = movement.location
+                batch_label = batch.lot_number if batch else "Unbatched"
+                location_label = location.code if location else "Unknown"
+                consumption_rows.append(
+                    {
+                        "batch_label": batch_label,
+                        "location_label": location_label,
+                        "quantity": consumption.quantity,
+                    }
+                )
+            component_consumptions[usage.id] = consumption_rows
+
+    return {
+        "order": order,
+        "component_options": component_options,
+        "component_requirements": component_requirements,
+        "component_consumptions": component_consumptions,
+        "pending_completed_ids": pending_completed_ids,
+        "selected_batches": selected_batches,
+    }
+
+
+def _adjust_reservation(order_line: OrderLine, item_id: int, delta: int):
+    """Adjust a reservation quantity for an order line and component item."""
+
+    reservation = next(
+        (res for res in order_line.reservations if res.item_id == item_id),
+        None,
+    )
+
+    if reservation:
+        new_quantity = int(reservation.quantity) + int(delta)
+        if new_quantity <= 0:
+            db.session.delete(reservation)
+        else:
+            reservation.quantity = new_quantity
+    elif delta > 0:
+        db.session.add(
+            Reservation(order_line=order_line, item_id=item_id, quantity=int(delta))
+        )
 
 
 @bp.route("/")
@@ -125,6 +258,7 @@ def new_order():
         "quantity": "",
         "customer_name": "",
         "created_by": "",
+        "general_notes": "",
         "promised_date": "",
         "scheduled_start_date": "",
         "scheduled_completion_date": "",
@@ -139,6 +273,8 @@ def new_order():
         quantity_raw = (request.form.get("quantity") or "").strip()
         customer_name = (request.form.get("customer_name") or "").strip()
         created_by = (request.form.get("created_by") or "").strip()
+        general_notes = request.form.get("general_notes") or ""
+        general_notes_db_value = general_notes if general_notes.strip() else None
         promised_date_raw = (request.form.get("promised_date") or "").strip()
         scheduled_start_raw = (
             request.form.get("scheduled_start_date") or ""
@@ -156,6 +292,7 @@ def new_order():
                 "quantity": quantity_raw,
                 "customer_name": customer_name,
                 "created_by": created_by,
+                "general_notes": general_notes,
                 "promised_date": promised_date_raw,
                 "scheduled_start_date": scheduled_start_raw,
                 "scheduled_completion_date": scheduled_completion_raw,
@@ -386,6 +523,7 @@ def new_order():
             order_number=order_number,
             customer_name=customer_name,
             created_by=created_by,
+            general_notes=general_notes_db_value,
             promised_date=promised_date,
             scheduled_start_date=scheduled_start_date,
             scheduled_completion_date=scheduled_completion_date,
@@ -476,16 +614,34 @@ def view_order(order_id):
         .filter_by(id=order_id)
         .first_or_404()
     )
-    return render_template("orders/view.html", order=order)
+    context = _prepare_order_detail(order)
+    return render_template("orders/view.html", **context)
 
 
 @bp.route("/<int:order_id>/routing", methods=["POST"])
 def update_routing(order_id):
     order = (
-        Order.query.options(joinedload(Order.routing_steps))
+        Order.query.options(
+            joinedload(Order.routing_steps)
+            .joinedload(RoutingStep.component_usages)
+            .joinedload(RoutingStepComponent.bom_component)
+            .joinedload(OrderComponent.order_line)
+            .joinedload(OrderLine.reservations),
+            joinedload(Order.routing_steps)
+            .joinedload(RoutingStep.component_usages)
+            .joinedload(RoutingStepComponent.consumptions)
+            .joinedload(RoutingStepConsumption.movement)
+            .joinedload(Movement.batch),
+            joinedload(Order.routing_steps)
+            .joinedload(RoutingStep.component_usages)
+            .joinedload(RoutingStepComponent.consumptions)
+            .joinedload(RoutingStepConsumption.movement)
+            .joinedload(Movement.location),
+        )
         .filter_by(id=order_id)
         .first_or_404()
     )
+
     selected_ids = set()
     for raw_id in request.form.getlist("completed_steps"):
         try:
@@ -493,14 +649,122 @@ def update_routing(order_id):
         except (TypeError, ValueError):
             continue
 
+    selected_batches = {}
+    for form_key, value in request.form.items():
+        if not form_key.startswith("usage_"):
+            continue
+        try:
+            usage_id = int(form_key.split("_", 1)[1])
+        except (ValueError, IndexError):
+            continue
+        selected_batches[usage_id] = value
+
+    errors = []
+    planned_consumptions = defaultdict(list)
+
+    for step in order.routing_steps:
+        desired_state = step.id in selected_ids
+        if desired_state and not step.completed:
+            for usage in step.component_usages:
+                field_name = f"usage_{usage.id}"
+                selection = (request.form.get(field_name) or "").strip()
+                if not selection:
+                    errors.append(
+                        "Select a batch for "
+                        f"{usage.bom_component.component_item.sku} on step {step.sequence}."
+                    )
+                    continue
+                try:
+                    batch_token, location_token = selection.split("::", 1)
+                    batch_id = None if batch_token == "none" else int(batch_token)
+                    location_id = int(location_token)
+                except (ValueError, TypeError):
+                    errors.append(
+                        "Invalid batch selection for "
+                        f"{usage.bom_component.component_item.sku} on step {step.sequence}."
+                    )
+                    continue
+
+                required_qty = _component_requirement(usage)
+                available_qty = _position_balance(
+                    usage.bom_component.component_item_id, batch_id, location_id
+                )
+                if required_qty > available_qty:
+                    errors.append(
+                        f"Not enough stock in selected batch for "
+                        f"{usage.bom_component.component_item.sku} on step {step.sequence}. "
+                        f"Required {required_qty}, available {available_qty}."
+                    )
+                    continue
+
+                planned_consumptions[step.id].append(
+                    {
+                        "usage": usage,
+                        "batch_id": batch_id,
+                        "location_id": location_id,
+                        "quantity": required_qty,
+                    }
+                )
+
+    if errors:
+        for error in errors:
+            flash(error, "danger")
+        context = _prepare_order_detail(
+            order,
+            pending_completed_ids=selected_ids,
+            selected_batches=selected_batches,
+        )
+        return render_template("orders/view.html", **context), 400
+
     changes_made = False
     current_time = datetime.utcnow()
     for step in order.routing_steps:
         desired_state = step.id in selected_ids
-        if step.completed != desired_state:
-            step.completed = desired_state
-            step.completed_at = current_time if desired_state else None
-            changes_made = True
+        if step.completed == desired_state:
+            continue
+
+        changes_made = True
+        if desired_state:
+            step.completed = True
+            step.completed_at = current_time
+            for action in planned_consumptions.get(step.id, []):
+                usage = action["usage"]
+                movement = Movement(
+                    item_id=usage.bom_component.component_item_id,
+                    batch_id=action["batch_id"],
+                    location_id=action["location_id"],
+                    quantity=-action["quantity"],
+                    movement_type="ISSUE",
+                    reference=f"Order {order.order_number} Step {step.sequence}",
+                )
+                db.session.add(movement)
+                db.session.flush()
+                db.session.add(
+                    RoutingStepConsumption(
+                        routing_step_component=usage,
+                        movement=movement,
+                        quantity=action["quantity"],
+                    )
+                )
+                _adjust_reservation(
+                    usage.bom_component.order_line,
+                    usage.bom_component.component_item_id,
+                    -action["quantity"],
+                )
+        else:
+            for usage in step.component_usages:
+                for consumption in list(usage.consumptions):
+                    movement = consumption.movement
+                    _adjust_reservation(
+                        usage.bom_component.order_line,
+                        usage.bom_component.component_item_id,
+                        consumption.quantity,
+                    )
+                    if movement is not None:
+                        db.session.delete(movement)
+                    db.session.delete(consumption)
+            step.completed = False
+            step.completed_at = None
 
     if changes_made:
         db.session.commit()
@@ -517,8 +781,11 @@ def edit_order(order_id):
     status_choices = OrderStatus.ALL_STATUSES
     if request.method == "POST":
         status = request.form.get("status", order.status)
+        general_notes = request.form.get("general_notes") or ""
+        general_notes_db_value = general_notes if general_notes.strip() else None
         if status not in set(status_choices):
             flash("Invalid status", "danger")
+            order.general_notes = general_notes_db_value
             return render_template(
                 "orders/edit.html",
                 order=order,
@@ -527,6 +794,7 @@ def edit_order(order_id):
             )
 
         order.status = status
+        order.general_notes = general_notes_db_value
         db.session.commit()
         flash("Order updated", "success")
         return redirect(url_for("orders.view_order", order_id=order.id))

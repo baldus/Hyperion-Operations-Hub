@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Edit Order {{ order.order_number }}</h2>
-<form method="post">
-    <label>Status:
+<form method="post" class="form-stack">
+    <label class="form-field">
+        <span class="field-label">Status</span>
         <select name="status">
             {% for value in statuses %}
                 <option value="{{ value }}" {% if order.status==value %}selected{% endif %}>
@@ -10,7 +11,14 @@
                 </option>
             {% endfor %}
         </select>
-    </label><br>
-    <button type="submit">Save</button>
+    </label>
+    <label class="form-field">
+        <span class="field-label">General Notes</span>
+        <textarea name="general_notes" rows="4">{{ order.general_notes or '' }}</textarea>
+    </label>
+    <div class="form-actions">
+        <button type="submit" class="action-btn">Save</button>
+        <a href="{{ url_for('orders.view_order', order_id=order.id) }}" class="action-btn secondary">Cancel</a>
+    </div>
 </form>
 {% endblock %}

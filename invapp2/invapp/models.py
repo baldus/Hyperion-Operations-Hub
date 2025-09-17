@@ -102,6 +102,7 @@ class Order(db.Model):
     status = db.Column(db.String, nullable=False, default=OrderStatus.SCHEDULED)
     customer_name = db.Column(db.String, nullable=True)
     created_by = db.Column(db.String, nullable=True)
+    general_notes = db.Column(db.Text, nullable=True)
     promised_date = db.Column(db.Date, nullable=True)
     scheduled_start_date = db.Column(db.Date, nullable=True)
     scheduled_completion_date = db.Column(db.Date, nullable=True)
@@ -296,11 +297,42 @@ class RoutingStepComponent(db.Model):
     order_component = db.relationship("OrderComponent", back_populates="routing_step_links")
     order_step = synonym("routing_step")
     bom_component = synonym("order_component")
+    consumptions = db.relationship(
+        "RoutingStepConsumption",
+        back_populates="routing_step_component",
+        cascade="all, delete-orphan",
+        order_by="RoutingStepConsumption.id",
+    )
 
     def __repr__(self):
         return (
             f"<RoutingStepComponent step={self.routing_step_id} "
             f"order_component={self.order_component_id}>"
+        )
+
+
+class RoutingStepConsumption(db.Model):
+    __tablename__ = "order_step_consumption"
+
+    id = db.Column(db.Integer, primary_key=True)
+    routing_step_component_id = db.Column(
+        db.Integer,
+        db.ForeignKey("order_step_component.id"),
+        nullable=False,
+    )
+    movement_id = db.Column(db.Integer, db.ForeignKey("movement.id"), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    routing_step_component = db.relationship(
+        "RoutingStepComponent", back_populates="consumptions"
+    )
+    movement = db.relationship("Movement")
+
+    def __repr__(self):
+        return (
+            f"<RoutingStepConsumption usage={self.routing_step_component_id} "
+            f"movement={self.movement_id} qty={self.quantity}>"
         )
 
 
