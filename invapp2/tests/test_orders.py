@@ -1,5 +1,8 @@
+import json
 import os
 import sys
+from datetime import date
+
 import pytest
 
 # ensure package path
@@ -28,55 +31,115 @@ def client(app):
 @pytest.fixture
 def items(app):
     with app.app_context():
-        main = Item(sku='100', name='Widget')
-        comp = Item(sku='200', name='Component')
-        db.session.add_all([main, comp])
+        finished = Item(sku='FG-100', name='Widget')
+        component = Item(sku='CMP-200', name='Component')
+        db.session.add_all([finished, component])
         db.session.commit()
-        return main.id, comp.id
+        return finished, component
 
 
 def test_order_creation(client, app, items):
-    item_id, comp_id = items
+    finished, component = items
     resp = client.post('/orders/new', data={
         'order_number': 'ORD001',
-        'item_id': item_id,
+        'finished_good_sku': finished.sku,
         'quantity': '5',
-        'bom': f'{comp_id}:2',
-        'steps': 'Cutting\nAssembly'
+        'promised_date': '2024-01-10',
+        'scheduled_start_date': '2024-01-05',
+        'scheduled_completion_date': '2024-01-08',
+        'bom_data': json.dumps([
+            {'sku': component.sku, 'quantity': 2}
+        ]),
+        'routing_data': json.dumps([
+            {
+                'sequence': 1,
+                'work_cell': 'Assembly',
+                'instructions': 'Assemble parts',
+                'components': [component.sku]
+            }
+        ]),
     }, follow_redirects=True)
     assert resp.status_code == 200
     with app.app_context():
         order = Order.query.filter_by(order_number='ORD001').first()
         assert order is not None
-        assert order.items[0].bom_components[0].component_item_id == comp_id
-        assert len(order.steps) == 2
-        assert Reservation.query.filter_by(order_item_id=order.items[0].id).count() == 1
+        assert order.promised_date == date(2024, 1, 10)
+        primary_item = order.primary_item
+        assert primary_item.item_id == finished.id
+        assert primary_item.quantity == 5
+        bom_component = primary_item.bom_components[0]
+        assert bom_component.component_item_id == component.id
+        assert bom_component.quantity == 2
+        assert Reservation.query.filter_by(order_item_id=primary_item.id).one().quantity == 10
+        assert len(order.steps) == 1
+        step = order.steps[0]
+        assert step.sequence == 1
+        assert step.work_cell == 'Assembly'
+        assert step.description == 'Assemble parts'
+        assert step.component_usages[0].bom_component_id == bom_component.id
 
 
 def test_bom_validation(client, app, items):
-    item_id, comp_id = items
+    finished, _ = items
     resp = client.post('/orders/new', data={
         'order_number': 'ORD002',
-        'item_id': item_id,
+        'finished_good_sku': finished.sku,
         'quantity': '1',
-        'bom': '9999:1'
+        'promised_date': '2024-02-01',
+        'scheduled_start_date': '2024-01-20',
+        'scheduled_completion_date': '2024-01-25',
+        'bom_data': json.dumps([
+            {'sku': 'MISSING', 'quantity': 1}
+        ]),
+        'routing_data': json.dumps([
+            {'sequence': 1, 'work_cell': '', 'instructions': 'Step', 'components': ['MISSING']}
+        ]),
     }, follow_redirects=True)
-    assert b'Invalid BOM component item id' in resp.data
+    assert b"BOM component SKU 'MISSING' was not found." in resp.data
     with app.app_context():
         assert Order.query.filter_by(order_number='ORD002').count() == 0
 
 
 def test_reservation_behavior(client, app, items):
-    item_id, comp_id = items
+    finished, component = items
     client.post('/orders/new', data={
         'order_number': 'ORD003',
-        'item_id': item_id,
-        'quantity': '1',
-        'bom': f'{comp_id}:3'
+        'finished_good_sku': finished.sku,
+        'quantity': '2',
+        'promised_date': '2024-03-01',
+        'scheduled_start_date': '2024-02-20',
+        'scheduled_completion_date': '2024-02-25',
+        'bom_data': json.dumps([
+            {'sku': component.sku, 'quantity': 3}
+        ]),
+        'routing_data': json.dumps([
+            {'sequence': 1, 'work_cell': 'Cut', 'instructions': 'Prep', 'components': [component.sku]}
+        ]),
     }, follow_redirects=True)
     with app.app_context():
         order = Order.query.filter_by(order_number='ORD003').first()
         res = Reservation.query.filter_by(order_item_id=order.items[0].id).first()
         assert res is not None
-        assert res.item_id == comp_id
-        assert res.quantity == 3
+        assert res.item_id == component.id
+        assert res.quantity == 6
+
+
+def test_component_usage_required(client, app, items):
+    finished, component = items
+    resp = client.post('/orders/new', data={
+        'order_number': 'ORD004',
+        'finished_good_sku': finished.sku,
+        'quantity': '1',
+        'promised_date': '2024-04-01',
+        'scheduled_start_date': '2024-03-20',
+        'scheduled_completion_date': '2024-03-22',
+        'bom_data': json.dumps([
+            {'sku': component.sku, 'quantity': 1}
+        ]),
+        'routing_data': json.dumps([
+            {'sequence': 1, 'work_cell': 'Prep', 'instructions': 'Do work', 'components': []}
+        ]),
+    }, follow_redirects=True)
+    assert b'Missing usage for' in resp.data
+    with app.app_context():
+        assert Order.query.filter_by(order_number='ORD004').count() == 0

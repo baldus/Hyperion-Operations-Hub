@@ -1,3 +1,6 @@
+import json
+from datetime import datetime
+
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from sqlalchemy import or_
 from sqlalchemy.orm import joinedload
@@ -10,6 +13,7 @@ from invapp.models import (
     OrderItem,
     OrderStatus,
     OrderStep,
+    OrderStepComponent,
     Reservation,
 )
 
@@ -64,96 +68,295 @@ def view_closed_orders():
     return render_template("orders/closed.html", orders=orders)
 
 
+def _parse_date(raw_value, field_label, errors):
+    if not raw_value:
+        errors.append(f"{field_label} is required.")
+        return None
+    try:
+        return datetime.strptime(raw_value, "%Y-%m-%d").date()
+    except ValueError:
+        errors.append(f"{field_label} must be a valid date (YYYY-MM-DD).")
+        return None
+
+
 @bp.route("/new", methods=["GET", "POST"])
 def new_order():
     items = Item.query.order_by(Item.sku).all()
+    form_data = {
+        "order_number": "",
+        "finished_good_sku": "",
+        "quantity": "",
+        "promised_date": "",
+        "scheduled_start_date": "",
+        "scheduled_completion_date": "",
+        "bom": [],
+        "steps": [],
+    }
+
     if request.method == "POST":
+        errors = []
         order_number = (request.form.get("order_number") or "").strip()
-        item_id = request.form.get("item_id")
+        finished_good_sku = (request.form.get("finished_good_sku") or "").strip()
         quantity_raw = (request.form.get("quantity") or "").strip()
-        bom_raw = (request.form.get("bom") or "").strip()
-        steps_raw = request.form.get("steps") or ""
+        promised_date_raw = (request.form.get("promised_date") or "").strip()
+        scheduled_start_raw = (
+            request.form.get("scheduled_start_date") or ""
+        ).strip()
+        scheduled_completion_raw = (
+            request.form.get("scheduled_completion_date") or ""
+        ).strip()
+        bom_raw = request.form.get("bom_data") or "[]"
+        routing_raw = request.form.get("routing_data") or "[]"
+
+        form_data.update(
+            {
+                "order_number": order_number,
+                "finished_good_sku": finished_good_sku,
+                "quantity": quantity_raw,
+                "promised_date": promised_date_raw,
+                "scheduled_start_date": scheduled_start_raw,
+                "scheduled_completion_date": scheduled_completion_raw,
+            }
+        )
 
         if not order_number:
-            flash("Order number is required", "danger")
-            return render_template("orders/new.html", items=items)
+            errors.append("Order number is required.")
+        elif Order.query.filter_by(order_number=order_number).first():
+            errors.append("Order number already exists.")
 
-        if Order.query.filter_by(order_number=order_number).first():
-            flash("Order number already exists", "danger")
-            return render_template("orders/new.html", items=items)
+        finished_good = None
+        if not finished_good_sku:
+            errors.append("Finished good part number is required.")
+        else:
+            finished_good = Item.query.filter_by(sku=finished_good_sku).first()
+            if finished_good is None:
+                errors.append(
+                    f"Finished good part number '{finished_good_sku}' was not found."
+                )
 
         try:
-            item_id = int(item_id)
             quantity = int(quantity_raw)
+            if quantity <= 0:
+                raise ValueError
         except (TypeError, ValueError):
-            flash("Item and quantity are required", "danger")
-            return render_template("orders/new.html", items=items)
+            errors.append("Quantity must be a positive integer.")
+            quantity = None
 
-        if quantity <= 0:
-            flash("Quantity must be greater than zero", "danger")
-            return render_template("orders/new.html", items=items)
+        promised_date = _parse_date(promised_date_raw, "Promised ship date", errors)
+        scheduled_start_date = _parse_date(
+            scheduled_start_raw, "Scheduled start date", errors
+        )
+        scheduled_completion_date = _parse_date(
+            scheduled_completion_raw, "Scheduled completion date", errors
+        )
 
-        finished_good = Item.query.get(item_id)
-        if finished_good is None:
-            flash("Selected item does not exist", "danger")
-            return render_template("orders/new.html", items=items)
+        if (
+            scheduled_start_date
+            and scheduled_completion_date
+            and scheduled_start_date > scheduled_completion_date
+        ):
+            errors.append("Scheduled start date must be on or before completion date.")
+
+        if (
+            promised_date
+            and scheduled_completion_date
+            and promised_date < scheduled_completion_date
+        ):
+            errors.append(
+                "Promised ship date must be on or after the scheduled completion date."
+            )
+
+        try:
+            bom_payload = json.loads(bom_raw)
+            if not isinstance(bom_payload, list):
+                raise ValueError
+        except ValueError:
+            bom_payload = []
+            errors.append("Unable to read the BOM component details submitted.")
+
+        try:
+            routing_payload = json.loads(routing_raw)
+            if not isinstance(routing_payload, list):
+                raise ValueError
+        except ValueError:
+            routing_payload = []
+            errors.append("Unable to read the routing information submitted.")
+
+        form_data["bom"] = bom_payload
+        form_data["steps"] = routing_payload
 
         bom_components = []
-        if bom_raw:
-            for token in bom_raw.split(","):
-                token = token.strip()
-                if not token:
+        component_lookup = {}
+        component_skus_seen = set()
+        if not bom_payload:
+            errors.append("At least one BOM component is required.")
+        else:
+            for entry in bom_payload:
+                if not isinstance(entry, dict):
+                    errors.append("Each BOM component must include a SKU and quantity.")
+                    continue
+                sku = (entry.get("sku") or "").strip()
+                quantity_value = entry.get("quantity")
+                if not sku:
+                    errors.append("BOM components require a component SKU.")
+                    continue
+                if sku in component_skus_seen:
+                    errors.append(f"BOM component {sku} is listed more than once.")
+                    continue
+                component_item = Item.query.filter_by(sku=sku).first()
+                if component_item is None:
+                    errors.append(f"BOM component SKU '{sku}' was not found.")
                     continue
                 try:
-                    component_str, qty_str = token.split(":", 1)
-                    component_id = int(component_str.strip())
-                    component_qty = int(qty_str.strip())
-                except ValueError:
-                    flash("Invalid BOM format. Use item_id:qty", "danger")
-                    return render_template("orders/new.html", items=items)
+                    component_quantity = int(quantity_value)
+                    if component_quantity <= 0:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    errors.append(
+                        f"BOM component quantity for {sku} must be a positive integer."
+                    )
+                    continue
 
-                component_item = Item.query.get(component_id)
-                if component_item is None:
-                    flash("Invalid BOM component item id", "danger")
-                    return render_template("orders/new.html", items=items)
+                component_entry = {
+                    "sku": sku,
+                    "item": component_item,
+                    "quantity": component_quantity,
+                }
+                bom_components.append(component_entry)
+                component_lookup[sku] = component_entry
+                component_skus_seen.add(sku)
 
-                if component_qty <= 0:
-                    flash("BOM component quantity must be positive", "danger")
-                    return render_template("orders/new.html", items=items)
+        routing_steps = []
+        referenced_components = set()
+        sequences_seen = set()
+        if not routing_payload:
+            errors.append("At least one routing step is required.")
+        else:
+            for entry in routing_payload:
+                if not isinstance(entry, dict):
+                    errors.append("Invalid routing step definition submitted.")
+                    continue
 
-                bom_components.append((component_item, component_qty))
+                raw_sequence = entry.get("sequence")
+                try:
+                    sequence = int(raw_sequence)
+                except (TypeError, ValueError):
+                    errors.append("Routing step sequences must be whole numbers.")
+                    continue
+                if sequence in sequences_seen:
+                    errors.append(
+                        f"Routing step sequence {sequence} is defined more than once."
+                    )
+                    continue
+                sequences_seen.add(sequence)
 
-        steps = [line.strip() for line in steps_raw.splitlines() if line.strip()]
+                work_cell = (entry.get("work_cell") or "").strip()
+                instructions = (entry.get("instructions") or "").strip()
+                if not instructions:
+                    errors.append(
+                        f"Routing step {sequence} must include work instructions."
+                    )
 
-        order = Order(order_number=order_number)
-        order_item = OrderItem(order=order, item_id=finished_good.id, quantity=quantity)
+                component_values = entry.get("components") or []
+                if not isinstance(component_values, list):
+                    errors.append(
+                        f"Component usage for routing step {sequence} is not valid."
+                    )
+                    component_values = []
+
+                resolved_components = []
+                for sku in component_values:
+                    if sku not in component_lookup:
+                        errors.append(
+                            f"Routing step {sequence} references unknown component {sku}."
+                        )
+                        continue
+                    if sku in resolved_components:
+                        continue
+                    resolved_components.append(sku)
+                    referenced_components.add(sku)
+
+                routing_steps.append(
+                    {
+                        "sequence": sequence,
+                        "work_cell": work_cell,
+                        "instructions": instructions,
+                        "components": resolved_components,
+                    }
+                )
+
+        missing_component_usage = set(component_lookup) - referenced_components
+        if missing_component_usage:
+            missing_list = ", ".join(sorted(missing_component_usage))
+            errors.append(
+                "Each BOM component must be associated with at least one routing step. "
+                f"Missing usage for: {missing_list}."
+            )
+
+        if errors:
+            for error in errors:
+                flash(error, "danger")
+            return render_template(
+                "orders/new.html", items=items, form_data=form_data
+            )
+
+        order = Order(
+            order_number=order_number,
+            promised_date=promised_date,
+            scheduled_start_date=scheduled_start_date,
+            scheduled_completion_date=scheduled_completion_date,
+        )
+        order_item = OrderItem(
+            order=order,
+            item_id=finished_good.id,
+            quantity=quantity,
+            promised_date=promised_date,
+            scheduled_start_date=scheduled_start_date,
+            scheduled_completion_date=scheduled_completion_date,
+        )
         db.session.add(order)
+        db.session.add(order_item)
 
-        for component_item, component_qty in bom_components:
-            bom_entry = OrderBOMComponent(
+        bom_entities = {}
+        for component_entry in bom_components:
+            component_item = component_entry["item"]
+            component_quantity = component_entry["quantity"]
+            bom_component = OrderBOMComponent(
                 order_item=order_item,
                 component_item_id=component_item.id,
-                quantity=component_qty,
+                quantity=component_quantity,
             )
-            db.session.add(bom_entry)
+            db.session.add(bom_component)
+            bom_entities[component_entry["sku"]] = bom_component
             db.session.add(
                 Reservation(
                     order_item=order_item,
                     item_id=component_item.id,
-                    quantity=component_qty * quantity,
+                    quantity=component_quantity * quantity,
                 )
             )
 
-        for idx, description in enumerate(steps, start=1):
-            db.session.add(
-                OrderStep(order=order, sequence=idx, description=description)
+        for step in sorted(routing_steps, key=lambda step: step["sequence"]):
+            order_step = OrderStep(
+                order=order,
+                sequence=step["sequence"],
+                work_cell=step["work_cell"] or None,
+                description=step["instructions"],
             )
+            db.session.add(order_step)
+            for component_sku in step["components"]:
+                db.session.add(
+                    OrderStepComponent(
+                        order_step=order_step,
+                        bom_component=bom_entities[component_sku],
+                    )
+                )
 
         db.session.commit()
         flash("Order created", "success")
         return redirect(url_for("orders.view_order", order_id=order.id))
 
-    return render_template("orders/new.html", items=items)
+    return render_template("orders/new.html", items=items, form_data=form_data)
 
 
 @bp.route("/<int:order_id>")
@@ -167,7 +370,10 @@ def view_order(order_id):
             joinedload(Order.items)
             .joinedload(OrderItem.reservations)
             .joinedload(Reservation.item),
-            joinedload(Order.steps),
+            joinedload(Order.steps)
+            .joinedload(OrderStep.component_usages)
+            .joinedload(OrderStepComponent.bom_component)
+            .joinedload(OrderBOMComponent.component_item),
         )
         .filter_by(id=order_id)
         .first_or_404()
