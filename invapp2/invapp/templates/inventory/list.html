@@ -11,6 +11,7 @@
                 <th>Unit</th>
                 <th>Description</th>
                 <th>Min Stock</th>
+                <th>Notes</th>
             </tr>
         </thead>
         <tbody>
@@ -22,6 +23,7 @@
                 <td>{{ item.unit }}</td>
                 <td>{{ item.description }}</td>
                 <td>{{ item.min_stock }}</td>
+                <td>{% if item.notes %}{{ item.notes }}{% else %}-{% endif %}</td>
             </tr>
             {% endfor %}
         </tbody>

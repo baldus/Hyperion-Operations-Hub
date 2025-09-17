@@ -1,6 +1,15 @@
 import csv
 import io
-from flask import Blueprint, render_template, request, redirect, url_for, flash, Response
+from flask import (
+    Blueprint,
+    render_template,
+    request,
+    redirect,
+    url_for,
+    flash,
+    Response,
+    jsonify,
+)
 from sqlalchemy import func, or_
 from sqlalchemy.orm import load_only, joinedload
 from invapp.models import db, Item, Location, Batch, Movement
@@ -14,6 +23,40 @@ bp = Blueprint("inventory", __name__, url_prefix="/inventory")
 @bp.route("/")
 def inventory_home():
     return render_template("inventory/home.html")
+
+
+@bp.route("/scan")
+def scan_inventory():
+    lookup_template = url_for("inventory.lookup_item_api", sku="__SKU__")
+    return render_template(
+        "inventory/scan.html",
+        lookup_template=lookup_template,
+    )
+
+
+@bp.route("/api/items/<sku>")
+def lookup_item_api(sku):
+    sku = sku.strip()
+    if not sku:
+        return jsonify({"error": "SKU is required"}), 400
+
+    item = (
+        Item.query.options(load_only(Item.sku, Item.name, Item.description, Item.unit))
+        .filter(func.lower(Item.sku) == sku.lower())
+        .first()
+    )
+
+    if not item:
+        return jsonify({"error": "Item not found"}), 404
+
+    return jsonify(
+        {
+            "sku": item.sku,
+            "name": item.name,
+            "description": item.description or "",
+            "unit": item.unit or "",
+        }
+    )
 
 ############################
 # CYCLE COUNT ROUTES
@@ -213,6 +256,10 @@ def add_item():
         except (TypeError, ValueError):
             min_stock = 0
 
+        notes_raw = request.form.get("notes")
+        notes = notes_raw.strip() if notes_raw is not None else None
+        notes_value = notes or None
+
         item = Item(
             sku=next_sku,
             name=request.form["name"],
@@ -220,10 +267,12 @@ def add_item():
             unit=request.form.get("unit", "ea"),
             description=request.form.get("description", ""),
             min_stock=min_stock,
+            notes=notes_value,
         )
         db.session.add(item)
         db.session.commit()
-        flash(f"Item added successfully with SKU {next_sku}", "success")
+        note_msg = " (notes saved)" if notes_value else ""
+        flash(f"Item added successfully with SKU {next_sku}{note_msg}", "success")
         return redirect(url_for("inventory.list_items"))
 
     max_sku = db.session.query(db.func.max(Item.sku.cast(db.Integer))).scalar()
@@ -247,8 +296,20 @@ def edit_item(item_id):
         except (TypeError, ValueError):
             item.min_stock = 0
 
+        notes_raw = request.form.get("notes")
+        notes = notes_raw.strip() if notes_raw is not None else None
+        notes_value = notes or None
+        item.notes = notes_value
+
         db.session.commit()
-        flash(f"Item {item.sku} updated successfully", "success")
+        if notes_raw is not None:
+            if notes_value:
+                note_msg = " (notes saved)"
+            else:
+                note_msg = " (notes cleared)"
+        else:
+            note_msg = ""
+        flash(f"Item {item.sku} updated successfully{note_msg}", "success")
         return redirect(url_for("inventory.list_items"))
 
     return render_template("inventory/edit_item.html", item=item)
@@ -288,6 +349,13 @@ def import_items():
 
             has_type_column = "type" in row
             item_type = (row.get("type") or "").strip() if has_type_column else None
+            has_notes_column = "notes" in row
+            if has_notes_column:
+                notes_raw = row.get("notes")
+                notes_clean = notes_raw.strip() if notes_raw is not None else ""
+                notes_value = notes_clean or None
+            else:
+                notes_value = None
 
             existing = Item.query.filter_by(sku=sku).first() if sku else None
             if existing:
@@ -297,6 +365,8 @@ def import_items():
                 existing.min_stock = min_stock or existing.min_stock
                 if has_type_column:
                     existing.type = item_type or None
+                if has_notes_column:
+                    existing.notes = notes_value
                 count_updated += 1
             else:
                 if not sku:
@@ -309,12 +379,16 @@ def import_items():
                     unit=unit,
                     description=description,
                     min_stock=min_stock,
+                    notes=notes_value if has_notes_column else None,
                 )
                 db.session.add(item)
                 count_new += 1
 
         db.session.commit()
-        flash(f"Items imported: {count_new} new, {count_updated} updated", "success")
+        flash(
+            f"Items imported: {count_new} new, {count_updated} updated (notes processed)",
+            "success",
+        )
         return redirect(url_for("inventory.list_items"))
 
     return render_template("inventory/import_items.html")
@@ -328,9 +402,19 @@ def export_items():
     items = Item.query.all()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["sku", "name", "type", "unit", "description", "min_stock"])
+    writer.writerow(["sku", "name", "type", "unit", "description", "min_stock", "notes"])
     for i in items:
-        writer.writerow([i.sku, i.name, i.type or "", i.unit, i.description, i.min_stock])
+        writer.writerow(
+            [
+                i.sku,
+                i.name,
+                i.type or "",
+                i.unit,
+                i.description,
+                i.min_stock,
+                i.notes or "",
+            ]
+        )
     response = Response(output.getvalue(), mimetype="text/csv")
     response.headers["Content-Disposition"] = "attachment; filename=items.csv"
     return response
@@ -784,6 +868,7 @@ def move_home():
     items = Item.query.all()
     locations = Location.query.all()
     batches = Batch.query.all()
+    prefill_sku = request.values.get("sku", "").strip()
 
     if request.method == "POST":
         sku = request.form["sku"].strip()
@@ -849,6 +934,8 @@ def move_home():
     locations_map = {l.id: l for l in Location.query.all()}
     batches_map = {b.id: b for b in Batch.query.all()}
 
+    lookup_template = url_for("inventory.lookup_item_api", sku="__SKU__")
+
     return render_template(
         "inventory/move.html",
         items=items,
@@ -858,6 +945,8 @@ def move_home():
         items_map=items_map,
         locations_map=locations_map,
         batches_map=batches_map,
+        prefill_sku=prefill_sku,
+        lookup_template=lookup_template,
     )
 
 

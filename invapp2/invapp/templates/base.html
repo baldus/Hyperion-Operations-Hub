@@ -45,5 +45,7 @@
             {% block content %}{% endblock %}
         </div>
     </main>
+    <script src="https://unpkg.com/@zxing/browser@latest"></script>
+    <script defer src="{{ url_for('static', filename='js/barcode-scanner.js') }}"></script>
 </body>
 </html>

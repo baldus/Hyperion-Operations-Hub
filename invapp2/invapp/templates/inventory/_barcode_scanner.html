@@ -1,0 +1,22 @@
+<div
+  class="scanner-widget"
+  data-scanner
+  data-target-input="{{ input_id | default('barcodeOutput') }}"
+  data-auto-submit="{{ 'true' if auto_submit else 'false' }}"
+  data-lookup-template="{{ lookup_template | default('') }}"
+>
+  <div class="scanner-preview">
+    <video
+      id="{{ video_id | default('cameraPreview') }}"
+      class="scanner-video"
+      autoplay
+      muted
+      playsinline
+    ></video>
+  </div>
+  <div class="scanner-controls">
+    <button type="button" class="action-btn start-scan">Start Scan</button>
+    <button type="button" class="action-btn stop-scan" disabled>Stop Scan</button>
+  </div>
+  <div class="scan-result" data-scan-result></div>
+</div>

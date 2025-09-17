@@ -3,8 +3,11 @@
 <h2>Stock Transfer (Move)</h2>
 
 <form method="POST">
-  <label>SKU:</label><br>
-  <input type="text" name="sku" required><br><br>
+  <label for="barcodeOutput">SKU:</label><br>
+  <input type="text" id="barcodeOutput" name="sku" value="{{ prefill_sku }}" required><br><br>
+
+  {% include "inventory/_barcode_scanner.html" with input_id="barcodeOutput" lookup_template=lookup_template %}
+  <br>
 
   <label>Batch / Lot:</label><br>
   <select name="batch_id" required>

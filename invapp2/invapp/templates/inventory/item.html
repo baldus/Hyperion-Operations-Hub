@@ -10,18 +10,20 @@
                 <th>Name</th>
                 <th>Unit</th>
                 <th>Description</th>
-                <th>Minimum Stock</th>
+                <th>Min Stock</th>
+                <th>Notes</th>
             </tr>
         </thead>
         <tbody>
-            {% for i in items %}
+            {% for item in items %}
             <tr>
-                <td>{{ i.id }}</td>
-                <td>{{ i.sku }}</td>
-                <td>{{ i.name }}</td>
-                <td>{{ i.unit }}</td>
-                <td>{{ i.description }}</td>
-                <td>{{ i.min_stock }}</td>
+                <td>{{ item.id }}</td>
+                <td>{{ item.sku }}</td>
+                <td>{{ item.name }}</td>
+                <td>{{ item.unit }}</td>
+                <td>{{ item.description }}</td>
+                <td>{{ item.min_stock }}</td>
+                <td>{% if item.notes %}{{ item.notes }}{% else %}-{% endif %}</td>
             </tr>
             {% endfor %}
         </tbody>

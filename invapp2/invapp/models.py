@@ -14,6 +14,7 @@ class Item(db.Model):
     unit = db.Column(db.String, default="ea")
     description = db.Column(db.String)
     min_stock = db.Column(db.Integer, default=0)
+    notes = db.Column(db.Text)
 
 
 class Location(db.Model):
