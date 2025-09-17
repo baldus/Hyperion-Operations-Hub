@@ -62,7 +62,45 @@
                     {% if step.component_usages %}
                         <ul>
                         {% for usage in step.component_usages %}
-                            <li>{{ usage.bom_component.component_item.sku }} ({{ usage.bom_component.quantity }} per)</li>
+                            {% set requirement = component_requirements[usage.id] %}
+                            {% set options = component_options.get(usage.id, []) %}
+                            {% set consumption_rows = component_consumptions.get(usage.id, []) %}
+                            <li class="component-consumption">
+                                <div>
+                                    <strong>{{ usage.bom_component.component_item.sku }}</strong>
+                                    ({{ usage.bom_component.quantity }} per unit / total {{ requirement }})
+                                </div>
+                                {% if step.completed %}
+                                    {% if consumption_rows %}
+                                        <div class="consumption-summary">
+                                            <strong>Consumed:</strong>
+                                            <ul>
+                                                {% for row in consumption_rows %}
+                                                    <li>{{ row.batch_label }} @ {{ row.location_label }} — {{ row.quantity }}</li>
+                                                {% endfor %}
+                                            </ul>
+                                        </div>
+                                    {% else %}
+                                        <em>No consumption recorded.</em>
+                                    {% endif %}
+                                {% else %}
+                                    {% set selected_value = selected_batches.get(usage.id) %}
+                                    {% if options %}
+                                        <label class="sr-only" for="usage-{{ usage.id }}">
+                                            Select batch for {{ usage.bom_component.component_item.sku }}
+                                        </label>
+                                        <select id="usage-{{ usage.id }}" name="usage_{{ usage.id }}">
+                                            <option value="">-- Select batch --</option>
+                                            {% for option in options %}
+                                                <option value="{{ option.value }}" {% if selected_value == option.value %}selected{% endif %}>{{ option.label }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    {% else %}
+                                        <em>No stock available to issue.</em>
+                                    {% endif %}
+                                {% endif %}
+                                <div class="requirement-note">Total required: {{ requirement }}</div>
+                            </li>
                         {% endfor %}
                         </ul>
                     {% else %}
@@ -71,7 +109,13 @@
                 </td>
                 <td class="numeric">
                     <label class="sr-only" for="step-{{ step.id }}">Mark step {{ step.sequence }} complete</label>
-                    <input id="step-{{ step.id }}" type="checkbox" name="completed_steps" value="{{ step.id }}" {% if step.completed %}checked{% endif %}>
+                    {% set pending = pending_completed_ids %}
+                    {% if pending is not none %}
+                        {% set is_checked = step.id in pending %}
+                    {% else %}
+                        {% set is_checked = step.completed %}
+                    {% endif %}
+                    <input id="step-{{ step.id }}" type="checkbox" name="completed_steps" value="{{ step.id }}" {% if is_checked %}checked{% endif %}>
                 </td>
             </tr>
         {% endfor %}

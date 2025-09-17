@@ -23,6 +23,7 @@ from invapp.models import (
     Reservation,
     RoutingStep,
     RoutingStepComponent,
+    RoutingStepConsumption,
 )
 
 
@@ -288,9 +289,13 @@ def test_routing_status_updates(client, app, items):
         assert step.completed is False
         step_id = step.id
         order_id = order.id
+        usage = step.component_usages[0]
+        required_qty = usage.bom_component.quantity * order.order_lines[0].quantity
+        selection_value = f"none::{location.id}"
 
     resp = client.post(f'/orders/{order_id}/routing', data={
-        'completed_steps': str(step_id)
+        'completed_steps': str(step_id),
+        f'usage_{usage.id}': selection_value,
     }, follow_redirects=True)
     assert resp.status_code == 200
 
@@ -300,6 +305,16 @@ def test_routing_status_updates(client, app, items):
         assert step.completed is True
         assert step.completed_at is not None
         assert order.routing_progress == 1.0
+        consumption = RoutingStepConsumption.query.filter_by(routing_step_component_id=usage.id).one()
+        assert consumption.quantity == required_qty
+        movement = consumption.movement
+        assert movement is not None
+        assert movement.quantity == -required_qty
+        assert movement.movement_type == 'ISSUE'
+        assert movement.location_id == location.id
+        assert movement.batch_id is None
+        reservation = Reservation.query.filter_by(order_line_id=order.order_lines[0].id).first()
+        assert reservation is None
 
     resp = client.post(f'/orders/{order_id}/routing', data={}, follow_redirects=True)
     assert resp.status_code == 200
@@ -310,6 +325,10 @@ def test_routing_status_updates(client, app, items):
         assert step.completed is False
         assert step.completed_at is None
         assert order.routing_progress == 0.0
+        assert RoutingStepConsumption.query.filter_by(routing_step_component_id=usage.id).count() == 0
+        reservation = Reservation.query.filter_by(order_line_id=order.order_lines[0].id, item_id=component.id).one()
+        assert reservation.quantity == required_qty
+        assert Movement.query.filter_by(movement_type='ISSUE').count() == 0
 
 
 def test_routing_step_component_relationships(app, items):
