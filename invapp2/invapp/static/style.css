@@ -153,48 +153,30 @@ body.dark .modal-content {
     margin-top: 10px;
 }
 
-/* --- Tables --- */
-table {
-    border-collapse: collapse;
-    width: 100%;
-    margin: 15px 0;
+/* --- Orders Home --- */
+.orders-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 20px;
 }
 
-th,
-td {
-    border: 1px solid #888;
-    padding: 6px 10px;
-    text-align: left;
+.toolbar-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
 }
 
-th {
-    background: #333;
-    color: #fff;
+.orders-filter {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
-body.dark table tr:nth-child(even):not(.low-red):not(.low-yellow):not(.match):not(.mismatch) {
-    background-color: #1f1f1f;
-}
+.orders-filter input[type="search"] {
+    padding: 8px 12px;
+    border-radius: 20px;
+    borde
 
-body.light table tr:nth-child(even):not(.low-red):not(.low-yellow):not(.match):not(.mismatch) {
-    background-color: #f0f0f0;
-}
-
-table tr.low-red,
-table tr.mismatch {
-    background-color: #b33a3a;
-    color: #fff;
-}
-
-table tr.low-yellow {
-    background-color: #b3b33a;
-    color: #000;
-}
-
-table tr.match {
-    background-color: #2a2a2a;
-}
-
-body.light table tr.match {
-    background-color: #e0e0e0;
-}
