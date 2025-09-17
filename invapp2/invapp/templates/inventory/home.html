@@ -2,7 +2,7 @@
 {% block content %}
 <h2>Inventory Dashboard</h2>
 
-<div class="menu-grid">
+<div class="button-grid">
   <a href="{{ url_for('inventory.list_items') }}" class="action-btn">Items</a>
   <a href="{{ url_for('inventory.list_locations') }}" class="action-btn">Locations</a>
   <a href="{{ url_for('inventory.list_stock') }}" class="action-btn">Stock</a>
@@ -11,5 +11,98 @@
   <a href="{{ url_for('inventory.move_home') }}" class="action-btn">Move</a>
   <a href="{{ url_for('inventory.cycle_count_home') }}" class="action-btn">Cycle Count</a>
   <a href="{{ url_for('inventory.history_home') }}" class="action-btn">History</a>
+</div>
+
+<div class="dashboard-panels">
+  <section class="dashboard-section">
+    <h3>Items Waiting on Orders</h3>
+    {% if pending_order_items %}
+      <table class="compact-table">
+        <tr>
+          <th>SKU</th>
+          <th>Item</th>
+          <th>Needed</th>
+          <th>On Hand</th>
+          <th>Minimum</th>
+          <th>Orders</th>
+          <th>Status</th>
+        </tr>
+        {% for entry in pending_order_items %}
+        <tr class="{{ 'low-red' if entry.shortfall > 0 else '' }}">
+          <td>{{ entry.item.sku }}</td>
+          <td>{{ entry.item.name }}</td>
+          <td>{{ entry.quantity }}</td>
+          <td>{{ entry.on_hand }}</td>
+          <td>{{ entry.minimum }}</td>
+          <td>
+            {% if entry.orders %}
+              {{ entry.orders | join(', ') }}
+            {% else %}
+              <span class="muted-text">-</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if entry.statuses %}
+              {{ entry.statuses | join(', ') }}
+            {% else %}
+              <span class="muted-text">-</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+    {% else %}
+      <p class="empty-state">No outstanding order items.</p>
+    {% endif %}
+  </section>
+
+  <section class="dashboard-section">
+    <h3>Stock Warnings</h3>
+    {% if critical_stock %}
+      <h4>Below Minimum</h4>
+      <table class="compact-table">
+        <tr>
+          <th>SKU</th>
+          <th>Item</th>
+          <th>On Hand</th>
+          <th>Minimum</th>
+        </tr>
+        {% for entry in critical_stock %}
+        <tr class="low-red">
+          <td>{{ entry.item.sku }}</td>
+          <td>{{ entry.item.name }}</td>
+          <td>{{ entry.on_hand }}</td>
+          <td>{{ entry.minimum }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    {% endif %}
+
+    {% if warning_stock %}
+      <h4>Approaching Minimum</h4>
+      <table class="compact-table">
+        <tr>
+          <th>SKU</th>
+          <th>Item</th>
+          <th>On Hand</th>
+          <th>Minimum</th>
+          <th>Warn At</th>
+        </tr>
+        {% for entry in warning_stock %}
+        <tr class="low-yellow">
+          <td>{{ entry.item.sku }}</td>
+          <td>{{ entry.item.name }}</td>
+          <td>{{ entry.on_hand }}</td>
+          <td>{{ entry.minimum }}</td>
+          <td>{{ entry.threshold }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    {% endif %}
+
+    {% if not critical_stock and not warning_stock %}
+      <p class="empty-state">All items are above their warning thresholds.</p>
+    {% endif %}
+  </section>
 </div>
 {% endblock %}
