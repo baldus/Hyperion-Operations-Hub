@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Edit Item</h2>
+<form method="POST">
+  <label for="sku">SKU:</label>
+  <input type="text" name="sku" value="{{ item.sku }}" readonly><br>
+
+  <label for="name">Name:</label>
+  <input type="text" name="name" value="{{ item.name }}" required><br>
+
+  <label for="type">Type:</label>
+  <input type="text" name="type" value="{{ item.type or '' }}"><br>
+
+  <label for="unit">Unit:</label>
+  <input type="text" name="unit" value="{{ item.unit }}"><br>
+
+  <label for="description">Description:</label>
+  <input type="text" name="description" value="{{ item.description or '' }}"><br>
+
+  <label for="min_stock">Minimum Stock:</label>
+  <input type="number" name="min_stock" value="{{ item.min_stock or 0 }}"><br>
+
+  <button type="submit">Update</button>
+</form>
+{% endblock %}
