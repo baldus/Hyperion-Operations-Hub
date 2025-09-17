@@ -17,6 +17,16 @@
             <a href="{{ url_for('orders.orders_home') }}" class="nav-btn">Orders</a>
             <a href="{{ url_for('work.work_home') }}" class="nav-btn">Work Instructions</a>
             <a href="{{ url_for('settings.settings_home') }}" class="nav-btn">Settings</a>
+            {% if session.get('is_admin') %}
+                <a href="{{ url_for('printers.printer_settings') }}" class="nav-btn">Admin Tools</a>
+            {% else %}
+                {% if request.endpoint != 'admin.login' %}
+                    {% set admin_login_url = url_for('admin.login', next=request.path) %}
+                {% else %}
+                    {% set admin_login_url = url_for('admin.login') %}
+                {% endif %}
+                <a href="{{ admin_login_url }}" class="nav-btn">Admin Login</a>
+            {% endif %}
         </nav>
     </header>
 
