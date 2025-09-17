@@ -88,6 +88,8 @@ class Order(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     order_number = db.Column(db.String, unique=True, nullable=False)
     status = db.Column(db.String, nullable=False, default=OrderStatus.OPEN)
+    customer_name = db.Column(db.String, nullable=True)
+    created_by = db.Column(db.String, nullable=True)
     promised_date = db.Column(db.Date, nullable=True)
     scheduled_start_date = db.Column(db.Date, nullable=True)
     scheduled_completion_date = db.Column(db.Date, nullable=True)

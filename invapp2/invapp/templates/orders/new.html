@@ -10,6 +10,10 @@
                 <input type="text" name="order_number" value="{{ form_data.order_number }}" required>
             </label>
             <label>
+                <span>Customer Name</span>
+                <input type="text" name="customer_name" value="{{ form_data.customer_name }}" required>
+            </label>
+            <label>
                 <span>Finished Good Part Number</span>
                 <input type="text" name="finished_good_sku" list="item-skus" value="{{ form_data.finished_good_sku }}" required>
                 <datalist id="item-skus">
@@ -17,6 +21,10 @@
                     <option value="{{ item.sku }}">{{ item.name }}</option>
                     {% endfor %}
                 </datalist>
+            </label>
+            <label>
+                <span>Order Created By</span>
+                <input type="text" name="created_by" value="{{ form_data.created_by }}" required>
             </label>
             <label>
                 <span>Quantity</span>
@@ -139,7 +147,7 @@
                 <input type="text" class="step-work-cell" placeholder="Work Cell">
             </td>
             <td>
-                <textarea class="step-instructions" rows="2" placeholder="Detailed instructions"></textarea>
+                <textarea class="step-instructions" rows="2" placeholder="Detailed instructions" required></textarea>
             </td>
             <td>
                 <select multiple class="step-components-select"></select>
