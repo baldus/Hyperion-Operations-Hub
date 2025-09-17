@@ -9,18 +9,24 @@
 </div>
 <br>
 
-<table>
-  <tr>
-    <th>Code</th>
-    <th>Description</th>
-  </tr>
-  {% for loc in locations %}
-  <tr>
-    <td>{{ loc.code }}</td>
-    <td>{{ loc.description }}</td>
-  </tr>
-  {% endfor %}
-</table>
+<div class="table-container">
+  <table class="inventory-table">
+    <thead>
+      <tr>
+        <th>Code</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for loc in locations %}
+      <tr>
+        <td>{{ loc.code }}</td>
+        <td>{{ loc.description }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 <div class="pagination">
   {% if page > 1 %}
     <a href="{{ url_for('inventory.list_locations', page=page-1, size=size) }}">Previous</a>

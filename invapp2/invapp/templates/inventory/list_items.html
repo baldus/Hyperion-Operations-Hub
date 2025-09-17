@@ -43,26 +43,32 @@
 
 <br>
 
-<table>
-  <tr>
-    <th>SKU</th>
-    <th>Name</th>
-    <th>Type</th>
-    <th>Unit</th>
-    <th>Description</th>
-    <th>Min Stock</th>
-  </tr>
-  {% for item in items %}
-  <tr>
-    <td><a href="{{ url_for('inventory.edit_item', item_id=item.id) }}">{{ item.sku }}</a></td>
-    <td>{{ item.name }}</td>
-    <td>{{ item.type or '-' }}</td>
-    <td>{{ item.unit }}</td>
-    <td>{{ item.description }}</td>
-    <td>{{ item.min_stock }}</td>
-  </tr>
-  {% endfor %}
-</table>
+<div class="table-container">
+  <table class="inventory-table">
+    <thead>
+      <tr>
+        <th>SKU</th>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Unit</th>
+        <th>Description</th>
+        <th>Min Stock</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td><a href="{{ url_for('inventory.edit_item', item_id=item.id) }}">{{ item.sku }}</a></td>
+        <td>{{ item.name }}</td>
+        <td>{{ item.type or '-' }}</td>
+        <td>{{ item.unit }}</td>
+        <td>{{ item.description }}</td>
+        <td>{{ item.min_stock }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 <div class="pagination">
   {% if page > 1 %}
     <a href="{{ url_for('inventory.list_items', page=page-1, size=size, type=selected_type, sort=sort, search=search) }}">Previous</a>
