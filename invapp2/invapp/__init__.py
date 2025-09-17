@@ -20,6 +20,23 @@ def _ensure_item_type_column(engine):
             conn.execute(text("ALTER TABLE item ADD COLUMN type VARCHAR"))
 
 
+def _ensure_order_schema(engine):
+    """Make sure legacy databases pick up the expanded order schema."""
+    inspector = inspect(engine)
+    existing_tables = {table.lower() for table in inspector.get_table_names()}
+    required_tables = {
+        "order_item",
+        "order_bom_component",
+        "order_step",
+        "order_step_component",
+    }
+    missing_tables = required_tables - existing_tables
+    if missing_tables:
+        metadata = db.Model.metadata
+        for table_name in missing_tables:
+            metadata.tables[table_name].create(bind=engine)
+
+
 def create_app(config_override=None):
     app = Flask(__name__)
 
@@ -34,6 +51,7 @@ def create_app(config_override=None):
     with app.app_context():
         db.create_all()
         _ensure_item_type_column(db.engine)
+        _ensure_order_schema(db.engine)
 
     # register blueprints
     app.register_blueprint(inventory.bp)
