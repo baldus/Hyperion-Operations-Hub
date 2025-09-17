@@ -1,13 +1,30 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Closed Orders</h2>
-<table>
-    <tr><th>Order #</th><th>Status</th></tr>
-    {% for order in orders %}
-    <tr>
-        <td><a href="{{ url_for('orders.view_order', order_id=order.id) }}">{{ order.order_number }}</a></td>
-        <td>{{ order.status_label }}</td>
-    </tr>
-    {% endfor %}
-</table>
+{% if orders %}
+<div class="table-container">
+    <table class="inventory-table orders-table">
+        <thead>
+            <tr>
+                <th scope="col">Order #</th>
+                <th scope="col">Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for order in orders %}
+            <tr>
+                <td data-label="Order #">
+                    <a href="{{ url_for('orders.view_order', order_id=order.id) }}" class="order-link">{{ order.order_number }}</a>
+                </td>
+                <td data-label="Status">
+                    <span class="status-pill status-{{ order.status|lower }}">{{ order.status_label }}</span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+    <p class="muted">No closed orders yet.</p>
+{% endif %}
 {% endblock %}

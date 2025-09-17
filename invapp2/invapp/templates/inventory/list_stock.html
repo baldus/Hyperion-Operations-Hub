@@ -33,64 +33,76 @@
 
 <!-- Totals by SKU table -->
 <h3>Totals by SKU</h3>
-<table>
-  <tr>
-    <th>SKU</th>
-    <th>Item</th>
-    <th>Total On Hand</th>
-    <th>Min Stock</th>
-  </tr>
-  {% if totals %}
-    {% for item_id, total in totals.items() %}
-      {% set item = items[item_id] %}
-      {% set min_stock = item.min_stock or 0 %}
-      {% if total < (min_stock * 1.05) %}
-        {% set row_class = "low-red" %}
-      {% elif total < (min_stock * 1.25) %}
-        {% set row_class = "low-yellow" %}
-      {% else %}
-        {% set row_class = "" %}
-      {% endif %}
-      <tr class="{{ row_class }}">
-        <td>{{ item.sku }}</td>
-        <td>{{ item.name }}</td>
-        <td>{{ total }}</td>
-        <td>{{ min_stock }}</td>
+<div class="table-container">
+  <table class="inventory-table">
+    <thead>
+      <tr>
+        <th>SKU</th>
+        <th>Item</th>
+        <th>Total On Hand</th>
+        <th>Min Stock</th>
       </tr>
-    {% endfor %}
-  {% else %}
-    <tr>
-      <td colspan="4">No items match the selected filter.</td>
-    </tr>
-  {% endif %}
-</table>
+    </thead>
+    <tbody>
+      {% if totals %}
+        {% for item_id, total in totals.items() %}
+          {% set item = items[item_id] %}
+          {% set min_stock = item.min_stock or 0 %}
+          {% if total < (min_stock * 1.05) %}
+            {% set row_class = "low-red" %}
+          {% elif total < (min_stock * 1.25) %}
+            {% set row_class = "low-yellow" %}
+          {% else %}
+            {% set row_class = "" %}
+          {% endif %}
+          <tr class="{{ row_class }}">
+            <td>{{ item.sku }}</td>
+            <td>{{ item.name }}</td>
+            <td>{{ total }}</td>
+            <td>{{ min_stock }}</td>
+          </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="4">No items match the selected filter.</td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
 
 <!-- Detailed balances by batch/location -->
 <h3>Detailed Balances</h3>
-<table>
-  <tr>
-    <th>SKU</th>
-    <th>Item</th>
-    <th>Batch / Lot</th>
-    <th>Location</th>
-    <th>Quantity</th>
-  </tr>
-  {% if balances %}
-    {% for bal in balances %}
-    <tr>
-      <td>{{ bal.item.sku if bal.item else "???" }}</td>
-      <td>{{ bal.item.name if bal.item else "Unknown" }}</td>
-      <td>{{ bal.batch.lot_number if bal.batch else "-" }}</td>
-      <td>{{ bal.location.code if bal.location else "-" }}</td>
-      <td>{{ bal.on_hand }}</td>
-    </tr>
-    {% endfor %}
-  {% else %}
-    <tr>
-      <td colspan="5">No location-level balances for the selected filter.</td>
-    </tr>
-  {% endif %}
-</table>
+<div class="table-container">
+  <table class="inventory-table">
+    <thead>
+      <tr>
+        <th>SKU</th>
+        <th>Item</th>
+        <th>Batch / Lot</th>
+        <th>Location</th>
+        <th>Quantity</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% if balances %}
+        {% for bal in balances %}
+        <tr>
+          <td>{{ bal.item.sku if bal.item else "???" }}</td>
+          <td>{{ bal.item.name if bal.item else "Unknown" }}</td>
+          <td>{{ bal.batch.lot_number if bal.batch else "-" }}</td>
+          <td>{{ bal.location.code if bal.location else "-" }}</td>
+          <td>{{ bal.on_hand }}</td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="5">No location-level balances for the selected filter.</td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
 <div class="pagination">
   {% if page > 1 %}
     <a href="{{ url_for('inventory.list_stock', page=page-1, size=size, status=status, search=search) }}">Previous</a>

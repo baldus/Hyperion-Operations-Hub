@@ -55,24 +55,32 @@ header {
 }
 
 /* --- Light mode adjustments --- */
-body.light .nav-btn, 
-body.light .action-btn, 
+body.light .nav-btn,
+body.light .action-btn,
 body.light button {
     background-color: #ddd;
     color: #000;
 }
 
-body.light .nav-btn:hover, 
-body.light .action-btn:hover, 
+body.light .nav-btn:hover,
+body.light .action-btn:hover,
 body.light button:hover {
     background-color: #bbb;
 }
 
+.muted {
+    color: rgba(255, 255, 255, 0.65);
+}
+
+body.light .muted {
+    color: rgba(0, 0, 0, 0.58);
+}
+
 /* --- Content Area --- */
 .content-card {
-    margin: 20px auto;
-    padding: 20px;
-    max-width: 800px;
+    margin: 24px auto;
+    padding: 24px;
+    width: min(1200px, calc(100% - 40px));
     border-radius: 12px;
     background-color: rgba(40, 40, 40, 0.9);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
@@ -83,12 +91,193 @@ body.light .content-card {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
+@media (max-width: 768px) {
+    .content-card {
+        padding: 18px;
+        width: calc(100% - 24px);
+    }
+}
+
 /* --- Grid for buttons --- */
 .button-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 15px;
     margin-top: 20px;
+}
+
+/* --- Tables --- */
+.table-container {
+    margin-top: 18px;
+    margin-bottom: 28px;
+    overflow-x: auto;
+    border-radius: 14px;
+    background-color: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+    padding: 12px;
+}
+
+body.light .table-container {
+    background-color: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    box-shadow: 0 6px 18px rgba(31, 45, 61, 0.08);
+}
+
+.inventory-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 640px;
+}
+
+.inventory-table thead {
+    background: linear-gradient(135deg, rgba(76, 110, 245, 0.9), rgba(90, 190, 255, 0.85));
+    color: #f5f9ff;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+body.light .inventory-table thead {
+    background: linear-gradient(135deg, #5a8dee, #6ec6ff);
+    color: #ffffff;
+}
+
+.inventory-table th,
+.inventory-table td {
+    padding: 12px 16px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+
+body.light .inventory-table th,
+body.light .inventory-table td {
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    color: inherit;
+}
+
+.inventory-table tbody tr:nth-child(even) {
+    background-color: rgba(255, 255, 255, 0.03);
+}
+
+body.light .inventory-table tbody tr:nth-child(even) {
+    background-color: rgba(0, 0, 0, 0.03);
+}
+
+.inventory-table tbody tr:hover:not(.low-red):not(.low-yellow):not(.mismatch):not(.match) {
+    background-color: rgba(90, 141, 238, 0.18);
+    transition: background-color 0.2s ease;
+}
+
+body.light .inventory-table tbody tr:hover:not(.low-red):not(.low-yellow):not(.mismatch):not(.match) {
+    background-color: rgba(90, 141, 238, 0.14);
+}
+
+.inventory-table tr.low-red {
+    background-color: rgba(220, 53, 69, 0.2);
+    color: #ffe5e9;
+}
+
+body.light .inventory-table tr.low-red {
+    background-color: rgba(220, 53, 69, 0.12);
+    color: #8a1c24;
+}
+
+.inventory-table tr.low-yellow {
+    background-color: rgba(255, 193, 7, 0.2);
+    color: #fff8dc;
+}
+
+body.light .inventory-table tr.low-yellow {
+    background-color: rgba(255, 193, 7, 0.18);
+    color: #7a5a00;
+}
+
+.inventory-table tr.mismatch {
+    background-color: rgba(244, 67, 54, 0.24);
+    color: #fff1f0;
+}
+
+body.light .inventory-table tr.mismatch {
+    background-color: rgba(244, 67, 54, 0.16);
+    color: #872024;
+}
+
+.inventory-table tr.match {
+    background-color: rgba(76, 175, 80, 0.24);
+    color: #ecfdf0;
+}
+
+body.light .inventory-table tr.match {
+    background-color: rgba(76, 175, 80, 0.16);
+    color: #1d5e29;
+}
+
+.inventory-table td form {
+    margin: 0;
+}
+
+.inventory-table td a {
+    color: inherit;
+    text-decoration: underline;
+}
+
+.inventory-table td a:hover {
+    text-decoration: none;
+}
+
+/* --- Work instructions --- */
+.instruction-item {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.instruction-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.75rem 1.1rem;
+    border-radius: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    border: none;
+    cursor: pointer;
+    width: 100%;
+    min-height: 48px;
+    text-align: center;
+    word-break: break-word;
+    white-space: normal;
+    color: #ffffff;
+    background: linear-gradient(135deg, #3a7bd5, #00d2ff);
+    box-shadow: 0 10px 20px rgba(58, 123, 213, 0.25);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.instruction-btn:hover,
+.instruction-btn:focus {
+    transform: translateY(-1px);
+    box-shadow: 0 14px 24px rgba(58, 123, 213, 0.35);
+    filter: brightness(1.05);
+}
+
+body.light .instruction-btn {
+    color: #ffffff;
+}
+
+.instruction-btn--danger {
+    background: linear-gradient(135deg, #ff6a6a, #d9534f);
+    box-shadow: 0 10px 20px rgba(217, 83, 79, 0.25);
+}
+
+.instruction-btn--danger:hover,
+.instruction-btn--danger:focus {
+    box-shadow: 0 14px 24px rgba(217, 83, 79, 0.35);
+}
+
+.instruction-item form {
+    width: 100%;
 }
 
 /* --- Flash Messages --- */
@@ -179,6 +368,118 @@ body.dark .modal-content {
     padding: 8px 12px;
     border-radius: 20px;
     border: none;
+}
+
+.orders-table {
+    width: 100%;
+}
+
+.orders-table .numeric {
+    text-align: center;
+}
+
+.orders-table .finished-good {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.orders-table .finished-good .sku {
+    font-weight: 600;
+}
+
+.orders-table .finished-good .name {
+    font-size: 0.9rem;
+    opacity: 0.85;
+}
+
+.orders-table .order-link {
+    color: inherit;
+    text-decoration: underline;
+}
+
+.orders-table .order-link:hover {
+    text-decoration: none;
+}
+
+.orders-table .progress-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.orders-table .progress-track {
+    position: relative;
+    width: 104px;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.18);
+    overflow: hidden;
+}
+
+body.light .orders-table .progress-track {
+    background: rgba(0, 0, 0, 0.12);
+}
+
+.orders-table .progress-fill {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(135deg, #7c9bff, #4cc3ff);
+}
+
+.orders-table .progress-label {
+    font-weight: 600;
+}
+
+.orders-table .status-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 88px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: rgba(255, 255, 255, 0.12);
+    color: #f0f4ff;
+}
+
+body.light .orders-table .status-pill {
+    background: rgba(0, 0, 0, 0.08);
+    color: #1f2937;
+}
+
+.orders-table .status-open {
+    background: rgba(76, 175, 80, 0.22);
+    color: #b5f5c1;
+}
+
+.orders-table .status-closed {
+    background: rgba(158, 158, 158, 0.25);
+    color: #f5f5f5;
+}
+
+.orders-table .status-pending {
+    background: rgba(255, 193, 7, 0.25);
+    color: #ffeaa7;
+}
+
+body.light .orders-table .status-open {
+    background: rgba(76, 175, 80, 0.16);
+    color: #256a31;
+}
+
+body.light .orders-table .status-closed {
+    background: rgba(158, 158, 158, 0.2);
+    color: #424242;
+}
+
+body.light .orders-table .status-pending {
+    background: rgba(255, 193, 7, 0.22);
+    color: #7a5a00;
 }
 
 /* --- Forms --- */
