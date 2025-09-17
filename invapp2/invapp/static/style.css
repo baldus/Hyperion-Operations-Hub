@@ -178,5 +178,186 @@ body.dark .modal-content {
 .orders-filter input[type="search"] {
     padding: 8px 12px;
     border-radius: 20px;
-    borde
+    border: none;
+}
 
+/* --- Forms --- */
+.form-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.form-section {
+    padding: 20px;
+    border-radius: 12px;
+    background-color: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+body.light .form-section {
+    background-color: #f9f9fb;
+    border-color: #d8dbe3;
+}
+
+.form-section h3 {
+    margin: 0;
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.section-help {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.95rem;
+}
+
+body.light .section-help {
+    color: #4a4a4a;
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+}
+
+.form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.form-field .field-label {
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.form-section input[type="text"],
+.form-section input[type="number"],
+.form-section input[type="date"],
+.form-section textarea,
+.form-section select {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background-color: rgba(0, 0, 0, 0.35);
+    color: inherit;
+    font: inherit;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+body.light .form-section input[type="text"],
+body.light .form-section input[type="number"],
+body.light .form-section input[type="date"],
+body.light .form-section textarea,
+body.light .form-section select {
+    background-color: #fff;
+    border-color: #c5cad6;
+}
+
+.form-section input[type="text"]:focus,
+.form-section input[type="number"]:focus,
+.form-section input[type="date"]:focus,
+.form-section textarea:focus,
+.form-section select:focus {
+    outline: none;
+    border-color: #7aa2ff;
+    box-shadow: 0 0 0 3px rgba(122, 162, 255, 0.25);
+}
+
+.form-section textarea {
+    min-height: 72px;
+    resize: vertical;
+}
+
+.table-scroll {
+    overflow-x: auto;
+}
+
+.form-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 520px;
+}
+
+.form-table th,
+.form-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    text-align: left;
+    vertical-align: top;
+}
+
+body.light .form-table th,
+body.light .form-table td {
+    border-color: #e0e3eb;
+}
+
+.form-table thead th {
+    font-weight: 600;
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+body.light .form-table thead th {
+    background-color: #f1f2f7;
+}
+
+.form-table td.numeric {
+    text-align: center;
+}
+
+.row-actions {
+    text-align: right;
+}
+
+.link-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    color: #9bb9ff;
+    font: inherit;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.link-btn:hover,
+.link-btn:focus {
+    background: none;
+    color: #c6d6ff;
+}
+
+body.light .link-btn {
+    color: #1d4ed8;
+}
+
+body.light .link-btn:hover,
+body.light .link-btn:focus {
+    color: #345fe0;
+}
+
+.form-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+@media (max-width: 640px) {
+    .form-section {
+        padding: 16px;
+    }
+
+    .form-table {
+        min-width: 100%;
+    }
+}

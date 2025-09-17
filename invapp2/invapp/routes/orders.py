@@ -1,7 +1,15 @@
 import json
 from datetime import datetime
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    flash,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
 from sqlalchemy import or_
 from sqlalchemy.orm import joinedload
 
@@ -81,6 +89,11 @@ def _parse_date(raw_value, field_label, errors):
 
 @bp.route("/new", methods=["GET", "POST"])
 def new_order():
+    if not session.get("is_admin"):
+        next_target = request.full_path if request.query_string else request.path
+        flash("Administrator access is required to create new orders.", "danger")
+        return redirect(url_for("admin.login", next=next_target))
+
     items = Item.query.order_by(Item.sku).all()
     form_data = {
         "order_number": "",

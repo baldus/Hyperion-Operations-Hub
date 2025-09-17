@@ -5,16 +5,16 @@
     <section class="form-section">
         <h3>Order Details</h3>
         <div class="form-grid">
-            <label>
-                <span>Order Number</span>
+            <label class="form-field">
+                <span class="field-label">Order Number</span>
                 <input type="text" name="order_number" value="{{ form_data.order_number }}" required>
             </label>
-            <label>
-                <span>Customer Name</span>
+            <label class="form-field">
+                <span class="field-label">Customer Name</span>
                 <input type="text" name="customer_name" value="{{ form_data.customer_name }}" required>
             </label>
-            <label>
-                <span>Finished Good Part Number</span>
+            <label class="form-field">
+                <span class="field-label">Finished Good Part Number</span>
                 <input type="text" name="finished_good_sku" list="item-skus" value="{{ form_data.finished_good_sku }}" required>
                 <datalist id="item-skus">
                     {% for item in items %}
@@ -22,24 +22,24 @@
                     {% endfor %}
                 </datalist>
             </label>
-            <label>
-                <span>Order Created By</span>
+            <label class="form-field">
+                <span class="field-label">Order Created By</span>
                 <input type="text" name="created_by" value="{{ form_data.created_by }}" required>
             </label>
-            <label>
-                <span>Quantity</span>
+            <label class="form-field">
+                <span class="field-label">Quantity</span>
                 <input type="number" name="quantity" min="1" value="{{ form_data.quantity }}" required>
             </label>
-            <label>
-                <span>Promised Ship Date</span>
+            <label class="form-field">
+                <span class="field-label">Promised Ship Date</span>
                 <input type="date" name="promised_date" value="{{ form_data.promised_date }}" required>
             </label>
-            <label>
-                <span>Scheduled Start Date</span>
+            <label class="form-field">
+                <span class="field-label">Scheduled Start Date</span>
                 <input type="date" name="scheduled_start_date" value="{{ form_data.scheduled_start_date }}" required>
             </label>
-            <label>
-                <span>Scheduled Completion Date</span>
+            <label class="form-field">
+                <span class="field-label">Scheduled Completion Date</span>
                 <input type="date" name="scheduled_completion_date" value="{{ form_data.scheduled_completion_date }}" required>
             </label>
         </div>
@@ -51,16 +51,18 @@
             <button type="button" class="action-btn" id="add-bom-component">Add Component</button>
         </div>
         <p class="section-help">List each component required to manufacture the finished good. Use valid component SKUs from inventory.</p>
-        <table class="form-table">
-            <thead>
-                <tr>
-                    <th>Component SKU</th>
-                    <th>Quantity Per</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody id="bom-rows"></tbody>
-        </table>
+        <div class="table-scroll">
+            <table class="form-table">
+                <thead>
+                    <tr>
+                        <th>Component SKU</th>
+                        <th>Quantity Per</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="bom-rows"></tbody>
+            </table>
+        </div>
     </section>
 
     <section class="form-section">
@@ -69,18 +71,20 @@
             <button type="button" class="action-btn" id="add-routing-step">Add Step</button>
         </div>
         <p class="section-help">Define the work sequence, indicating the work cell, instructions, and which components are consumed during the step.</p>
-        <table class="form-table">
-            <thead>
-                <tr>
-                    <th>Sequence</th>
-                    <th>Work Cell</th>
-                    <th>Instructions</th>
-                    <th>Components Used</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody id="routing-rows"></tbody>
-        </table>
+        <div class="table-scroll">
+            <table class="form-table">
+                <thead>
+                    <tr>
+                        <th>Sequence</th>
+                        <th>Work Cell</th>
+                        <th>Instructions</th>
+                        <th>Components Used</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="routing-rows"></tbody>
+            </table>
+        </div>
     </section>
 
     <input type="hidden" name="bom_data" id="bom-data">
