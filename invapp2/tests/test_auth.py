@@ -72,3 +72,19 @@ def test_password_reset(client):
     client.get('/auth/logout')
     resp = login(client, 'carol', 'pw2')
     assert b'Invalid credentials' not in resp.data
+
+
+def test_admin_login_button_route(client):
+    resp = client.get('/admin/login')
+    assert resp.status_code == 200
+
+    resp = client.post(
+        '/admin/login',
+        data={'username': 'admin', 'password': 'password'},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    assert resp.headers['Location'].endswith('/')
+
+    with client.session_transaction() as session:
+        assert session.get('is_admin') is True
