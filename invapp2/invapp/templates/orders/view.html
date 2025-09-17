@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Order {{ order.order_number }}</h2>
-<p>Status: {{ order.status }}</p>
+<p>Status: {{ order.status_label }}</p>
 <div class="order-metadata">
     <p><strong>Promised Ship Date:</strong> {{ order.promised_date or 'TBD' }}</p>
     <p><strong>Scheduled Start:</strong> {{ order.scheduled_start_date or 'TBD' }}</p>

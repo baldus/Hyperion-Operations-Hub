@@ -61,11 +61,22 @@ class WorkInstruction(db.Model):
 
 
 class OrderStatus:
+    SCHEDULED = "SCHEDULED"
     OPEN = "OPEN"
+    WAITING_MATERIAL = "WAITING_MATERIAL"
     CLOSED = "CLOSED"
     CANCELLED = "CANCELLED"
 
-    ACTIVE_STATES = {OPEN}
+    ACTIVE_STATES = {SCHEDULED, OPEN, WAITING_MATERIAL}
+    RESERVABLE_STATES = {SCHEDULED, OPEN}
+    ALL_STATUSES = [SCHEDULED, OPEN, WAITING_MATERIAL, CLOSED, CANCELLED]
+    LABELS = {
+        SCHEDULED: "Scheduled",
+        OPEN: "Open",
+        WAITING_MATERIAL: "Waiting on Material",
+        CLOSED: "Closed",
+        CANCELLED: "Cancelled",
+    }
 
 
 class Order(db.Model):
@@ -87,7 +98,7 @@ class Order(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     order_number = db.Column(db.String, unique=True, nullable=False)
-    status = db.Column(db.String, nullable=False, default=OrderStatus.OPEN)
+    status = db.Column(db.String, nullable=False, default=OrderStatus.SCHEDULED)
     customer_name = db.Column(db.String, nullable=True)
     created_by = db.Column(db.String, nullable=True)
     promised_date = db.Column(db.Date, nullable=True)
@@ -133,6 +144,14 @@ class Order(db.Model):
         if total == 0:
             return None
         return completed / total
+
+    @property
+    def status_label(self):
+        if not self.status:
+            return "—"
+        return OrderStatus.LABELS.get(
+            self.status, self.status.replace("_", " ").title()
+        )
 
 
 class OrderLine(db.Model):

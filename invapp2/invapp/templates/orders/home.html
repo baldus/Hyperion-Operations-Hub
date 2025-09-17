@@ -5,7 +5,9 @@
 
 <div class="orders-toolbar">
     <div class="toolbar-actions">
-        <a href="{{ url_for('orders.new_order') }}" class="action-btn primary-action">Create New Order</a>
+        {% if session.get('is_admin') %}
+            <a href="{{ url_for('orders.new_order') }}" class="action-btn primary-action">Create New Order</a>
+        {% endif %}
         <a href="{{ url_for('orders.view_open_orders') }}" class="action-btn subtle-action">Open Orders</a>
         <a href="{{ url_for('orders.view_closed_orders') }}" class="action-btn subtle-action">Closed Orders</a>
     </div>
@@ -69,7 +71,7 @@
                         {% endif %}
                     </td>
                     <td data-label="Status">
-                        <span class="status-pill status-{{ order.status|lower }}">{{ order.status.title() if order.status else '—' }}</span>
+                        <span class="status-pill status-{{ order.status|lower }}">{{ order.status_label }}</span>
                     </td>
                 </tr>
             {% endfor %}
@@ -78,8 +80,12 @@
 </div>
 {% else %}
     <div class="empty-state">
-        <p>No open orders yet. Create a new order to get started.</p>
-        <a href="{{ url_for('orders.new_order') }}" class="action-btn primary-action">Create New Order</a>
+        {% if session.get('is_admin') %}
+            <p>No open orders yet. Create a new order to get started.</p>
+            <a href="{{ url_for('orders.new_order') }}" class="action-btn primary-action">Create New Order</a>
+        {% else %}
+            <p>No open orders yet.</p>
+        {% endif %}
     </div>
 {% endif %}
 {% endblock %}

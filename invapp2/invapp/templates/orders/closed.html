@@ -6,7 +6,7 @@
     {% for order in orders %}
     <tr>
         <td><a href="{{ url_for('orders.view_order', order_id=order.id) }}">{{ order.order_number }}</a></td>
-        <td>{{ order.status }}</td>
+        <td>{{ order.status_label }}</td>
     </tr>
     {% endfor %}
 </table>
