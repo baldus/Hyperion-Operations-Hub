@@ -20,6 +20,9 @@
   <label for="min_stock">Minimum Stock:</label>
   <input type="number" name="min_stock" value="{{ item.min_stock or 0 }}"><br>
 
+  <label for="notes">Notes:</label>
+  <textarea name="notes" rows="4">{{ item.notes or '' }}</textarea><br>
+
   <button type="submit">Update</button>
 </form>
 {% endblock %}

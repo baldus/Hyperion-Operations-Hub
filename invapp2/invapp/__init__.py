@@ -20,6 +20,19 @@ def _ensure_item_type_column(engine):
             conn.execute(text("ALTER TABLE item ADD COLUMN type VARCHAR"))
 
 
+def _ensure_item_notes_column(engine):
+    """Ensure legacy databases have the ``item.notes`` column."""
+    inspector = inspect(engine)
+    try:
+        item_columns = {col["name"] for col in inspector.get_columns("item")}
+    except (NoSuchTableError, OperationalError):
+        item_columns = set()
+
+    if "notes" not in item_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE item ADD COLUMN notes TEXT"))
+
+
 def _ensure_order_schema(engine):
     """Make sure legacy databases pick up the expanded order schema."""
     inspector = inspect(engine)
@@ -71,6 +84,7 @@ def create_app(config_override=None):
     with app.app_context():
         db.create_all()
         _ensure_item_type_column(db.engine)
+        _ensure_item_notes_column(db.engine)
         _ensure_order_schema(db.engine)
 
     # register blueprints
