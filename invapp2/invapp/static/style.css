@@ -91,6 +91,67 @@ body.light .content-card {
     margin-top: 20px;
 }
 
+.dashboard-panels {
+    margin-top: 30px;
+    display: grid;
+    gap: 20px;
+}
+
+@media (min-width: 900px) {
+    .dashboard-panels {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.dashboard-section {
+    padding: 18px;
+    border-radius: 12px;
+    background-color: rgba(55, 55, 55, 0.8);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+}
+
+body.light .dashboard-section {
+    background-color: #f7f7f7;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+}
+
+.dashboard-section h3 {
+    margin-top: 0;
+}
+
+.dashboard-section h4 {
+    margin-bottom: 8px;
+    margin-top: 20px;
+}
+
+.dashboard-section h4:first-of-type {
+    margin-top: 10px;
+}
+
+.empty-state {
+    font-style: italic;
+    color: #b5b5b5;
+    margin: 10px 0 0;
+}
+
+body.light .empty-state {
+    color: #666;
+}
+
+.muted-text {
+    color: #9a9a9a;
+}
+
+body.light .muted-text {
+    color: #777;
+}
+
+.compact-table th,
+.compact-table td {
+    font-size: 0.9rem;
+    padding: 6px 8px;
+}
+
 /* --- Flash Messages --- */
 .flashes {
     list-style-type: none;

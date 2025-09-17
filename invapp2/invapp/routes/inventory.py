@@ -1,7 +1,8 @@
 import csv
 import io
+import math
 from flask import Blueprint, render_template, request, redirect, url_for, flash, Response
-from sqlalchemy import func, or_
+from sqlalchemy import MetaData, func, inspect, or_
 from sqlalchemy.orm import load_only, joinedload
 from invapp.models import db, Item, Location, Batch, Movement
 from datetime import datetime
@@ -13,7 +14,188 @@ bp = Blueprint("inventory", __name__, url_prefix="/inventory")
 ############################
 @bp.route("/")
 def inventory_home():
-    return render_template("inventory/home.html")
+    items = Item.query.options(
+        load_only(Item.id, Item.sku, Item.name, Item.min_stock)
+    ).all()
+    item_map = {item.id: item for item in items}
+    stock_totals = _calculate_stock_totals()
+    stock_alerts = _build_stock_alerts(item_map, stock_totals)
+    pending_order_items = _fetch_pending_order_items(item_map, stock_totals)
+
+    return render_template(
+        "inventory/home.html",
+        pending_order_items=pending_order_items,
+        critical_stock=stock_alerts["critical"],
+        warning_stock=stock_alerts["warning"],
+    )
+
+
+def _calculate_stock_totals():
+    """Return current on-hand totals for each item id."""
+
+    totals_query = (
+        db.session.query(Movement.item_id, func.sum(Movement.quantity))
+        .group_by(Movement.item_id)
+        .all()
+    )
+    return {item_id: int(total or 0) for item_id, total in totals_query}
+
+
+def _build_stock_alerts(item_map, stock_totals):
+    """Group items that are at or approaching their minimum stock levels."""
+
+    critical = []
+    warning = []
+    for item in item_map.values():
+        min_stock = item.min_stock or 0
+        if min_stock <= 0:
+            continue
+
+        on_hand = stock_totals.get(item.id, 0)
+        if on_hand < min_stock:
+            critical.append(
+                {
+                    "item": item,
+                    "on_hand": on_hand,
+                    "minimum": min_stock,
+                }
+            )
+        else:
+            warning_threshold = math.ceil(min_stock * 1.25)
+            if on_hand < warning_threshold:
+                warning.append(
+                    {
+                        "item": item,
+                        "on_hand": on_hand,
+                        "minimum": min_stock,
+                        "threshold": warning_threshold,
+                    }
+                )
+
+    critical.sort(key=lambda entry: entry["item"].sku)
+    warning.sort(key=lambda entry: entry["item"].sku)
+    return {"critical": critical, "warning": warning}
+
+
+def _fetch_pending_order_items(item_map, stock_totals):
+    """Return outstanding order line items grouped by inventory item."""
+
+    try:
+        inspector = inspect(db.engine)
+    except Exception:
+        return []
+
+    table_names = set(inspector.get_table_names())
+    required_tables = {"order", "order_item", "item"}
+    if not required_tables.issubset(table_names):
+        return []
+
+    metadata = MetaData()
+    try:
+        metadata.reflect(db.engine, only=required_tables)
+    except Exception:
+        return []
+
+    orders_table = metadata.tables.get("order")
+    order_items_table = metadata.tables.get("order_item")
+    items_table = metadata.tables.get("item")
+    if not orders_table or not order_items_table or not items_table:
+        return []
+
+    item_id_column = order_items_table.c.get("item_id")
+    quantity_column = order_items_table.c.get("quantity")
+    if item_id_column is None or quantity_column is None:
+        return []
+
+    columns = [
+        item_id_column.label("item_id"),
+        quantity_column.label("quantity"),
+    ]
+
+    sku_column = items_table.c.get("sku")
+    if sku_column is not None:
+        columns.append(sku_column.label("sku"))
+
+    name_column = items_table.c.get("name")
+    if name_column is not None:
+        columns.append(name_column.label("name"))
+
+    order_number_column = orders_table.c.get("order_number")
+    if order_number_column is not None:
+        columns.append(order_number_column.label("order_number"))
+
+    status_column = orders_table.c.get("status")
+    if status_column is not None:
+        columns.append(status_column.label("status"))
+
+    query = (
+        db.session.query(*columns)
+        .select_from(order_items_table)
+        .join(orders_table, order_items_table.c.order_id == orders_table.c.id)
+        .join(items_table, order_items_table.c.item_id == items_table.c.id)
+    )
+
+    if status_column is not None:
+        query = query.filter(
+            ~status_column.in_(
+                ["completed", "complete", "closed", "cancelled", "canceled", "done"]
+            )
+        )
+
+    try:
+        rows = query.all()
+    except Exception:
+        return []
+
+    pending = {}
+    for row in rows:
+        data = row._mapping
+        item_id = data.get("item_id")
+        quantity = data.get("quantity") or 0
+        if not item_id or quantity <= 0:
+            continue
+
+        item = item_map.get(item_id)
+        if not item:
+            continue
+
+        entry = pending.setdefault(
+            item_id,
+            {
+                "item": item,
+                "quantity": 0,
+                "orders": set(),
+                "statuses": set(),
+            },
+        )
+        entry["quantity"] += int(quantity)
+
+        order_number = data.get("order_number")
+        if order_number:
+            entry["orders"].add(order_number)
+
+        status_value = data.get("status")
+        if status_value:
+            entry["statuses"].add(status_value)
+
+    results = []
+    for item_id, entry in pending.items():
+        on_hand = stock_totals.get(item_id, 0)
+        quantity = entry["quantity"]
+        results.append(
+            {
+                "item": entry["item"],
+                "quantity": quantity,
+                "orders": sorted(entry["orders"]),
+                "statuses": sorted(entry["statuses"]),
+                "on_hand": on_hand,
+                "minimum": entry["item"].min_stock or 0,
+                "shortfall": max(quantity - on_hand, 0),
+            }
+        )
+
+    results.sort(key=lambda entry: entry["item"].sku)
+    return results
 
 ############################
 # CYCLE COUNT ROUTES
