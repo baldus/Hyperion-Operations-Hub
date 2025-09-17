@@ -164,7 +164,9 @@ def test_import_export_items_with_notes(client, app):
     csv_data = io.StringIO()
     writer = csv.writer(csv_data)
     writer.writerow(["sku", "name", "type", "unit", "description", "min_stock", "notes"])
-    writer.writerow(["300", "Existing Item", "", "ea", "Updated description", "12", "Updated legacy note"])
+    writer.writerow(
+        ["300", "Existing Item", "", "ea", "Updated description", "12", "Updated legacy note"]
+    )
     writer.writerow(["", "New Item", "", "ea", "Brand new", "3", "Fresh notes"])
 
     response = client.post(
@@ -197,3 +199,10 @@ def test_import_export_items_with_notes(client, app):
     new_rows = [row for sku, row in rows.items() if sku != "300"]
     assert len(new_rows) == 1
     assert new_rows[0][6] == "Fresh notes"
+
+
+def test_inventory_scan_page(client):
+    response = client.get("/inventory/scan")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "cameraPreview" in body
