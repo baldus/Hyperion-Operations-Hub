@@ -9,6 +9,12 @@
     <p><strong>Customer:</strong> {{ order.customer_name or '—' }}</p>
     <p><strong>Created By:</strong> {{ order.created_by or '—' }}</p>
 </div>
+{% if order.general_notes %}
+<section class="order-notes">
+    <h3>General Notes</h3>
+    <p>{{ order.general_notes | e | replace('\n', '<br>') | safe }}</p>
+</section>
+{% endif %}
 {% if order.routing_progress is not none %}
     {% set percent = (order.routing_progress * 100) | round(0, 'floor') %}
     <p><strong>Routing Progress:</strong> {{ percent | int }}% complete</p>
