@@ -86,6 +86,8 @@ def new_order():
         "order_number": "",
         "finished_good_sku": "",
         "quantity": "",
+        "customer_name": "",
+        "created_by": "",
         "promised_date": "",
         "scheduled_start_date": "",
         "scheduled_completion_date": "",
@@ -98,6 +100,8 @@ def new_order():
         order_number = (request.form.get("order_number") or "").strip()
         finished_good_sku = (request.form.get("finished_good_sku") or "").strip()
         quantity_raw = (request.form.get("quantity") or "").strip()
+        customer_name = (request.form.get("customer_name") or "").strip()
+        created_by = (request.form.get("created_by") or "").strip()
         promised_date_raw = (request.form.get("promised_date") or "").strip()
         scheduled_start_raw = (
             request.form.get("scheduled_start_date") or ""
@@ -113,6 +117,8 @@ def new_order():
                 "order_number": order_number,
                 "finished_good_sku": finished_good_sku,
                 "quantity": quantity_raw,
+                "customer_name": customer_name,
+                "created_by": created_by,
                 "promised_date": promised_date_raw,
                 "scheduled_start_date": scheduled_start_raw,
                 "scheduled_completion_date": scheduled_completion_raw,
@@ -123,6 +129,12 @@ def new_order():
             errors.append("Order number is required.")
         elif Order.query.filter_by(order_number=order_number).first():
             errors.append("Order number already exists.")
+
+        if not customer_name:
+            errors.append("Customer name is required.")
+
+        if not created_by:
+            errors.append("Order creator name is required.")
 
         finished_good = None
         if not finished_good_sku:
@@ -302,6 +314,8 @@ def new_order():
 
         order = Order(
             order_number=order_number,
+            customer_name=customer_name,
+            created_by=created_by,
             promised_date=promised_date,
             scheduled_start_date=scheduled_start_date,
             scheduled_completion_date=scheduled_completion_date,
@@ -379,6 +393,38 @@ def view_order(order_id):
         .first_or_404()
     )
     return render_template("orders/view.html", order=order)
+
+
+@bp.route("/<int:order_id>/routing", methods=["POST"])
+def update_routing(order_id):
+    order = (
+        Order.query.options(joinedload(Order.routing_steps))
+        .filter_by(id=order_id)
+        .first_or_404()
+    )
+    selected_ids = set()
+    for raw_id in request.form.getlist("completed_steps"):
+        try:
+            selected_ids.add(int(raw_id))
+        except (TypeError, ValueError):
+            continue
+
+    changes_made = False
+    current_time = datetime.utcnow()
+    for step in order.routing_steps:
+        desired_state = step.id in selected_ids
+        if step.completed != desired_state:
+            step.completed = desired_state
+            step.completed_at = current_time if desired_state else None
+            changes_made = True
+
+    if changes_made:
+        db.session.commit()
+        flash("Routing progress updated", "success")
+    else:
+        flash("No routing updates were made.", "info")
+
+    return redirect(url_for("orders.view_order", order_id=order.id))
 
 
 @bp.route("/<int:order_id>/edit", methods=["GET", "POST"])

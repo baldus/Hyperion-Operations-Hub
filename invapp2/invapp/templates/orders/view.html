@@ -6,7 +6,15 @@
     <p><strong>Promised Ship Date:</strong> {{ order.promised_date or 'TBD' }}</p>
     <p><strong>Scheduled Start:</strong> {{ order.scheduled_start_date or 'TBD' }}</p>
     <p><strong>Scheduled Completion:</strong> {{ order.scheduled_completion_date or 'TBD' }}</p>
+    <p><strong>Customer:</strong> {{ order.customer_name or '—' }}</p>
+    <p><strong>Created By:</strong> {{ order.created_by or '—' }}</p>
 </div>
+{% if order.routing_progress is not none %}
+    {% set percent = (order.routing_progress * 100) | round(0, 'floor') %}
+    <p><strong>Routing Progress:</strong> {{ percent | int }}% complete</p>
+{% else %}
+    <p><strong>Routing Progress:</strong> Not started</p>
+{% endif %}
 <a href="{{ url_for('orders.edit_order', order_id=order.id) }}" class="action-btn">Edit</a>
 <form method="post" action="{{ url_for('orders.delete_order', order_id=order.id) }}" style="display:inline;">
     <button type="submit">Delete</button>
@@ -33,36 +41,44 @@
 {% endfor %}
 </ul>
 <h3>Routing Steps</h3>
-<table class="form-table">
-    <thead>
-        <tr>
-            <th>Sequence</th>
-            <th>Work Cell</th>
-            <th>Instructions</th>
-            <th>Components</th>
-            <th>Status</th>
-        </tr>
-    </thead>
-    <tbody>
-    {% for step in order.steps %}
-        <tr>
-            <td>{{ step.sequence }}</td>
-            <td>{{ step.work_cell or '—' }}</td>
-            <td>{{ step.description }}</td>
-            <td>
-                {% if step.component_usages %}
-                    <ul>
-                    {% for usage in step.component_usages %}
-                        <li>{{ usage.bom_component.component_item.sku }} ({{ usage.bom_component.quantity }} per)</li>
-                    {% endfor %}
-                    </ul>
-                {% else %}
-                    —
-                {% endif %}
-            </td>
-            <td>{% if step.completed %}Complete{% else %}Open{% endif %}</td>
-        </tr>
-    {% endfor %}
-    </tbody>
-</table>
+<form method="post" action="{{ url_for('orders.update_routing', order_id=order.id) }}" class="form-stack">
+    <table class="form-table">
+        <thead>
+            <tr>
+                <th>Sequence</th>
+                <th>Work Cell</th>
+                <th>Instructions</th>
+                <th>Components</th>
+                <th>Completed</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for step in order.steps %}
+            <tr>
+                <td>{{ step.sequence }}</td>
+                <td>{{ step.work_cell or '—' }}</td>
+                <td>{{ step.description }}</td>
+                <td>
+                    {% if step.component_usages %}
+                        <ul>
+                        {% for usage in step.component_usages %}
+                            <li>{{ usage.bom_component.component_item.sku }} ({{ usage.bom_component.quantity }} per)</li>
+                        {% endfor %}
+                        </ul>
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+                <td class="numeric">
+                    <label class="sr-only" for="step-{{ step.id }}">Mark step {{ step.sequence }} complete</label>
+                    <input id="step-{{ step.id }}" type="checkbox" name="completed_steps" value="{{ step.id }}" {% if step.completed %}checked{% endif %}>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <div class="form-actions">
+        <button type="submit" class="action-btn">Update Routing Status</button>
+    </div>
+</form>
 {% endblock %}

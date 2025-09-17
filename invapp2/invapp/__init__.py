@@ -36,6 +36,26 @@ def _ensure_order_schema(engine):
         for table_name in missing_tables:
             metadata.tables[table_name].create(bind=engine)
 
+    try:
+        order_columns = {col["name"] for col in inspector.get_columns("order")}
+    except (NoSuchTableError, OperationalError):
+        order_columns = set()
+
+    columns_to_add = []
+    if "customer_name" not in order_columns:
+        columns_to_add.append("customer_name")
+    if "created_by" not in order_columns:
+        columns_to_add.append("created_by")
+
+    if columns_to_add:
+        with engine.begin() as conn:
+            for column in columns_to_add:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE \"order\" ADD COLUMN {column} VARCHAR"
+                    )
+                )
+
 
 def create_app(config_override=None):
     app = Flask(__name__)
