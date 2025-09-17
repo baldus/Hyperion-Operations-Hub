@@ -1,19 +1,33 @@
 import csv
 import io
+from collections import defaultdict
+from datetime import datetime
+
 from flask import (
     Blueprint,
+    Response,
+    flash,
+    jsonify,
+    redirect,
     render_template,
     request,
-    redirect,
     url_for,
-    flash,
-    Response,
-    jsonify,
 )
 from sqlalchemy import func, or_
-from sqlalchemy.orm import load_only, joinedload
-from invapp.models import db, Item, Location, Batch, Movement
-from datetime import datetime
+from sqlalchemy.orm import joinedload, load_only
+
+from invapp.models import (
+    Batch,
+    Item,
+    Location,
+    Movement,
+    Order,
+    OrderComponent,
+    OrderLine,
+    OrderStatus,
+    Reservation,
+    db,
+)
 
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
 
@@ -22,7 +36,126 @@ bp = Blueprint("inventory", __name__, url_prefix="/inventory")
 ############################
 @bp.route("/")
 def inventory_home():
-    return render_template("inventory/home.html")
+    # Summaries for on-hand inventory and reservations
+    movement_totals = (
+        db.session.query(
+            Movement.item_id,
+            func.coalesce(func.sum(Movement.quantity), 0).label("on_hand"),
+        )
+        .group_by(Movement.item_id)
+        .all()
+    )
+    on_hand_map = {item_id: int(total or 0) for item_id, total in movement_totals}
+
+    reservation_totals = (
+        db.session.query(
+            Reservation.item_id,
+            func.coalesce(func.sum(Reservation.quantity), 0).label("reserved"),
+        )
+        .join(OrderLine)
+        .join(Order)
+        .filter(Order.status.in_(OrderStatus.RESERVABLE_STATES))
+        .group_by(Reservation.item_id)
+        .all()
+    )
+    reserved_map = {item_id: int(total or 0) for item_id, total in reservation_totals}
+
+    items = (
+        Item.query.options(load_only(Item.id, Item.sku, Item.name, Item.min_stock))
+        .order_by(Item.sku)
+        .all()
+    )
+    items_by_id = {item.id: item for item in items}
+
+    # Determine inventory warning zones
+    low_stock_items = []
+    near_stock_items = []
+    for item in items:
+        min_stock = int(item.min_stock or 0)
+        if min_stock <= 0:
+            continue
+        total_on_hand = on_hand_map.get(item.id, 0)
+        coverage = total_on_hand / float(min_stock) if min_stock else None
+        entry = {
+            "item": item,
+            "on_hand": total_on_hand,
+            "min_stock": min_stock,
+            "coverage": coverage,
+        }
+        if total_on_hand < (min_stock * 1.05):
+            low_stock_items.append(entry)
+        elif total_on_hand < (min_stock * 1.25):
+            near_stock_items.append(entry)
+
+    def _coverage_sort_key(entry):
+        coverage = entry.get("coverage")
+        return coverage if coverage is not None else float("inf")
+
+    low_stock_items.sort(key=_coverage_sort_key)
+    near_stock_items.sort(key=_coverage_sort_key)
+
+    # Aggregate items causing material shortages for orders
+    waiting_orders = (
+        Order.query.options(
+            joinedload(Order.order_lines)
+            .joinedload(OrderLine.components)
+            .joinedload(OrderComponent.component_item)
+        )
+        .filter(Order.status == OrderStatus.WAITING_MATERIAL)
+        .order_by(Order.order_number)
+        .all()
+    )
+
+    required_by_item = defaultdict(int)
+    order_refs = defaultdict(list)
+    for order in waiting_orders:
+        for line in order.order_lines:
+            line_quantity = int(line.quantity or 0)
+            if line_quantity <= 0:
+                continue
+            for component in line.components:
+                component_quantity = int(component.quantity or 0)
+                if component_quantity <= 0:
+                    continue
+                total_required = component_quantity * line_quantity
+                required_by_item[component.component_item_id] += total_required
+                order_refs[component.component_item_id].append(
+                    {
+                        "order_number": order.order_number,
+                        "order_id": order.id,
+                        "required": total_required,
+                    }
+                )
+
+    for entries in order_refs.values():
+        entries.sort(key=lambda value: value["order_number"])
+
+    waiting_items = []
+    for item_id, required_total in required_by_item.items():
+        available = on_hand_map.get(item_id, 0) - reserved_map.get(item_id, 0)
+        if available < 0:
+            available = 0
+        shortage = required_total - available
+        if shortage <= 0:
+            continue
+        waiting_items.append(
+            {
+                "item": items_by_id.get(item_id),
+                "total_required": required_total,
+                "available": available,
+                "shortage": shortage,
+                "orders": order_refs[item_id],
+            }
+        )
+
+    waiting_items.sort(key=lambda entry: entry["shortage"], reverse=True)
+
+    return render_template(
+        "inventory/home.html",
+        waiting_items=waiting_items,
+        low_stock_items=low_stock_items,
+        near_stock_items=near_stock_items,
+    )
 
 
 @bp.route("/scan")

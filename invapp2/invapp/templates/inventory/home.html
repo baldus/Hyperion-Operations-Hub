@@ -13,4 +13,116 @@
   <a href="{{ url_for('inventory.cycle_count_home') }}" class="action-btn">Cycle Count</a>
   <a href="{{ url_for('inventory.history_home') }}" class="action-btn">History</a>
 </div>
+
+<div class="dashboard-section">
+  <h3>Waiting on Material for Orders</h3>
+  {% if waiting_items %}
+  <div class="table-container">
+    <table class="inventory-table">
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>Total Required</th>
+          <th>Available</th>
+          <th>Shortage</th>
+          <th>Orders</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in waiting_items %}
+        <tr class="low-red">
+          <td>
+            {% if entry.item %}
+            <strong>{{ entry.item.sku }}</strong><br>
+            <small>{{ entry.item.name }}</small>
+            {% else %}
+            Unknown Item
+            {% endif %}
+          </td>
+          <td>{{ entry.total_required }}</td>
+          <td>{{ entry.available }}</td>
+          <td>{{ entry.shortage }}</td>
+          <td>
+            {% for order in entry.orders %}
+              <div>
+                <a href="{{ url_for('orders.view_order', order_id=order.order_id) }}">Order {{ order.order_number }}</a>
+                (needs {{ order.required }})
+              </div>
+            {% endfor %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>All active orders have the required components on hand.</p>
+  {% endif %}
+</div>
+
+<div class="dashboard-section">
+  <h3>Low Stock Alerts (&lt; 105% of minimum)</h3>
+  {% if low_stock_items %}
+  <div class="table-container">
+    <table class="inventory-table">
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>On Hand</th>
+          <th>Minimum</th>
+          <th>Coverage</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in low_stock_items %}
+        <tr class="low-red">
+          <td>
+            <strong>{{ entry.item.sku }}</strong><br>
+            <small>{{ entry.item.name }}</small>
+          </td>
+          <td>{{ entry.on_hand }}</td>
+          <td>{{ entry.min_stock }}</td>
+          <td>{{ (entry.coverage * 100)|round(0, 'floor') }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>No items are currently below minimum stock levels.</p>
+  {% endif %}
+</div>
+
+<div class="dashboard-section">
+  <h3>Near Minimum Alerts (&lt; 125% of minimum)</h3>
+  {% if near_stock_items %}
+  <div class="table-container">
+    <table class="inventory-table">
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>On Hand</th>
+          <th>Minimum</th>
+          <th>Coverage</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in near_stock_items %}
+        <tr class="low-yellow">
+          <td>
+            <strong>{{ entry.item.sku }}</strong><br>
+            <small>{{ entry.item.name }}</small>
+          </td>
+          <td>{{ entry.on_hand }}</td>
+          <td>{{ entry.min_stock }}</td>
+          <td>{{ (entry.coverage * 100)|round(0, 'floor') }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>All other items are comfortably above minimum stock thresholds.</p>
+  {% endif %}
+</div>
 {% endblock %}
