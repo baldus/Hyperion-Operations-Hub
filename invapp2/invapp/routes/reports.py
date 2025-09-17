@@ -1,12 +1,79 @@
 import io, csv, zipfile
+from datetime import datetime, timedelta
+
 from flask import Blueprint, Response, render_template
+from sqlalchemy import case, func
+
 from invapp.models import db, Item, Location, Batch, Movement
 
 bp = Blueprint("reports", __name__, url_prefix="/reports")
 
 @bp.route("/")
 def reports_home():
-    return render_template("reports/home.html")
+    now = datetime.utcnow()
+    cutoff_30 = now - timedelta(days=30)
+    cutoff_90 = now - timedelta(days=90)
+
+    usage_query = (
+        db.session.query(
+            Item.sku,
+            Item.name,
+            func.coalesce(-func.sum(Movement.quantity), 0).label("total_usage"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (Movement.date >= cutoff_30, -Movement.quantity),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("usage_30"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (Movement.date >= cutoff_90, -Movement.quantity),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("usage_90"),
+        )
+        .join(Item, Movement.item_id == Item.id)
+        .filter(
+            Movement.movement_type == "ISSUE",
+            Movement.quantity < 0,
+        )
+        .group_by(Item.id, Item.sku, Item.name)
+        .having(func.sum(Movement.quantity) < 0)
+        .order_by(
+            func.sum(
+                case((Movement.date >= cutoff_30, -Movement.quantity), else_=0)
+            ).desc()
+        )
+        .limit(100)
+        .all()
+    )
+
+    usage_rows = [
+        {
+            "sku": sku,
+            "name": name,
+            "usage_30": int(usage_30 or 0),
+            "usage_90": int(usage_90 or 0),
+            "usage_total": int(total_usage or 0),
+        }
+        for sku, name, total_usage, usage_30, usage_90 in usage_query
+    ]
+
+    usage_window_30 = cutoff_30.strftime("%Y-%m-%d")
+    usage_window_90 = cutoff_90.strftime("%Y-%m-%d")
+
+    return render_template(
+        "reports/home.html",
+        usage_rows=usage_rows,
+        usage_window_30=usage_window_30,
+        usage_window_90=usage_window_90,
+    )
 
 @bp.route("/generate")
 def generate_reports():

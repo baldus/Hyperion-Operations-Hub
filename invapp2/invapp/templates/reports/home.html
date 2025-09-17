@@ -5,4 +5,41 @@
 <p>You can generate a full export of all tables as CSVs in a single ZIP file.</p>
 
 <a href="{{ url_for('reports.generate_reports') }}" class="bubble-btn">Generate Reports (ZIP)</a>
+
+<div class="dashboard-section">
+  <h3>Usage Report</h3>
+  <p>
+    Top issued items based on movement history. The 30-day window begins on
+    <strong>{{ usage_window_30 }}</strong> and the 90-day window begins on
+    <strong>{{ usage_window_90 }}</strong>.
+  </p>
+  {% if usage_rows %}
+  <div class="table-container">
+    <table class="inventory-table">
+      <thead>
+        <tr>
+          <th>SKU</th>
+          <th>Item</th>
+          <th>Last 30 Days</th>
+          <th>Last 90 Days</th>
+          <th>All-Time Issued</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in usage_rows %}
+        <tr>
+          <td><strong>{{ row.sku }}</strong></td>
+          <td>{{ row.name }}</td>
+          <td>{{ row.usage_30 }}</td>
+          <td>{{ row.usage_90 }}</td>
+          <td>{{ row.usage_total }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>No usage data has been recorded yet.</p>
+  {% endif %}
+</div>
 {% endblock %}

@@ -1,7 +1,7 @@
 import csv
 import io
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import (
     Blueprint,
@@ -66,6 +66,26 @@ def inventory_home():
         .all()
     )
     items_by_id = {item.id: item for item in items}
+
+    usage_cutoff = datetime.utcnow() - timedelta(days=30)
+    usage_totals = (
+        db.session.query(
+            Movement.item_id,
+            func.sum(Movement.quantity).label("usage"),
+        )
+        .filter(
+            Movement.movement_type == "ISSUE",
+            Movement.quantity < 0,
+            Movement.date >= usage_cutoff,
+        )
+        .group_by(Movement.item_id)
+        .all()
+    )
+    usage_map = {
+        item_id: int(-total)
+        for item_id, total in usage_totals
+        if total and total < 0
+    }
 
     # Determine inventory warning zones
     low_stock_items = []
@@ -150,11 +170,76 @@ def inventory_home():
 
     waiting_items.sort(key=lambda entry: entry["shortage"], reverse=True)
 
+    def _build_chart_entries(source_map):
+        entries = []
+        for item_id, raw_value in source_map.items():
+            value = int(raw_value)
+            if value <= 0:
+                continue
+            item = items_by_id.get(item_id)
+            if not item:
+                continue
+            entries.append(
+                {"sku": item.sku, "name": item.name, "value": value}
+            )
+        entries.sort(key=lambda entry: entry["value"], reverse=True)
+        return entries[:10]
+
+    shortage_entries = []
+    for record in waiting_items:
+        shortage_value = int(record.get("shortage", 0) or 0)
+        if shortage_value <= 0:
+            continue
+        item = record.get("item")
+        sku = item.sku if item else "Unknown"
+        name = item.name if item else "Item awaiting setup"
+        shortage_entries.append(
+            {"sku": sku, "name": name, "value": shortage_value}
+        )
+
+    chart_datasets = {
+        "usage": {
+            "title": "Usage (Last 30 Days)",
+            "description": (
+                "Top components issued in the past 30 days (since "
+                f"{usage_cutoff.strftime('%Y-%m-%d')})."
+            ),
+            "entries": _build_chart_entries(usage_map),
+        },
+        "on_hand": {
+            "title": "Inventory On Hand",
+            "description": "Items with the highest current on-hand balances.",
+            "entries": _build_chart_entries(on_hand_map),
+        },
+        "reserved": {
+            "title": "Reserved for Active Orders",
+            "description": (
+                "Components reserved against open and scheduled work orders."
+            ),
+            "entries": _build_chart_entries(reserved_map),
+        },
+        "shortages": {
+            "title": "Waiting on Material",
+            "description": (
+                "Outstanding shortages preventing orders from progressing."
+            ),
+            "entries": shortage_entries[:10],
+        },
+    }
+
+    preferred_keys = ("usage", "on_hand", "reserved", "shortages")
+    default_chart_key = next(
+        (key for key in preferred_keys if chart_datasets[key]["entries"]),
+        preferred_keys[0],
+    )
+
     return render_template(
         "inventory/home.html",
         waiting_items=waiting_items,
         low_stock_items=low_stock_items,
         near_stock_items=near_stock_items,
+        inventory_chart_data=chart_datasets,
+        inventory_chart_default=default_chart_key,
     )
 
 
