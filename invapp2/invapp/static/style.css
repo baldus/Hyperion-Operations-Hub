@@ -238,56 +238,45 @@ body.light .inventory-table tr.match {
 }
 
 /* --- Work instructions --- */
+.instruction-grid {
+    margin-top: 20px;
+}
+
 .instruction-item {
     display: flex;
     flex-direction: column;
     gap: 10px;
 }
 
-.instruction-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.75rem 1.1rem;
-    border-radius: 14px;
-    font-weight: 600;
-    text-decoration: none;
-    border: none;
-    cursor: pointer;
-    width: 100%;
-    min-height: 48px;
-    text-align: center;
-    word-break: break-word;
-    white-space: normal;
-    color: #ffffff;
-    background: linear-gradient(135deg, #3a7bd5, #00d2ff);
-    box-shadow: 0 10px 20px rgba(58, 123, 213, 0.25);
-    transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
-}
-
-.instruction-btn:hover,
-.instruction-btn:focus {
-    transform: translateY(-1px);
-    box-shadow: 0 14px 24px rgba(58, 123, 213, 0.35);
-    filter: brightness(1.05);
-}
-
-body.light .instruction-btn {
-    color: #ffffff;
-}
-
-.instruction-btn--danger {
-    background: linear-gradient(135deg, #ff6a6a, #d9534f);
-    box-shadow: 0 10px 20px rgba(217, 83, 79, 0.25);
-}
-
-.instruction-btn--danger:hover,
-.instruction-btn--danger:focus {
-    box-shadow: 0 14px 24px rgba(217, 83, 79, 0.35);
-}
-
 .instruction-item form {
     width: 100%;
+    margin: 0;
+}
+
+.instruction-item .action-btn {
+    word-break: break-word;
+    white-space: normal;
+    text-align: center;
+}
+
+.action-btn--danger {
+    background-color: #c0392b;
+    color: #ffffff;
+}
+
+.action-btn--danger:hover,
+.action-btn--danger:focus {
+    background-color: #a93226;
+}
+
+body.light .action-btn--danger {
+    background-color: #e74c3c;
+    color: #ffffff;
+}
+
+body.light .action-btn--danger:hover,
+body.light .action-btn--danger:focus {
+    background-color: #d84333;
 }
 
 /* --- Flash Messages --- */
