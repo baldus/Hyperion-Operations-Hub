@@ -198,6 +198,131 @@ body.dark .modal-content {
     gap: 16px;
 }
 
+/* --- Scanner Layout --- */
+.scan-page {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.scan-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.scan-label {
+    font-weight: bold;
+}
+
+#barcodeOutput {
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    font-size: 1rem;
+}
+
+body.light #barcodeOutput {
+    border-color: rgba(0, 0, 0, 0.2);
+}
+
+.scanner-widget {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 16px;
+}
+
+body.light .scanner-widget {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+.scanner-preview {
+    position: relative;
+    background-color: #000;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.scanner-video {
+    width: 100%;
+    height: auto;
+    display: block;
+    min-height: 200px;
+    object-fit: cover;
+}
+
+.scanner-controls {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.scan-actions {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.scan-result {
+    font-size: 0.95rem;
+    min-height: 1.4em;
+}
+
+.scan-status {
+    color: #8bc34a;
+}
+
+.scan-success {
+    color: #4cafef;
+}
+
+.scan-error {
+    color: #f44336;
+}
+
+.scan-help {
+    font-size: 0.9rem;
+    opacity: 0.8;
+}
+
+@media (min-width: 768px) {
+    .scanner-widget {
+        flex-direction: row;
+        align-items: center;
+    }
+
+    .scanner-preview {
+        flex: 2;
+    }
+
+    .scanner-controls {
+        flex: 1;
+        justify-content: flex-start;
+    }
+
+    .scanner-widget .scan-result {
+        flex-basis: 100%;
+    }
+}
+
+@media (max-width: 480px) {
+    .scanner-video {
+        min-height: 160px;
+    }
+
+    .scan-actions {
+        grid-template-columns: 1fr;
+    }
+
+    .scanner-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}
+
 body.light .form-section {
     background-color: #f9f9fb;
     border-color: #d8dbe3;
