@@ -1,1 +1,14 @@
-# Placeholder for requirements.txt
+# Core web framework and utilities
+Flask==2.2.5
+Werkzeug==2.2.3
+
+# Database integration
+Flask-SQLAlchemy==2.5.1
+SQLAlchemy==1.4.52
+psycopg2-binary==2.9.9
+
+# Authentication
+Flask-Login==0.6.3
+
+# Developer tooling / tests
+pytest==8.3.2

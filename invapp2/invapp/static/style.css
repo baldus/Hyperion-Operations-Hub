@@ -108,6 +108,7 @@ body.light .content-card {
 
 /* --- Tables --- */
 .table-container {
+
     margin-top: 18px;
     margin-bottom: 28px;
     overflow-x: auto;
@@ -116,6 +117,7 @@ body.light .content-card {
     border: 1px solid rgba(255, 255, 255, 0.08);
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
     padding: 12px;
+
 }
 
 body.light .table-container {
@@ -127,7 +129,10 @@ body.light .table-container {
 .inventory-table {
     width: 100%;
     border-collapse: collapse;
+
     min-width: 640px;
+
+
 }
 
 .inventory-table thead {
