@@ -9,12 +9,12 @@ from invapp.extensions import db
 from invapp.models import (
     Item,
     Order,
-    OrderBOMComponent,
-    OrderItem,
+    OrderComponent,
+    OrderLine,
     OrderStatus,
-    OrderStep,
-    OrderStepComponent,
     Reservation,
+    RoutingStep,
+    RoutingStepComponent,
 )
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
@@ -25,7 +25,7 @@ def _search_filter(query, search_term):
         return query
 
     like_term = f"%{search_term}%"
-    return query.join(Order.items).join(OrderItem.item).filter(
+    return query.join(Order.order_lines).join(OrderLine.item).filter(
         or_(
             Order.order_number.ilike(like_term),
             Item.sku.ilike(like_term),
@@ -38,8 +38,8 @@ def _search_filter(query, search_term):
 def orders_home():
     search_term = request.args.get("q", "").strip()
     query = Order.query.options(
-        joinedload(Order.items).joinedload(OrderItem.item),
-        joinedload(Order.steps),
+        joinedload(Order.order_lines).joinedload(OrderLine.item),
+        joinedload(Order.routing_steps),
     ).filter(Order.status.in_(OrderStatus.ACTIVE_STATES))
     query = _search_filter(query, search_term)
     open_orders = query.order_by(Order.promised_date.is_(None), Order.promised_date, Order.order_number).all()
@@ -49,7 +49,7 @@ def orders_home():
 @bp.route("/open")
 def view_open_orders():
     orders = (
-        Order.query.options(joinedload(Order.items).joinedload(OrderItem.item))
+        Order.query.options(joinedload(Order.order_lines).joinedload(OrderLine.item))
         .filter(Order.status == OrderStatus.OPEN)
         .order_by(Order.order_number)
         .all()
@@ -60,7 +60,7 @@ def view_open_orders():
 @bp.route("/closed")
 def view_closed_orders():
     orders = (
-        Order.query.options(joinedload(Order.items).joinedload(OrderItem.item))
+        Order.query.options(joinedload(Order.order_lines).joinedload(OrderLine.item))
         .filter(Order.status == OrderStatus.CLOSED)
         .order_by(Order.order_number)
         .all()
@@ -306,7 +306,7 @@ def new_order():
             scheduled_start_date=scheduled_start_date,
             scheduled_completion_date=scheduled_completion_date,
         )
-        order_item = OrderItem(
+        order_line = OrderLine(
             order=order,
             item_id=finished_good.id,
             quantity=quantity,
@@ -315,14 +315,14 @@ def new_order():
             scheduled_completion_date=scheduled_completion_date,
         )
         db.session.add(order)
-        db.session.add(order_item)
+        db.session.add(order_line)
 
         bom_entities = {}
         for component_entry in bom_components:
             component_item = component_entry["item"]
             component_quantity = component_entry["quantity"]
-            bom_component = OrderBOMComponent(
-                order_item=order_item,
+            bom_component = OrderComponent(
+                order_line=order_line,
                 component_item_id=component_item.id,
                 quantity=component_quantity,
             )
@@ -330,25 +330,25 @@ def new_order():
             bom_entities[component_entry["sku"]] = bom_component
             db.session.add(
                 Reservation(
-                    order_item=order_item,
+                    order_line=order_line,
                     item_id=component_item.id,
                     quantity=component_quantity * quantity,
                 )
             )
 
         for step in sorted(routing_steps, key=lambda step: step["sequence"]):
-            order_step = OrderStep(
+            routing_step = RoutingStep(
                 order=order,
                 sequence=step["sequence"],
                 work_cell=step["work_cell"] or None,
                 description=step["instructions"],
             )
-            db.session.add(order_step)
+            db.session.add(routing_step)
             for component_sku in step["components"]:
                 db.session.add(
-                    OrderStepComponent(
-                        order_step=order_step,
-                        bom_component=bom_entities[component_sku],
+                    RoutingStepComponent(
+                        routing_step=routing_step,
+                        order_component=bom_entities[component_sku],
                     )
                 )
 
@@ -363,17 +363,17 @@ def new_order():
 def view_order(order_id):
     order = (
         Order.query.options(
-            joinedload(Order.items)
-            .joinedload(OrderItem.bom_components)
-            .joinedload(OrderBOMComponent.component_item),
-            joinedload(Order.items).joinedload(OrderItem.item),
-            joinedload(Order.items)
-            .joinedload(OrderItem.reservations)
+            joinedload(Order.order_lines)
+            .joinedload(OrderLine.components)
+            .joinedload(OrderComponent.component_item),
+            joinedload(Order.order_lines).joinedload(OrderLine.item),
+            joinedload(Order.order_lines)
+            .joinedload(OrderLine.reservations)
             .joinedload(Reservation.item),
-            joinedload(Order.steps)
-            .joinedload(OrderStep.component_usages)
-            .joinedload(OrderStepComponent.bom_component)
-            .joinedload(OrderBOMComponent.component_item),
+            joinedload(Order.routing_steps)
+            .joinedload(RoutingStep.component_links)
+            .joinedload(RoutingStepComponent.order_component)
+            .joinedload(OrderComponent.component_item),
         )
         .filter_by(id=order_id)
         .first_or_404()

@@ -10,7 +10,17 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from invapp import create_app
 from invapp.extensions import db
-from invapp.models import Item, Order, Reservation
+from sqlalchemy.exc import IntegrityError
+
+from invapp.models import (
+    Item,
+    Order,
+    OrderComponent,
+    OrderLine,
+    Reservation,
+    RoutingStep,
+    RoutingStepComponent,
+)
 
 
 @pytest.fixture
@@ -64,19 +74,20 @@ def test_order_creation(client, app, items):
         order = Order.query.filter_by(order_number='ORD001').first()
         assert order is not None
         assert order.promised_date == date(2024, 1, 10)
-        primary_item = order.primary_item
-        assert primary_item.item_id == finished.id
-        assert primary_item.quantity == 5
-        bom_component = primary_item.bom_components[0]
+        primary_line = order.primary_line
+        assert primary_line.item_id == finished.id
+        assert primary_line.quantity == 5
+        bom_component = primary_line.components[0]
         assert bom_component.component_item_id == component.id
         assert bom_component.quantity == 2
-        assert Reservation.query.filter_by(order_item_id=primary_item.id).one().quantity == 10
-        assert len(order.steps) == 1
-        step = order.steps[0]
+        reservation = Reservation.query.filter_by(order_line_id=primary_line.id).one()
+        assert reservation.quantity == 10
+        assert len(order.routing_steps) == 1
+        step = order.routing_steps[0]
         assert step.sequence == 1
         assert step.work_cell == 'Assembly'
         assert step.description == 'Assemble parts'
-        assert step.component_usages[0].bom_component_id == bom_component.id
+        assert step.components[0].id == bom_component.id
 
 
 def test_bom_validation(client, app, items):
@@ -118,7 +129,7 @@ def test_reservation_behavior(client, app, items):
     }, follow_redirects=True)
     with app.app_context():
         order = Order.query.filter_by(order_number='ORD003').first()
-        res = Reservation.query.filter_by(order_item_id=order.items[0].id).first()
+        res = Reservation.query.filter_by(order_line_id=order.order_lines[0].id).first()
         assert res is not None
         assert res.item_id == component.id
         assert res.quantity == 6
@@ -143,3 +154,77 @@ def test_component_usage_required(client, app, items):
     assert b'Missing usage for' in resp.data
     with app.app_context():
         assert Order.query.filter_by(order_number='ORD004').count() == 0
+
+
+def test_routing_step_component_relationships(app, items):
+    finished, component = items
+    with app.app_context():
+        order = Order(
+            order_number='ORDREL',
+            promised_date=date(2024, 5, 1),
+            scheduled_start_date=date(2024, 4, 1),
+            scheduled_completion_date=date(2024, 4, 20),
+        )
+        line = OrderLine(
+            order=order,
+            item_id=finished.id,
+            quantity=1,
+            promised_date=order.promised_date,
+            scheduled_start_date=order.scheduled_start_date,
+            scheduled_completion_date=order.scheduled_completion_date,
+        )
+        component_row = OrderComponent(
+            order_line=line,
+            component_item_id=component.id,
+            quantity=2,
+        )
+        step = RoutingStep(
+            order=order,
+            sequence=1,
+            work_cell='Assembly',
+            description='Link component',
+        )
+        RoutingStepComponent(order_component=component_row, routing_step=step)
+        db.session.add(order)
+        db.session.commit()
+
+        persisted = Order.query.filter_by(order_number='ORDREL').one()
+        assert persisted.routing_steps[0].components[0].id == component_row.id
+        assert component_row.routing_steps[0].id == step.id
+
+
+def test_order_schedule_constraints_enforced(app):
+    with app.app_context():
+        order = Order(
+            order_number='ORDBAD',
+            promised_date=date(2024, 1, 1),
+            scheduled_start_date=date(2024, 1, 5),
+            scheduled_completion_date=date(2024, 1, 3),
+        )
+        db.session.add(order)
+        with pytest.raises(IntegrityError):
+            db.session.commit()
+        db.session.rollback()
+
+
+def test_order_line_schedule_constraints_enforced(app, items):
+    finished, _ = items
+    with app.app_context():
+        order = Order(
+            order_number='ORDLINE',
+            promised_date=date(2024, 6, 1),
+            scheduled_start_date=date(2024, 5, 1),
+            scheduled_completion_date=date(2024, 5, 20),
+        )
+        line = OrderLine(
+            order=order,
+            item_id=finished.id,
+            quantity=1,
+            promised_date=date(2024, 5, 10),
+            scheduled_start_date=date(2024, 5, 15),
+            scheduled_completion_date=date(2024, 5, 12),
+        )
+        db.session.add_all([order, line])
+        with pytest.raises(IntegrityError):
+            db.session.commit()
+        db.session.rollback()
