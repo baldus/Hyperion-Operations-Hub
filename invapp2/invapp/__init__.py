@@ -43,16 +43,18 @@ def _ensure_order_schema(engine):
 
     columns_to_add = []
     if "customer_name" not in order_columns:
-        columns_to_add.append("customer_name")
+        columns_to_add.append(("customer_name", "VARCHAR"))
     if "created_by" not in order_columns:
-        columns_to_add.append("created_by")
+        columns_to_add.append(("created_by", "VARCHAR"))
+    if "general_notes" not in order_columns:
+        columns_to_add.append(("general_notes", "TEXT"))
 
     if columns_to_add:
         with engine.begin() as conn:
-            for column in columns_to_add:
+            for column_name, column_type in columns_to_add:
                 conn.execute(
                     text(
-                        f"ALTER TABLE \"order\" ADD COLUMN {column} VARCHAR"
+                        f"ALTER TABLE \"order\" ADD COLUMN {column_name} {column_type}"
                     )
                 )
 

@@ -258,6 +258,7 @@ def new_order():
         "quantity": "",
         "customer_name": "",
         "created_by": "",
+        "general_notes": "",
         "promised_date": "",
         "scheduled_start_date": "",
         "scheduled_completion_date": "",
@@ -272,6 +273,8 @@ def new_order():
         quantity_raw = (request.form.get("quantity") or "").strip()
         customer_name = (request.form.get("customer_name") or "").strip()
         created_by = (request.form.get("created_by") or "").strip()
+        general_notes = request.form.get("general_notes") or ""
+        general_notes_db_value = general_notes if general_notes.strip() else None
         promised_date_raw = (request.form.get("promised_date") or "").strip()
         scheduled_start_raw = (
             request.form.get("scheduled_start_date") or ""
@@ -289,6 +292,7 @@ def new_order():
                 "quantity": quantity_raw,
                 "customer_name": customer_name,
                 "created_by": created_by,
+                "general_notes": general_notes,
                 "promised_date": promised_date_raw,
                 "scheduled_start_date": scheduled_start_raw,
                 "scheduled_completion_date": scheduled_completion_raw,
@@ -519,6 +523,7 @@ def new_order():
             order_number=order_number,
             customer_name=customer_name,
             created_by=created_by,
+            general_notes=general_notes_db_value,
             promised_date=promised_date,
             scheduled_start_date=scheduled_start_date,
             scheduled_completion_date=scheduled_completion_date,
@@ -776,8 +781,11 @@ def edit_order(order_id):
     status_choices = OrderStatus.ALL_STATUSES
     if request.method == "POST":
         status = request.form.get("status", order.status)
+        general_notes = request.form.get("general_notes") or ""
+        general_notes_db_value = general_notes if general_notes.strip() else None
         if status not in set(status_choices):
             flash("Invalid status", "danger")
+            order.general_notes = general_notes_db_value
             return render_template(
                 "orders/edit.html",
                 order=order,
@@ -786,6 +794,7 @@ def edit_order(order_id):
             )
 
         order.status = status
+        order.general_notes = general_notes_db_value
         db.session.commit()
         flash("Order updated", "success")
         return redirect(url_for("orders.view_order", order_id=order.id))

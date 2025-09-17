@@ -2,6 +2,7 @@ import json
 import os
 import sys
 from datetime import date, timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -32,6 +33,7 @@ def app():
     app = create_app({'TESTING': True, 'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:'})
     with app.app_context():
         db.create_all()
+        db.session.expire_on_commit = False
         yield app
         db.session.remove()
         db.drop_all()
@@ -50,7 +52,11 @@ def items(app):
         location = Location(code='MAIN', description='Main Storage')
         db.session.add_all([finished, component, location])
         db.session.commit()
-        yield finished, component, location
+        yield (
+            SimpleNamespace(id=finished.id, sku=finished.sku, name=finished.name),
+            SimpleNamespace(id=component.id, sku=component.sku, name=component.name),
+            SimpleNamespace(id=location.id, code=location.code, description=location.description),
+        )
 
 
 def test_order_creation(client, app, items):
@@ -76,6 +82,7 @@ def test_order_creation(client, app, items):
         'quantity': '5',
         'customer_name': 'Acme Industries',
         'created_by': 'Alice',
+        'general_notes': 'Initial note\nWith details',
         'promised_date': (today + timedelta(days=15)).isoformat(),
         'scheduled_start_date': (today + timedelta(days=7)).isoformat(),
         'scheduled_completion_date': (today + timedelta(days=10)).isoformat(),
@@ -99,6 +106,7 @@ def test_order_creation(client, app, items):
         assert order.promised_date == today + timedelta(days=15)
         assert order.customer_name == 'Acme Industries'
         assert order.created_by == 'Alice'
+        assert order.general_notes == 'Initial note\nWith details'
         assert order.status == OrderStatus.SCHEDULED
         primary_line = order.primary_line
         assert primary_line.item_id == finished.id
@@ -126,6 +134,7 @@ def test_bom_validation(client, app, items):
         'quantity': '1',
         'customer_name': 'Beta Corp',
         'created_by': 'Bob',
+        'general_notes': 'Validation notes',
         'promised_date': '2024-02-01',
         'scheduled_start_date': '2024-01-20',
         'scheduled_completion_date': '2024-01-25',
@@ -136,7 +145,7 @@ def test_bom_validation(client, app, items):
             {'sequence': 1, 'work_cell': '', 'instructions': 'Step', 'components': ['MISSING']}
         ]),
     }, follow_redirects=True)
-    assert b"BOM component SKU 'MISSING' was not found." in resp.data
+    assert b"BOM component SKU &#39;MISSING&#39; was not found." in resp.data
     with app.app_context():
         assert Order.query.filter_by(order_number='ORD002').count() == 0
 
@@ -164,6 +173,7 @@ def test_reservation_behavior(client, app, items):
         'quantity': '2',
         'customer_name': 'Gamma LLC',
         'created_by': 'Charlie',
+        'general_notes': 'Reservation notes',
         'promised_date': (today + timedelta(days=20)).isoformat(),
         'scheduled_start_date': (today + timedelta(days=5)).isoformat(),
         'scheduled_completion_date': (today + timedelta(days=12)).isoformat(),
@@ -206,6 +216,7 @@ def test_waiting_status_when_inventory_insufficient(client, app, items):
         'quantity': '3',
         'customer_name': 'Short Supply Co',
         'created_by': 'Sam',
+        'general_notes': 'Waiting for material',
         'promised_date': (today + timedelta(days=21)).isoformat(),
         'scheduled_start_date': (today + timedelta(days=9)).isoformat(),
         'scheduled_completion_date': (today + timedelta(days=12)).isoformat(),
@@ -234,6 +245,7 @@ def test_component_usage_required(client, app, items):
         'quantity': '1',
         'customer_name': 'Delta Co',
         'created_by': 'Diana',
+        'general_notes': 'Routing requires components',
         'promised_date': '2024-04-01',
         'scheduled_start_date': '2024-03-20',
         'scheduled_completion_date': '2024-03-22',
@@ -272,6 +284,7 @@ def test_routing_status_updates(client, app, items):
         'quantity': '1',
         'customer_name': 'Eta Manufacturing',
         'created_by': 'Evan',
+        'general_notes': 'Routing notes',
         'promised_date': (today + timedelta(days=18)).isoformat(),
         'scheduled_start_date': (today + timedelta(days=3)).isoformat(),
         'scheduled_completion_date': (today + timedelta(days=8)).isoformat(),
@@ -329,6 +342,60 @@ def test_routing_status_updates(client, app, items):
         reservation = Reservation.query.filter_by(order_line_id=order.order_lines[0].id, item_id=component.id).one()
         assert reservation.quantity == required_qty
         assert Movement.query.filter_by(movement_type='ISSUE').count() == 0
+
+
+def test_edit_updates_general_notes(client, app, items):
+    finished, component, location = items
+    with app.app_context():
+        db.session.add(
+            Movement(
+                item_id=component.id,
+                location_id=location.id,
+                quantity=10,
+                movement_type='RECEIPT',
+            )
+        )
+        db.session.commit()
+
+    with client.session_transaction() as session:
+        session['is_admin'] = True
+
+    today = date.today()
+    client.post('/orders/new', data={
+        'order_number': 'ORDEDIT',
+        'finished_good_sku': finished.sku,
+        'quantity': '1',
+        'customer_name': 'Edit Corp',
+        'created_by': 'Eli',
+        'general_notes': 'Original notes',
+        'promised_date': (today + timedelta(days=12)).isoformat(),
+        'scheduled_start_date': (today + timedelta(days=3)).isoformat(),
+        'scheduled_completion_date': (today + timedelta(days=6)).isoformat(),
+        'bom_data': json.dumps([
+            {'sku': component.sku, 'quantity': 1}
+        ]),
+        'routing_data': json.dumps([
+            {'sequence': 1, 'work_cell': 'Assembly', 'instructions': 'Build', 'components': [component.sku]}
+        ]),
+    }, follow_redirects=True)
+
+    with app.app_context():
+        order = Order.query.filter_by(order_number='ORDEDIT').first()
+        assert order is not None
+        assert order.general_notes == 'Original notes'
+        order_id = order.id
+        current_status = order.status
+
+    resp = client.post(f'/orders/{order_id}/edit', data={
+        'status': current_status,
+        'general_notes': 'Updated notes\nSecond line',
+    }, follow_redirects=True)
+    assert resp.status_code == 200
+
+    with app.app_context():
+        order = Order.query.get(order_id)
+        assert order.general_notes == 'Updated notes\nSecond line'
+        assert order.status == current_status
 
 
 def test_routing_step_component_relationships(app, items):

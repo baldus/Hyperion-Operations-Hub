@@ -101,6 +101,7 @@ class Order(db.Model):
     status = db.Column(db.String, nullable=False, default=OrderStatus.SCHEDULED)
     customer_name = db.Column(db.String, nullable=True)
     created_by = db.Column(db.String, nullable=True)
+    general_notes = db.Column(db.Text, nullable=True)
     promised_date = db.Column(db.Date, nullable=True)
     scheduled_start_date = db.Column(db.Date, nullable=True)
     scheduled_completion_date = db.Column(db.Date, nullable=True)
