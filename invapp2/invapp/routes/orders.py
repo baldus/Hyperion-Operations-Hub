@@ -10,12 +10,13 @@ from flask import (
     session,
     url_for,
 )
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload
 
 from invapp.extensions import db
 from invapp.models import (
     Item,
+    Movement,
     Order,
     OrderComponent,
     OrderLine,
@@ -42,6 +43,29 @@ def _search_filter(query, search_term):
     )
 
 
+def _available_quantity(item_id: int) -> int:
+    """Return on-hand inventory minus active reservations for an item."""
+
+    total_on_hand = (
+        db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+        .filter(Movement.item_id == item_id)
+        .scalar()
+    ) or 0
+
+    reserved_total = (
+        db.session.query(func.coalesce(func.sum(Reservation.quantity), 0))
+        .join(OrderLine)
+        .join(Order)
+        .filter(
+            Reservation.item_id == item_id,
+            Order.status.in_(OrderStatus.RESERVABLE_STATES),
+        )
+        .scalar()
+    ) or 0
+
+    return max(0, int(total_on_hand) - int(reserved_total))
+
+
 @bp.route("/")
 def orders_home():
     search_term = request.args.get("q", "").strip()
@@ -58,7 +82,7 @@ def orders_home():
 def view_open_orders():
     orders = (
         Order.query.options(joinedload(Order.order_lines).joinedload(OrderLine.item))
-        .filter(Order.status == OrderStatus.OPEN)
+        .filter(Order.status.in_(OrderStatus.ACTIVE_STATES))
         .order_by(Order.order_number)
         .all()
     )
@@ -325,6 +349,39 @@ def new_order():
                 "orders/new.html", items=items, form_data=form_data
             )
 
+        shortages = []
+        reservations_needed = []
+        if quantity is not None:
+            for component_entry in bom_components:
+                component_item = component_entry["item"]
+                required_total = component_entry["quantity"] * quantity
+                available_quantity = _available_quantity(component_item.id)
+                component_entry["required_total"] = required_total
+                component_entry["available_quantity"] = available_quantity
+                if required_total > available_quantity:
+                    shortages.append(
+                        {
+                            "item": component_item,
+                            "required": required_total,
+                            "available": available_quantity,
+                        }
+                    )
+                else:
+                    reservations_needed.append(
+                        {
+                            "item": component_item,
+                            "quantity": required_total,
+                        }
+                    )
+
+        today = datetime.utcnow().date()
+        if scheduled_start_date and scheduled_start_date > today:
+            order_status = OrderStatus.SCHEDULED
+        else:
+            order_status = OrderStatus.OPEN
+        if shortages:
+            order_status = OrderStatus.WAITING_MATERIAL
+
         order = Order(
             order_number=order_number,
             customer_name=customer_name,
@@ -332,6 +389,7 @@ def new_order():
             promised_date=promised_date,
             scheduled_start_date=scheduled_start_date,
             scheduled_completion_date=scheduled_completion_date,
+            status=order_status,
         )
         order_line = OrderLine(
             order=order,
@@ -355,13 +413,16 @@ def new_order():
             )
             db.session.add(bom_component)
             bom_entities[component_entry["sku"]] = bom_component
-            db.session.add(
-                Reservation(
-                    order_line=order_line,
-                    item_id=component_item.id,
-                    quantity=component_quantity * quantity,
+
+        if not shortages:
+            for reservation_entry in reservations_needed:
+                db.session.add(
+                    Reservation(
+                        order_line=order_line,
+                        item_id=reservation_entry["item"].id,
+                        quantity=reservation_entry["quantity"],
+                    )
                 )
-            )
 
         for step in sorted(routing_steps, key=lambda step: step["sequence"]):
             routing_step = RoutingStep(
@@ -380,7 +441,17 @@ def new_order():
                 )
 
         db.session.commit()
-        flash("Order created", "success")
+        if shortages:
+            shortage_summary = ", ".join(
+                f"{entry['item'].sku} (required {entry['required']}, available {entry['available']})"
+                for entry in shortages
+            )
+            message = "Order created but waiting on material"
+            if shortage_summary:
+                message = f"{message}: {shortage_summary}"
+            flash(message, "warning")
+        else:
+            flash("Order created and materials reserved", "success")
         return redirect(url_for("orders.view_order", order_id=order.id))
 
     return render_template("orders/new.html", items=items, form_data=form_data)
@@ -443,18 +514,29 @@ def update_routing(order_id):
 @bp.route("/<int:order_id>/edit", methods=["GET", "POST"])
 def edit_order(order_id):
     order = Order.query.get_or_404(order_id)
+    status_choices = OrderStatus.ALL_STATUSES
     if request.method == "POST":
         status = request.form.get("status", order.status)
-        if status not in {OrderStatus.OPEN, OrderStatus.CLOSED, OrderStatus.CANCELLED}:
+        if status not in set(status_choices):
             flash("Invalid status", "danger")
-            return render_template("orders/edit.html", order=order)
+            return render_template(
+                "orders/edit.html",
+                order=order,
+                statuses=status_choices,
+                status_labels=OrderStatus.LABELS,
+            )
 
         order.status = status
         db.session.commit()
         flash("Order updated", "success")
         return redirect(url_for("orders.view_order", order_id=order.id))
 
-    return render_template("orders/edit.html", order=order)
+    return render_template(
+        "orders/edit.html",
+        order=order,
+        statuses=status_choices,
+        status_labels=OrderStatus.LABELS,
+    )
 
 
 @bp.route("/<int:order_id>/delete", methods=["POST"])

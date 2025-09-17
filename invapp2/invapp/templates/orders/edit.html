@@ -4,8 +4,11 @@
 <form method="post">
     <label>Status:
         <select name="status">
-            <option value="OPEN" {% if order.status=='OPEN' %}selected{% endif %}>OPEN</option>
-            <option value="CLOSED" {% if order.status=='CLOSED' %}selected{% endif %}>CLOSED</option>
+            {% for value in statuses %}
+                <option value="{{ value }}" {% if order.status==value %}selected{% endif %}>
+                    {{ status_labels.get(value, value.replace('_', ' ').title()) }}
+                </option>
+            {% endfor %}
         </select>
     </label><br>
     <button type="submit">Save</button>
