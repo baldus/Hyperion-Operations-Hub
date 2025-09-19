@@ -17,6 +17,7 @@ from flask import (
 from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload, load_only
 
+from invapp.auth import role_required
 from invapp.models import (
     Batch,
     Item,
@@ -541,6 +542,7 @@ def add_item():
 
 
 @bp.route("/item/<int:item_id>/edit", methods=["GET", "POST"])
+@role_required("admin")
 def edit_item(item_id):
     item = Item.query.get_or_404(item_id)
 
@@ -577,6 +579,37 @@ def edit_item(item_id):
         return redirect(url_for("inventory.list_items"))
 
     return render_template("inventory/edit_item.html", item=item)
+
+
+@bp.route("/item/<int:item_id>/delete", methods=["POST"])
+@role_required("admin")
+def delete_item(item_id):
+    item = Item.query.get_or_404(item_id)
+
+    blocking_reasons = []
+    if Movement.query.filter_by(item_id=item.id).first():
+        blocking_reasons.append("inventory movements")
+    if Batch.query.filter_by(item_id=item.id).first():
+        blocking_reasons.append("batches")
+    if Reservation.query.filter_by(item_id=item.id).first():
+        blocking_reasons.append("reservations")
+    if OrderLine.query.filter_by(item_id=item.id).first():
+        blocking_reasons.append("orders")
+    if OrderComponent.query.filter_by(component_item_id=item.id).first():
+        blocking_reasons.append("bill of material components")
+
+    if blocking_reasons:
+        reasons = ", ".join(blocking_reasons)
+        flash(
+            f"Cannot delete item {item.sku} because related {reasons} exist.",
+            "danger",
+        )
+        return redirect(url_for("inventory.edit_item", item_id=item.id))
+
+    db.session.delete(item)
+    db.session.commit()
+    flash(f"Item {item.sku} deleted successfully.", "success")
+    return redirect(url_for("inventory.list_items"))
 
 
 @bp.route("/items/import", methods=["GET", "POST"])
@@ -759,6 +792,64 @@ def add_location():
         flash("Location added successfully", "success")
         return redirect(url_for("inventory.list_locations"))
     return render_template("inventory/add_location.html")
+
+
+@bp.route("/location/<int:location_id>/edit", methods=["GET", "POST"])
+@role_required("admin")
+def edit_location(location_id):
+    location = Location.query.get_or_404(location_id)
+
+    if request.method == "POST":
+        code = request.form.get("code", "").strip()
+        description = request.form.get("description", "").strip()
+
+        if not code:
+            flash("Location code is required.", "danger")
+        else:
+            conflict = (
+                Location.query.filter(Location.code == code)
+                .filter(Location.id != location.id)
+                .first()
+            )
+            if conflict:
+                flash("Another location with that code already exists.", "danger")
+            else:
+                location.code = code
+                location.description = description
+                db.session.commit()
+                flash(f"Location {location.code} updated successfully.", "success")
+                return redirect(url_for("inventory.list_locations"))
+
+        form_code = code
+        form_description = description
+    else:
+        form_code = location.code
+        form_description = location.description or ""
+
+    return render_template(
+        "inventory/edit_location.html",
+        location=location,
+        form_code=form_code,
+        form_description=form_description,
+    )
+
+
+@bp.route("/location/<int:location_id>/delete", methods=["POST"])
+@role_required("admin")
+def delete_location(location_id):
+    location = Location.query.get_or_404(location_id)
+
+    if Movement.query.filter_by(location_id=location.id).first():
+        flash(
+            "Cannot delete this location because inventory movements reference it.",
+            "danger",
+        )
+        return redirect(url_for("inventory.edit_location", location_id=location.id))
+
+    db.session.delete(location)
+    db.session.commit()
+    flash(f"Location {location.code} deleted successfully.", "success")
+    return redirect(url_for("inventory.list_locations"))
 
 
 @bp.route("/locations/import", methods=["GET", "POST"])
