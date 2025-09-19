@@ -49,6 +49,8 @@ def _ensure_order_schema(engine):
         "order_bom_component",
         "order_step",
         "order_step_component",
+        "item_bom",
+        "item_bom_component",
     }
     missing_tables = required_tables - existing_tables
     if missing_tables:

@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import sys
@@ -14,6 +15,8 @@ from invapp.extensions import db
 from sqlalchemy.exc import IntegrityError
 
 from invapp.models import (
+    BillOfMaterial,
+    BillOfMaterialComponent,
     Item,
     Location,
     Movement,
@@ -470,3 +473,135 @@ def test_order_line_schedule_constraints_enforced(app, items):
         with pytest.raises(IntegrityError):
             db.session.commit()
         db.session.rollback()
+
+def test_fetch_bom_template_requires_admin(client, app, items):
+    finished, component, _ = items
+    with app.app_context():
+        template = BillOfMaterial(item_id=finished.id)
+        db.session.add(template)
+        db.session.add(
+            BillOfMaterialComponent(bom=template, component_item_id=component.id, quantity=3)
+        )
+        db.session.commit()
+
+    resp = client.get(f'/orders/bom-template/{finished.sku}')
+    assert resp.status_code == 403
+
+
+
+def test_fetch_bom_template_as_admin(client, app, items):
+    finished, component, _ = items
+    with app.app_context():
+        template = BillOfMaterial(item_id=finished.id)
+        db.session.add(template)
+        db.session.add(
+            BillOfMaterialComponent(bom=template, component_item_id=component.id, quantity=4)
+        )
+        db.session.commit()
+
+    with client.session_transaction() as session:
+        session['is_admin'] = True
+
+    resp = client.get(f'/orders/bom-template/{finished.sku}')
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload['item']['sku'] == finished.sku
+    assert payload['components'][0]['quantity'] == 4
+
+
+
+def test_new_order_can_save_bom_template(client, app, items):
+    finished, component, location = items
+    with app.app_context():
+        db.session.add(
+            Movement(
+                item_id=component.id,
+                location_id=location.id,
+                quantity=20,
+                movement_type='RECEIPT',
+            )
+        )
+        db.session.commit()
+
+    with client.session_transaction() as session:
+        session['is_admin'] = True
+
+    today = date.today()
+    payload = {
+        'order_number': 'ORDLIB',
+        'finished_good_sku': finished.sku,
+        'quantity': '2',
+        'customer_name': 'Library Inc',
+        'created_by': 'Libby',
+        'general_notes': '',
+        'promised_date': (today + timedelta(days=14)).isoformat(),
+        'scheduled_start_date': (today + timedelta(days=3)).isoformat(),
+        'scheduled_completion_date': (today + timedelta(days=7)).isoformat(),
+        'bom_data': json.dumps([
+            {'sku': component.sku, 'quantity': 2}
+        ]),
+        'routing_data': json.dumps([
+            {'sequence': 1, 'work_cell': 'Cell', 'instructions': 'Assemble', 'components': [component.sku]}
+        ]),
+        'save_bom_template': '1',
+    }
+    resp = client.post('/orders/new', data=payload, follow_redirects=True)
+    assert resp.status_code == 200
+
+    with app.app_context():
+        template = BillOfMaterial.query.filter_by(item_id=finished.id).one()
+        assert template.components[0].component_item_id == component.id
+        assert template.components[0].quantity == 2
+
+
+
+def test_bom_library_manual_creation(client, app, items):
+    finished, component, _ = items
+
+    with client.session_transaction() as session:
+        session['is_admin'] = True
+
+    payload = {
+        'action': 'create',
+        'finished_good_sku': finished.sku,
+        'bom_data': json.dumps([
+            {'sku': component.sku, 'quantity': 5}
+        ]),
+    }
+
+    resp = client.post('/orders/bom-library', data=payload, follow_redirects=True)
+    assert resp.status_code == 200
+
+    with app.app_context():
+        template = BillOfMaterial.query.filter_by(item_id=finished.id).one()
+        assert template.components[0].component_item_id == component.id
+        assert template.components[0].quantity == 5
+
+
+
+def test_bom_library_csv_import_updates_template(client, app, items):
+    finished, component, _ = items
+    with app.app_context():
+        template = BillOfMaterial(item_id=finished.id)
+        db.session.add(template)
+        db.session.add(
+            BillOfMaterialComponent(bom=template, component_item_id=component.id, quantity=1)
+        )
+        db.session.commit()
+
+    with client.session_transaction() as session:
+        session['is_admin'] = True
+
+    csv_content = f"component_sku,quantity\n{component.sku},7\n"
+    data = {
+        'action': 'import_csv',
+        'finished_good_sku': finished.sku,
+        'csv_file': (io.BytesIO(csv_content.encode('utf-8')), 'template.csv'),
+    }
+
+    resp = client.post('/orders/bom-library', data=data, content_type='multipart/form-data', follow_redirects=True)
+    assert resp.status_code == 200
+
+    with app.app_context():
+        template = BillOfMaterial.query.filter_by(item_id=finished.id).one()
+        assert template.components[0].quantity == 7
