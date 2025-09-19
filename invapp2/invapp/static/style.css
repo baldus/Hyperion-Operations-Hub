@@ -579,6 +579,12 @@ body.light .form-section {
     gap: 16px;
 }
 
+.section-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
 .section-help {
     margin: 0;
     color: rgba(255, 255, 255, 0.7);
@@ -643,6 +649,75 @@ body.light .form-section select {
 .form-section textarea {
     min-height: 72px;
     resize: vertical;
+}
+
+.import-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    border-radius: 10px;
+    border: 1px dashed rgba(255, 255, 255, 0.25);
+    background-color: rgba(255, 255, 255, 0.04);
+}
+
+body.light .import-panel {
+    border-color: rgba(0, 0, 0, 0.2);
+    background-color: rgba(0, 0, 0, 0.04);
+}
+
+.import-panel textarea {
+    width: 100%;
+    min-height: 140px;
+    resize: vertical;
+    font-family: 'Fira Code', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    background-color: rgba(0, 0, 0, 0.4);
+    color: inherit;
+}
+
+body.light .import-panel textarea {
+    background-color: #ffffff;
+}
+
+.import-panel .import-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.import-panel .import-error {
+    margin: 0;
+    min-height: 1.2em;
+    color: #ff8a80;
+    font-weight: 600;
+}
+
+body.light .import-panel .import-error {
+    color: #c62828;
+}
+
+.import-panel .import-instructions {
+    margin: 0;
+    font-size: 0.95rem;
+    line-height: 1.4;
+    color: rgba(255, 255, 255, 0.75);
+}
+
+body.light .import-panel .import-instructions {
+    color: #4a4a4a;
+}
+
+.import-panel .import-example {
+    margin: 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background-color: rgba(0, 0, 0, 0.45);
+    font-family: 'Fira Code', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    overflow-x: auto;
+}
+
+body.light .import-panel .import-example {
+    background-color: rgba(0, 0, 0, 0.08);
 }
 
 .table-scroll {

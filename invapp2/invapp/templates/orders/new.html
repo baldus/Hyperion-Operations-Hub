@@ -72,9 +72,23 @@
     <section class="form-section">
         <div class="section-header">
             <h3>Routing Steps</h3>
-            <button type="button" class="action-btn" id="add-routing-step">Add Step</button>
+            <div class="section-actions">
+                <button type="button" class="action-btn secondary" id="import-routing-steps">Import Steps</button>
+                <button type="button" class="action-btn" id="add-routing-step">Add Step</button>
+            </div>
         </div>
         <p class="section-help">Define the work sequence, indicating the work cell, instructions, and which components are consumed during the step.</p>
+        <div id="routing-import-panel" class="import-panel" hidden>
+            <p class="import-instructions">Paste or type routing steps using tabs or commas to separate the sequence, work cell, instructions, and component columns. Component SKUs can be listed together separated by commas, semicolons, spaces, or placed in their own columns.</p>
+            <pre class="import-example">Sequence    Work Cell    Instructions    Components
+10    Assembly    Assemble parts    CMP-100; CMP-200</pre>
+            <textarea id="routing-import-input" rows="6" placeholder="Example: 10    Assembly    Assemble parts    CMP-100; CMP-200"></textarea>
+            <div class="import-actions">
+                <button type="button" class="action-btn" id="routing-import-apply">Use Imported Steps</button>
+                <button type="button" class="action-btn secondary" id="routing-import-cancel">Cancel</button>
+            </div>
+            <p class="import-error" id="routing-import-error"></p>
+        </div>
         <div class="table-scroll">
             <table class="form-table">
                 <thead>
@@ -109,6 +123,12 @@
     const routingDataInput = document.getElementById('routing-data');
     const addBomButton = document.getElementById('add-bom-component');
     const addRoutingButton = document.getElementById('add-routing-step');
+    const importRoutingButton = document.getElementById('import-routing-steps');
+    const routingImportPanel = document.getElementById('routing-import-panel');
+    const routingImportInput = document.getElementById('routing-import-input');
+    const routingImportApply = document.getElementById('routing-import-apply');
+    const routingImportCancel = document.getElementById('routing-import-cancel');
+    const routingImportError = document.getElementById('routing-import-error');
     const form = document.getElementById('new-order-form');
 
     function createBomRow(values = {}) {
@@ -223,6 +243,134 @@
         });
     }
 
+    function normalizeDelimitedCell(cell) {
+        let value = (cell || '').replace(/\r/g, '').trim();
+        if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
+            value = value.slice(1, -1).replace(/""/g, '"');
+        }
+        return value;
+    }
+
+    function splitCsvLine(line) {
+        const cells = [];
+        let current = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i += 1) {
+            const char = line[i];
+            if (char === '"') {
+                if (inQuotes && line[i + 1] === '"') {
+                    current += '"';
+                    i += 1;
+                } else {
+                    inQuotes = !inQuotes;
+                }
+            } else if (char === ',' && !inQuotes) {
+                cells.push(current);
+                current = '';
+            } else {
+                current += char;
+            }
+        }
+        cells.push(current);
+        return cells;
+    }
+
+    function parseComponentValues(tokens) {
+        const cleaned = tokens
+            .map(token => normalizeDelimitedCell(token))
+            .filter(value => value !== '');
+        if (!cleaned.length) {
+            return [];
+        }
+        const combined = cleaned.join(' ');
+        return combined
+            .split(/[\s,;|]+/)
+            .map(part => part.trim())
+            .filter(part => part !== '');
+    }
+
+    function parseRoutingLine(line) {
+        const trimmedLine = (line || '').trim();
+        if (!trimmedLine) {
+            return { skip: true };
+        }
+        const rawCells = trimmedLine.includes('\t') ? trimmedLine.split('\t') : splitCsvLine(trimmedLine);
+        const cells = rawCells.map(cell => normalizeDelimitedCell(cell));
+        while (cells.length && cells[cells.length - 1] === '') {
+            cells.pop();
+        }
+        if (!cells.length) {
+            return { skip: true };
+        }
+        const sequenceRaw = cells[0] || '';
+        if (!sequenceRaw) {
+            return { error: 'Missing sequence number.' };
+        }
+        const sequenceNumber = Number(sequenceRaw);
+        if (!Number.isFinite(sequenceNumber) || !Number.isInteger(sequenceNumber)) {
+            return { error: 'Sequence must be a whole number.' };
+        }
+        let workCell = '';
+        let instructions = '';
+        if (cells.length >= 3) {
+            workCell = cells[1] || '';
+            instructions = cells[2] || '';
+        } else if (cells.length === 2) {
+            instructions = cells[1] || '';
+        }
+        if (!instructions) {
+            return { error: 'Instructions are required.' };
+        }
+        const componentTokens = cells.slice(3);
+        const components = [];
+        parseComponentValues(componentTokens).forEach(sku => {
+            if (!components.includes(sku)) {
+                components.push(sku);
+            }
+        });
+        return {
+            step: {
+                sequence: sequenceNumber,
+                work_cell: workCell,
+                instructions: instructions,
+                components: components,
+            },
+        };
+    }
+
+    function parseRoutingImport(text) {
+        const steps = [];
+        const errors = [];
+        const lines = (text || '').split(/\r?\n/);
+        lines.forEach((line, index) => {
+            const result = parseRoutingLine(line);
+            if (!result || result.skip) {
+                return;
+            }
+            if (result.error) {
+                errors.push(`Line ${index + 1}: ${result.error}`);
+            } else if (result.step) {
+                steps.push(result.step);
+            }
+        });
+        if (!steps.length && !errors.length) {
+            errors.push('No routing steps were detected in the import.');
+        }
+        return { steps, errors };
+    }
+
+    function showRoutingImportPanel() {
+        routingImportPanel.hidden = false;
+        routingImportError.textContent = '';
+        routingImportInput.focus();
+        routingImportPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function hideRoutingImportPanel() {
+        routingImportPanel.hidden = true;
+        routingImportError.textContent = '';
+    }
+
     function collectBomPayload() {
         const entries = [];
         bomBody.querySelectorAll('tr').forEach(row => {
@@ -258,6 +406,25 @@
 
     addBomButton.addEventListener('click', () => createBomRow());
     addRoutingButton.addEventListener('click', () => createRoutingRow());
+    importRoutingButton.addEventListener('click', () => {
+        showRoutingImportPanel();
+    });
+    routingImportCancel.addEventListener('click', () => {
+        hideRoutingImportPanel();
+    });
+    routingImportApply.addEventListener('click', () => {
+        const { steps, errors } = parseRoutingImport(routingImportInput.value);
+        if (errors.length) {
+            routingImportError.textContent = errors.join(' ');
+            return;
+        }
+        routingBody.innerHTML = '';
+        steps.forEach(step => createRoutingRow(step));
+        hideRoutingImportPanel();
+    });
+    routingImportInput.addEventListener('input', () => {
+        routingImportError.textContent = '';
+    });
 
     const initialBom = Array.isArray(initialData.bom) && initialData.bom.length ? initialData.bom : [{}];
     initialBom.forEach(component => createBomRow(component));
