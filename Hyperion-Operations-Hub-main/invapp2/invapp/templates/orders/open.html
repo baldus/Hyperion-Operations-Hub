@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Open Orders</h2>
+{% if session.get('is_admin') %}
+    <a href="{{ url_for('orders.new_order') }}" class="action-btn">Create Order</a>
+{% endif %}
+<table>
+    <tr><th>Order #</th><th>Status</th></tr>
+    {% for order in orders %}
+    <tr>
+        <td><a href="{{ url_for('orders.view_order', order_id=order.id) }}">{{ order.order_number }}</a></td>
+        <td>{{ order.status_label }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endblock %}

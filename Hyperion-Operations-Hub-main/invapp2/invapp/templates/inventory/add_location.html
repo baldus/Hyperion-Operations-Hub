@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Add New Location</h2>
+<form method="POST">
+    <label>Code:</label><br>
+    <input type="text" name="code" required><br><br>
+
+    <label>Description:</label><br>
+    <textarea name="description"></textarea><br><br>
+
+    <button type="submit">Save</button>
+</form>
+{% endblock %}

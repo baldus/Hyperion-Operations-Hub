@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Stock Transfer (Move)</h2>
+
+<form method="POST">
+  <label for="barcodeOutput">SKU:</label><br>
+  <input type="text" id="barcodeOutput" name="sku" value="{{ prefill_sku }}" required><br><br>
+
+  {% include "inventory/_barcode_scanner.html" with input_id="barcodeOutput" lookup_template=lookup_template %}
+  <br>
+
+  <label>Batch / Lot:</label><br>
+  <select name="batch_id" required>
+    {% for batch in batches %}
+      <option value="{{ batch.id }}">{{ batch.lot_number }}</option>
+    {% endfor %}
+  </select><br><br>
+
+  <label>From Location:</label><br>
+  <select name="from_location_id" required>
+    {% for loc in locations %}
+      <option value="{{ loc.id }}">{{ loc.code }}</option>
+    {% endfor %}
+  </select><br><br>
+
+  <label>To Location:</label><br>
+  <select name="to_location_id" required>
+    {% for loc in locations %}
+      <option value="{{ loc.id }}">{{ loc.code }}</option>
+    {% endfor %}
+  </select><br><br>
+
+  <label>Quantity:</label><br>
+  <input type="number" name="qty" required><br><br>
+
+  <label>Person:</label><br>
+  <input type="text" name="person" required><br><br>
+
+  <label>Reference:</label><br>
+  <input type="text" name="reference" value="Stock Transfer"><br><br>
+
+  <button type="submit" class="bubble-btn">Submit Transfer</button>
+</form>
+
+<hr>
+
+<h3>Recent Transfers</h3>
+<div class="table-container">
+  <table class="inventory-table">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>SKU</th>
+        <th>Item</th>
+        <th>Lot / Batch</th>
+        <th>Quantity</th>
+        <th>Location</th>
+        <th>Person</th>
+        <th>Reference</th>
+        <th>Type</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for rec in records %}
+      <tr>
+        <td>{{ rec.date.strftime("%Y-%m-%d %H:%M") }}</td>
+        <td>{{ items_map[rec.item_id].sku if rec.item_id in items_map else "???" }}</td>
+        <td>{{ items_map[rec.item_id].name if rec.item_id in items_map else "Unknown" }}</td>
+        <td>{{ batches_map[rec.batch_id].lot_number if rec.batch_id in batches_map else "-" }}</td>
+        <td>{{ rec.quantity }}</td>
+        <td>{{ locations_map[rec.location_id].code if rec.location_id in locations_map else "-" }}</td>
+        <td>{{ rec.person or "-" }}</td>
+        <td>{{ rec.reference or "-" }}</td>
+        <td>{{ rec.movement_type }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Inventory Dashboard</h2>
+
+<div class="menu-grid">
+  <a href="{{ url_for('inventory.list_items') }}" class="action-btn">Items</a>
+  <a href="{{ url_for('inventory.list_locations') }}" class="action-btn">Locations</a>
+  <a href="{{ url_for('inventory.list_stock') }}" class="action-btn">Stock</a>
+  <a href="{{ url_for('inventory.receiving') }}" class="action-btn">Receiving</a>
+  <a href="{{ url_for('inventory.adjust_stock') }}" class="action-btn">Issue</a>
+  <a href="{{ url_for('inventory.move_home') }}" class="action-btn">Move</a>
+  <a href="{{ url_for('inventory.scan_inventory') }}" class="action-btn">Scan</a>
+  <a href="{{ url_for('inventory.cycle_count_home') }}" class="action-btn">Cycle Count</a>
+  <a href="{{ url_for('inventory.history_home') }}" class="action-btn">History</a>
+</div>
+
+<div class="dashboard-section">
+  <h3>Inventory Insights</h3>
+  <div class="chart-controls">
+    <label for="inventory-chart-select">Show:</label>
+    <select id="inventory-chart-select" aria-label="Select inventory insight">
+      {% for key, dataset in inventory_chart_data.items() %}
+      <option value="{{ key }}" {% if key == inventory_chart_default %}selected{% endif %}>
+        {{ dataset.title }}{% if not dataset.entries %} (No data){% endif %}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="chart-wrapper">
+    <canvas id="inventoryPieChart" role="img" aria-label="Inventory insight chart"
+      {% if not inventory_chart_data[inventory_chart_default].entries %}style="display:none;"{% endif %}></canvas>
+    <div id="inventory-chart-empty" class="chart-empty"
+      {% if inventory_chart_data[inventory_chart_default].entries %}style="display:none;"{% endif %}>
+      No data is available for the selected dataset yet.
+    </div>
+  </div>
+  <p id="inventory-chart-description" class="chart-description">
+    {{ inventory_chart_data[inventory_chart_default].description }}
+  </p>
+</div>
+
+<div class="dashboard-section">
+  <h3>Waiting on Material for Orders</h3>
+  {% if waiting_items %}
+  <div class="table-container">
+    <table class="inventory-table">
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>Total Required</th>
+          <th>Available</th>
+          <th>Shortage</th>
+          <th>Orders</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in waiting_items %}
+        <tr class="low-red">
+          <td>
+            {% if entry.item %}
+            <strong>{{ entry.item.sku }}</strong><br>
+            <small>{{ entry.item.name }}</small>
+            {% else %}
+            Unknown Item
+            {% endif %}
+          </td>
+          <td>{{ entry.total_required }}</td>
+          <td>{{ entry.available }}</td>
+          <td>{{ entry.shortage }}</td>
+          <td>
+            {% for order in entry.orders %}
+              <div>
+                <a href="{{ url_for('orders.view_order', order_id=order.order_id) }}">Order {{ order.order_number }}</a>
+                (needs {{ order.required }})
+              </div>
+            {% endfor %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>All active orders have the required components on hand.</p>
+  {% endif %}
+</div>
+
+<div class="dashboard-section">
+  <h3>Low Stock Alerts (&lt; 105% of minimum)</h3>
+  {% if low_stock_items %}
+  <div class="table-container">
+    <table class="inventory-table">
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>On Hand</th>
+          <th>Minimum</th>
+          <th>Coverage</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in low_stock_items %}
+        <tr class="low-red">
+          <td>
+            <strong>{{ entry.item.sku }}</strong><br>
+            <small>{{ entry.item.name }}</small>
+          </td>
+          <td>{{ entry.on_hand }}</td>
+          <td>{{ entry.min_stock }}</td>
+          <td>{{ (entry.coverage * 100)|round(0, 'floor') }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>No items are currently below minimum stock levels.</p>
+  {% endif %}
+</div>
+
+<div class="dashboard-section">
+  <h3>Near Minimum Alerts (&lt; 125% of minimum)</h3>
+  {% if near_stock_items %}
+  <div class="table-container">
+    <table class="inventory-table">
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>On Hand</th>
+          <th>Minimum</th>
+          <th>Coverage</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in near_stock_items %}
+        <tr class="low-yellow">
+          <td>
+            <strong>{{ entry.item.sku }}</strong><br>
+            <small>{{ entry.item.name }}</small>
+          </td>
+          <td>{{ entry.on_hand }}</td>
+          <td>{{ entry.min_stock }}</td>
+          <td>{{ (entry.coverage * 100)|round(0, 'floor') }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>All other items are comfortably above minimum stock thresholds.</p>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+  (function () {
+    const datasets = {{ inventory_chart_data | tojson }};
+    const defaultKey = "{{ inventory_chart_default }}";
+    const selectEl = document.getElementById('inventory-chart-select');
+    const descriptionEl = document.getElementById('inventory-chart-description');
+    const emptyEl = document.getElementById('inventory-chart-empty');
+    const canvasEl = document.getElementById('inventoryPieChart');
+    let chartInstance = null;
+
+    function getPalette(size) {
+      const palette = [
+        '#4c6ef5', '#9775fa', '#51cf66', '#ff922b', '#f76707',
+        '#ffa8a8', '#339af0', '#20c997', '#fab005', '#845ef7'
+      ];
+      const colors = [];
+      for (let i = 0; i < size; i += 1) {
+        colors.push(palette[i % palette.length]);
+      }
+      return colors;
+    }
+
+    function updateChart(key) {
+      const dataset = datasets[key] || { title: '', description: '', entries: [] };
+      const entries = Array.isArray(dataset.entries) ? dataset.entries : [];
+      descriptionEl.textContent = dataset.description || '';
+
+      if (!entries.length) {
+        if (chartInstance) {
+          chartInstance.destroy();
+          chartInstance = null;
+        }
+        canvasEl.style.display = 'none';
+        emptyEl.style.display = 'block';
+        return;
+      }
+
+      emptyEl.style.display = 'none';
+      canvasEl.style.display = 'block';
+
+      const labels = entries.map(entry => `${entry.sku} – ${entry.name}`);
+      const dataValues = entries.map(entry => Number(entry.value) || 0);
+      const backgroundColor = getPalette(dataValues.length);
+
+      const chartData = {
+        labels,
+        datasets: [{
+          label: dataset.title,
+          data: dataValues,
+          backgroundColor
+        }]
+      };
+
+      const tooltipLabel = function (context) {
+        const value = context.parsed;
+        const total = context.dataset.data.reduce((acc, current) => acc + current, 0);
+        const percentage = total ? ((value / total) * 100).toFixed(1) : '0.0';
+        return `${context.label}: ${value.toLocaleString()} (${percentage}%)`;
+      };
+
+      if (chartInstance) {
+        chartInstance.data = chartData;
+        chartInstance.options.plugins.tooltip.callbacks.label = tooltipLabel;
+        chartInstance.update();
+      } else {
+        chartInstance = new Chart(canvasEl, {
+          type: 'pie',
+          data: chartData,
+          options: {
+            plugins: {
+              legend: { position: 'bottom' },
+              tooltip: { callbacks: { label: tooltipLabel } }
+            }
+          }
+        });
+      }
+    }
+
+    selectEl.addEventListener('change', (event) => {
+      updateChart(event.target.value);
+    });
+
+    const startKey = datasets[defaultKey] ? defaultKey : Object.keys(datasets)[0];
+    updateChart(startKey);
+  })();
+</script>
+{% endblock %}
