@@ -11,15 +11,15 @@
             <a href="{{ url_for('home') }}" class="logo-link" aria-label="Go to home">
                 <img src="{{ url_for('static', filename='logo.png') }}" alt="Hyperion Logo" class="logo">
             </a>
+            <nav class="navbar" aria-label="Primary navigation">
+                <a href="{{ url_for('inventory.inventory_home') }}" class="nav-btn">Inventory</a>
+                <a href="{{ url_for('orders.orders_home') }}" class="nav-btn">Orders</a>
+                <a href="{{ url_for('work.work_home') }}" class="nav-btn">Work Instructions</a>
+            </nav>
             <a href="{{ url_for('settings.operations_menu') }}" class="icon-btn gear-btn" aria-label="Open settings, reports, and admin tools">
                 &#9881;
             </a>
         </div>
-        <nav class="navbar">
-            <a href="{{ url_for('inventory.inventory_home') }}" class="nav-btn">Inventory</a>
-            <a href="{{ url_for('orders.orders_home') }}" class="nav-btn">Orders</a>
-            <a href="{{ url_for('work.work_home') }}" class="nav-btn">Work Instructions</a>
-        </nav>
     </header>
 
     <main>

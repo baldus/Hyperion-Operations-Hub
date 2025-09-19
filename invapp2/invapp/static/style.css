@@ -19,10 +19,8 @@ body.light {
 /* --- Header --- */
 header {
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 20px 16px;
+    justify-content: center;
+    padding: 14px 28px;
     border-bottom: 2px solid #444;
     box-sizing: border-box;
 }
@@ -30,15 +28,17 @@ header {
 .header-top {
     width: 100%;
     max-width: 1400px;
-    display: flex;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas: "logo nav actions";
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    gap: 18px;
 }
 
 .logo-link {
     display: inline-flex;
     align-items: center;
+    grid-area: logo;
 }
 
 .logo {
@@ -47,11 +47,33 @@ header {
 
 .navbar {
     display: flex;
-    gap: 10px;
+    gap: 12px;
     flex-wrap: wrap;
     justify-content: center;
-    width: 100%;
-    max-width: 1400px;
+    grid-area: nav;
+}
+
+.gear-btn {
+    grid-area: actions;
+    justify-self: end;
+}
+
+@media (max-width: 900px) {
+    .header-top {
+        grid-template-columns: auto auto;
+        grid-template-areas:
+            "logo actions"
+            "nav nav";
+        row-gap: 12px;
+    }
+
+    .navbar {
+        justify-content: center;
+    }
+
+    .gear-btn {
+        justify-self: end;
+    }
 }
 
 /* --- Buttons --- */
@@ -621,6 +643,114 @@ body.dark .modal-content {
     padding: 8px 12px;
     border-radius: 20px;
     border: none;
+}
+
+.orders-table-wrapper {
+    background-color: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+    padding: 4px;
+}
+
+body.light .orders-table-wrapper {
+    background-color: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+}
+
+.orders-table {
+    width: 100%;
+    min-width: 720px;
+    border-collapse: collapse;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background-color: rgba(12, 19, 38, 0.72);
+}
+
+body.light .orders-table {
+    background-color: #fdfdff;
+    border-color: rgba(0, 0, 0, 0.08);
+}
+
+.orders-table thead th {
+    background: linear-gradient(135deg, rgba(70, 105, 230, 0.9), rgba(115, 155, 255, 0.85));
+    color: #f4f7ff;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.75rem;
+}
+
+body.light .orders-table thead th {
+    background: linear-gradient(135deg, #5676e6, #8bb2ff);
+    color: #ffffff;
+}
+
+.orders-table th,
+.orders-table td {
+    padding: 14px 16px;
+    text-align: left;
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+body.light .orders-table th,
+body.light .orders-table td {
+    border-right: 1px solid rgba(0, 0, 0, 0.06);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    color: inherit;
+}
+
+.orders-table th:last-child,
+.orders-table td:last-child {
+    border-right: none;
+}
+
+.orders-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.orders-table tbody tr:nth-child(even) {
+    background-color: rgba(255, 255, 255, 0.02);
+}
+
+body.light .orders-table tbody tr:nth-child(even) {
+    background-color: rgba(15, 23, 42, 0.04);
+}
+
+.orders-table tbody tr:hover {
+    background-color: rgba(103, 146, 255, 0.16);
+    transition: background-color 0.2s ease;
+}
+
+body.light .orders-table tbody tr:hover {
+    background-color: rgba(103, 146, 255, 0.12);
+}
+
+.orders-table td.numeric {
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.order-link {
+    color: #9bb9ff;
+    font-weight: 700;
+    text-decoration: none;
+    letter-spacing: 0.04em;
+}
+
+.order-link:hover,
+.order-link:focus {
+    color: #c5d6ff;
+    text-decoration: underline;
+}
+
+body.light .order-link {
+    color: #2d49c7;
+}
+
+body.light .order-link:hover,
+body.light .order-link:focus {
+    color: #1d3297;
 }
 
 /* --- Forms --- */
