@@ -7,30 +7,35 @@ from .routes import admin, inventory, reports, orders, work, settings, printers
 from config import Config
 from . import models  # ensure models are registered with SQLAlchemy
 
-def _ensure_item_type_column(engine):
-    """Ensure legacy databases have the ``item.type`` column."""
+
+def _ensure_item_columns(engine):
+    """Ensure legacy databases include the latest ``item`` columns."""
+
     inspector = inspect(engine)
     try:
         item_columns = {col["name"] for col in inspector.get_columns("item")}
     except (NoSuchTableError, OperationalError):
         item_columns = set()
 
-    if "type" not in item_columns:
+    columns_to_add = []
+    required_columns = {
+        "type": "VARCHAR",
+        "notes": "TEXT",
+        "list_price": "NUMERIC(12, 2)",
+        "last_unit_cost": "NUMERIC(12, 2)",
+        "item_class": "VARCHAR",
+    }
+
+    for column_name, column_type in required_columns.items():
+        if column_name not in item_columns:
+            columns_to_add.append((column_name, column_type))
+
+    if columns_to_add:
         with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE item ADD COLUMN type VARCHAR"))
-
-
-def _ensure_item_notes_column(engine):
-    """Ensure legacy databases have the ``item.notes`` column."""
-    inspector = inspect(engine)
-    try:
-        item_columns = {col["name"] for col in inspector.get_columns("item")}
-    except (NoSuchTableError, OperationalError):
-        item_columns = set()
-
-    if "notes" not in item_columns:
-        with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE item ADD COLUMN notes TEXT"))
+            for column_name, column_type in columns_to_add:
+                conn.execute(
+                    text(f"ALTER TABLE item ADD COLUMN {column_name} {column_type}")
+                )
 
 
 def _ensure_order_schema(engine):
@@ -85,8 +90,7 @@ def create_app(config_override=None):
     # create tables if they do not exist and ensure legacy schema has "type"
     with app.app_context():
         db.create_all()
-        _ensure_item_type_column(db.engine)
-        _ensure_item_notes_column(db.engine)
+        _ensure_item_columns(db.engine)
         _ensure_order_schema(db.engine)
 
     # register blueprints

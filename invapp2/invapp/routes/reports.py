@@ -1,5 +1,6 @@
 import io, csv, zipfile
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 from flask import Blueprint, Response, render_template
 from sqlalchemy import case, func
@@ -7,6 +8,12 @@ from sqlalchemy import case, func
 from invapp.models import db, Item, Location, Batch, Movement
 
 bp = Blueprint("reports", __name__, url_prefix="/reports")
+
+
+def _decimal_to_string(value):
+    if value is None:
+        return ""
+    return f"{Decimal(value):.2f}"
 
 @bp.route("/")
 def reports_home():
@@ -83,9 +90,35 @@ def generate_reports():
         # Items
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(["sku", "name", "unit", "description", "min_stock"])
+        writer.writerow(
+            [
+                "sku",
+                "name",
+                "type",
+                "unit",
+                "description",
+                "min_stock",
+                "notes",
+                "list_price",
+                "last_unit_cost",
+                "item_class",
+            ]
+        )
         for i in Item.query.all():
-            writer.writerow([i.sku, i.name, i.unit, i.description, i.min_stock])
+            writer.writerow(
+                [
+                    i.sku,
+                    i.name,
+                    i.type or "",
+                    i.unit,
+                    i.description,
+                    i.min_stock,
+                    i.notes or "",
+                    _decimal_to_string(i.list_price),
+                    _decimal_to_string(i.last_unit_cost),
+                    i.item_class or "",
+                ]
+            )
         zf.writestr("items.csv", output.getvalue())
 
         # Locations

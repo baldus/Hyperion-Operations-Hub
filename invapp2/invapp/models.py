@@ -15,6 +15,9 @@ class Item(db.Model):
     description = db.Column(db.String)
     min_stock = db.Column(db.Integer, default=0)
     notes = db.Column(db.Text)
+    list_price = db.Column(db.Numeric(12, 2))
+    last_unit_cost = db.Column(db.Numeric(12, 2))
+    item_class = db.Column(db.String)
 
 
 class Location(db.Model):
