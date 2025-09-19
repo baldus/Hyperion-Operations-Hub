@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Import Items</h2>
+<form method="POST" enctype="multipart/form-data">
+    <label>Upload CSV File:</label><br>
+    <input type="file" name="file" accept=".csv" required><br><br>
+    <button type="submit">Import</button>
+</form>
+<p>
+  Expected CSV columns: sku, name, type, unit, description, min_stock, notes,
+  list_price, last_unit_cost, item_class (additional fields optional)
+</p>
+{% endblock %}
