@@ -2,4 +2,17 @@
 {% block content %}
 <h2>Hyperion Operations Module</h2>
 <p>Please select from the modules listed above.</p>
+{% if stat_cards %}
+<section class="stat-grid">
+  {% for card in stat_cards %}
+  <a class="stat-card" href="{{ card.url }}">
+    <h3>{{ card.title }}</h3>
+    <div class="stat-value">{{ card.value }}</div>
+    {% if card.description %}
+    <p>{{ card.description }}</p>
+    {% endif %}
+  </a>
+  {% endfor %}
+</section>
+{% endif %}
 {% endblock %}

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Bill of Material Templates</h2>
+
+<div>
+  <a href="{{ url_for('inventory.create_bom') }}" class="bubble-btn">Create BOM Template</a>
+</div>
+<br>
+
+<form method="get" class="search-bar">
+  <label for="search">Search:</label>
+  <input type="text" id="search" name="search" value="{{ search }}" placeholder="Search by template name or finished good SKU">
+  <button type="submit">Search</button>
+</form>
+
+<div class="table-container">
+  <table class="inventory-table">
+    <thead>
+      <tr>
+        <th>Template</th>
+        <th>Finished Good</th>
+        <th>Description</th>
+        <th>Components</th>
+        <th>Last Updated</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for bom in boms %}
+      <tr>
+        <td><a href="{{ url_for('inventory.edit_bom', bom_id=bom.id) }}">{{ bom.name }}</a></td>
+        <td>
+          {% if bom.item %}
+            {{ bom.item.sku }}
+          {% else %}
+            &mdash;
+          {% endif %}
+        </td>
+        <td>{{ bom.description or '&mdash;' }}</td>
+        <td>
+          {% if bom.components %}
+            <ul class="compact-list">
+              {% for component in bom.components %}
+                <li>{{ component.component_item.sku }} &times; {{ component.quantity }}</li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            &mdash;
+          {% endif %}
+        </td>
+        <td>
+          {% if bom.updated_at %}
+            {{ bom.updated_at.strftime('%Y-%m-%d %H:%M') }}
+          {% else %}
+            &mdash;
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if not boms %}
+  <p>No BOM templates have been created yet.</p>
+{% endif %}
+{% endblock %}

@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 from collections import defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -20,6 +21,8 @@ from sqlalchemy.orm import joinedload, load_only
 from invapp.auth import role_required
 from invapp.models import (
     Batch,
+    BillOfMaterial,
+    BillOfMaterialComponent,
     Item,
     Location,
     Movement,
@@ -34,31 +37,9 @@ from invapp.models import (
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
 
 
-def _parse_decimal(value):
-    if value is None:
-        return None
-    if isinstance(value, (int, float, Decimal)):
-        value = str(value)
-    value = value.strip()
-    if not value:
-        return None
-    try:
-        return Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    except (InvalidOperation, ValueError):
-        return None
+def get_inventory_stock_alerts():
+    """Return base inventory summaries used across dashboards."""
 
-
-def _decimal_to_string(value):
-    if value is None:
-        return ""
-    return f"{Decimal(value):.2f}"
-
-############################
-# HOME
-############################
-@bp.route("/")
-def inventory_home():
-    # Summaries for on-hand inventory and reservations
     movement_totals = (
         db.session.query(
             Movement.item_id,
@@ -89,27 +70,6 @@ def inventory_home():
     )
     items_by_id = {item.id: item for item in items}
 
-    usage_cutoff = datetime.utcnow() - timedelta(days=30)
-    usage_totals = (
-        db.session.query(
-            Movement.item_id,
-            func.sum(Movement.quantity).label("usage"),
-        )
-        .filter(
-            Movement.movement_type == "ISSUE",
-            Movement.quantity < 0,
-            Movement.date >= usage_cutoff,
-        )
-        .group_by(Movement.item_id)
-        .all()
-    )
-    usage_map = {
-        item_id: int(-total)
-        for item_id, total in usage_totals
-        if total and total < 0
-    }
-
-    # Determine inventory warning zones
     low_stock_items = []
     near_stock_items = []
     for item in items:
@@ -135,6 +95,68 @@ def inventory_home():
 
     low_stock_items.sort(key=_coverage_sort_key)
     near_stock_items.sort(key=_coverage_sort_key)
+
+    return {
+        "items": items,
+        "items_by_id": items_by_id,
+        "on_hand_map": on_hand_map,
+        "reserved_map": reserved_map,
+        "low_stock_items": low_stock_items,
+        "near_stock_items": near_stock_items,
+    }
+
+
+def _parse_decimal(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float, Decimal)):
+        value = str(value)
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        return Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _decimal_to_string(value):
+    if value is None:
+        return ""
+    return f"{Decimal(value):.2f}"
+
+############################
+# HOME
+############################
+@bp.route("/")
+def inventory_home():
+    base_data = get_inventory_stock_alerts()
+    items = base_data["items"]
+    items_by_id = base_data["items_by_id"]
+    on_hand_map = base_data["on_hand_map"]
+    reserved_map = base_data["reserved_map"]
+    low_stock_items = base_data["low_stock_items"]
+    near_stock_items = base_data["near_stock_items"]
+
+    usage_cutoff = datetime.utcnow() - timedelta(days=30)
+    usage_totals = (
+        db.session.query(
+            Movement.item_id,
+            func.sum(Movement.quantity).label("usage"),
+        )
+        .filter(
+            Movement.movement_type == "ISSUE",
+            Movement.quantity < 0,
+            Movement.date >= usage_cutoff,
+        )
+        .group_by(Movement.item_id)
+        .all()
+    )
+    usage_map = {
+        item_id: int(-total)
+        for item_id, total in usage_totals
+        if total and total < 0
+    }
 
     # Aggregate items causing material shortages for orders
     waiting_orders = (
@@ -445,6 +467,299 @@ def export_cycle_counts():
     response.headers["Content-Disposition"] = "attachment; filename=cycle_counts.csv"
     return response
 
+
+
+############################
+# BOM TEMPLATE ROUTES
+############################
+
+
+def _parse_component_payload(raw_value, errors):
+    try:
+        payload = json.loads(raw_value)
+        if not isinstance(payload, list):
+            raise ValueError
+        return payload
+    except ValueError:
+        errors.append("Unable to read the component details submitted.")
+        return []
+
+
+@bp.route("/boms")
+def list_boms():
+    search = (request.args.get("search") or "").strip()
+    query = (
+        BillOfMaterial.query.options(
+            joinedload(BillOfMaterial.item),
+            joinedload(BillOfMaterial.components).joinedload(
+                BillOfMaterialComponent.component_item
+            ),
+        )
+        .outerjoin(BillOfMaterial.item)
+    )
+    if search:
+        like = f"%{search}%"
+        query = query.filter(
+            or_(
+                BillOfMaterial.name.ilike(like),
+                Item.sku.ilike(like),
+                Item.name.ilike(like),
+            )
+        )
+
+    boms = (
+        query.order_by(Item.sku.asc(), BillOfMaterial.name.asc()).all()
+    )
+    return render_template(
+        "inventory/list_boms.html",
+        boms=boms,
+        search=search,
+    )
+
+
+def _build_component_entries(component_payload, errors):
+    components = []
+    seen = set()
+    for entry in component_payload:
+        if not isinstance(entry, dict):
+            errors.append("Each component entry must include a SKU and quantity.")
+            continue
+        sku = (entry.get("sku") or "").strip()
+        if not sku:
+            errors.append("Components require a valid SKU.")
+            continue
+        if sku in seen:
+            errors.append(f"Component {sku} is listed more than once.")
+            continue
+        item = Item.query.filter_by(sku=sku).first()
+        if item is None:
+            errors.append(f"Component SKU '{sku}' was not found.")
+            continue
+        quantity_value = entry.get("quantity")
+        try:
+            quantity = int(quantity_value)
+            if quantity <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            errors.append(
+                f"Component quantity for {sku} must be a positive integer."
+            )
+            continue
+        components.append({"item": item, "sku": sku, "quantity": quantity})
+        seen.add(sku)
+    if not components:
+        errors.append("At least one component is required.")
+    return components
+
+
+@bp.route("/boms/new", methods=["GET", "POST"])
+def create_bom():
+    items = Item.query.order_by(Item.sku).all()
+    form_data = {
+        "name": "",
+        "finished_good_sku": "",
+        "description": "",
+        "components": [],
+    }
+
+    if request.method == "POST":
+        errors = []
+        name = (request.form.get("name") or "").strip()
+        finished_good_sku = (request.form.get("finished_good_sku") or "").strip()
+        description_raw = request.form.get("description") or ""
+        components_raw = request.form.get("components_json") or "[]"
+
+        form_data.update(
+            {
+                "name": name,
+                "finished_good_sku": finished_good_sku,
+                "description": description_raw,
+            }
+        )
+
+        if not name:
+            errors.append("Template name is required.")
+
+        finished_good = None
+        if not finished_good_sku:
+            errors.append("Finished good part number is required.")
+        else:
+            finished_good = Item.query.filter_by(sku=finished_good_sku).first()
+            if finished_good is None:
+                errors.append(
+                    f"Finished good part number '{finished_good_sku}' was not found."
+                )
+
+        component_payload = _parse_component_payload(components_raw, errors)
+        components = _build_component_entries(component_payload, errors)
+        form_data["components"] = [
+            {"sku": entry["sku"], "quantity": entry["quantity"]}
+            for entry in component_payload
+            if isinstance(entry, dict)
+        ]
+
+        if finished_good and name:
+            duplicate = BillOfMaterial.query.filter_by(
+                item_id=finished_good.id, name=name
+            ).first()
+            if duplicate:
+                errors.append(
+                    "A BOM template with this name already exists for the selected finished good."
+                )
+
+        if errors:
+            for error in errors:
+                flash(error, "danger")
+            return render_template(
+                "inventory/bom_form.html",
+                title="Create BOM Template",
+                submit_label="Create Template",
+                items=items,
+                form_data=form_data,
+                editing=False,
+            )
+
+        description_value = description_raw.strip() or None
+        bom = BillOfMaterial(
+            name=name,
+            item_id=finished_good.id,
+            description=description_value,
+        )
+        for component in components:
+            bom.components.append(
+                BillOfMaterialComponent(
+                    component_item_id=component["item"].id,
+                    quantity=component["quantity"],
+                )
+            )
+        db.session.add(bom)
+        db.session.commit()
+        flash(
+            f"BOM template '{name}' created for {finished_good.sku}.", "success"
+        )
+        return redirect(url_for("inventory.list_boms"))
+
+    if form_data["components"] == []:
+        form_data["components"] = []
+    return render_template(
+        "inventory/bom_form.html",
+        title="Create BOM Template",
+        submit_label="Create Template",
+        items=items,
+        form_data=form_data,
+        editing=False,
+    )
+
+
+@bp.route("/boms/<int:bom_id>/edit", methods=["GET", "POST"])
+def edit_bom(bom_id):
+    bom = (
+        BillOfMaterial.query.options(
+            joinedload(BillOfMaterial.item),
+            joinedload(BillOfMaterial.components).joinedload(
+                BillOfMaterialComponent.component_item
+            ),
+        )
+        .filter_by(id=bom_id)
+        .first_or_404()
+    )
+    items = Item.query.order_by(Item.sku).all()
+
+    if request.method == "POST":
+        errors = []
+        name = (request.form.get("name") or "").strip()
+        finished_good_sku = (request.form.get("finished_good_sku") or "").strip()
+        description_raw = request.form.get("description") or ""
+        components_raw = request.form.get("components_json") or "[]"
+
+        form_data = {
+            "name": name,
+            "finished_good_sku": finished_good_sku,
+            "description": description_raw,
+        }
+
+        if not name:
+            errors.append("Template name is required.")
+
+        finished_good = None
+        if not finished_good_sku:
+            errors.append("Finished good part number is required.")
+        else:
+            finished_good = Item.query.filter_by(sku=finished_good_sku).first()
+            if finished_good is None:
+                errors.append(
+                    f"Finished good part number '{finished_good_sku}' was not found."
+                )
+
+        component_payload = _parse_component_payload(components_raw, errors)
+        components = _build_component_entries(component_payload, errors)
+        form_data["components"] = [
+            {"sku": entry["sku"], "quantity": entry.get("quantity")}
+            for entry in component_payload
+            if isinstance(entry, dict)
+        ]
+
+        if finished_good and name:
+            duplicate = (
+                BillOfMaterial.query.filter(
+                    BillOfMaterial.item_id == finished_good.id,
+                    BillOfMaterial.name == name,
+                    BillOfMaterial.id != bom.id,
+                ).first()
+            )
+            if duplicate:
+                errors.append(
+                    "Another BOM template with this name exists for the selected finished good."
+                )
+
+        if errors:
+            for error in errors:
+                flash(error, "danger")
+            return render_template(
+                "inventory/bom_form.html",
+                title="Edit BOM Template",
+                submit_label="Save Changes",
+                items=items,
+                form_data=form_data,
+                editing=True,
+                bom=bom,
+            )
+
+        bom.name = name
+        bom.item_id = finished_good.id
+        bom.description = description_raw.strip() or None
+        bom.components.clear()
+        for component in components:
+            bom.components.append(
+                BillOfMaterialComponent(
+                    component_item_id=component["item"].id,
+                    quantity=component["quantity"],
+                )
+            )
+        db.session.commit()
+        flash(
+            f"BOM template '{name}' updated for {finished_good.sku}.", "success"
+        )
+        return redirect(url_for("inventory.list_boms"))
+
+    form_data = {
+        "name": bom.name,
+        "finished_good_sku": bom.item.sku if bom.item else "",
+        "description": bom.description or "",
+        "components": [
+            {"sku": component.component_item.sku, "quantity": component.quantity}
+            for component in bom.components
+        ],
+    }
+    return render_template(
+        "inventory/bom_form.html",
+        title="Edit BOM Template",
+        submit_label="Save Changes",
+        items=items,
+        form_data=form_data,
+        editing=True,
+        bom=bom,
+    )
 
 
 ############################
