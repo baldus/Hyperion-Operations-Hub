@@ -134,6 +134,9 @@ def test_edit_item_updates_notes(client, app):
         db.session.commit()
         item_id = item.id
 
+    with client.session_transaction() as session:
+        session["is_admin"] = True
+
     response = client.post(
         f"/inventory/item/{item_id}/edit",
         data={
@@ -156,6 +159,9 @@ def test_edit_item_updates_notes(client, app):
         assert updated.list_price == Decimal("2.22")
         assert updated.last_unit_cost == Decimal("1.11")
         assert updated.item_class == "Updated"
+
+    with client.session_transaction() as session:
+        session["is_admin"] = True
 
     response = client.post(
         f"/inventory/item/{item_id}/edit",

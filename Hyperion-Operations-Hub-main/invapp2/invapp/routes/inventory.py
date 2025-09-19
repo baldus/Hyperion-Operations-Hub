@@ -1,8 +1,10 @@
 import csv
 import io
+import json
 from collections import defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from functools import wraps
 
 from flask import (
     Blueprint,
@@ -12,14 +14,16 @@ from flask import (
     redirect,
     render_template,
     request,
+    session,
     url_for,
 )
 from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload, load_only
 
-from invapp.auth import role_required
 from invapp.models import (
     Batch,
+    BillOfMaterial,
+    BillOfMaterialComponent,
     Item,
     Location,
     Movement,
@@ -32,6 +36,25 @@ from invapp.models import (
 )
 
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
+
+
+def _ensure_admin_access():
+    if session.get("is_admin"):
+        return None
+    next_target = request.full_path if request.query_string else request.path
+    flash("Administrator access is required for that action.", "danger")
+    return redirect(url_for("admin.login", next=next_target))
+
+
+def admin_required(view_func):
+    @wraps(view_func)
+    def wrapped(*args, **kwargs):
+        redirect_response = _ensure_admin_access()
+        if redirect_response is not None:
+            return redirect_response
+        return view_func(*args, **kwargs)
+
+    return wrapped
 
 
 def _parse_decimal(value):
@@ -52,6 +75,106 @@ def _decimal_to_string(value):
     if value is None:
         return ""
     return f"{Decimal(value):.2f}"
+
+
+def _validate_bom_submission(finished_good_sku, payload):
+    errors = []
+    finished_good_sku = (finished_good_sku or "").strip()
+    finished_good = None
+    if not finished_good_sku:
+        errors.append("Finished good SKU is required.")
+    else:
+        finished_good = (
+            Item.query.filter(db.func.lower(Item.sku) == finished_good_sku.lower())
+            .first()
+        )
+        if finished_good is None:
+            errors.append(
+                f"Finished good SKU '{finished_good_sku}' was not found in inventory."
+            )
+
+    components = []
+    seen_skus = set()
+    if not isinstance(payload, list):
+        errors.append("BOM components must be submitted as a list of entries.")
+    else:
+        for raw_entry in payload:
+            if not isinstance(raw_entry, dict):
+                errors.append("Each component row must include a SKU and quantity.")
+                continue
+            component_sku = (
+                raw_entry.get("sku")
+                or raw_entry.get("component_sku")
+                or ""
+            ).strip()
+            quantity_raw = raw_entry.get("quantity") or raw_entry.get("qty")
+            if not component_sku and not quantity_raw:
+                # Ignore empty placeholder rows from dynamic forms.
+                continue
+            if not component_sku:
+                errors.append("Component SKU is required for each entry.")
+                continue
+            if component_sku in seen_skus:
+                errors.append(f"Component {component_sku} is listed more than once.")
+                continue
+            component_item = (
+                Item.query.filter(db.func.lower(Item.sku) == component_sku.lower())
+                .first()
+            )
+            if component_item is None:
+                errors.append(f"Component SKU '{component_sku}' was not found.")
+                continue
+            try:
+                quantity = int(quantity_raw)
+                if quantity <= 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                errors.append(
+                    f"Component {component_sku} must have a positive quantity."
+                )
+                continue
+            components.append(
+                {
+                    "sku": component_item.sku,
+                    "item": component_item,
+                    "quantity": quantity,
+                }
+            )
+            seen_skus.add(component_sku)
+
+    if not components and not errors:
+        errors.append("At least one component is required for a bill of material.")
+
+    return finished_good, components, errors
+
+
+def _apply_master_bom(finished_good, component_entries, description=None, revision=None):
+    """Create or replace the saved BOM for a finished good item."""
+
+    bom = (
+        BillOfMaterial.query.options(joinedload(BillOfMaterial.components))
+        .filter(BillOfMaterial.finished_good_item_id == finished_good.id)
+        .filter(BillOfMaterial.revision.is_(revision))
+        .first()
+    )
+    if bom is None:
+        bom = BillOfMaterial(
+            finished_good_item_id=finished_good.id,
+            revision=revision,
+        )
+        db.session.add(bom)
+
+    bom.description = description.strip() if description else None
+    bom.updated_at = datetime.utcnow()
+    bom.components.clear()
+    for entry in component_entries:
+        bom.components.append(
+            BillOfMaterialComponent(
+                component_item_id=entry["item"].id,
+                quantity=entry["quantity"],
+            )
+        )
+    return bom
 
 ############################
 # HOME
@@ -542,7 +665,7 @@ def add_item():
 
 
 @bp.route("/item/<int:item_id>/edit", methods=["GET", "POST"])
-@role_required("admin")
+@admin_required
 def edit_item(item_id):
     item = Item.query.get_or_404(item_id)
 
@@ -582,7 +705,7 @@ def edit_item(item_id):
 
 
 @bp.route("/item/<int:item_id>/delete", methods=["POST"])
-@role_required("admin")
+@admin_required
 def delete_item(item_id):
     item = Item.query.get_or_404(item_id)
 
@@ -767,6 +890,146 @@ def export_items():
 
 
 ############################
+# BILL OF MATERIAL ROUTES
+############################
+@bp.route("/api/bom/<sku>")
+def get_bom_api(sku):
+    if not session.get("is_admin"):
+        return jsonify({"error": "Administrator access is required."}), 403
+
+    sku = (sku or "").strip()
+    if not sku:
+        return jsonify({"error": "SKU is required."}), 400
+
+    finished_good = (
+        Item.query.filter(db.func.lower(Item.sku) == sku.lower()).first()
+    )
+    if finished_good is None:
+        return jsonify({"error": "Finished good was not found."}), 404
+
+    bom = (
+        BillOfMaterial.query.options(
+            joinedload(BillOfMaterial.components).joinedload(
+                BillOfMaterialComponent.component_item
+            )
+        )
+        .filter(BillOfMaterial.finished_good_item_id == finished_good.id)
+        .order_by(BillOfMaterial.updated_at.desc())
+        .first()
+    )
+    if bom is None or not bom.components:
+        return jsonify({"error": "No saved bill of material found."}), 404
+
+    components = []
+    for component in bom.components:
+        component_item = component.component_item
+        if not component_item:
+            continue
+        components.append(
+            {
+                "sku": component_item.sku,
+                "name": component_item.name,
+                "quantity": component.quantity,
+            }
+        )
+
+    return jsonify(
+        {
+            "finished_good": {
+                "sku": finished_good.sku,
+                "name": finished_good.name,
+            },
+            "revision": bom.revision or "",
+            "updated_at": bom.updated_at.isoformat() if bom.updated_at else None,
+            "components": components,
+        }
+    )
+
+
+@bp.route("/boms", methods=["GET", "POST"])
+@admin_required
+def manage_boms():
+    if request.method == "POST":
+        action = request.form.get("action", "create")
+        finished_good_sku = request.form.get("finished_good_sku")
+        description = request.form.get("description")
+
+        if action == "import":
+            file = request.files.get("file")
+            if not file or not file.filename:
+                flash("Please select a CSV file to import.", "danger")
+                return redirect(url_for("inventory.manage_boms"))
+            try:
+                stream = io.StringIO(file.stream.read().decode("utf-8"))
+            except UnicodeDecodeError:
+                flash("Unable to decode the uploaded file. Use UTF-8 encoding.", "danger")
+                return redirect(url_for("inventory.manage_boms"))
+
+            reader = csv.DictReader(stream)
+            payload = []
+            for row in reader:
+                payload.append(
+                    {
+                        "sku": row.get("component_sku")
+                        or row.get("sku")
+                        or "",
+                        "quantity": row.get("quantity") or row.get("qty"),
+                    }
+                )
+            finished_good, components, errors = _validate_bom_submission(
+                finished_good_sku, payload
+            )
+        else:
+            raw_payload = request.form.get("components_data") or "[]"
+            try:
+                payload = json.loads(raw_payload)
+            except ValueError:
+                payload = []
+                errors = [
+                    "Unable to interpret the component entries that were submitted.",
+                ]
+                finished_good = None
+            else:
+                finished_good, components, errors = _validate_bom_submission(
+                    finished_good_sku, payload
+                )
+
+        if errors:
+            for message in errors:
+                flash(message, "danger")
+            return redirect(url_for("inventory.manage_boms"))
+
+        _apply_master_bom(finished_good, components, description=description)
+        db.session.commit()
+
+        if action == "import":
+            flash(
+                f"Imported {len(components)} components for {finished_good.sku}.",
+                "success",
+            )
+        else:
+            flash(
+                f"Saved bill of material for {finished_good.sku} with {len(components)} components.",
+                "success",
+            )
+
+        return redirect(url_for("inventory.manage_boms"))
+
+    boms = (
+        BillOfMaterial.query.options(
+            joinedload(BillOfMaterial.finished_good).load_only(Item.sku, Item.name),
+            joinedload(BillOfMaterial.components).joinedload(
+                BillOfMaterialComponent.component_item
+            ),
+        )
+        .order_by(BillOfMaterial.updated_at.desc())
+        .all()
+    )
+    items = Item.query.order_by(Item.sku).all()
+    return render_template("inventory/manage_boms.html", boms=boms, items=items)
+
+
+############################
 # LOCATION ROUTES
 ############################
 @bp.route("/locations")
@@ -795,7 +1058,7 @@ def add_location():
 
 
 @bp.route("/location/<int:location_id>/edit", methods=["GET", "POST"])
-@role_required("admin")
+@admin_required
 def edit_location(location_id):
     location = Location.query.get_or_404(location_id)
 
@@ -835,7 +1098,7 @@ def edit_location(location_id):
 
 
 @bp.route("/location/<int:location_id>/delete", methods=["POST"])
-@role_required("admin")
+@admin_required
 def delete_location(location_id):
     location = Location.query.get_or_404(location_id)
 

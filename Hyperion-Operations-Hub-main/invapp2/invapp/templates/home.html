@@ -1,5 +1,121 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Hyperion Operations Module</h2>
-<p>Please select from the modules listed above.</p>
+<h2>Hyperion Operations Hub</h2>
+<p class="home-lede">Stay ahead of production commitments and material needs with a snapshot of active work.</p>
+
+<div class="summary-grid">
+  <div class="summary-card">
+    <h3>Orders</h3>
+    <p class="summary-highlight"><span class="summary-number">{{ active_orders_total }}</span> active</p>
+    <ul class="summary-list">
+      <li><strong>{{ due_soon_total }}</strong> due within 7 days</li>
+      <li><strong>{{ overdue_total }}</strong> past due</li>
+      <li><strong>{{ waiting_material_count }}</strong> waiting on material</li>
+    </ul>
+    <div class="summary-actions">
+      <a class="action-btn" href="{{ url_for('orders.orders_home') }}">View Orders</a>
+    </div>
+  </div>
+
+  <div class="summary-card">
+    <h3>Inventory</h3>
+    <p class="summary-highlight">Low: <strong>{{ inventory_summary.low }}</strong> &nbsp;•&nbsp; Out: <strong>{{ inventory_summary.out }}</strong></p>
+    <ul class="summary-list">
+      <li><strong>{{ inventory_summary.total_tracked }}</strong> items with minimums</li>
+      <li>Focus on low and out-of-stock parts below.</li>
+    </ul>
+    <div class="summary-actions">
+      <a class="action-btn" href="{{ url_for('inventory.inventory_home') }}">Inventory Dashboard</a>
+      {% if session.get('is_admin') %}
+      <a class="action-btn secondary" href="{{ url_for('inventory.manage_boms') }}">Manage BOM Library</a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="home-section">
+  <h3>Orders Requiring Attention</h3>
+  <div class="home-columns">
+    <div class="home-column">
+      <h4>Due Soon</h4>
+      {% if due_soon_orders %}
+      <ul class="attention-list">
+        {% for order in due_soon_orders %}
+        {% set due_date = order.promised_date or order.scheduled_completion_date %}
+        <li>
+          <a href="{{ url_for('orders.view_order', order_id=order.id) }}">Order {{ order.order_number }}</a>
+          {% if order.order_lines %}
+            <span class="item-ref">{{ order.order_lines[0].item.sku }}</span>
+          {% endif %}
+          {% if due_date %}
+            <span class="date-ref">Due {{ due_date.strftime('%b %d, %Y') }}</span>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="empty-state">No orders are due within the next week.</p>
+      {% endif %}
+    </div>
+    <div class="home-column">
+      <h4>Overdue</h4>
+      {% if overdue_orders %}
+      <ul class="attention-list attention-list--warning">
+        {% for order in overdue_orders %}
+        {% set due_date = order.promised_date or order.scheduled_completion_date %}
+        <li>
+          <a href="{{ url_for('orders.view_order', order_id=order.id) }}">Order {{ order.order_number }}</a>
+          {% if order.order_lines %}
+            <span class="item-ref">{{ order.order_lines[0].item.sku }}</span>
+          {% endif %}
+          {% if due_date %}
+            <span class="date-ref">Was due {{ due_date.strftime('%b %d, %Y') }}</span>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="empty-state">Great news—no orders are overdue.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="home-section">
+  <h3>Inventory Watchlist</h3>
+  <div class="home-columns">
+    <div class="home-column">
+      <h4>Out of Stock</h4>
+      {% if out_of_stock_items %}
+      <ul class="attention-list attention-list--critical">
+        {% for entry in out_of_stock_items %}
+        <li>
+          <span class="item-ref">{{ entry.item.sku }}</span>
+          <span class="item-name">{{ entry.item.name }}</span>
+          <span class="date-ref">Min {{ entry.min_stock }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="empty-state">All tracked items currently have on-hand stock.</p>
+      {% endif %}
+    </div>
+    <div class="home-column">
+      <h4>Below Minimum</h4>
+      {% if low_stock_items %}
+      <ul class="attention-list attention-list--caution">
+        {% for entry in low_stock_items %}
+        <li>
+          <span class="item-ref">{{ entry.item.sku }}</span>
+          <span class="item-name">{{ entry.item.name }}</span>
+          <span class="date-ref">On hand {{ entry.on_hand }} / Min {{ entry.min_stock }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="empty-state">No items are currently below minimum stock.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
 {% endblock %}

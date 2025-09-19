@@ -14,6 +14,8 @@ from invapp.extensions import db
 from sqlalchemy.exc import IntegrityError
 
 from invapp.models import (
+    BillOfMaterial,
+    BillOfMaterialComponent,
     Item,
     Location,
     Movement,
@@ -233,6 +235,82 @@ def test_waiting_status_when_inventory_insufficient(client, app, items):
         assert order.status == OrderStatus.WAITING_MATERIAL
         reservations = Reservation.query.filter_by(order_line_id=order.order_lines[0].id).all()
         assert reservations == []
+
+
+def test_order_creation_saves_master_bom(client, app, items):
+    finished, component, location = items
+    with app.app_context():
+        db.session.add(
+            Movement(
+                item_id=component.id,
+                location_id=location.id,
+                quantity=25,
+                movement_type='RECEIPT',
+            )
+        )
+        db.session.commit()
+
+    with client.session_transaction() as session:
+        session['is_admin'] = True
+
+    today = date.today()
+    payload = {
+        'order_number': 'BOM001',
+        'finished_good_sku': finished.sku,
+        'quantity': '3',
+        'customer_name': 'Delta Corp',
+        'created_by': 'Dana',
+        'general_notes': '',
+        'promised_date': (today + timedelta(days=10)).isoformat(),
+        'scheduled_start_date': (today + timedelta(days=2)).isoformat(),
+        'scheduled_completion_date': (today + timedelta(days=5)).isoformat(),
+        'bom_data': json.dumps([
+            {'sku': component.sku, 'quantity': 4}
+        ]),
+        'routing_data': json.dumps([
+            {
+                'sequence': 1,
+                'work_cell': 'Prep',
+                'instructions': 'Prep materials',
+                'components': [component.sku],
+            }
+        ]),
+        'persist_bom': 'yes',
+        'bom_prompt_state': 'missing',
+    }
+
+    response = client.post('/orders/new', data=payload, follow_redirects=False)
+    assert response.status_code in (302, 303)
+
+    with app.app_context():
+        bom = BillOfMaterial.query.filter_by(finished_good_item_id=finished.id).one()
+        assert len(bom.components) == 1
+        saved_component = bom.components[0]
+        assert saved_component.component_item_id == component.id
+        assert saved_component.quantity == 4
+
+
+def test_bom_api_requires_admin(client, app, items):
+    finished, component, _ = items
+    with app.app_context():
+        bom = BillOfMaterial(finished_good_item_id=finished.id)
+        bom.components.append(
+            BillOfMaterialComponent(component_item_id=component.id, quantity=7)
+        )
+        db.session.add(bom)
+        db.session.commit()
+
+    resp = client.get(f'/inventory/api/bom/{finished.sku}')
+    assert resp.status_code == 403
+
+    with client.session_transaction() as session:
+        session['is_admin'] = True
+
+    resp = client.get(f'/inventory/api/bom/{finished.sku}')
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload['finished_good']['sku'] == finished.sku
+    assert payload['components'][0]['quantity'] == 7
 
 
 def test_component_usage_required(client, app, items):
