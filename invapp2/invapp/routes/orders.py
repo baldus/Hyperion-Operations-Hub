@@ -17,6 +17,8 @@ from sqlalchemy.orm import joinedload
 from invapp.extensions import db
 from invapp.models import (
     Batch,
+    BillOfMaterial,
+    BillOfMaterialComponent,
     Item,
     Location,
     Movement,
@@ -262,12 +264,15 @@ def new_order():
         "promised_date": "",
         "scheduled_start_date": "",
         "scheduled_completion_date": "",
+        "bom_template_name": "",
         "bom": [],
         "steps": [],
     }
 
     if request.method == "POST":
         errors = []
+        action = request.form.get("action") or "create"
+        saving_template = action == "save_bom"
         order_number = (request.form.get("order_number") or "").strip()
         finished_good_sku = (request.form.get("finished_good_sku") or "").strip()
         quantity_raw = (request.form.get("quantity") or "").strip()
@@ -284,6 +289,7 @@ def new_order():
         ).strip()
         bom_raw = request.form.get("bom_data") or "[]"
         routing_raw = request.form.get("routing_data") or "[]"
+        template_name = (request.form.get("bom_template_name") or "").strip()
 
         form_data.update(
             {
@@ -296,19 +302,26 @@ def new_order():
                 "promised_date": promised_date_raw,
                 "scheduled_start_date": scheduled_start_raw,
                 "scheduled_completion_date": scheduled_completion_raw,
+                "bom_template_name": template_name,
             }
         )
 
-        if not order_number:
-            errors.append("Order number is required.")
-        elif Order.query.filter_by(order_number=order_number).first():
-            errors.append("Order number already exists.")
+        if not saving_template:
+            if not order_number:
+                errors.append("Order number is required.")
+            elif Order.query.filter_by(order_number=order_number).first():
+                errors.append("Order number already exists.")
 
-        if not customer_name:
-            errors.append("Customer name is required.")
+            if not customer_name:
+                errors.append("Customer name is required.")
 
-        if not created_by:
-            errors.append("Order creator name is required.")
+            if not created_by:
+                errors.append("Order creator name is required.")
+        else:
+            if not template_name:
+                errors.append(
+                    "Template name is required to save a BOM template."
+                )
 
         finished_good = None
         if not finished_good_sku:
@@ -320,37 +333,46 @@ def new_order():
                     f"Finished good part number '{finished_good_sku}' was not found."
                 )
 
-        try:
-            quantity = int(quantity_raw)
-            if quantity <= 0:
-                raise ValueError
-        except (TypeError, ValueError):
-            errors.append("Quantity must be a positive integer.")
-            quantity = None
+        promised_date = None
+        scheduled_start_date = None
+        scheduled_completion_date = None
+        quantity = None
+        if not saving_template:
+            try:
+                quantity = int(quantity_raw)
+                if quantity <= 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                errors.append("Quantity must be a positive integer.")
+                quantity = None
 
-        promised_date = _parse_date(promised_date_raw, "Promised ship date", errors)
-        scheduled_start_date = _parse_date(
-            scheduled_start_raw, "Scheduled start date", errors
-        )
-        scheduled_completion_date = _parse_date(
-            scheduled_completion_raw, "Scheduled completion date", errors
-        )
-
-        if (
-            scheduled_start_date
-            and scheduled_completion_date
-            and scheduled_start_date > scheduled_completion_date
-        ):
-            errors.append("Scheduled start date must be on or before completion date.")
-
-        if (
-            promised_date
-            and scheduled_completion_date
-            and promised_date < scheduled_completion_date
-        ):
-            errors.append(
-                "Promised ship date must be on or after the scheduled completion date."
+            promised_date = _parse_date(
+                promised_date_raw, "Promised ship date", errors
             )
+            scheduled_start_date = _parse_date(
+                scheduled_start_raw, "Scheduled start date", errors
+            )
+            scheduled_completion_date = _parse_date(
+                scheduled_completion_raw, "Scheduled completion date", errors
+            )
+
+            if (
+                scheduled_start_date
+                and scheduled_completion_date
+                and scheduled_start_date > scheduled_completion_date
+            ):
+                errors.append(
+                    "Scheduled start date must be on or before completion date."
+                )
+
+            if (
+                promised_date
+                and scheduled_completion_date
+                and promised_date < scheduled_completion_date
+            ):
+                errors.append(
+                    "Promised ship date must be on or after the scheduled completion date."
+                )
 
         try:
             bom_payload = json.loads(bom_raw)
@@ -360,13 +382,15 @@ def new_order():
             bom_payload = []
             errors.append("Unable to read the BOM component details submitted.")
 
-        try:
-            routing_payload = json.loads(routing_raw)
-            if not isinstance(routing_payload, list):
-                raise ValueError
-        except ValueError:
-            routing_payload = []
-            errors.append("Unable to read the routing information submitted.")
+        routing_payload = []
+        if not saving_template:
+            try:
+                routing_payload = json.loads(routing_raw)
+                if not isinstance(routing_payload, list):
+                    raise ValueError
+            except ValueError:
+                routing_payload = []
+                errors.append("Unable to read the routing information submitted.")
 
         form_data["bom"] = bom_payload
         form_data["steps"] = routing_payload
@@ -413,71 +437,72 @@ def new_order():
                 component_skus_seen.add(sku)
 
         routing_steps = []
-        referenced_components = set()
-        sequences_seen = set()
-        if not routing_payload:
-            errors.append("At least one routing step is required.")
-        else:
-            for entry in routing_payload:
-                if not isinstance(entry, dict):
-                    errors.append("Invalid routing step definition submitted.")
-                    continue
+        if not saving_template:
+            referenced_components = set()
+            sequences_seen = set()
+            if not routing_payload:
+                errors.append("At least one routing step is required.")
+            else:
+                for entry in routing_payload:
+                    if not isinstance(entry, dict):
+                        errors.append("Invalid routing step definition submitted.")
+                        continue
 
-                raw_sequence = entry.get("sequence")
-                try:
-                    sequence = int(raw_sequence)
-                except (TypeError, ValueError):
-                    errors.append("Routing step sequences must be whole numbers.")
-                    continue
-                if sequence in sequences_seen:
-                    errors.append(
-                        f"Routing step sequence {sequence} is defined more than once."
-                    )
-                    continue
-                sequences_seen.add(sequence)
-
-                work_cell = (entry.get("work_cell") or "").strip()
-                instructions = (entry.get("instructions") or "").strip()
-                if not instructions:
-                    errors.append(
-                        f"Routing step {sequence} must include work instructions."
-                    )
-
-                component_values = entry.get("components") or []
-                if not isinstance(component_values, list):
-                    errors.append(
-                        f"Component usage for routing step {sequence} is not valid."
-                    )
-                    component_values = []
-
-                resolved_components = []
-                for sku in component_values:
-                    if sku not in component_lookup:
+                    raw_sequence = entry.get("sequence")
+                    try:
+                        sequence = int(raw_sequence)
+                    except (TypeError, ValueError):
+                        errors.append("Routing step sequences must be whole numbers.")
+                        continue
+                    if sequence in sequences_seen:
                         errors.append(
-                            f"Routing step {sequence} references unknown component {sku}."
+                            f"Routing step sequence {sequence} is defined more than once."
                         )
                         continue
-                    if sku in resolved_components:
-                        continue
-                    resolved_components.append(sku)
-                    referenced_components.add(sku)
+                    sequences_seen.add(sequence)
 
-                routing_steps.append(
-                    {
-                        "sequence": sequence,
-                        "work_cell": work_cell,
-                        "instructions": instructions,
-                        "components": resolved_components,
-                    }
+                    work_cell = (entry.get("work_cell") or "").strip()
+                    instructions = (entry.get("instructions") or "").strip()
+                    if not instructions:
+                        errors.append(
+                            f"Routing step {sequence} must include work instructions."
+                        )
+
+                    component_values = entry.get("components") or []
+                    if not isinstance(component_values, list):
+                        errors.append(
+                            f"Component usage for routing step {sequence} is not valid."
+                        )
+                        component_values = []
+
+                    resolved_components = []
+                    for sku in component_values:
+                        if sku not in component_lookup:
+                            errors.append(
+                                f"Routing step {sequence} references unknown component {sku}."
+                            )
+                            continue
+                        if sku in resolved_components:
+                            continue
+                        resolved_components.append(sku)
+                        referenced_components.add(sku)
+
+                    routing_steps.append(
+                        {
+                            "sequence": sequence,
+                            "work_cell": work_cell,
+                            "instructions": instructions,
+                            "components": resolved_components,
+                        }
+                    )
+
+            missing_component_usage = set(component_lookup) - referenced_components
+            if missing_component_usage:
+                missing_list = ", ".join(sorted(missing_component_usage))
+                errors.append(
+                    "Each BOM component must be associated with at least one routing step. "
+                    f"Missing usage for: {missing_list}."
                 )
-
-        missing_component_usage = set(component_lookup) - referenced_components
-        if missing_component_usage:
-            missing_list = ", ".join(sorted(missing_component_usage))
-            errors.append(
-                "Each BOM component must be associated with at least one routing step. "
-                f"Missing usage for: {missing_list}."
-            )
 
         if errors:
             for error in errors:
@@ -485,6 +510,52 @@ def new_order():
             return render_template(
                 "orders/new.html", items=items, form_data=form_data
             )
+
+        if saving_template:
+            description_value = (
+                general_notes if general_notes.strip() else None
+            )
+            existing_template = None
+            if finished_good:
+                existing_template = BillOfMaterial.query.filter_by(
+                    item_id=finished_good.id, name=template_name
+                ).first()
+            if existing_template:
+                existing_template.description = description_value
+                existing_template.components.clear()
+                for component_entry in bom_components:
+                    existing_template.components.append(
+                        BillOfMaterialComponent(
+                            component_item_id=component_entry["item"].id,
+                            quantity=component_entry["quantity"],
+                        )
+                    )
+                db.session.commit()
+                flash(
+                    f"BOM template '{template_name}' updated for {finished_good.sku}.",
+                    "success",
+                )
+            else:
+                bom_template = BillOfMaterial(
+                    name=template_name,
+                    item_id=finished_good.id if finished_good else None,
+                    description=description_value,
+                )
+                for component_entry in bom_components:
+                    bom_template.components.append(
+                        BillOfMaterialComponent(
+                            component_item_id=component_entry["item"].id,
+                            quantity=component_entry["quantity"],
+                        )
+                    )
+                db.session.add(bom_template)
+                db.session.commit()
+                flash(
+                    f"BOM template '{template_name}' saved for {finished_good.sku}.",
+                    "success",
+                )
+
+            return render_template("orders/new.html", items=items, form_data=form_data)
 
         shortages = []
         reservations_needed = []
