@@ -2,8 +2,17 @@ from flask import Flask, render_template
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import NoSuchTableError, OperationalError
 
-from .extensions import db
-from .routes import admin, inventory, reports, orders, work, settings, printers
+from .extensions import db, login_manager
+from .routes import (
+    admin,
+    auth as auth_routes,
+    inventory,
+    orders,
+    printers,
+    reports,
+    settings,
+    work,
+)
 from config import Config
 from . import models  # ensure models are registered with SQLAlchemy
 
@@ -87,6 +96,9 @@ def create_app(config_override=None):
 
     # ✅ init db with app
     db.init_app(app)
+    login_manager.init_app(app)
+    login_manager.login_view = "auth.login"
+    login_manager.login_message_category = "info"
     # create tables if they do not exist and ensure legacy schema has "type"
     with app.app_context():
         db.create_all()
@@ -94,6 +106,7 @@ def create_app(config_override=None):
         _ensure_order_schema(db.engine)
 
     # register blueprints
+    app.register_blueprint(auth_routes.bp)
     app.register_blueprint(inventory.bp)
     app.register_blueprint(reports.bp)
     app.register_blueprint(orders.bp)
@@ -107,3 +120,11 @@ def create_app(config_override=None):
         return render_template("home.html")
 
     return app
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    try:
+        return models.User.query.get(int(user_id))
+    except (TypeError, ValueError):
+        return None

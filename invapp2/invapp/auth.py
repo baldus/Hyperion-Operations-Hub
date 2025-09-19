@@ -1,6 +1,9 @@
 from functools import wraps
-from flask_login import login_required, current_user
-from flask import abort
+
+from flask import abort, session
+from flask_login import current_user
+
+from invapp.extensions import login_manager
 
 
 def role_required(role_name):
@@ -8,11 +11,21 @@ def role_required(role_name):
 
     def decorator(f):
         @wraps(f)
-        @login_required
         def wrapped(*args, **kwargs):
-            if not current_user.has_role(role_name):
+            if session.get("is_admin"):
+                return f(*args, **kwargs)
+
+            if current_user.is_authenticated:
+                if current_user.has_role(role_name):
+                    return f(*args, **kwargs)
                 abort(403)
-            return f(*args, **kwargs)
+
+            from invapp.models import User
+
+            if User.query.first() is None:
+                return f(*args, **kwargs)
+
+            return login_manager.unauthorized()
 
         return wrapped
 

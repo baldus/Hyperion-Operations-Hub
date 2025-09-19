@@ -1,9 +1,104 @@
 from datetime import datetime
 
+from flask_login import UserMixin
+from sqlalchemy import func
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.orm import synonym
+from sqlalchemy.orm.exc import DetachedInstanceError
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from invapp.extensions import db
+
+
+user_roles = db.Table(
+    "user_role",
+    db.Column("user_id", db.Integer, db.ForeignKey("user.id"), primary_key=True),
+    db.Column("role_id", db.Integer, db.ForeignKey("role.id"), primary_key=True),
+)
+
+
+class Role(db.Model):
+    __tablename__ = "role"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(64), unique=True, nullable=False)
+    description = db.Column(db.String(255))
+
+    def __repr__(self):
+        return f"<Role {self.name}>"
+
+
+class User(UserMixin, db.Model):
+    __tablename__ = "user"
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    roles = db.relationship(
+        "Role",
+        secondary=user_roles,
+        backref=db.backref("users", lazy="dynamic"),
+        lazy="joined",
+    )
+
+    def set_password(self, password: str) -> None:
+        """Persist a secure hash for the provided password."""
+
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password: str) -> bool:
+        """Return ``True`` when the provided password matches the stored hash."""
+
+        if not self.password_hash:
+            return False
+        return check_password_hash(self.password_hash, password)
+
+    def has_role(self, role_name: str) -> bool:
+        """Return ``True`` if the user is associated with a given role."""
+
+        if not role_name:
+            return False
+
+        normalized = role_name.lower()
+
+        try:
+            roles = self.roles
+        except DetachedInstanceError:
+            roles = None
+
+        if roles is not None:
+            return any((role.name or "").lower() == normalized for role in roles)
+
+        state = getattr(self, "_sa_instance_state", None)
+        if state is not None and state.identity is not None:
+            user_id = state.identity[0]
+        else:
+            try:
+                user_id = object.__getattribute__(self, "id")
+            except DetachedInstanceError:
+                user_id = None
+
+        if not user_id:
+            return False
+
+        return (
+            db.session.query(Role.id)
+            .join(user_roles, Role.id == user_roles.c.role_id)
+            .filter(
+                user_roles.c.user_id == user_id,
+                func.lower(Role.name) == normalized,
+            )
+            .first()
+            is not None
+        )
+
+    def __repr__(self):
+        return f"<User {self.username}>"
 
 class Item(db.Model):
     __tablename__ = "item"

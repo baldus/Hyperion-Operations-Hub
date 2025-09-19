@@ -1,19 +1,171 @@
-import io, csv, zipfile
+import csv
+import io
+import zipfile
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from flask import Blueprint, Response, render_template
+from flask import Blueprint, Response, jsonify, render_template, request
+from flask_login import login_required
 from sqlalchemy import case, func
+from sqlalchemy.orm import joinedload
 
-from invapp.models import db, Item, Location, Batch, Movement
+from invapp.extensions import db
+from invapp.models import Batch, Item, Location, Movement
 
 bp = Blueprint("reports", __name__, url_prefix="/reports")
+
+
+def _parse_date_arg(raw_value):
+    if not raw_value:
+        return None
+    return datetime.strptime(raw_value, "%Y-%m-%d").date()
+
+
+def _collect_movement_rows(sku, location_code, start_date, end_date):
+    query = (
+        Movement.query.join(Item)
+        .filter(Item.sku == sku)
+        .options(joinedload(Movement.location))
+    )
+    if location_code:
+        query = query.join(Location, Movement.location).filter(Location.code == location_code)
+    if start_date:
+        start_dt = datetime.combine(start_date, datetime.min.time())
+        query = query.filter(Movement.date >= start_dt)
+    if end_date:
+        end_dt = datetime.combine(end_date, datetime.max.time())
+        query = query.filter(Movement.date <= end_dt)
+
+    movements = query.order_by(Movement.date.asc()).all()
+    rows = []
+    for movement in movements:
+        quantity = movement.quantity
+        if (movement.movement_type or "").upper() == "ISSUE":
+            quantity = -quantity
+        rows.append(
+            {
+                "date": movement.date.strftime("%Y-%m-%d"),
+                "movement_type": movement.movement_type,
+                "quantity": int(quantity or 0),
+                "location": movement.location.code if movement.location else None,
+            }
+        )
+    return rows
+
+
+def _collect_stock_aging_rows(sku, location_code):
+    batch_query = Batch.query.join(Item).filter(Item.sku == sku)
+    batches = batch_query.all()
+    rows = []
+    today = datetime.utcnow().date()
+
+    for batch in batches:
+        received_date = batch.received_date.date() if batch.received_date else today
+        quantity_query = Movement.query.filter(Movement.item_id == batch.item_id)
+        if batch.id is None:
+            quantity_query = quantity_query.filter(Movement.batch_id.is_(None))
+        else:
+            quantity_query = quantity_query.filter(Movement.batch_id == batch.id)
+        if location_code:
+            quantity_query = quantity_query.join(Location, Movement.location).filter(
+                Location.code == location_code
+            )
+        total_quantity = quantity_query.with_entities(
+            func.coalesce(func.sum(Movement.quantity), 0)
+        ).scalar()
+
+        rows.append(
+            {
+                "sku": batch.item.sku if batch.item else sku,
+                "lot_number": batch.lot_number,
+                "days": (today - received_date).days,
+                "quantity": int(total_quantity or 0),
+            }
+        )
+
+    return rows
 
 
 def _decimal_to_string(value):
     if value is None:
         return ""
     return f"{Decimal(value):.2f}"
+
+
+@bp.route("/summary_data")
+@login_required
+def summary_data():
+    sku = (request.args.get("sku") or "").strip()
+    location_code = (request.args.get("location") or "").strip() or None
+
+    if not sku:
+        return jsonify({"error": "sku parameter is required"}), 400
+
+    try:
+        start_date = _parse_date_arg(request.args.get("start"))
+        end_date = _parse_date_arg(request.args.get("end"))
+    except ValueError:
+        return jsonify({"error": "Dates must be in YYYY-MM-DD format"}), 400
+
+    movement_rows = _collect_movement_rows(sku, location_code, start_date, end_date)
+    stock_aging_rows = _collect_stock_aging_rows(sku, location_code)
+
+    return jsonify({
+        "movement_trends": movement_rows,
+        "stock_aging": stock_aging_rows,
+    })
+
+
+@bp.route("/export")
+@login_required
+def export_report():
+    sku = (request.args.get("sku") or "").strip()
+    location_code = (request.args.get("location") or "").strip() or None
+
+    if not sku:
+        return jsonify({"error": "sku parameter is required"}), 400
+
+    try:
+        start_date = _parse_date_arg(request.args.get("start"))
+        end_date = _parse_date_arg(request.args.get("end"))
+    except ValueError:
+        return jsonify({"error": "Dates must be in YYYY-MM-DD format"}), 400
+
+    movement_rows = _collect_movement_rows(sku, location_code, start_date, end_date)
+    stock_aging_rows = _collect_stock_aging_rows(sku, location_code)
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        stock_output = io.StringIO()
+        stock_writer = csv.writer(stock_output)
+        stock_writer.writerow(["sku", "lot_number", "days", "quantity"])
+        for row in stock_aging_rows:
+            stock_writer.writerow(
+                [row.get("sku"), row.get("lot_number"), row.get("days"), row.get("quantity")]
+            )
+        archive.writestr("stock_aging.csv", stock_output.getvalue())
+
+        movement_output = io.StringIO()
+        movement_writer = csv.writer(movement_output)
+        movement_writer.writerow(["date", "movement_type", "quantity", "location"])
+        for row in movement_rows:
+            movement_writer.writerow(
+                [
+                    row.get("date"),
+                    row.get("movement_type"),
+                    row.get("quantity"),
+                    row.get("location"),
+                ]
+            )
+        archive.writestr("movement_trends.csv", movement_output.getvalue())
+
+    zip_buffer.seek(0)
+    return Response(
+        zip_buffer.getvalue(),
+        mimetype="application/zip",
+        headers={"Content-Disposition": "attachment; filename=inventory_report.zip"},
+    )
+
 
 @bp.route("/")
 def reports_home():
