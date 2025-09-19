@@ -134,6 +134,9 @@ def test_edit_item_updates_notes(client, app):
         db.session.commit()
         item_id = item.id
 
+    with client.session_transaction() as session:
+        session["is_admin"] = True
+
     response = client.post(
         f"/inventory/item/{item_id}/edit",
         data={
@@ -179,6 +182,146 @@ def test_edit_item_updates_notes(client, app):
         assert cleared.list_price is None
         assert cleared.last_unit_cost is None
         assert cleared.item_class is None
+
+
+def test_edit_item_requires_admin(client, app):
+    with app.app_context():
+        item = Item(sku="500", name="Admin Only")
+        db.session.add(item)
+        db.session.commit()
+        item_id = item.id
+
+    response = client.get(f"/inventory/item/{item_id}/edit")
+    assert response.status_code == 302
+    assert "/admin/login" in response.headers["Location"]
+    assert f"next=%2Finventory%2Fitem%2F{item_id}%2Fedit" in response.headers["Location"]
+
+
+def test_delete_item_blocks_when_referenced(client, app):
+    with app.app_context():
+        location = Location(code="DEL-LOC")
+        item = Item(sku="DEL-1", name="Delete Me")
+        db.session.add_all([location, item])
+        db.session.commit()
+
+        movement = Movement(
+            item_id=item.id,
+            location_id=location.id,
+            quantity=5,
+            movement_type="ADJUST",
+        )
+        db.session.add(movement)
+        db.session.commit()
+        item_id = item.id
+
+    with client.session_transaction() as session:
+        session["is_admin"] = True
+
+    response = client.post(f"/inventory/item/{item_id}/delete")
+    assert response.status_code == 302
+    assert f"/inventory/item/{item_id}/edit" in response.headers["Location"]
+
+    with app.app_context():
+        assert Item.query.get(item_id) is not None
+
+
+def test_delete_item_succeeds_without_references(client, app):
+    with app.app_context():
+        item = Item(sku="FREE-1", name="Free Item")
+        db.session.add(item)
+        db.session.commit()
+        item_id = item.id
+
+    with client.session_transaction() as session:
+        session["is_admin"] = True
+
+    response = client.post(f"/inventory/item/{item_id}/delete")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/inventory/items")
+
+    with app.app_context():
+        assert Item.query.get(item_id) is None
+
+
+def test_edit_location_requires_admin(client, app):
+    with app.app_context():
+        location = Location(code="EDIT-LOC", description="Old desc")
+        db.session.add(location)
+        db.session.commit()
+        location_id = location.id
+
+    response = client.get(f"/inventory/location/{location_id}/edit")
+    assert response.status_code == 302
+    assert "/admin/login" in response.headers["Location"]
+    assert f"next=%2Finventory%2Flocation%2F{location_id}%2Fedit" in response.headers["Location"]
+
+
+def test_edit_location_updates(client, app):
+    with app.app_context():
+        location = Location(code="STAGE-1", description="Staging")
+        db.session.add(location)
+        db.session.commit()
+        location_id = location.id
+
+    with client.session_transaction() as session:
+        session["is_admin"] = True
+
+    response = client.post(
+        f"/inventory/location/{location_id}/edit",
+        data={"code": "STAGE-99", "description": "Updated"},
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        updated = Location.query.get(location_id)
+        assert updated.code == "STAGE-99"
+        assert updated.description == "Updated"
+
+
+def test_delete_location_blocks_when_movement_exists(client, app):
+    with app.app_context():
+        location = Location(code="BLOCK-1")
+        item = Item(sku="BLOCK-ITEM", name="Block Item")
+        db.session.add_all([location, item])
+        db.session.commit()
+
+        movement = Movement(
+            item_id=item.id,
+            location_id=location.id,
+            quantity=10,
+            movement_type="ADJUST",
+        )
+        db.session.add(movement)
+        db.session.commit()
+        location_id = location.id
+
+    with client.session_transaction() as session:
+        session["is_admin"] = True
+
+    response = client.post(f"/inventory/location/{location_id}/delete")
+    assert response.status_code == 302
+    assert f"/inventory/location/{location_id}/edit" in response.headers["Location"]
+
+    with app.app_context():
+        assert Location.query.get(location_id) is not None
+
+
+def test_delete_location_succeeds_without_movement(client, app):
+    with app.app_context():
+        location = Location(code="FREE-LOC")
+        db.session.add(location)
+        db.session.commit()
+        location_id = location.id
+
+    with client.session_transaction() as session:
+        session["is_admin"] = True
+
+    response = client.post(f"/inventory/location/{location_id}/delete")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/inventory/locations")
+
+    with app.app_context():
+        assert Location.query.get(location_id) is None
 
 
 def test_import_export_items_with_notes(client, app):

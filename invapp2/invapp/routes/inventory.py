@@ -12,6 +12,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    session,
     url_for,
 )
 from sqlalchemy import func, or_
@@ -542,6 +543,13 @@ def add_item():
 
 @bp.route("/item/<int:item_id>/edit", methods=["GET", "POST"])
 def edit_item(item_id):
+    if not session.get("is_admin"):
+        next_target = (
+            request.full_path if request.method == "GET" and request.query_string else request.path
+        )
+        flash("Administrator access is required to edit items.", "danger")
+        return redirect(url_for("admin.login", next=next_target))
+
     item = Item.query.get_or_404(item_id)
 
     if request.method == "POST":
@@ -577,6 +585,37 @@ def edit_item(item_id):
         return redirect(url_for("inventory.list_items"))
 
     return render_template("inventory/edit_item.html", item=item)
+
+
+@bp.route("/item/<int:item_id>/delete", methods=["POST"])
+def delete_item(item_id):
+    if not session.get("is_admin"):
+        flash("Administrator access is required to delete items.", "danger")
+        next_target = url_for("inventory.edit_item", item_id=item_id)
+        return redirect(url_for("admin.login", next=next_target))
+
+    item = Item.query.get_or_404(item_id)
+
+    has_batches = Batch.query.filter_by(item_id=item.id).first() is not None
+    has_movements = Movement.query.filter_by(item_id=item.id).first() is not None
+    has_order_lines = OrderLine.query.filter_by(item_id=item.id).first() is not None
+    has_components = (
+        OrderComponent.query.filter_by(component_item_id=item.id).first() is not None
+    )
+    has_reservations = Reservation.query.filter_by(item_id=item.id).first() is not None
+
+    if any([has_batches, has_movements, has_order_lines, has_components, has_reservations]):
+        flash(
+            "Cannot delete item because related stock, order, or reservation records exist.",
+            "danger",
+        )
+        return redirect(url_for("inventory.edit_item", item_id=item.id))
+
+    sku = item.sku
+    db.session.delete(item)
+    db.session.commit()
+    flash(f"Item {sku} deleted successfully.", "success")
+    return redirect(url_for("inventory.list_items"))
 
 
 @bp.route("/items/import", methods=["GET", "POST"])
@@ -759,6 +798,77 @@ def add_location():
         flash("Location added successfully", "success")
         return redirect(url_for("inventory.list_locations"))
     return render_template("inventory/add_location.html")
+
+
+@bp.route("/location/<int:location_id>/edit", methods=["GET", "POST"])
+def edit_location(location_id):
+    if not session.get("is_admin"):
+        next_target = (
+            request.full_path if request.method == "GET" and request.query_string else request.path
+        )
+        flash("Administrator access is required to edit locations.", "danger")
+        return redirect(url_for("admin.login", next=next_target))
+
+    location = Location.query.get_or_404(location_id)
+
+    if request.method == "POST":
+        code = (request.form.get("code") or "").strip()
+        description = (request.form.get("description") or "").strip()
+        errors = []
+
+        if not code:
+            errors.append("Location code is required.")
+        elif code != location.code:
+            existing = Location.query.filter_by(code=code).first()
+            if existing:
+                errors.append("Another location with that code already exists.")
+
+        if errors:
+            for message in errors:
+                flash(message, "danger")
+            return render_template(
+                "inventory/edit_location.html",
+                location=location,
+                form_code=code,
+                form_description=description,
+            )
+
+        location.code = code
+        location.description = description
+        db.session.commit()
+        flash(f"Location {location.code} updated successfully.", "success")
+        return redirect(url_for("inventory.list_locations"))
+
+    return render_template(
+        "inventory/edit_location.html",
+        location=location,
+        form_code=location.code,
+        form_description=location.description or "",
+    )
+
+
+@bp.route("/location/<int:location_id>/delete", methods=["POST"])
+def delete_location(location_id):
+    if not session.get("is_admin"):
+        flash("Administrator access is required to delete locations.", "danger")
+        next_target = url_for("inventory.edit_location", location_id=location_id)
+        return redirect(url_for("admin.login", next=next_target))
+
+    location = Location.query.get_or_404(location_id)
+    has_movements = Movement.query.filter_by(location_id=location.id).first() is not None
+
+    if has_movements:
+        flash(
+            "Cannot delete location because inventory movements reference it.",
+            "danger",
+        )
+        return redirect(url_for("inventory.edit_location", location_id=location.id))
+
+    code = location.code
+    db.session.delete(location)
+    db.session.commit()
+    flash(f"Location {code} deleted successfully.", "success")
+    return redirect(url_for("inventory.list_locations"))
 
 
 @bp.route("/locations/import", methods=["GET", "POST"])
