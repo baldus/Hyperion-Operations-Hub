@@ -7,27 +7,18 @@
 </head>
 <body class="{{ session.get('theme', 'dark') }}">
     <header>
-        <div class="logo-container">
-            <img src="{{ url_for('static', filename='logo.png') }}" alt="Hyperion Logo" class="logo">
+        <div class="header-top">
+            <a href="{{ url_for('home') }}" class="logo-link" aria-label="Go to home">
+                <img src="{{ url_for('static', filename='logo.png') }}" alt="Hyperion Logo" class="logo">
+            </a>
+            <a href="{{ url_for('settings.operations_menu') }}" class="icon-btn gear-btn" aria-label="Open settings, reports, and admin tools">
+                &#9881;
+            </a>
         </div>
         <nav class="navbar">
-            <a href="{{ url_for('home') }}" class="nav-btn">Home</a>
             <a href="{{ url_for('inventory.inventory_home') }}" class="nav-btn">Inventory</a>
-            <a href="{{ url_for('reports.reports_home') }}" class="nav-btn">Reports</a>
             <a href="{{ url_for('orders.orders_home') }}" class="nav-btn">Orders</a>
             <a href="{{ url_for('work.work_home') }}" class="nav-btn">Work Instructions</a>
-            <a href="{{ url_for('settings.settings_home') }}" class="nav-btn">Settings</a>
-            {% if session.get('is_admin') %}
-                <a href="{{ url_for('printers.printer_settings') }}" class="nav-btn">Admin Tools</a>
-                <a href="{{ url_for('admin.logout', next=request.path) }}" class="nav-btn">Admin Logout</a>
-            {% else %}
-                {% if request.endpoint != 'admin.login' %}
-                    {% set admin_login_url = url_for('admin.login', next=request.path) %}
-                {% else %}
-                    {% set admin_login_url = url_for('admin.login') %}
-                {% endif %}
-                <a href="{{ admin_login_url }}" class="nav-btn">Admin Login</a>
-            {% endif %}
         </nav>
     </header>
 

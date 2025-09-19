@@ -6,6 +6,11 @@ bp = Blueprint("settings", __name__, url_prefix="/settings")
 def settings_home():
     return render_template("settings/home.html")
 
+
+@bp.route("/operations")
+def operations_menu():
+    return render_template("settings/operations_menu.html")
+
 # --- Dark/Light Mode Toggle ---
 @bp.route("/toggle-theme")
 def toggle_theme():
