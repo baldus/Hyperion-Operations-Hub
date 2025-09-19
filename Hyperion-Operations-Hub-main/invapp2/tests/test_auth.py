@@ -8,7 +8,6 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from invapp import create_app
 from invapp.extensions import db
-from invapp.models import User, Role
 
 
 @pytest.fixture
@@ -48,19 +47,23 @@ def test_login_required_redirect(client):
     assert '/auth/login' in resp.headers['Location']
 
 
-def test_role_restriction(client, app):
+def test_printer_settings_require_admin_session(client):
     register(client, 'bob', 'pw')
     login(client, 'bob', 'pw')
-    # No admin role yet -> forbidden
-    resp = client.get('/settings/printers')
-    assert resp.status_code == 403
-    # grant admin role
-    with app.app_context():
-        user = User.query.filter_by(username='bob').first()
-        admin = Role(name='admin')
-        db.session.add(admin)
-        user.roles.append(admin)
-        db.session.commit()
+
+    resp = client.get('/settings/printers', follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers['Location'].startswith('/admin/login')
+
+    # Unlock admin access using the dedicated admin login route.
+    login_response = client.post(
+        '/admin/login?next=/settings/printers',
+        data={'username': 'admin', 'password': 'password'},
+        follow_redirects=False,
+    )
+    assert login_response.status_code == 302
+    assert login_response.headers['Location'].endswith('/settings/printers')
+
     resp = client.get('/settings/printers')
     assert resp.status_code == 200
 

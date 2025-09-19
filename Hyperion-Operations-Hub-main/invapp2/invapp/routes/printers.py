@@ -1,12 +1,12 @@
 from flask import Blueprint, render_template, request, session, current_app
 
-from invapp.auth import role_required
+from invapp.security import admin_required
 
 bp = Blueprint("printers", __name__, url_prefix="/settings/printers")
 
 @bp.route("", methods=["GET", "POST"])
 @bp.route("/", methods=["GET", "POST"])
-@role_required("admin")
+@admin_required
 def printer_settings():
     theme = session.get("theme", "dark")
     printer_host = current_app.config.get("ZEBRA_PRINTER_HOST", "")
