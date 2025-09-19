@@ -11,10 +11,11 @@ from flask import (
     session,
     url_for,
 )
+from invapp.auth import refresh_logged_in_user
 from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload
 
-from invapp.extensions import db
+from invapp.extensions import db, login_manager
 from invapp.models import (
     Batch,
     Item,
@@ -31,6 +32,15 @@ from invapp.models import (
 )
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
+
+
+@bp.before_request
+def require_login():
+    if session.get("is_admin"):
+        return None
+    if refresh_logged_in_user():
+        return None
+    return login_manager.unauthorized()
 
 
 def _search_filter(query, search_term):

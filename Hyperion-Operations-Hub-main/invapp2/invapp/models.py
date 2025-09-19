@@ -1,9 +1,70 @@
 from datetime import datetime
 
+from flask_login import UserMixin
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.orm import synonym
+from werkzeug.security import check_password_hash, generate_password_hash
 
-from invapp.extensions import db
+from invapp.extensions import db, login_manager
+
+
+user_roles = db.Table(
+    "user_role",
+    db.Column("user_id", db.Integer, db.ForeignKey("user.id"), primary_key=True),
+    db.Column("role_id", db.Integer, db.ForeignKey("role.id"), primary_key=True),
+)
+
+
+class Role(db.Model):
+    __tablename__ = "role"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(64), unique=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    users = db.relationship(
+        "User", secondary=user_roles, back_populates="roles", lazy="joined"
+    )
+
+    def __repr__(self):
+        return f"<Role {self.name}>"
+
+
+class User(UserMixin, db.Model):
+    __tablename__ = "user"
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    _is_active = db.Column("is_active", db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    roles = db.relationship(
+        "Role", secondary=user_roles, back_populates="users", lazy="joined"
+    )
+
+    def set_password(self, password: str) -> None:
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password: str) -> bool:
+        if not self.password_hash:
+            return False
+        return check_password_hash(self.password_hash, password)
+
+    def has_role(self, role_name: str) -> bool:
+        normalized = role_name.strip().lower()
+        return any(role.name.lower() == normalized for role in self.roles)
+
+    @property
+    def is_active(self) -> bool:  # pragma: no cover - trivial delegation
+        return bool(self._is_active)
+
+    @is_active.setter
+    def is_active(self, value: bool) -> None:  # pragma: no cover - trivial delegation
+        self._is_active = bool(value)
+
+    def __repr__(self):
+        return f"<User {self.username}>"
 
 class Item(db.Model):
     __tablename__ = "item"
@@ -370,3 +431,15 @@ OrderItem = OrderLine
 OrderBOMComponent = OrderComponent
 OrderStep = RoutingStep
 OrderStepComponent = RoutingStepComponent
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    """Return the ``User`` instance for the stored session identifier."""
+
+    if not user_id:
+        return None
+    try:
+        return User.query.get(int(user_id))
+    except (TypeError, ValueError):
+        return None

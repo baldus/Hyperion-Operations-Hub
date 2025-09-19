@@ -1,9 +1,26 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash
-from flask_login import login_user, logout_user, login_required, current_user
+from urllib.parse import urljoin
+
+from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask_login import current_user, login_required, login_user, logout_user
 from invapp.extensions import db
 from invapp.models import User, Role
 
 bp = Blueprint("auth", __name__, url_prefix="/auth")
+
+
+def _get_safe_redirect_target(default: str = "home") -> str:
+    """Return a safe redirect target to avoid open redirect vulnerabilities."""
+
+    next_url = request.args.get("next")
+    if not next_url:
+        return url_for(default)
+
+    host_url = request.host_url
+    absolute_target = urljoin(host_url, next_url)
+    if absolute_target.startswith(host_url):
+        return next_url
+
+    return url_for(default)
 
 
 @bp.route("/register", methods=["GET", "POST"])
@@ -40,7 +57,8 @@ def login():
         if user and user.check_password(password):
             login_user(user)
             flash("Logged in", "success")
-            return redirect(url_for("home"))
+            target = _get_safe_redirect_target()
+            return redirect(target)
         flash("Invalid credentials", "danger")
     return render_template("auth/login.html")
 

@@ -17,7 +17,8 @@
             <a href="{{ url_for('orders.orders_home') }}" class="nav-btn">Orders</a>
             <a href="{{ url_for('work.work_home') }}" class="nav-btn">Work Instructions</a>
             <a href="{{ url_for('settings.settings_home') }}" class="nav-btn">Settings</a>
-            {% if session.get('is_admin') %}
+            {% set has_admin_role = current_user.is_authenticated and current_user.has_role('admin') %}
+            {% if session.get('is_admin') or has_admin_role %}
                 <a href="{{ url_for('printers.printer_settings') }}" class="nav-btn">Admin Tools</a>
                 <a href="{{ url_for('admin.logout', next=request.path) }}" class="nav-btn">Admin Logout</a>
             {% else %}

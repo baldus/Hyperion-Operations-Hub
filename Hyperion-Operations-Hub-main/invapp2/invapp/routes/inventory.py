@@ -17,7 +17,6 @@ from flask import (
 from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload, load_only
 
-from invapp.auth import role_required
 from invapp.models import (
     Batch,
     Item,
@@ -542,7 +541,6 @@ def add_item():
 
 
 @bp.route("/item/<int:item_id>/edit", methods=["GET", "POST"])
-@role_required("admin")
 def edit_item(item_id):
     item = Item.query.get_or_404(item_id)
 
@@ -582,7 +580,6 @@ def edit_item(item_id):
 
 
 @bp.route("/item/<int:item_id>/delete", methods=["POST"])
-@role_required("admin")
 def delete_item(item_id):
     item = Item.query.get_or_404(item_id)
 
@@ -795,7 +792,6 @@ def add_location():
 
 
 @bp.route("/location/<int:location_id>/edit", methods=["GET", "POST"])
-@role_required("admin")
 def edit_location(location_id):
     location = Location.query.get_or_404(location_id)
 
@@ -835,7 +831,6 @@ def edit_location(location_id):
 
 
 @bp.route("/location/<int:location_id>/delete", methods=["POST"])
-@role_required("admin")
 def delete_location(location_id):
     location = Location.query.get_or_404(location_id)
 
