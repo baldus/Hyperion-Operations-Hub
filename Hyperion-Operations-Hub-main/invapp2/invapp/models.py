@@ -1,9 +1,149 @@
 from datetime import datetime
 
+from flask_login import UserMixin
 from sqlalchemy.ext.associationproxy import association_proxy
-from sqlalchemy.orm import synonym
+from sqlalchemy import inspect
+from sqlalchemy.orm import joinedload, synonym
+from sqlalchemy.orm.exc import DetachedInstanceError
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from invapp.extensions import db
+
+
+user_roles = db.Table(
+    "user_roles",
+    db.Column("user_id", db.Integer, db.ForeignKey("user.id"), primary_key=True),
+    db.Column("role_id", db.Integer, db.ForeignKey("role.id"), primary_key=True),
+)
+
+
+class Role(db.Model):
+    __tablename__ = "role"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String, unique=True, nullable=False)
+
+    def __repr__(self):
+        return f"<Role name={self.name}>"
+
+
+class User(UserMixin, db.Model):
+    __tablename__ = "user"
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String, unique=True, nullable=False)
+    password_hash = db.Column(db.String, nullable=False)
+
+    roles = db.relationship(
+        Role,
+        secondary=user_roles,
+        backref=db.backref("users", lazy="dynamic"),
+        lazy="joined",
+    )
+
+    def set_password(self, password: str) -> None:
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password: str) -> bool:
+        if not self.password_hash:
+            return False
+        return check_password_hash(self.password_hash, password)
+
+    def has_role(self, role_name: str) -> bool:
+        try:
+            return any(role.name == role_name for role in self.roles)
+        except DetachedInstanceError:
+            identity = inspect(self).identity
+            if not identity:
+                return False
+            user_id = identity[0]
+            user = (
+                db.session.query(type(self))
+                .options(joinedload(type(self).roles))
+                .filter_by(id=user_id)
+                .one_or_none()
+            )
+            if not user:
+                return False
+            return any(role.name == role_name for role in user.roles)
+
+    def __repr__(self):
+        return f"<User username={self.username}>"
+
+
+class BillOfMaterial(db.Model):
+    __tablename__ = "bill_of_material"
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "finished_good_item_id",
+            "revision",
+            name="uq_bom_finished_good_revision",
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    finished_good_item_id = db.Column(
+        db.Integer, db.ForeignKey("item.id"), nullable=False
+    )
+    description = db.Column(db.String, nullable=True)
+    revision = db.Column(db.String(32), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    finished_good = db.relationship(
+        "Item",
+        backref=db.backref("bill_of_materials", cascade="all, delete-orphan"),
+    )
+
+    components = db.relationship(
+        "BillOfMaterialComponent",
+        back_populates="bill_of_material",
+        cascade="all, delete-orphan",
+        order_by="BillOfMaterialComponent.id",
+    )
+
+    def __repr__(self):
+        revision_label = f" rev={self.revision}" if self.revision else ""
+        return (
+            f"<BillOfMaterial fg={self.finished_good_item_id}{revision_label} "
+            f"components={len(self.components) if self.components else 0}>"
+        )
+
+
+class BillOfMaterialComponent(db.Model):
+    __tablename__ = "bill_of_material_component"
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "bill_of_material_id",
+            "component_item_id",
+            name="uq_bom_component_item",
+        ),
+        db.CheckConstraint(
+            "quantity > 0", name="ck_bom_component_positive_quantity"
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    bill_of_material_id = db.Column(
+        db.Integer, db.ForeignKey("bill_of_material.id"), nullable=False
+    )
+    component_item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+
+    bill_of_material = db.relationship(
+        "BillOfMaterial", back_populates="components"
+    )
+    component_item = db.relationship("Item")
+
+    def __repr__(self):
+        return (
+            f"<BillOfMaterialComponent bom={self.bill_of_material_id} "
+            f"component={self.component_item_id} qty={self.quantity}>"
+        )
 
 class Item(db.Model):
     __tablename__ = "item"

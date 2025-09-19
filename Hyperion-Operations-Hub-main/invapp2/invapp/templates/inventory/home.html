@@ -12,6 +12,9 @@
   <a href="{{ url_for('inventory.scan_inventory') }}" class="action-btn">Scan</a>
   <a href="{{ url_for('inventory.cycle_count_home') }}" class="action-btn">Cycle Count</a>
   <a href="{{ url_for('inventory.history_home') }}" class="action-btn">History</a>
+  {% if session.get('is_admin') %}
+  <a href="{{ url_for('inventory.manage_boms') }}" class="action-btn">BOM Library</a>
+  {% endif %}
 </div>
 
 <div class="dashboard-section">

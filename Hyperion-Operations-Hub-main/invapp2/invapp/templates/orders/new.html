@@ -52,9 +52,25 @@
     <section class="form-section">
         <div class="section-header">
             <h3>Bill of Materials</h3>
-            <button type="button" class="action-btn" id="add-bom-component">Add Component</button>
+            <div class="section-actions">
+                <button type="button" class="action-btn secondary" id="import-bom-button">Import Saved BOM</button>
+                <button type="button" class="action-btn" id="add-bom-component">Add Component</button>
+            </div>
         </div>
         <p class="section-help">List each component required to manufacture the finished good. Use valid component SKUs from inventory.</p>
+        <div id="bom-import-status" class="status-message" {% if form_data.bom_prompt_state == 'none' %}style="display:none;"{% endif %}>
+            {% if form_data.bom_prompt_state == 'missing' %}
+                No saved bill of material was found for {{ form_data.finished_good_sku or 'this part' }}. Configure the components below and choose whether to save them.
+            {% elif form_data.bom_prompt_state == 'imported' %}
+                Bill of material loaded from the library. Review and adjust as needed.
+            {% endif %}
+        </div>
+        <div id="bom-save-prompt" class="bom-save-prompt" {% if form_data.bom_prompt_state != 'missing' %}style="display:none;"{% endif %}>
+            <label class="checkbox-field">
+                <input type="checkbox" id="persist-bom-checkbox" {% if form_data.persist_bom %}checked{% endif %}>
+                <span>Save this bill of material to the library when the order is submitted.</span>
+            </label>
+        </div>
         <div class="table-scroll">
             <table class="form-table">
                 <thead>
@@ -93,6 +109,8 @@
 
     <input type="hidden" name="bom_data" id="bom-data">
     <input type="hidden" name="routing_data" id="routing-data">
+    <input type="hidden" name="bom_prompt_state" id="bom-prompt-state" value="{{ form_data.bom_prompt_state }}">
+    <input type="hidden" name="persist_bom" id="persist-bom-flag" value="{{ 'yes' if form_data.persist_bom else 'no' }}">
 
     <div class="form-actions">
         <button type="submit" class="action-btn">Create Order</button>
@@ -110,6 +128,55 @@
     const addBomButton = document.getElementById('add-bom-component');
     const addRoutingButton = document.getElementById('add-routing-step');
     const form = document.getElementById('new-order-form');
+    const importBomButton = document.getElementById('import-bom-button');
+    const finishedGoodInput = document.querySelector('input[name="finished_good_sku"]');
+    const bomStatus = document.getElementById('bom-import-status');
+    const bomPromptStateInput = document.getElementById('bom-prompt-state');
+    const bomSavePrompt = document.getElementById('bom-save-prompt');
+    const persistBomInput = document.getElementById('persist-bom-flag');
+    const persistBomCheckbox = document.getElementById('persist-bom-checkbox');
+
+    function showStatus(state, message) {
+        if (!bomStatus) {
+            return;
+        }
+        bomStatus.dataset.state = state;
+        if (message) {
+            bomStatus.textContent = message;
+            bomStatus.style.display = 'block';
+        } else {
+            bomStatus.textContent = '';
+            bomStatus.style.display = 'none';
+        }
+    }
+
+    function setPromptState(state, message) {
+        if (bomPromptStateInput) {
+            bomPromptStateInput.value = state;
+        }
+        if (state === 'missing') {
+            if (bomSavePrompt) {
+                bomSavePrompt.style.display = 'block';
+            }
+            if (message === undefined) {
+                message = 'No saved bill of material was found. Configure the components below.';
+            }
+        } else {
+            if (bomSavePrompt) {
+                bomSavePrompt.style.display = 'none';
+            }
+            if (state === 'imported' && message === undefined) {
+                message = 'Bill of material loaded from the library.';
+            }
+        }
+        showStatus(state, message || '');
+    }
+
+    function clearBomRows() {
+        while (bomBody && bomBody.firstChild) {
+            bomBody.removeChild(bomBody.firstChild);
+        }
+    }
 
     function createBomRow(values = {}) {
         const row = document.createElement('tr');
@@ -259,11 +326,87 @@
     addBomButton.addEventListener('click', () => createBomRow());
     addRoutingButton.addEventListener('click', () => createRoutingRow());
 
+    if (persistBomCheckbox) {
+        persistBomCheckbox.addEventListener('change', () => {
+            if (persistBomInput) {
+                persistBomInput.value = persistBomCheckbox.checked ? 'yes' : 'no';
+            }
+        });
+    }
+
+    if (importBomButton) {
+        importBomButton.addEventListener('click', async () => {
+            if (!finishedGoodInput) {
+                return;
+            }
+            const sku = finishedGoodInput.value.trim();
+            if (!sku) {
+                setPromptState('error', 'Enter the finished good SKU before importing a bill of material.');
+                return;
+            }
+
+            importBomButton.disabled = true;
+            setPromptState('loading', 'Searching for a saved bill of material…');
+            try {
+                const response = await fetch(`/inventory/api/bom/${encodeURIComponent(sku)}`, {
+                    headers: { 'Accept': 'application/json' },
+                });
+                if (response.ok) {
+                    const payload = await response.json();
+                    clearBomRows();
+                    if (Array.isArray(payload.components) && payload.components.length) {
+                        payload.components.forEach(component => {
+                            createBomRow({ sku: component.sku, quantity: component.quantity });
+                        });
+                    } else {
+                        createBomRow({});
+                    }
+                    if (persistBomCheckbox) {
+                        persistBomCheckbox.checked = false;
+                    }
+                    if (persistBomInput) {
+                        persistBomInput.value = 'no';
+                    }
+                    const fg = payload.finished_good && payload.finished_good.sku ? payload.finished_good.sku : sku;
+                    setPromptState('imported', `Bill of material loaded for ${fg}.`);
+                } else if (response.status === 404) {
+                    if (!bomBody.querySelector('.bom-row')) {
+                        createBomRow({});
+                    }
+                    if (persistBomCheckbox) {
+                        persistBomCheckbox.checked = true;
+                    }
+                    if (persistBomInput) {
+                        persistBomInput.value = 'yes';
+                    }
+                    setPromptState('missing', `No saved bill of material was found for ${sku}.`);
+                } else if (response.status === 403) {
+                    setPromptState('error', 'Admin access has expired. Please log in again to import a bill of material.');
+                } else {
+                    setPromptState('error', 'Unable to import the bill of material at this time.');
+                }
+            } catch (err) {
+                setPromptState('error', 'A network error occurred while importing the bill of material.');
+            } finally {
+                importBomButton.disabled = false;
+                updateStepComponentOptions();
+            }
+        });
+    }
+
     const initialBom = Array.isArray(initialData.bom) && initialData.bom.length ? initialData.bom : [{}];
     initialBom.forEach(component => createBomRow(component));
 
     const initialSteps = Array.isArray(initialData.steps) && initialData.steps.length ? initialData.steps : [{}];
     initialSteps.forEach(step => createRoutingRow(step));
+
+    if (persistBomInput) {
+        persistBomInput.value = initialData.persist_bom ? 'yes' : 'no';
+    }
+    if (persistBomCheckbox) {
+        persistBomCheckbox.checked = Boolean(initialData.persist_bom);
+    }
+    setPromptState(initialData.bom_prompt_state || 'none');
 
     form.addEventListener('submit', () => {
         const bomPayload = collectBomPayload();

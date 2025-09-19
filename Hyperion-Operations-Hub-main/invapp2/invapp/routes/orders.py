@@ -11,12 +11,15 @@ from flask import (
     session,
     url_for,
 )
+from flask_login import login_required
 from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload
 
 from invapp.extensions import db
 from invapp.models import (
     Batch,
+    BillOfMaterial,
+    BillOfMaterialComponent,
     Item,
     Location,
     Movement,
@@ -140,6 +143,30 @@ def _inventory_options(item_id: int):
     return sorted(options, key=lambda entry: entry["label"])
 
 
+def _save_master_bom(finished_good: Item, bom_components):
+    """Persist a reusable bill of material for a finished good item."""
+
+    bom = (
+        BillOfMaterial.query.options(joinedload(BillOfMaterial.components))
+        .filter(BillOfMaterial.finished_good_item_id == finished_good.id)
+        .filter(BillOfMaterial.revision.is_(None))
+        .first()
+    )
+    if bom is None:
+        bom = BillOfMaterial(finished_good_item_id=finished_good.id)
+        db.session.add(bom)
+
+    bom.updated_at = datetime.utcnow()
+    bom.components.clear()
+    for entry in bom_components:
+        bom.components.append(
+            BillOfMaterialComponent(
+                component_item_id=entry["item"].id,
+                quantity=entry["quantity"],
+            )
+        )
+
+
 def _prepare_order_detail(order: Order, *, pending_completed_ids=None, selected_batches=None):
     if selected_batches is None:
         selected_batches = {}
@@ -200,6 +227,7 @@ def _adjust_reservation(order_line: OrderLine, item_id: int, delta: int):
 
 
 @bp.route("/")
+@login_required
 def orders_home():
     search_term = request.args.get("q", "").strip()
     query = Order.query.options(
@@ -212,6 +240,7 @@ def orders_home():
 
 
 @bp.route("/open")
+@login_required
 def view_open_orders():
     orders = (
         Order.query.options(joinedload(Order.order_lines).joinedload(OrderLine.item))
@@ -223,6 +252,7 @@ def view_open_orders():
 
 
 @bp.route("/closed")
+@login_required
 def view_closed_orders():
     orders = (
         Order.query.options(joinedload(Order.order_lines).joinedload(OrderLine.item))
@@ -264,6 +294,8 @@ def new_order():
         "scheduled_completion_date": "",
         "bom": [],
         "steps": [],
+        "bom_prompt_state": "none",
+        "persist_bom": False,
     }
 
     if request.method == "POST":
@@ -284,6 +316,8 @@ def new_order():
         ).strip()
         bom_raw = request.form.get("bom_data") or "[]"
         routing_raw = request.form.get("routing_data") or "[]"
+        bom_prompt_state = request.form.get("bom_prompt_state", "none")
+        persist_bom_flag = (request.form.get("persist_bom") or "no").lower() == "yes"
 
         form_data.update(
             {
@@ -296,6 +330,8 @@ def new_order():
                 "promised_date": promised_date_raw,
                 "scheduled_start_date": scheduled_start_raw,
                 "scheduled_completion_date": scheduled_completion_raw,
+                "bom_prompt_state": bom_prompt_state,
+                "persist_bom": persist_bom_flag,
             }
         )
 
@@ -577,6 +613,9 @@ def new_order():
                         order_component=bom_entities[component_sku],
                     )
                 )
+
+        if persist_bom_flag and finished_good is not None:
+            _save_master_bom(finished_good, bom_components)
 
         db.session.commit()
         if shortages:

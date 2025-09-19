@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Bill of Materials Library</h2>
+<p class="home-lede">Maintain reusable bills of material so they can be imported directly into new orders.</p>
+
+<section class="form-section">
+  <div class="section-header">
+    <h3>Create or Update a BOM</h3>
+    <div class="section-actions">
+      <button type="button" class="action-btn secondary" id="load-bom-library">Load Saved BOM</button>
+      <button type="button" class="action-btn" id="add-library-component">Add Component</button>
+    </div>
+  </div>
+  <p class="section-help">Choose a finished good SKU, enter the component requirements, and save to update the master library.</p>
+  <form method="post" id="bom-library-form" class="form-stack">
+    <input type="hidden" name="action" value="create">
+    <div class="form-grid">
+      <label class="form-field">
+        <span class="field-label">Finished Good SKU</span>
+        <input type="text" name="finished_good_sku" id="library-fg" list="library-fg-skus" required>
+      </label>
+      <label class="form-field">
+        <span class="field-label">Description (optional)</span>
+        <input type="text" name="description" placeholder="Notes or revision label">
+      </label>
+    </div>
+    <datalist id="library-fg-skus">
+      {% for item in items %}
+      <option value="{{ item.sku }}">{{ item.name }}</option>
+      {% endfor %}
+    </datalist>
+
+    <div id="library-bom-status" class="status-message" style="display:none;"></div>
+
+    <div class="table-scroll">
+      <table class="form-table">
+        <thead>
+          <tr>
+            <th>Component SKU</th>
+            <th>Quantity Per</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="library-bom-rows"></tbody>
+      </table>
+    </div>
+
+    <input type="hidden" name="components_data" id="library-components-data">
+    <div class="form-actions">
+      <button type="submit" class="action-btn">Save BOM</button>
+    </div>
+  </form>
+</section>
+
+<section class="form-section">
+  <h3>Import from CSV</h3>
+  <p class="section-help">Upload a CSV containing columns <code>component_sku</code> and <code>quantity</code>. Existing entries for the finished good will be replaced.</p>
+  <form method="post" enctype="multipart/form-data" class="form-grid">
+    <input type="hidden" name="action" value="import">
+    <label class="form-field">
+      <span class="field-label">Finished Good SKU</span>
+      <input type="text" name="finished_good_sku" list="library-fg-skus" required>
+    </label>
+    <label class="form-field">
+      <span class="field-label">CSV File</span>
+      <input type="file" name="file" accept=".csv" required>
+    </label>
+    <div class="form-actions">
+      <button type="submit" class="action-btn">Import CSV</button>
+    </div>
+  </form>
+</section>
+
+<section class="form-section">
+  <h3>Saved Bills of Material</h3>
+  {% if boms %}
+  <div class="table-scroll">
+    <table class="inventory-table">
+      <thead>
+        <tr>
+          <th>Finished Good</th>
+          <th>Components</th>
+          <th>Updated</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for bom in boms %}
+        <tr>
+          <td>
+            <strong>{{ bom.finished_good.sku }}</strong><br>
+            <small>{{ bom.finished_good.name }}</small>
+          </td>
+          <td>
+            {% if bom.components %}
+            <ul class="attention-list">
+              {% for component in bom.components %}
+              <li>
+                <span class="item-ref">{{ component.component_item.sku }}</span>
+                <span class="item-name">{{ component.component_item.name }}</span>
+                <span class="date-ref">Qty {{ component.quantity }}</span>
+              </li>
+              {% endfor %}
+            </ul>
+            {% else %}
+            <p class="empty-state">No components recorded.</p>
+            {% endif %}
+          </td>
+          <td>
+            {% if bom.updated_at %}
+            {{ bom.updated_at.strftime('%b %d, %Y %H:%M') }}
+            {% else %}
+            —
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty-state">No saved bills of material yet. Create one above to get started.</p>
+  {% endif %}
+</section>
+
+<script>
+(function() {
+  const rowsBody = document.getElementById('library-bom-rows');
+  const addRowButton = document.getElementById('add-library-component');
+  const loadButton = document.getElementById('load-bom-library');
+  const componentsInput = document.getElementById('library-components-data');
+  const form = document.getElementById('bom-library-form');
+  const finishedGoodField = document.getElementById('library-fg');
+  const statusBox = document.getElementById('library-bom-status');
+
+  function showStatus(message, tone = 'info') {
+    if (!statusBox) {
+      return;
+    }
+    statusBox.dataset.state = tone;
+    if (message) {
+      statusBox.textContent = message;
+      statusBox.style.display = 'block';
+    } else {
+      statusBox.textContent = '';
+      statusBox.style.display = 'none';
+    }
+  }
+
+  function updateRowOptions() {
+    // Placeholder for future enhancements.
+  }
+
+  function createRow(values = {}) {
+    const row = document.createElement('tr');
+    row.classList.add('bom-row');
+    row.innerHTML = `
+      <td><input type="text" class="bom-sku" placeholder="Component SKU" list="library-fg-skus"></td>
+      <td><input type="number" class="bom-qty" min="1" placeholder="Qty"></td>
+      <td class="row-actions"><button type="button" class="link-btn remove-row">Remove</button></td>
+    `;
+    const skuInput = row.querySelector('.bom-sku');
+    const qtyInput = row.querySelector('.bom-qty');
+    if (values.sku) {
+      skuInput.value = values.sku;
+    }
+    if (values.quantity) {
+      qtyInput.value = values.quantity;
+    }
+    row.querySelector('.remove-row').addEventListener('click', () => {
+      row.remove();
+    });
+    rowsBody.appendChild(row);
+    updateRowOptions();
+  }
+
+  function clearRows() {
+    while (rowsBody.firstChild) {
+      rowsBody.removeChild(rowsBody.firstChild);
+    }
+  }
+
+  function collectPayload() {
+    const payload = [];
+    rowsBody.querySelectorAll('tr').forEach(row => {
+      const sku = row.querySelector('.bom-sku').value.trim();
+      const qty = row.querySelector('.bom-qty').value.trim();
+      if (!sku && !qty) {
+        return;
+      }
+      payload.push({ sku, quantity: qty });
+    });
+    return payload;
+  }
+
+  if (addRowButton) {
+    addRowButton.addEventListener('click', () => createRow());
+  }
+
+  if (loadButton) {
+    loadButton.addEventListener('click', async () => {
+      const fgSku = finishedGoodField ? finishedGoodField.value.trim() : '';
+      if (!fgSku) {
+        showStatus('Enter a finished good SKU to load its saved bill of material.', 'error');
+        return;
+      }
+      showStatus('Loading saved bill of material…', 'loading');
+      try {
+        const response = await fetch(`/inventory/api/bom/${encodeURIComponent(fgSku)}`);
+        if (response.ok) {
+          const payload = await response.json();
+          clearRows();
+          if (Array.isArray(payload.components) && payload.components.length) {
+            payload.components.forEach(component => createRow({ sku: component.sku, quantity: component.quantity }));
+          } else {
+            createRow();
+          }
+          showStatus(`Loaded ${payload.components.length} component(s) for ${payload.finished_good.sku}.`, 'imported');
+        } else if (response.status === 404) {
+          clearRows();
+          createRow();
+          showStatus('No saved bill of material was found. Enter the components below and save.', 'missing');
+        } else if (response.status === 403) {
+          showStatus('Admin access is required to load saved BOMs. Please log in again.', 'error');
+        } else {
+          showStatus('Unable to load the saved bill of material right now.', 'error');
+        }
+      } catch (err) {
+        showStatus('A network error occurred while loading the bill of material.', 'error');
+      }
+    });
+  }
+
+  if (form) {
+    form.addEventListener('submit', () => {
+      const payload = collectPayload();
+      componentsInput.value = JSON.stringify(payload);
+    });
+  }
+
+  // Seed with a single empty row to start.
+  createRow();
+})();
+</script>
+{% endblock %}
