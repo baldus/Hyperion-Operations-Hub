@@ -34,31 +34,9 @@ from invapp.models import (
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
 
 
-def _parse_decimal(value):
-    if value is None:
-        return None
-    if isinstance(value, (int, float, Decimal)):
-        value = str(value)
-    value = value.strip()
-    if not value:
-        return None
-    try:
-        return Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    except (InvalidOperation, ValueError):
-        return None
+def get_inventory_stock_alerts():
+    """Return base inventory summaries used across dashboards."""
 
-
-def _decimal_to_string(value):
-    if value is None:
-        return ""
-    return f"{Decimal(value):.2f}"
-
-############################
-# HOME
-############################
-@bp.route("/")
-def inventory_home():
-    # Summaries for on-hand inventory and reservations
     movement_totals = (
         db.session.query(
             Movement.item_id,
@@ -89,27 +67,6 @@ def inventory_home():
     )
     items_by_id = {item.id: item for item in items}
 
-    usage_cutoff = datetime.utcnow() - timedelta(days=30)
-    usage_totals = (
-        db.session.query(
-            Movement.item_id,
-            func.sum(Movement.quantity).label("usage"),
-        )
-        .filter(
-            Movement.movement_type == "ISSUE",
-            Movement.quantity < 0,
-            Movement.date >= usage_cutoff,
-        )
-        .group_by(Movement.item_id)
-        .all()
-    )
-    usage_map = {
-        item_id: int(-total)
-        for item_id, total in usage_totals
-        if total and total < 0
-    }
-
-    # Determine inventory warning zones
     low_stock_items = []
     near_stock_items = []
     for item in items:
@@ -135,6 +92,68 @@ def inventory_home():
 
     low_stock_items.sort(key=_coverage_sort_key)
     near_stock_items.sort(key=_coverage_sort_key)
+
+    return {
+        "items": items,
+        "items_by_id": items_by_id,
+        "on_hand_map": on_hand_map,
+        "reserved_map": reserved_map,
+        "low_stock_items": low_stock_items,
+        "near_stock_items": near_stock_items,
+    }
+
+
+def _parse_decimal(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float, Decimal)):
+        value = str(value)
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        return Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _decimal_to_string(value):
+    if value is None:
+        return ""
+    return f"{Decimal(value):.2f}"
+
+############################
+# HOME
+############################
+@bp.route("/")
+def inventory_home():
+    base_data = get_inventory_stock_alerts()
+    items = base_data["items"]
+    items_by_id = base_data["items_by_id"]
+    on_hand_map = base_data["on_hand_map"]
+    reserved_map = base_data["reserved_map"]
+    low_stock_items = base_data["low_stock_items"]
+    near_stock_items = base_data["near_stock_items"]
+
+    usage_cutoff = datetime.utcnow() - timedelta(days=30)
+    usage_totals = (
+        db.session.query(
+            Movement.item_id,
+            func.sum(Movement.quantity).label("usage"),
+        )
+        .filter(
+            Movement.movement_type == "ISSUE",
+            Movement.quantity < 0,
+            Movement.date >= usage_cutoff,
+        )
+        .group_by(Movement.item_id)
+        .all()
+    )
+    usage_map = {
+        item_id: int(-total)
+        for item_id, total in usage_totals
+        if total and total < 0
+    }
 
     # Aggregate items causing material shortages for orders
     waiting_orders = (
