@@ -15,6 +15,31 @@
 </div>
 
 <div class="dashboard-section">
+  <h3>Inventory Insights</h3>
+  <div class="chart-controls">
+    <label for="inventory-chart-select">Show:</label>
+    <select id="inventory-chart-select" aria-label="Select inventory insight">
+      {% for key, dataset in inventory_chart_data.items() %}
+      <option value="{{ key }}" {% if key == inventory_chart_default %}selected{% endif %}>
+        {{ dataset.title }}{% if not dataset.entries %} (No data){% endif %}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="chart-wrapper">
+    <canvas id="inventoryPieChart" role="img" aria-label="Inventory insight chart"
+      {% if not inventory_chart_data[inventory_chart_default].entries %}style="display:none;"{% endif %}></canvas>
+    <div id="inventory-chart-empty" class="chart-empty"
+      {% if inventory_chart_data[inventory_chart_default].entries %}style="display:none;"{% endif %}>
+      No data is available for the selected dataset yet.
+    </div>
+  </div>
+  <p id="inventory-chart-description" class="chart-description">
+    {{ inventory_chart_data[inventory_chart_default].description }}
+  </p>
+</div>
+
+<div class="dashboard-section">
   <h3>Waiting on Material for Orders</h3>
   {% if waiting_items %}
   <div class="table-container">
@@ -125,4 +150,94 @@
   <p>All other items are comfortably above minimum stock thresholds.</p>
   {% endif %}
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+  (function () {
+    const datasets = {{ inventory_chart_data | tojson }};
+    const defaultKey = "{{ inventory_chart_default }}";
+    const selectEl = document.getElementById('inventory-chart-select');
+    const descriptionEl = document.getElementById('inventory-chart-description');
+    const emptyEl = document.getElementById('inventory-chart-empty');
+    const canvasEl = document.getElementById('inventoryPieChart');
+    let chartInstance = null;
+
+    function getPalette(size) {
+      const palette = [
+        '#4c6ef5', '#9775fa', '#51cf66', '#ff922b', '#f76707',
+        '#ffa8a8', '#339af0', '#20c997', '#fab005', '#845ef7'
+      ];
+      const colors = [];
+      for (let i = 0; i < size; i += 1) {
+        colors.push(palette[i % palette.length]);
+      }
+      return colors;
+    }
+
+    function updateChart(key) {
+      const dataset = datasets[key] || { title: '', description: '', entries: [] };
+      const entries = Array.isArray(dataset.entries) ? dataset.entries : [];
+      descriptionEl.textContent = dataset.description || '';
+
+      if (!entries.length) {
+        if (chartInstance) {
+          chartInstance.destroy();
+          chartInstance = null;
+        }
+        canvasEl.style.display = 'none';
+        emptyEl.style.display = 'block';
+        return;
+      }
+
+      emptyEl.style.display = 'none';
+      canvasEl.style.display = 'block';
+
+      const labels = entries.map(entry => `${entry.sku} – ${entry.name}`);
+      const dataValues = entries.map(entry => Number(entry.value) || 0);
+      const backgroundColor = getPalette(dataValues.length);
+
+      const chartData = {
+        labels,
+        datasets: [{
+          label: dataset.title,
+          data: dataValues,
+          backgroundColor
+        }]
+      };
+
+      const tooltipLabel = function (context) {
+        const value = context.parsed;
+        const total = context.dataset.data.reduce((acc, current) => acc + current, 0);
+        const percentage = total ? ((value / total) * 100).toFixed(1) : '0.0';
+        return `${context.label}: ${value.toLocaleString()} (${percentage}%)`;
+      };
+
+      if (chartInstance) {
+        chartInstance.data = chartData;
+        chartInstance.options.plugins.tooltip.callbacks.label = tooltipLabel;
+        chartInstance.update();
+      } else {
+        chartInstance = new Chart(canvasEl, {
+          type: 'pie',
+          data: chartData,
+          options: {
+            plugins: {
+              legend: { position: 'bottom' },
+              tooltip: { callbacks: { label: tooltipLabel } }
+            }
+          }
+        });
+      }
+    }
+
+    selectEl.addEventListener('change', (event) => {
+      updateChart(event.target.value);
+    });
+
+    const startKey = datasets[defaultKey] ? defaultKey : Object.keys(datasets)[0];
+    updateChart(startKey);
+  })();
+</script>
 {% endblock %}

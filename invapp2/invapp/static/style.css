@@ -116,6 +116,51 @@ body.light .content-card {
     margin-bottom: 12px;
 }
 
+.chart-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.chart-controls label {
+    font-weight: 600;
+}
+
+.chart-controls select {
+    padding: 8px 14px;
+    border-radius: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(0, 0, 0, 0.25);
+    color: inherit;
+    cursor: pointer;
+}
+
+body.light .chart-controls select {
+    background: #fff;
+    border-color: rgba(0, 0, 0, 0.18);
+}
+
+.chart-wrapper {
+    position: relative;
+    max-width: 520px;
+    margin: 0 auto;
+}
+
+.chart-description {
+    margin-top: 12px;
+    font-size: 0.9rem;
+    opacity: 0.85;
+}
+
+.chart-empty {
+    text-align: center;
+    font-style: italic;
+    opacity: 0.75;
+    padding: 36px 0;
+}
+
 /* --- Tables --- */
 .table-container {
     margin-top: 15px;
