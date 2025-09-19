@@ -242,6 +242,62 @@ class OrderComponent(db.Model):
         )
 
 
+class BillOfMaterial(db.Model):
+    __tablename__ = "item_bom"
+
+    __table_args__ = (
+        db.UniqueConstraint("item_id", name="uq_bom_item"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    item = db.relationship("Item", backref=db.backref("bill_of_material", uselist=False))
+    components = db.relationship(
+        "BillOfMaterialComponent",
+        back_populates="bom",
+        cascade="all, delete-orphan",
+        order_by="BillOfMaterialComponent.id",
+    )
+
+    def __repr__(self):
+        return (
+            f"<BillOfMaterial item={self.item_id} "
+            f"components={len(self.components)}>"
+        )
+
+
+class BillOfMaterialComponent(db.Model):
+    __tablename__ = "item_bom_component"
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "bom_id", "component_item_id", name="uq_bom_component_item"
+        ),
+        db.CheckConstraint(
+            "quantity > 0", name="ck_bom_component_quantity_positive"
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    bom_id = db.Column(db.Integer, db.ForeignKey("item_bom.id"), nullable=False)
+    component_item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+
+    bom = db.relationship("BillOfMaterial", back_populates="components")
+    component_item = db.relationship("Item")
+
+    def __repr__(self):
+        return (
+            f"<BillOfMaterialComponent bom={self.bom_id} "
+            f"component={self.component_item_id} qty={self.quantity}>"
+        )
+
+
 class RoutingStep(db.Model):
     __tablename__ = "order_step"
 
