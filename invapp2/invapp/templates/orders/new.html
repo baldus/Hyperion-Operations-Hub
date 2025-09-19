@@ -52,7 +52,11 @@
     <section class="form-section">
         <div class="section-header">
             <h3>Bill of Materials</h3>
-            <button type="button" class="action-btn" id="add-bom-component">Add Component</button>
+            <div class="section-actions">
+                <input type="text" name="bom_template_name" value="{{ form_data.bom_template_name }}" placeholder="Template Name" class="template-name-input">
+                <button type="submit" name="action" value="save_bom" class="action-btn secondary" formnovalidate>Save BOM Template</button>
+                <button type="button" class="action-btn" id="add-bom-component">Add Component</button>
+            </div>
         </div>
         <p class="section-help">List each component required to manufacture the finished good. Use valid component SKUs from inventory.</p>
         <div class="table-scroll">
