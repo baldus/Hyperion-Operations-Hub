@@ -34,6 +34,9 @@
     <option value="type" {% if sort == 'type' %}selected{% endif %}>Type</option>
     <option value="unit" {% if sort == 'unit' %}selected{% endif %}>Unit</option>
     <option value="min_stock" {% if sort == 'min_stock' %}selected{% endif %}>Min Stock</option>
+    <option value="list_price" {% if sort == 'list_price' %}selected{% endif %}>List Price</option>
+    <option value="last_unit_cost" {% if sort == 'last_unit_cost' %}selected{% endif %}>Last Unit Cost</option>
+    <option value="item_class" {% if sort == 'item_class' %}selected{% endif %}>Item Class</option>
   </select>
 
   <input type="hidden" name="search" value="{{ search }}">
@@ -53,6 +56,9 @@
         <th>Unit</th>
         <th>Description</th>
         <th>Min Stock</th>
+        <th>List Price</th>
+        <th>Last Unit Cost</th>
+        <th>Item Class</th>
         <th>Notes</th>
       </tr>
     </thead>
@@ -65,6 +71,21 @@
         <td>{{ item.unit }}</td>
         <td>{{ item.description }}</td>
         <td>{{ item.min_stock }}</td>
+        <td>
+          {% if item.list_price is not none %}
+            {{ "{:.2f}".format(item.list_price) }}
+          {% else %}
+            -
+          {% endif %}
+        </td>
+        <td>
+          {% if item.last_unit_cost is not none %}
+            {{ "{:.2f}".format(item.last_unit_cost) }}
+          {% else %}
+            -
+          {% endif %}
+        </td>
+        <td>{{ item.item_class or '-' }}</td>
         <td>
           {% if item.notes %}
             {{ item.notes|truncate(80) }}

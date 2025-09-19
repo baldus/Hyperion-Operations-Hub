@@ -71,8 +71,8 @@ body.light button:hover {
 /* --- Content Area --- */
 .content-card {
     margin: 20px auto;
-    padding: 20px;
-    max-width: 800px;
+    padding: 24px;
+    width: min(1400px, 95vw);
     border-radius: 12px;
     background-color: rgba(40, 40, 40, 0.9);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
@@ -81,6 +81,13 @@ body.light button:hover {
 body.light .content-card {
     background-color: #fff;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+@media (max-width: 768px) {
+    .content-card {
+        padding: 16px;
+        width: min(100%, 95vw);
+    }
 }
 
 /* --- Grid for buttons --- */

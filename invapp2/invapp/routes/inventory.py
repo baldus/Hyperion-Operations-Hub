@@ -2,6 +2,7 @@ import csv
 import io
 from collections import defaultdict
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from flask import (
     Blueprint,
@@ -30,6 +31,26 @@ from invapp.models import (
 )
 
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
+
+
+def _parse_decimal(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float, Decimal)):
+        value = str(value)
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        return Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _decimal_to_string(value):
+    if value is None:
+        return ""
+    return f"{Decimal(value):.2f}"
 
 ############################
 # HOME
@@ -259,7 +280,18 @@ def lookup_item_api(sku):
         return jsonify({"error": "SKU is required"}), 400
 
     item = (
-        Item.query.options(load_only(Item.sku, Item.name, Item.description, Item.unit))
+        Item.query.options(
+            load_only(
+                Item.sku,
+                Item.name,
+                Item.description,
+                Item.unit,
+                Item.list_price,
+                Item.last_unit_cost,
+                Item.item_class,
+                Item.type,
+            )
+        )
         .filter(func.lower(Item.sku) == sku.lower())
         .first()
     )
@@ -273,6 +305,10 @@ def lookup_item_api(sku):
             "name": item.name,
             "description": item.description or "",
             "unit": item.unit or "",
+            "type": item.type or "",
+            "list_price": _decimal_to_string(item.list_price),
+            "last_unit_cost": _decimal_to_string(item.last_unit_cost),
+            "item_class": item.item_class or "",
         }
     )
 
@@ -436,6 +472,9 @@ def list_items():
         "type": Item.type.asc(),
         "unit": Item.unit.asc(),
         "min_stock": Item.min_stock.asc(),
+        "list_price": Item.list_price.asc(),
+        "last_unit_cost": Item.last_unit_cost.asc(),
+        "item_class": Item.item_class.asc(),
     }
     query = query.order_by(sort_columns.get(sort_param, Item.sku.asc()))
 
@@ -482,10 +521,13 @@ def add_item():
             sku=next_sku,
             name=request.form["name"],
             type=request.form.get("type", "").strip() or None,
-            unit=request.form.get("unit", "ea"),
+            unit=request.form.get("unit", "ea").strip() or "ea",
             description=request.form.get("description", ""),
             min_stock=min_stock,
             notes=notes_value,
+            list_price=_parse_decimal(request.form.get("list_price")),
+            last_unit_cost=_parse_decimal(request.form.get("last_unit_cost")),
+            item_class=request.form.get("item_class", "").strip() or None,
         )
         db.session.add(item)
         db.session.commit()
@@ -518,6 +560,10 @@ def edit_item(item_id):
         notes = notes_raw.strip() if notes_raw is not None else None
         notes_value = notes or None
         item.notes = notes_value
+
+        item.list_price = _parse_decimal(request.form.get("list_price"))
+        item.last_unit_cost = _parse_decimal(request.form.get("last_unit_cost"))
+        item.item_class = request.form.get("item_class", "").strip() or None
 
         db.session.commit()
         if notes_raw is not None:
@@ -575,6 +621,22 @@ def import_items():
             else:
                 notes_value = None
 
+            has_list_price_column = "list_price" in row
+            has_last_unit_cost_column = "last_unit_cost" in row
+            has_item_class_column = "item_class" in row
+
+            list_price_value = (
+                _parse_decimal(row.get("list_price")) if has_list_price_column else None
+            )
+            last_unit_cost_value = (
+                _parse_decimal(row.get("last_unit_cost"))
+                if has_last_unit_cost_column
+                else None
+            )
+            item_class_value = (
+                (row.get("item_class") or "").strip() if has_item_class_column else None
+            )
+
             existing = Item.query.filter_by(sku=sku).first() if sku else None
             if existing:
                 existing.name = name or existing.name
@@ -585,6 +647,12 @@ def import_items():
                     existing.type = item_type or None
                 if has_notes_column:
                     existing.notes = notes_value
+                if has_list_price_column:
+                    existing.list_price = list_price_value
+                if has_last_unit_cost_column:
+                    existing.last_unit_cost = last_unit_cost_value
+                if has_item_class_column:
+                    existing.item_class = item_class_value or None
                 count_updated += 1
             else:
                 if not sku:
@@ -598,13 +666,24 @@ def import_items():
                     description=description,
                     min_stock=min_stock,
                     notes=notes_value if has_notes_column else None,
+                    list_price=list_price_value if has_list_price_column else None,
+                    last_unit_cost=(
+                        last_unit_cost_value if has_last_unit_cost_column else None
+                    ),
+                    item_class=(
+                        (item_class_value or None) if has_item_class_column else None
+                    ),
                 )
                 db.session.add(item)
                 count_new += 1
 
         db.session.commit()
         flash(
-            f"Items imported: {count_new} new, {count_updated} updated (notes processed)",
+            (
+                "Items imported: "
+                f"{count_new} new, {count_updated} updated "
+                "(extended fields processed)"
+            ),
             "success",
         )
         return redirect(url_for("inventory.list_items"))
@@ -620,7 +699,20 @@ def export_items():
     items = Item.query.all()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["sku", "name", "type", "unit", "description", "min_stock", "notes"])
+    writer.writerow(
+        [
+            "sku",
+            "name",
+            "type",
+            "unit",
+            "description",
+            "min_stock",
+            "notes",
+            "list_price",
+            "last_unit_cost",
+            "item_class",
+        ]
+    )
     for i in items:
         writer.writerow(
             [
@@ -631,6 +723,9 @@ def export_items():
                 i.description,
                 i.min_stock,
                 i.notes or "",
+                _decimal_to_string(i.list_price),
+                _decimal_to_string(i.last_unit_cost),
+                i.item_class or "",
             ]
         )
     response = Response(output.getvalue(), mimetype="text/csv")
