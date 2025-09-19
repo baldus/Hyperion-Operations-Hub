@@ -1,9 +1,13 @@
-from flask import Flask, render_template
-from sqlalchemy import inspect, text
+from datetime import datetime, timedelta
+
+from flask import Flask, render_template, url_for
+from sqlalchemy import inspect, text, func
 from sqlalchemy.exc import NoSuchTableError, OperationalError
 
 from .extensions import db
+from .models import Batch, Movement, Order, OrderStatus
 from .routes import admin, inventory, reports, orders, work, settings, printers
+from .routes.inventory import get_inventory_stock_alerts
 from config import Config
 from . import models  # ensure models are registered with SQLAlchemy
 
@@ -106,6 +110,86 @@ def create_app(config_override=None):
 
     @app.route("/")
     def home():
-        return render_template("home.html")
+        order_counts = {status: 0 for status in OrderStatus.ALL_STATUSES}
+        order_rows = (
+            db.session.query(Order.status, func.count(Order.id))
+            .group_by(Order.status)
+            .all()
+        )
+        for status, count in order_rows:
+            order_counts[status] = int(count or 0)
+
+        active_pipeline = sum(order_counts[status] for status in OrderStatus.ACTIVE_STATES)
+        closed_count = order_counts[OrderStatus.CLOSED]
+        cancelled_count = order_counts[OrderStatus.CANCELLED]
+
+        stock_summary = get_inventory_stock_alerts()
+        low_stock_count = len(stock_summary["low_stock_items"])
+        near_stock_count = len(stock_summary["near_stock_items"])
+
+        now = datetime.utcnow()
+        movement_cutoff = now - timedelta(days=7)
+        batch_cutoff = now - timedelta(days=30)
+
+        recent_movement_count = (
+            db.session.query(func.count(Movement.id))
+            .filter(Movement.date >= movement_cutoff)
+            .scalar()
+        ) or 0
+        recent_batch_count = (
+            db.session.query(func.count(Batch.id))
+            .filter(Batch.received_date >= batch_cutoff)
+            .scalar()
+        ) or 0
+
+        stat_cards = [
+            {
+                "title": "Order Pipeline",
+                "value": active_pipeline,
+                "url": url_for("orders.orders_home"),
+                "description": (
+                    f"Scheduled: {order_counts[OrderStatus.SCHEDULED]} • "
+                    f"Open: {order_counts[OrderStatus.OPEN]} • "
+                    f"Waiting: {order_counts[OrderStatus.WAITING_MATERIAL]}"
+                ),
+            },
+            {
+                "title": "Completed / Cancelled",
+                "value": closed_count + cancelled_count,
+                "url": url_for("orders.orders_home"),
+                "description": (
+                    f"Closed: {closed_count} • Cancelled: {cancelled_count}"
+                ),
+            },
+            {
+                "title": "Low Stock Alerts",
+                "value": low_stock_count,
+                "url": url_for("inventory.inventory_home"),
+                "description": "Items below 105% of minimum levels.",
+            },
+            {
+                "title": "Near Minimum Alerts",
+                "value": near_stock_count,
+                "url": url_for("inventory.inventory_home"),
+                "description": "Items within 125% of minimum levels.",
+            },
+            {
+                "title": "Movements (7 days)",
+                "value": int(recent_movement_count),
+                "url": url_for("inventory.cycle_count_home"),
+                "description": "Inventory transactions logged this week.",
+            },
+            {
+                "title": "Batches Received (30 days)",
+                "value": int(recent_batch_count),
+                "url": url_for("inventory.inventory_home"),
+                "description": "New lots entered in the last month.",
+            },
+        ]
+
+        return render_template(
+            "home.html",
+            stat_cards=stat_cards,
+        )
 
     return app
