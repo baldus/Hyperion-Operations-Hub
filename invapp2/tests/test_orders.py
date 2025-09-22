@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import re
 import sys
 from datetime import date, timedelta
 from types import SimpleNamespace
@@ -60,6 +61,62 @@ def items(app):
             SimpleNamespace(id=component.id, sku=component.sku, name=component.name),
             SimpleNamespace(id=location.id, code=location.code, description=location.description),
         )
+
+
+@pytest.fixture
+def schedule_orders(app):
+    first_date = date(2024, 1, 5)
+    second_date = date(2024, 1, 10)
+
+    with app.app_context():
+        widget = Item(sku='FG-SCH-1', name='Schedule Widget', type='Widget')
+        gadget = Item(sku='FG-SCH-2', name='Schedule Gadget', type='')
+
+        order_one = Order(
+            order_number='ORD-SCHED-1',
+            status=OrderStatus.SCHEDULED,
+            scheduled_completion_date=first_date,
+        )
+        order_one.order_lines.append(
+            OrderLine(
+                item=widget,
+                quantity=12,
+                scheduled_completion_date=first_date,
+            )
+        )
+        order_one.routing_steps.append(
+            RoutingStep(sequence=1, work_cell='Cell A', description='Assembly')
+        )
+
+        order_two = Order(
+            order_number='ORD-SCHED-2',
+            status=OrderStatus.OPEN,
+            scheduled_completion_date=second_date,
+        )
+        order_two.order_lines.append(
+            OrderLine(
+                item=gadget,
+                quantity=7,
+            )
+        )
+        order_two.routing_steps.append(
+            RoutingStep(sequence=1, work_cell=None, description='Inspection')
+        )
+
+        db.session.add_all([widget, gadget, order_one, order_two])
+        db.session.commit()
+
+    return {
+        'dates': [first_date.isoformat(), second_date.isoformat()],
+        'item_type': {
+            'Uncategorized': [0, 7],
+            'Widget': [12, 0],
+        },
+        'work_cell': {
+            'Cell A': [12, 0],
+            'Unassigned': [0, 7],
+        },
+    }
 
 
 def test_order_creation(client, app, items):
@@ -236,6 +293,36 @@ def test_waiting_status_when_inventory_insufficient(client, app, items):
         assert order.status == OrderStatus.WAITING_MATERIAL
         reservations = Reservation.query.filter_by(order_line_id=order.order_lines[0].id).all()
         assert reservations == []
+
+
+def test_schedule_view_groups_totals(client, schedule_orders):
+    resp = client.get('/orders/schedule')
+    assert resp.status_code == 200
+
+    page_html = resp.data.decode('utf-8')
+    match = re.search(r'<script id="schedule-data" type="application/json">(.*?)</script>', page_html, re.DOTALL)
+    assert match is not None
+
+    payload = json.loads(match.group(1))
+
+    assert 'item_type' in payload
+    assert 'work_cell' in payload
+
+    expected_dates = schedule_orders['dates']
+
+    item_dataset = payload['item_type']
+    assert item_dataset['label'] == 'By Item Type'
+    assert item_dataset['data']['dates'] == expected_dates
+    item_series = {entry['label']: entry['data'] for entry in item_dataset['data']['series']}
+    for label, values in schedule_orders['item_type'].items():
+        assert item_series.get(label) == values
+
+    work_dataset = payload['work_cell']
+    assert work_dataset['label'] == 'By Work Cell'
+    assert work_dataset['data']['dates'] == expected_dates
+    work_series = {entry['label']: entry['data'] for entry in work_dataset['data']['series']}
+    for label, values in schedule_orders['work_cell'].items():
+        assert work_series.get(label) == values
 
 
 def test_component_usage_required(client, app, items):

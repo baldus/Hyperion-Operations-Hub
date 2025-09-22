@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Production Schedule</h2>
+<p class="page-intro">Explore upcoming production demand grouped by finished good type or by the work cells needed to complete each order.</p>
+<div class="schedule-toolbar" role="group" aria-label="Schedule breakdown controls">
+  <div class="toolbar-actions">
+    <button type="button" class="action-btn subtle-action" data-breakdown="item_type" aria-pressed="false">By Item Type</button>
+    <button type="button" class="action-btn subtle-action" data-breakdown="work_cell" aria-pressed="false">By Work Cell</button>
+  </div>
+  <p class="muted" id="schedule-mode-copy">Currently viewing: <span id="schedule-mode-label">—</span></p>
+</div>
+<div class="schedule-chart-area">
+  <canvas id="scheduleChart" role="img" aria-label="Stacked bar chart of scheduled production" style="display:none;"></canvas>
+  <div id="schedule-empty" class="empty-state">
+    <p>No scheduled production demand is available yet. Create or schedule orders to populate this view.</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script id="schedule-data" type="application/json">{{ schedule_breakdowns | tojson }}</script>
+<script>
+  (function () {
+    const dataScript = document.getElementById('schedule-data');
+    const breakdowns = dataScript ? JSON.parse(dataScript.textContent) : {};
+    const defaultKey = {{ schedule_default | tojson }};
+    const buttons = Array.from(document.querySelectorAll('[data-breakdown]'));
+    const chartCanvas = document.getElementById('scheduleChart');
+    const emptyEl = document.getElementById('schedule-empty');
+    const modeLabelEl = document.getElementById('schedule-mode-label');
+    let chartInstance = null;
+
+    function getPalette(size) {
+      const palette = [
+        '#4c6ef5', '#9775fa', '#51cf66', '#ff922b', '#f76707',
+        '#ffa8a8', '#339af0', '#20c997', '#fab005', '#845ef7'
+      ];
+      const colors = [];
+      for (let i = 0; i < size; i += 1) {
+        colors.push(palette[i % palette.length]);
+      }
+      return colors;
+    }
+
+    function setActiveButton(key) {
+      buttons.forEach((button) => {
+        const isActive = button.dataset.breakdown === key;
+        button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        if (isActive) {
+          button.classList.add('primary-action');
+          button.classList.remove('subtle-action');
+        } else {
+          button.classList.remove('primary-action');
+          button.classList.add('subtle-action');
+        }
+      });
+    }
+
+    function buildDatasets(series) {
+      const palette = getPalette(series.length || 1);
+      return series.map((entry, index) => ({
+        label: entry.label,
+        data: (entry.data || []).map((value) => Number(value) || 0),
+        backgroundColor: palette[index % palette.length],
+        stack: 'schedule'
+      }));
+    }
+
+    function toggleEmptyState(showEmpty) {
+      if (showEmpty) {
+        if (chartInstance) {
+          chartInstance.destroy();
+          chartInstance = null;
+        }
+        chartCanvas.style.display = 'none';
+        emptyEl.style.display = 'block';
+      } else {
+        emptyEl.style.display = 'none';
+        chartCanvas.style.display = 'block';
+      }
+    }
+
+    function updateChart(key) {
+      const breakdown = breakdowns[key] || {};
+      const dataset = breakdown.data || {};
+      const dates = Array.isArray(dataset.dates) ? dataset.dates : [];
+      const series = Array.isArray(dataset.series) ? dataset.series : [];
+
+      setActiveButton(key);
+      modeLabelEl.textContent = breakdown.label || '—';
+
+      if (!dates.length || !series.length) {
+        toggleEmptyState(true);
+        return;
+      }
+
+      toggleEmptyState(false);
+
+      const datasets = buildDatasets(series);
+      const chartData = {
+        labels: dates,
+        datasets
+      };
+
+      const tooltipLabel = function (context) {
+        const value = context.parsed.y !== undefined ? context.parsed.y : context.parsed;
+        return `${context.dataset.label}: ${Number(value).toLocaleString()}`;
+      };
+
+      if (chartInstance) {
+        chartInstance.data = chartData;
+        chartInstance.options.plugins.tooltip.callbacks.label = tooltipLabel;
+        chartInstance.update();
+      } else {
+        chartInstance = new Chart(chartCanvas, {
+          type: 'bar',
+          data: chartData,
+          options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { position: 'bottom' },
+              tooltip: { callbacks: { label: tooltipLabel } }
+            },
+            scales: {
+              x: { stacked: true, title: { display: true, text: 'Scheduled completion date' } },
+              y: {
+                stacked: true,
+                beginAtZero: true,
+                title: { display: true, text: 'Finished good quantity' }
+              }
+            }
+          }
+        });
+      }
+    }
+
+    buttons.forEach((button) => {
+      button.addEventListener('click', () => {
+        updateChart(button.dataset.breakdown);
+      });
+    });
+
+    const keys = Object.keys(breakdowns);
+    const initialKey = keys.includes(defaultKey) ? defaultKey : keys[0];
+    if (initialKey) {
+      updateChart(initialKey);
+    } else {
+      setActiveButton('');
+      toggleEmptyState(true);
+    }
+  })();
+</script>
+{% endblock %}

@@ -145,6 +145,31 @@ def _inventory_options(item_id: int):
     return sorted(options, key=lambda entry: entry["label"])
 
 
+def _format_schedule_breakdown(buckets):
+    if not buckets:
+        return {"dates": [], "series": []}
+
+    date_keys = sorted(
+        buckets.keys(), key=lambda value: (value is None, value.toordinal() if value else 0)
+    )
+    date_labels = [value.isoformat() if value else "Unscheduled" for value in date_keys]
+
+    categories = sorted(
+        {category for totals in buckets.values() for category in totals.keys()}
+    )
+
+    series = []
+    for category in categories:
+        series.append(
+            {
+                "label": category,
+                "data": [int(buckets[date_key].get(category, 0)) for date_key in date_keys],
+            }
+        )
+
+    return {"dates": date_labels, "series": series}
+
+
 def _save_bom_template(item: Item, component_entries, *, replace_existing=False):
     """Persist a BOM template for a finished good item."""
 
@@ -244,6 +269,67 @@ def orders_home():
     query = _search_filter(query, search_term)
     open_orders = query.order_by(Order.promised_date.is_(None), Order.promised_date, Order.order_number).all()
     return render_template("orders/home.html", orders=open_orders, search_term=search_term)
+
+
+@bp.route("/schedule")
+def schedule_view():
+    orders = (
+        Order.query.options(
+            joinedload(Order.order_lines).joinedload(OrderLine.item),
+            joinedload(Order.routing_steps),
+        )
+        .filter(Order.status.in_(OrderStatus.ACTIVE_STATES))
+        .order_by(Order.scheduled_completion_date.is_(None), Order.scheduled_completion_date, Order.order_number)
+        .all()
+    )
+
+    type_totals = defaultdict(lambda: defaultdict(int))
+    work_cell_totals = defaultdict(lambda: defaultdict(int))
+
+    for order in orders:
+        primary_line = order.primary_line
+        if not primary_line:
+            continue
+
+        schedule_date = (
+            primary_line.scheduled_completion_date or order.scheduled_completion_date
+        )
+        quantity = int(primary_line.quantity or 0)
+        if quantity <= 0:
+            continue
+
+        item_type = ""
+        if primary_line.item and primary_line.item.type:
+            item_type = primary_line.item.type.strip()
+        type_label = item_type or "Uncategorized"
+        type_totals[schedule_date][type_label] += quantity
+
+        work_cells = {
+            (step.work_cell or "").strip()
+            for step in order.routing_steps
+            if (step.work_cell or "").strip()
+        }
+        if not work_cells:
+            work_cells = {"Unassigned"}
+        for work_cell in sorted(work_cells):
+            work_cell_totals[schedule_date][work_cell] += quantity
+
+    schedule_breakdowns = {
+        "item_type": {
+            "label": "By Item Type",
+            "data": _format_schedule_breakdown(type_totals),
+        },
+        "work_cell": {
+            "label": "By Work Cell",
+            "data": _format_schedule_breakdown(work_cell_totals),
+        },
+    }
+
+    return render_template(
+        "orders/schedule.html",
+        schedule_breakdowns=schedule_breakdowns,
+        schedule_default="item_type",
+    )
 
 
 @bp.route("/open")
