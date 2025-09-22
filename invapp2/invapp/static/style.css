@@ -19,21 +19,28 @@ body.light {
 /* --- Header --- */
 header {
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 20px 16px;
+    justify-content: center;
+    padding: 14px 24px;
     border-bottom: 2px solid #444;
     box-sizing: border-box;
 }
 
-.header-top {
+.header-bar {
     width: 100%;
     max-width: 1400px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: 16px;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    flex: 1;
+    flex-wrap: wrap;
+    min-width: 0;
 }
 
 .logo-link {
@@ -47,11 +54,38 @@ header {
 
 .navbar {
     display: flex;
-    gap: 10px;
+    align-items: center;
+    gap: 12px;
     flex-wrap: wrap;
-    justify-content: center;
-    width: 100%;
-    max-width: 1400px;
+}
+
+.navbar .nav-btn {
+    white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+    header {
+        padding: 12px 18px;
+    }
+
+    .header-bar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+
+    .header-left {
+        justify-content: center;
+        gap: 18px;
+    }
+
+    .navbar {
+        justify-content: center;
+    }
+
+    .header-bar .gear-btn {
+        align-self: flex-end;
+    }
 }
 
 /* --- Buttons --- */
@@ -599,10 +633,10 @@ body.dark .modal-content {
 .orders-toolbar {
     display: flex;
     flex-wrap: wrap;
-    justify-content: space-between;
     align-items: center;
-    gap: 15px;
-    margin-bottom: 20px;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
 }
 
 .toolbar-actions {
@@ -613,14 +647,25 @@ body.dark .modal-content {
 
 .orders-filter {
     display: flex;
+    gap: 8px;
     align-items: center;
-    gap: 10px;
 }
 
 .orders-filter input[type="search"] {
-    padding: 8px 12px;
-    border-radius: 20px;
-    border: none;
+    padding: 8px 14px;
+    border-radius: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(0, 0, 0, 0.35);
+    color: inherit;
+}
+
+body.light .orders-filter input[type="search"] {
+    background: #fff;
+    border-color: rgba(0, 0, 0, 0.18);
+}
+
+.orders-filter button {
+    padding: 8px 16px;
 }
 
 /* --- Forms --- */
@@ -849,6 +894,242 @@ body.light .form-section select {
 
 .table-scroll {
     overflow-x: auto;
+}
+
+.orders-table-wrap {
+    margin-top: 18px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.04);
+    box-shadow: 0 14px 28px rgba(0, 0, 0, 0.28);
+    overflow: hidden;
+}
+
+body.light .orders-table-wrap {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.12);
+    box-shadow: 0 14px 32px rgba(31, 45, 61, 0.12);
+}
+
+.orders-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 720px;
+}
+
+.orders-table thead th {
+    background: linear-gradient(135deg, rgba(82, 110, 255, 0.85), rgba(96, 196, 255, 0.8));
+    color: #f5f9ff;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.85rem;
+}
+
+body.light .orders-table thead th {
+    background: linear-gradient(135deg, #5a8dee, #6ec6ff);
+    color: #ffffff;
+}
+
+.orders-table th,
+.orders-table td {
+    padding: 14px 18px;
+    text-align: left;
+    border-right: 1px solid rgba(255, 255, 255, 0.12);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    font-size: 0.95rem;
+}
+
+body.light .orders-table th,
+body.light .orders-table td {
+    border-color: rgba(0, 0, 0, 0.1);
+    color: inherit;
+}
+
+.orders-table tbody td {
+    background-color: rgba(0, 0, 0, 0.28);
+}
+
+body.light .orders-table tbody td {
+    background-color: rgba(255, 255, 255, 0.92);
+}
+
+.orders-table th:last-child,
+.orders-table td:last-child {
+    border-right: none;
+}
+
+.orders-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.orders-table tbody tr:nth-child(even) td {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+body.light .orders-table tbody tr:nth-child(even) td {
+    background-color: rgba(0, 0, 0, 0.03);
+}
+
+.orders-table tbody tr:hover td {
+    background-color: rgba(104, 164, 255, 0.18);
+    transition: background-color 0.2s ease;
+}
+
+body.light .orders-table tbody tr:hover td {
+    background-color: rgba(104, 164, 255, 0.14);
+}
+
+.orders-table td.numeric,
+.orders-table th.numeric {
+    text-align: right;
+}
+
+.orders-table td:first-child {
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: #e3f3ff;
+}
+
+.order-link {
+    color: #8bd4ff;
+    text-decoration: none;
+    font-variant-numeric: tabular-nums;
+}
+
+.order-link:hover,
+.order-link:focus {
+    text-decoration: underline;
+}
+
+body.light .order-link {
+    color: #0b6fb8;
+}
+
+body.light .orders-table td:first-child {
+    color: #0b4b7f;
+}
+
+.finished-good {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.finished-good .sku {
+    font-weight: 600;
+    letter-spacing: 0.03em;
+}
+
+.finished-good .name {
+    opacity: 0.85;
+}
+
+.muted {
+    opacity: 0.6;
+}
+
+.progress-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+body.light .progress-chip {
+    background-color: rgba(0, 0, 0, 0.06);
+}
+
+.progress-track {
+    width: 120px;
+    height: 6px;
+    background-color: rgba(255, 255, 255, 0.18);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+body.light .progress-track {
+    background-color: rgba(0, 0, 0, 0.12);
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #64b5ff, #7cffd1);
+}
+
+.progress-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background-color: rgba(255, 255, 255, 0.12);
+    color: #f5f5f5;
+}
+
+body.light .status-pill {
+    background-color: rgba(0, 0, 0, 0.08);
+    color: #1f2933;
+}
+
+.status-pill.status-scheduled {
+    background-color: rgba(255, 193, 7, 0.24);
+    color: #ffe59a;
+}
+
+.status-pill.status-in_production {
+    background-color: rgba(33, 150, 243, 0.24);
+    color: #9ed7ff;
+}
+
+.status-pill.status-complete {
+    background-color: rgba(76, 175, 80, 0.26);
+    color: #bdf7c7;
+}
+
+body.light .status-pill.status-scheduled {
+    background-color: rgba(255, 193, 7, 0.18);
+    color: #7a5a00;
+}
+
+body.light .status-pill.status-in_production {
+    background-color: rgba(33, 150, 243, 0.18);
+    color: #0b60a8;
+}
+
+body.light .status-pill.status-complete {
+    background-color: rgba(76, 175, 80, 0.18);
+    color: #1d5e29;
+}
+
+.status-pill.status-pending {
+    background-color: rgba(158, 158, 158, 0.22);
+    color: #e4e4e4;
+}
+
+body.light .status-pill.status-pending {
+    background-color: rgba(158, 158, 158, 0.2);
+    color: #3c3c3c;
+}
+
+@media (max-width: 960px) {
+    .orders-table-wrap {
+        margin-top: 16px;
+    }
+
+    .orders-table {
+        min-width: 620px;
+    }
 }
 
 .form-table {
