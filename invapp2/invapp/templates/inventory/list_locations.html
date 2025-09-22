@@ -20,7 +20,7 @@
     <tbody>
       {% for loc in locations %}
       <tr>
-        <td>{{ loc.code }}</td>
+        <td><a href="{{ url_for('inventory.edit_location', location_id=loc.id) }}">{{ loc.code }}</a></td>
         <td>{{ loc.description }}</td>
       </tr>
       {% endfor %}

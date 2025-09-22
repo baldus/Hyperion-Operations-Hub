@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Operations Menu</h2>
+<p>Select a destination to manage settings, reports, or administrator tools.</p>
+<div class="button-grid">
+    <a href="{{ url_for('settings.settings_home') }}" class="action-btn">Settings</a>
+    <a href="{{ url_for('reports.reports_home') }}" class="action-btn">Reports</a>
+    {% if session.get('is_admin') %}
+        <a href="{{ url_for('printers.printer_settings') }}" class="action-btn">Admin Tools</a>
+        <a href="{{ url_for('admin.logout', next=request.path) }}" class="action-btn">Admin Logout</a>
+    {% else %}
+        {% if request.endpoint != 'admin.login' %}
+            {% set admin_login_url = url_for('admin.login', next=request.path) %}
+        {% else %}
+            {% set admin_login_url = url_for('admin.login') %}
+        {% endif %}
+        <a href="{{ admin_login_url }}" class="action-btn">Admin Login</a>
+    {% endif %}
+</div>
+{% endblock %}

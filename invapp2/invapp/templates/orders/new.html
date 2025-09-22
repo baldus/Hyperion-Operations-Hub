@@ -52,7 +52,10 @@
     <section class="form-section">
         <div class="section-header">
             <h3>Bill of Materials</h3>
-            <button type="button" class="action-btn" id="add-bom-component">Add Component</button>
+            <div class="section-actions">
+                <button type="button" class="action-btn" id="import-bom-template" data-fetch-url="{{ url_for('orders.fetch_bom_template', sku='__SKU__') }}">Import BOM</button>
+                <button type="button" class="action-btn" id="add-bom-component">Add Component</button>
+            </div>
         </div>
         <p class="section-help">List each component required to manufacture the finished good. Use valid component SKUs from inventory.</p>
         <div class="table-scroll">
@@ -66,6 +69,14 @@
                 </thead>
                 <tbody id="bom-rows"></tbody>
             </table>
+        </div>
+        <div class="form-feedback" id="bom-import-feedback" hidden></div>
+        <div class="form-field" id="save-bom-template-container" {% if not form_data.save_bom_template %}hidden{% endif %}>
+            <label>
+                <input type="checkbox" name="save_bom_template" id="save-bom-template" value="1" {% if form_data.save_bom_template %}checked{% endif %}>
+                Save these BOM components to the template library when the order is created.
+            </label>
+            <p class="section-help" id="save-bom-template-help">No stored BOM template was found for this finished good. Select this option to add it after submission.</p>
         </div>
     </section>
 
@@ -109,6 +120,11 @@
     const routingDataInput = document.getElementById('routing-data');
     const addBomButton = document.getElementById('add-bom-component');
     const addRoutingButton = document.getElementById('add-routing-step');
+    const importBomButton = document.getElementById('import-bom-template');
+    const bomFeedback = document.getElementById('bom-import-feedback');
+    const saveTemplateContainer = document.getElementById('save-bom-template-container');
+    const saveTemplateCheckbox = document.getElementById('save-bom-template');
+    const saveTemplateHelp = document.getElementById('save-bom-template-help');
     const form = document.getElementById('new-order-form');
 
     function createBomRow(values = {}) {
@@ -254,6 +270,94 @@
             });
         });
         return entries;
+    }
+
+    function setBomFeedback(message, level = 'info') {
+        if (!bomFeedback) {
+            return;
+        }
+        if (!message) {
+            bomFeedback.textContent = '';
+            bomFeedback.className = 'form-feedback';
+            bomFeedback.hidden = true;
+            return;
+        }
+        bomFeedback.textContent = message;
+        bomFeedback.className = `form-feedback ${level}`;
+        bomFeedback.hidden = false;
+    }
+
+    function showSaveTemplatePrompt(message) {
+        if (!saveTemplateContainer || !saveTemplateCheckbox) {
+            return;
+        }
+        saveTemplateContainer.hidden = false;
+        if (typeof message === 'string' && saveTemplateHelp) {
+            saveTemplateHelp.textContent = message;
+        }
+        saveTemplateCheckbox.checked = true;
+    }
+
+    function hideSaveTemplatePrompt() {
+        if (!saveTemplateContainer || !saveTemplateCheckbox) {
+            return;
+        }
+        saveTemplateCheckbox.checked = false;
+        saveTemplateContainer.hidden = true;
+        if (saveTemplateHelp) {
+            saveTemplateHelp.textContent = 'No stored BOM template was found for this finished good. Select this option to add it after submission.';
+        }
+    }
+
+    if (saveTemplateContainer && initialData.save_bom_template) {
+        saveTemplateContainer.hidden = false;
+    }
+
+    if (importBomButton) {
+        importBomButton.addEventListener('click', async () => {
+            const skuField = document.querySelector('input[name="finished_good_sku"]');
+            const finishedSku = skuField ? skuField.value.trim() : '';
+            if (!finishedSku) {
+                setBomFeedback('Enter a finished good part number before importing a BOM.', 'danger');
+                showSaveTemplatePrompt('Enter a finished good part number before requesting a BOM template.');
+                return;
+            }
+            if (!importBomButton.dataset.fetchUrl) {
+                setBomFeedback('Unable to determine the BOM import endpoint.', 'danger');
+                return;
+            }
+            setBomFeedback('Searching for a stored BOM template…', 'info');
+            try {
+                const endpoint = importBomButton.dataset.fetchUrl.replace('__SKU__', encodeURIComponent(finishedSku));
+                const response = await fetch(endpoint, { headers: { 'Accept': 'application/json' } });
+                if (response.status === 404) {
+                    const payload = await response.json().catch(() => ({}));
+                    const message = payload.error || `No BOM template is stored for ${finishedSku}.`;
+                    setBomFeedback(message, 'warning');
+                    showSaveTemplatePrompt(`${message} Select this option to store the BOM after submitting the order.`);
+                    return;
+                }
+                if (!response.ok) {
+                    setBomFeedback('Failed to fetch the BOM template. Please try again later.', 'danger');
+                    return;
+                }
+                const payload = await response.json();
+                const components = Array.isArray(payload.components) ? payload.components : [];
+                bomBody.innerHTML = '';
+                if (components.length === 0) {
+                    createBomRow({});
+                } else {
+                    components.forEach(component => {
+                        createBomRow({ sku: component.sku || '', quantity: component.quantity });
+                    });
+                }
+                setBomFeedback(`Loaded ${components.length} component${components.length === 1 ? '' : 's'} from the template${payload.updated_at ? ` (updated ${new Date(payload.updated_at).toLocaleString()})` : ''}.`, 'success');
+                hideSaveTemplatePrompt();
+            } catch (error) {
+                console.error('Unable to load BOM template', error);
+                setBomFeedback('An unexpected error occurred while importing the BOM template.', 'danger');
+            }
+        });
     }
 
     addBomButton.addEventListener('click', () => createBomRow());

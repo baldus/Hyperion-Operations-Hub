@@ -1,5 +1,7 @@
+from datetime import date, timedelta
+
 from flask import Flask, render_template
-from sqlalchemy import inspect, text
+from sqlalchemy import func, inspect, text
 from sqlalchemy.exc import NoSuchTableError, OperationalError
 
 from .extensions import db
@@ -47,6 +49,8 @@ def _ensure_order_schema(engine):
         "order_bom_component",
         "order_step",
         "order_step_component",
+        "item_bom",
+        "item_bom_component",
     }
     missing_tables = required_tables - existing_tables
     if missing_tables:
@@ -104,6 +108,117 @@ def create_app(config_override=None):
 
     @app.route("/")
     def home():
-        return render_template("home.html")
+        today = date.today()
+        due_soon_window = timedelta(days=3)
+        soon_cutoff = today + due_soon_window
+        active_statuses = tuple(models.OrderStatus.ACTIVE_STATES)
+
+        due_soon_query = models.Order.query.filter(
+            models.Order.status.in_(active_statuses),
+            models.Order.promised_date.isnot(None),
+            models.Order.promised_date >= today,
+            models.Order.promised_date <= soon_cutoff,
+        )
+        due_soon_count = due_soon_query.count()
+        due_soon_preview = (
+            due_soon_query.order_by(
+                models.Order.promised_date.asc(),
+                models.Order.order_number.asc(),
+            )
+            .limit(5)
+            .all()
+        )
+
+        overdue_query = models.Order.query.filter(
+            models.Order.status.in_(active_statuses),
+            models.Order.promised_date.isnot(None),
+            models.Order.promised_date < today,
+        )
+        overdue_count = overdue_query.count()
+        overdue_preview = (
+            overdue_query.order_by(
+                models.Order.promised_date.asc(),
+                models.Order.order_number.asc(),
+            )
+            .limit(5)
+            .all()
+        )
+
+        waiting_material_count = (
+            models.Order.query.filter(
+                models.Order.status == models.OrderStatus.WAITING_MATERIAL
+            ).count()
+        )
+
+        movement_totals = (
+            db.session.query(
+                models.Movement.item_id,
+                func.coalesce(func.sum(models.Movement.quantity), 0).label(
+                    "on_hand"
+                ),
+            )
+            .group_by(models.Movement.item_id)
+            .all()
+        )
+        on_hand_map = {
+            item_id: int(total or 0) for item_id, total in movement_totals
+        }
+
+        items = models.Item.query.order_by(models.Item.sku).all()
+
+        low_items = []
+        out_items = []
+        for item in items:
+            min_stock_raw = item.min_stock or 0
+            try:
+                min_stock = int(min_stock_raw)
+            except (TypeError, ValueError):
+                min_stock = 0
+            if min_stock <= 0:
+                continue
+            on_hand = on_hand_map.get(item.id, 0)
+            shortage = max(min_stock - on_hand, 0)
+            entry = {
+                "item": item,
+                "on_hand": on_hand,
+                "min_stock": min_stock,
+                "shortage": shortage,
+            }
+            if on_hand <= 0:
+                entry["is_out"] = True
+                out_items.append(entry)
+            elif on_hand < min_stock:
+                entry["is_out"] = False
+                low_items.append(entry)
+
+        out_items.sort(key=lambda entry: (-entry["shortage"], entry["item"].sku))
+        low_items.sort(key=lambda entry: (-entry["shortage"], entry["item"].sku))
+
+        preview_limit = 5
+        inventory_preview = (out_items + low_items)[:preview_limit]
+
+        order_summary = {
+            "due_soon_window_days": due_soon_window.days,
+            "due_soon_count": due_soon_count,
+            "due_soon_preview": due_soon_preview,
+            "overdue_count": overdue_count,
+            "overdue_preview": overdue_preview,
+            "waiting_material_count": waiting_material_count,
+            "preview_limit": 5,
+        }
+
+        inventory_summary = {
+            "out_count": len(out_items),
+            "low_count": len(low_items),
+            "preview": inventory_preview,
+            "preview_limit": preview_limit,
+            "total_alerts": len(out_items) + len(low_items),
+        }
+
+        return render_template(
+            "home.html",
+            order_summary=order_summary,
+            inventory_summary=inventory_summary,
+        )
 
     return app

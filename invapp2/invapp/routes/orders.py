@@ -1,3 +1,5 @@
+import csv
+import io
 import json
 from collections import defaultdict
 from datetime import datetime
@@ -5,6 +7,7 @@ from datetime import datetime
 from flask import (
     Blueprint,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -16,6 +19,8 @@ from sqlalchemy.orm import joinedload
 
 from invapp.extensions import db
 from invapp.models import (
+    BillOfMaterial,
+    BillOfMaterialComponent,
     Batch,
     Item,
     Location,
@@ -140,6 +145,36 @@ def _inventory_options(item_id: int):
     return sorted(options, key=lambda entry: entry["label"])
 
 
+def _save_bom_template(item: Item, component_entries, *, replace_existing=False):
+    """Persist a BOM template for a finished good item."""
+
+    template = BillOfMaterial.query.filter_by(item_id=item.id).first()
+    created = False
+    replaced = False
+
+    if template and not replace_existing:
+        return template, created, replaced
+
+    if template is None:
+        template = BillOfMaterial(item=item)
+        db.session.add(template)
+        created = True
+    else:
+        template.components.clear()
+        db.session.flush()
+        replaced = True
+
+    for entry in component_entries:
+        template.components.append(
+            BillOfMaterialComponent(
+                component_item_id=entry["item"].id,
+                quantity=entry["quantity"],
+            )
+        )
+
+    return template, created, (created or replaced)
+
+
 def _prepare_order_detail(order: Order, *, pending_completed_ids=None, selected_batches=None):
     if selected_batches is None:
         selected_batches = {}
@@ -233,6 +268,62 @@ def view_closed_orders():
     return render_template("orders/closed.html", orders=orders)
 
 
+@bp.route("/bom-template/<string:sku>")
+def fetch_bom_template(sku: str):
+    if not session.get("is_admin"):
+        return jsonify({"error": "Administrator access is required."}), 403
+
+    normalized_sku = (sku or "").strip()
+    if not normalized_sku:
+        return jsonify({"error": "Finished good part number is required."}), 400
+
+    item = Item.query.filter_by(sku=normalized_sku).first()
+    if item is None:
+        return (
+            jsonify(
+                {"error": f"Finished good part number '{normalized_sku}' was not found."}
+            ),
+            404,
+        )
+
+    bom = (
+        BillOfMaterial.query.options(
+            joinedload(BillOfMaterial.components)
+            .joinedload(BillOfMaterialComponent.component_item)
+        )
+        .filter_by(item_id=item.id)
+        .first()
+    )
+    if bom is None:
+        return (
+            jsonify(
+                {
+                    "error": f"No BOM template stored for {item.sku}.",
+                    "item": {"sku": item.sku, "name": item.name},
+                }
+            ),
+            404,
+        )
+
+    components = [
+        {
+            "sku": component.component_item.sku,
+            "name": component.component_item.name,
+            "quantity": component.quantity,
+        }
+        for component in sorted(
+            bom.components, key=lambda entry: entry.component_item.sku
+        )
+    ]
+    return jsonify(
+        {
+            "item": {"sku": item.sku, "name": item.name},
+            "components": components,
+            "updated_at": bom.updated_at.isoformat() if bom.updated_at else None,
+        }
+    )
+
+
 def _parse_date(raw_value, field_label, errors):
     if not raw_value:
         errors.append(f"{field_label} is required.")
@@ -242,6 +333,168 @@ def _parse_date(raw_value, field_label, errors):
     except ValueError:
         errors.append(f"{field_label} must be a valid date (YYYY-MM-DD).")
         return None
+
+
+@bp.route("/bom-library", methods=["GET", "POST"])
+def bom_library():
+    if not session.get("is_admin"):
+        next_target = request.full_path if request.query_string else request.path
+        flash("Administrator access is required to manage BOM templates.", "danger")
+        return redirect(url_for("admin.login", next=next_target))
+
+    items = Item.query.order_by(Item.sku).all()
+    templates = (
+        BillOfMaterial.query.options(
+            joinedload(BillOfMaterial.item),
+            joinedload(BillOfMaterial.components).joinedload(
+                BillOfMaterialComponent.component_item
+            ),
+        )
+        .order_by(BillOfMaterial.updated_at.desc())
+        .all()
+    )
+
+    form_data = {"finished_good_sku": "", "bom": []}
+    if request.method == "POST":
+        action = (request.form.get("action") or "create").strip()
+        errors = []
+        finished_good_sku = (request.form.get("finished_good_sku") or "").strip()
+        form_data["finished_good_sku"] = finished_good_sku
+
+        bom_payload = []
+        if action == "import_csv":
+            upload = request.files.get("csv_file")
+            if upload is None or not upload.filename:
+                errors.append("A CSV file is required to import a BOM.")
+            else:
+                try:
+                    raw_content = upload.read().decode("utf-8-sig")
+                except UnicodeDecodeError:
+                    errors.append("CSV import files must be UTF-8 encoded.")
+                else:
+                    stream = io.StringIO(raw_content)
+                    reader = csv.DictReader(stream)
+                    if not reader.fieldnames:
+                        errors.append("CSV file is empty.")
+                    else:
+                        normalized = {
+                            (name or "").strip().lower(): name
+                            for name in reader.fieldnames
+                        }
+                        sku_field = normalized.get("component_sku") or normalized.get("sku")
+                        quantity_field = normalized.get("quantity")
+                        if not sku_field or not quantity_field:
+                            errors.append(
+                                "CSV must include 'component_sku' and 'quantity' columns."
+                            )
+                        else:
+                            parsed_entries = []
+                            for row in reader:
+                                sku_value = (row.get(sku_field) or "").strip()
+                                quantity_value = (row.get(quantity_field) or "").strip()
+                                if not sku_value and not quantity_value:
+                                    continue
+                                parsed_entries.append(
+                                    {"sku": sku_value, "quantity": quantity_value}
+                                )
+                            if not parsed_entries:
+                                errors.append(
+                                    "CSV did not include any component rows to import."
+                                )
+                            bom_payload = parsed_entries
+                            form_data["bom"] = parsed_entries
+        else:
+            bom_raw = request.form.get("bom_data") or "[]"
+            try:
+                bom_payload = json.loads(bom_raw)
+                if not isinstance(bom_payload, list):
+                    raise ValueError
+            except ValueError:
+                bom_payload = []
+                errors.append(
+                    "Unable to read the BOM component details submitted for the template."
+                )
+            form_data["bom"] = bom_payload
+
+        finished_good = None
+        if not finished_good_sku:
+            errors.append("Finished good part number is required.")
+        else:
+            finished_good = Item.query.filter_by(sku=finished_good_sku).first()
+            if finished_good is None:
+                errors.append(
+                    f"Finished good part number '{finished_good_sku}' was not found."
+                )
+
+        bom_components = []
+        component_skus_seen = set()
+        if not bom_payload:
+            errors.append("At least one BOM component is required to save a template.")
+        else:
+            for entry in bom_payload:
+                if not isinstance(entry, dict):
+                    errors.append("Each BOM component must include a SKU and quantity.")
+                    continue
+                sku = (entry.get("sku") or "").strip()
+                quantity_value = entry.get("quantity")
+                if not sku:
+                    errors.append("BOM components require a component SKU.")
+                    continue
+                if sku in component_skus_seen:
+                    errors.append(f"BOM component {sku} is listed more than once.")
+                    continue
+                component_item = Item.query.filter_by(sku=sku).first()
+                if component_item is None:
+                    errors.append(f"BOM component SKU '{sku}' was not found.")
+                    continue
+                try:
+                    component_quantity = int(quantity_value)
+                    if component_quantity <= 0:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    errors.append(
+                        f"BOM component quantity for {sku} must be a positive integer."
+                    )
+                    continue
+                bom_components.append(
+                    {"sku": sku, "item": component_item, "quantity": component_quantity}
+                )
+                component_skus_seen.add(sku)
+
+        if errors:
+            for error in errors:
+                flash(error, "danger")
+            return render_template(
+                "orders/bom_library.html",
+                items=items,
+                templates=templates,
+                form_data=form_data,
+            )
+
+        _, created, changed = _save_bom_template(
+            finished_good, bom_components, replace_existing=True
+        )
+        db.session.commit()
+        if created:
+            flash(
+                f"BOM template for {finished_good.sku} was created successfully.",
+                "success",
+            )
+        elif changed:
+            flash(
+                f"BOM template for {finished_good.sku} was updated successfully.",
+                "success",
+            )
+        else:
+            flash(
+                f"BOM template for {finished_good.sku} already exists and was not modified.",
+                "info",
+            )
+        return redirect(url_for("orders.bom_library"))
+
+    return render_template(
+        "orders/bom_library.html", items=items, templates=templates, form_data=form_data
+    )
 
 
 @bp.route("/new", methods=["GET", "POST"])
@@ -264,6 +517,7 @@ def new_order():
         "scheduled_completion_date": "",
         "bom": [],
         "steps": [],
+        "save_bom_template": False,
     }
 
     if request.method == "POST":
@@ -284,6 +538,7 @@ def new_order():
         ).strip()
         bom_raw = request.form.get("bom_data") or "[]"
         routing_raw = request.form.get("routing_data") or "[]"
+        save_bom_template = request.form.get("save_bom_template") == "1"
 
         form_data.update(
             {
@@ -296,6 +551,7 @@ def new_order():
                 "promised_date": promised_date_raw,
                 "scheduled_start_date": scheduled_start_raw,
                 "scheduled_completion_date": scheduled_completion_raw,
+                "save_bom_template": save_bom_template,
             }
         )
 
@@ -519,6 +775,12 @@ def new_order():
         if shortages:
             order_status = OrderStatus.WAITING_MATERIAL
 
+        existing_template = None
+        if finished_good is not None:
+            existing_template = BillOfMaterial.query.filter_by(
+                item_id=finished_good.id
+            ).first()
+
         order = Order(
             order_number=order_number,
             customer_name=customer_name,
@@ -578,6 +840,13 @@ def new_order():
                     )
                 )
 
+        bom_template_saved = False
+        if save_bom_template and finished_good is not None:
+            _, created_template, changed_template = _save_bom_template(
+                finished_good, bom_components, replace_existing=False
+            )
+            bom_template_saved = created_template or changed_template
+
         db.session.commit()
         if shortages:
             shortage_summary = ", ".join(
@@ -587,9 +856,21 @@ def new_order():
             message = "Order created but waiting on material"
             if shortage_summary:
                 message = f"{message}: {shortage_summary}"
+            if bom_template_saved:
+                message = f"{message} — BOM template saved for {finished_good.sku}."
             flash(message, "warning")
         else:
-            flash("Order created and materials reserved", "success")
+            success_message = "Order created and materials reserved"
+            if bom_template_saved:
+                success_message = (
+                    f"{success_message}. BOM template saved for {finished_good.sku}."
+                )
+            elif save_bom_template and existing_template is not None:
+                success_message = (
+                    f"{success_message}. Existing BOM template for {finished_good.sku} "
+                    "remains unchanged."
+                )
+            flash(success_message, "success")
         return redirect(url_for("orders.view_order", order_id=order.id))
 
     return render_template("orders/new.html", items=items, form_data=form_data)

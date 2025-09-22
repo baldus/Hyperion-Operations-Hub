@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Edit Location</h2>
+<form method="POST">
+  <label for="code">Code:</label><br>
+  <input type="text" name="code" value="{{ form_code if form_code is not none else location.code }}" required><br><br>
+
+  <label for="description">Description:</label><br>
+  <textarea name="description">{{ form_description if form_description is not none else (location.description or '') }}</textarea><br><br>
+
+  <button type="submit" class="action-btn">Update</button>
+</form>
+
+<form method="POST" action="{{ url_for('inventory.delete_location', location_id=location.id) }}" onsubmit="return confirm('Are you sure you want to delete this location? This action cannot be undone.');">
+  <button type="submit" class="action-btn action-btn--danger">Delete Location</button>
+</form>
+{% endblock %}
