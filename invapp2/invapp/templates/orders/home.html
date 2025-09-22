@@ -11,6 +11,7 @@
             <a href="{{ url_for('orders.bom_library') }}" class="action-btn subtle-action">BOM Library</a>
             <a href="{{ url_for('orders.view_waiting_orders') }}" class="action-btn subtle-action">Waiting on Material</a>
         {% endif %}
+        <a href="{{ url_for('orders.schedule_view') }}" class="action-btn subtle-action">Schedule</a>
         <a href="{{ url_for('orders.view_open_orders') }}" class="action-btn subtle-action">Open Orders</a>
         <a href="{{ url_for('orders.view_closed_orders') }}" class="action-btn subtle-action">Closed Orders</a>
     </div>
