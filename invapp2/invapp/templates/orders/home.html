@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "orders/_orders_table.html" import render_orders_table %}
 
 {% block content %}
 <h2>Production Orders</h2>
@@ -21,65 +22,7 @@
 </div>
 
 {% if orders %}
-<div class="table-scroll orders-table-wrap">
-    <table class="orders-table">
-        <thead>
-            <tr>
-                <th scope="col">Order #</th>
-                <th scope="col">Finished Good</th>
-                <th scope="col" class="numeric">Quantity</th>
-                <th scope="col">Promised Date</th>
-                <th scope="col">Scheduled Date</th>
-                <th scope="col">Routing Progress</th>
-                <th scope="col">Status</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for order in orders %}
-                {% set primary_item = order.primary_item %}
-                {% set scheduled_date = order.scheduled_completion_date or (primary_item.scheduled_completion_date if primary_item else None) %}
-                <tr>
-                    <td data-label="Order #">
-                        <a href="{{ url_for('orders.view_order', order_id=order.id) }}" class="order-link">{{ order.order_number }}</a>
-                    </td>
-                    <td data-label="Finished Good">
-                        {% if primary_item %}
-                            <div class="finished-good">
-                                <span class="sku">{{ primary_item.item.sku }}</span>
-                                <span class="name">{{ primary_item.item.name }}</span>
-                            </div>
-                        {% else %}
-                            <span class="muted">Not assigned</span>
-                        {% endif %}
-                    </td>
-                    <td data-label="Quantity" class="numeric">{{ primary_item.quantity if primary_item else '—' }}</td>
-                    <td data-label="Promised Date">
-                        {{ order.promised_date.strftime('%Y-%m-%d') if order.promised_date else '—' }}
-                    </td>
-                    <td data-label="Scheduled Date">
-                        {{ scheduled_date.strftime('%Y-%m-%d') if scheduled_date else '—' }}
-                    </td>
-                    <td data-label="Routing Progress">
-                        {% if order.routing_progress is not none %}
-                            {% set percent = (order.routing_progress * 100) | round(0, 'floor') %}
-                            <div class="progress-chip">
-                                <div class="progress-track">
-                                    <div class="progress-fill" style="width: {{ percent }}%"></div>
-                                </div>
-                                <span class="progress-label">{{ percent | int }}%</span>
-                            </div>
-                        {% else %}
-                            <span class="muted">Not started</span>
-                        {% endif %}
-                    </td>
-                    <td data-label="Status">
-                        <span class="status-pill status-{{ order.status|lower }}">{{ order.status_label }}</span>
-                    </td>
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
+{{ render_orders_table(orders) }}
 {% else %}
     <div class="empty-state">
         {% if session.get('is_admin') %}
