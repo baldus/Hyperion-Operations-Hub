@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Waiting on Material</h2>
+<div class="orders-toolbar">
+    <div class="toolbar-actions">
+        <a href="{{ url_for('orders.view_open_orders') }}" class="action-btn subtle-action">Open Orders</a>
+        <a href="{{ url_for('orders.view_closed_orders') }}" class="action-btn subtle-action">Closed Orders</a>
+    </div>
+</div>
+{% if orders %}
+<table>
+    <tr><th>Order #</th><th>Status</th></tr>
+    {% for order in orders %}
+    <tr>
+        <td><a href="{{ url_for('orders.view_order', order_id=order.id) }}">{{ order.order_number }}</a></td>
+        <td>{{ order.status_label }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<p>No orders are currently waiting on material.</p>
+{% endif %}
+{% endblock %}
