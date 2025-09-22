@@ -240,7 +240,7 @@ def orders_home():
     query = Order.query.options(
         joinedload(Order.order_lines).joinedload(OrderLine.item),
         joinedload(Order.routing_steps),
-    ).filter(Order.status.in_(OrderStatus.ACTIVE_STATES))
+    ).filter(Order.status.in_(OrderStatus.RESERVABLE_STATES))
     query = _search_filter(query, search_term)
     open_orders = query.order_by(Order.promised_date.is_(None), Order.promised_date, Order.order_number).all()
     return render_template("orders/home.html", orders=open_orders, search_term=search_term)
@@ -250,7 +250,7 @@ def orders_home():
 def view_open_orders():
     orders = (
         Order.query.options(joinedload(Order.order_lines).joinedload(OrderLine.item))
-        .filter(Order.status.in_(OrderStatus.ACTIVE_STATES))
+        .filter(Order.status.in_(OrderStatus.RESERVABLE_STATES))
         .order_by(Order.order_number)
         .all()
     )
@@ -266,6 +266,21 @@ def view_closed_orders():
         .all()
     )
     return render_template("orders/closed.html", orders=orders)
+
+
+@bp.route("/waiting")
+def view_waiting_orders():
+    if not session.get("is_admin"):
+        flash("Administrator access is required to view waiting orders.", "danger")
+        return redirect(url_for("orders.view_open_orders"))
+
+    orders = (
+        Order.query.options(joinedload(Order.order_lines).joinedload(OrderLine.item))
+        .filter(Order.status == OrderStatus.WAITING_MATERIAL)
+        .order_by(Order.order_number)
+        .all()
+    )
+    return render_template("orders/waiting.html", orders=orders)
 
 
 @bp.route("/bom-template/<string:sku>")
