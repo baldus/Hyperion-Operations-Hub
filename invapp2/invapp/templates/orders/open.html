@@ -1,21 +1,25 @@
 {% extends "base.html" %}
+{% from "orders/_orders_table.html" import render_orders_table %}
+
 {% block content %}
 <h2>Open Orders</h2>
-{% if session.get('is_admin') %}
-    <div class="orders-toolbar">
-        <div class="toolbar-actions">
-            <a href="{{ url_for('orders.new_order') }}" class="action-btn">Create Order</a>
+
+<div class="orders-toolbar">
+    <div class="toolbar-actions">
+        {% if session.get('is_admin') %}
+            <a href="{{ url_for('orders.new_order') }}" class="action-btn primary-action">Create New Order</a>
+            <a href="{{ url_for('orders.bom_library') }}" class="action-btn subtle-action">BOM Library</a>
             <a href="{{ url_for('orders.view_waiting_orders') }}" class="action-btn subtle-action">Waiting on Material</a>
-        </div>
+        {% endif %}
+        <a href="{{ url_for('orders.view_closed_orders') }}" class="action-btn subtle-action">Closed Orders</a>
     </div>
+</div>
+
+{% if orders %}
+{{ render_orders_table(orders) }}
+{% else %}
+<div class="empty-state">
+    <p>No open orders available.</p>
+</div>
 {% endif %}
-<table>
-    <tr><th>Order #</th><th>Status</th></tr>
-    {% for order in orders %}
-    <tr>
-        <td><a href="{{ url_for('orders.view_order', order_id=order.id) }}">{{ order.order_number }}</a></td>
-        <td>{{ order.status_label }}</td>
-    </tr>
-    {% endfor %}
-</table>
 {% endblock %}
