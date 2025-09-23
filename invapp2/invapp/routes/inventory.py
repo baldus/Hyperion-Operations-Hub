@@ -56,6 +56,19 @@ def _decimal_to_string(value):
         return ""
     return f"{Decimal(value):.2f}"
 
+
+def _get_highest_numeric_sku():
+    """Return the highest numeric SKU value as an integer."""
+    sku_rows = db.session.query(Item.sku).all()
+    numeric_values = []
+    for (sku,) in sku_rows:
+        if sku is None:
+            continue
+        sku_str = str(sku).strip()
+        if sku_str.isdigit():
+            numeric_values.append(int(sku_str))
+    return max(numeric_values) if numeric_values else None
+
 ############################
 # HOME
 ############################
@@ -508,8 +521,8 @@ def list_items():
 @bp.route("/item/add", methods=["GET", "POST"])
 def add_item():
     if request.method == "POST":
-        max_sku = db.session.query(db.func.max(Item.sku.cast(db.Integer))).scalar()
-        next_sku = str(int(max_sku) + 1) if max_sku else "1"
+        max_sku = _get_highest_numeric_sku()
+        next_sku = str(max_sku + 1) if max_sku is not None else "1"
 
         min_stock_raw = request.form.get("min_stock", 0)
         try:
@@ -539,8 +552,8 @@ def add_item():
         flash(f"Item added successfully with SKU {next_sku}{note_msg}", "success")
         return redirect(url_for("inventory.list_items"))
 
-    max_sku = db.session.query(db.func.max(Item.sku.cast(db.Integer))).scalar()
-    next_sku = str(int(max_sku) + 1) if max_sku else "1"
+    max_sku = _get_highest_numeric_sku()
+    next_sku = str(max_sku + 1) if max_sku is not None else "1"
     return render_template("inventory/add_item.html", next_sku=next_sku)
 
 
@@ -638,8 +651,8 @@ def import_items():
         stream = io.StringIO(file.stream.read().decode("UTF8"))
         csv_input = csv.DictReader(stream)
 
-        max_sku_val = db.session.query(db.func.max(Item.sku.cast(db.Integer))).scalar()
-        next_sku = int(max_sku_val) + 1 if max_sku_val else 1
+        max_sku_val = _get_highest_numeric_sku()
+        next_sku = (max_sku_val + 1) if max_sku_val is not None else 1
 
         count_new, count_updated = 0, 0
         for row in csv_input:

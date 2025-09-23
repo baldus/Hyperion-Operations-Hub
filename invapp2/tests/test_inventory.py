@@ -120,6 +120,29 @@ def test_add_item_with_notes(client, app):
         assert item.item_class == "Hardware"
 
 
+def test_add_item_handles_alphanumeric_skus(client, app):
+    with app.app_context():
+        existing = Item(sku="LOW-1", name="Legacy Alpha")
+        db.session.add(existing)
+        db.session.commit()
+
+    get_response = client.get("/inventory/item/add")
+    assert get_response.status_code == 200
+
+    response = client.post(
+        "/inventory/item/add",
+        data={
+            "name": "Generated SKU Item",
+            "description": "Automatically numbered",
+        },
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        new_item = Item.query.filter_by(name="Generated SKU Item").one()
+        assert new_item.sku == "1"
+
+
 def test_edit_item_updates_notes(client, app):
     with app.app_context():
         item = Item(
@@ -195,6 +218,29 @@ def test_edit_item_requires_admin(client, app):
     assert response.status_code == 302
     assert "/admin/login" in response.headers["Location"]
     assert f"next=%2Finventory%2Fitem%2F{item_id}%2Fedit" in response.headers["Location"]
+
+
+def test_import_items_skips_alphanumeric_skus(client, app):
+    with app.app_context():
+        alpha_item = Item(sku="LOW-1", name="Legacy Alpha")
+        db.session.add(alpha_item)
+        db.session.commit()
+
+    csv_content = "sku,name,unit,description,min_stock\n,Imported Item,ea,,0\n"
+    data = {
+        "file": (io.BytesIO(csv_content.encode("utf-8")), "items.csv"),
+    }
+
+    response = client.post(
+        "/inventory/items/import",
+        data=data,
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        imported = Item.query.filter_by(name="Imported Item").one()
+        assert imported.sku == "1"
 
 
 def test_delete_item_blocks_when_referenced(client, app):
