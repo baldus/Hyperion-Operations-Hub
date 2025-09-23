@@ -34,6 +34,9 @@ from invapp.models import (
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
 
 
+UNASSIGNED_LOCATION_CODE = "UNASSIGNED"
+
+
 def _parse_decimal(value):
     if value is None:
         return None
@@ -1095,19 +1098,32 @@ def import_stock():
         item_map = {i.sku: i for i in Item.query.all()}
         loc_map = {l.code: l for l in Location.query.all()}
 
+        placeholder_location = loc_map.get(UNASSIGNED_LOCATION_CODE)
+        if not placeholder_location:
+            placeholder_location = Location(
+                code=UNASSIGNED_LOCATION_CODE,
+                description="Unassigned staging location",
+            )
+            db.session.add(placeholder_location)
+            db.session.flush()
+            loc_map[UNASSIGNED_LOCATION_CODE] = placeholder_location
+
         count_new, count_updated = 0, 0
         for row in csv_input:
             sku = row["sku"].strip()
-            loc_code = row["location_code"].strip()
+            loc_code = (row.get("location_code") or "").strip()
             qty = int(row.get("quantity", 0))
             lot_number = (row.get("lot_number") or "").strip() or None
             person = (row.get("person") or "").strip() or None
             reference = (row.get("reference") or "Bulk Adjust").strip()
 
             item = item_map.get(sku)
-            location = loc_map.get(loc_code)
-            if not item or not location:
+            if not item:
                 continue
+
+            location = loc_map.get(loc_code) if loc_code else None
+            if not location:
+                location = placeholder_location
 
             batch = None
             if lot_number:
