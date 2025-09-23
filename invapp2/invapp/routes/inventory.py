@@ -1,6 +1,9 @@
 import csv
 import io
+import re
+import zipfile
 from collections import defaultdict
+from xml.etree import ElementTree
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
@@ -51,10 +54,205 @@ def _parse_decimal(value):
         return None
 
 
+def _parse_int(value):
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    value = str(value).strip()
+    if not value:
+        return None
+    try:
+        return int(Decimal(value).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    except (InvalidOperation, ValueError):
+        return None
+
+
 def _decimal_to_string(value):
     if value is None:
         return ""
     return f"{Decimal(value):.2f}"
+
+
+def _normalize_key(key):
+    if key is None:
+        return ""
+    return re.sub(r"\s+", " ", str(key).strip().lower())
+
+
+def _clean_string(value):
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return str(value).strip()
+
+
+def _excel_column_index(cell_reference):
+    if not cell_reference:
+        return None
+    letters = "".join(filter(str.isalpha, cell_reference))
+    if not letters:
+        return None
+    index = 0
+    for char in letters:
+        index = index * 26 + (ord(char.upper()) - 64)
+    return index - 1 if index else None
+
+
+def _read_excel_via_zip(raw_bytes):
+    try:
+        workbook = zipfile.ZipFile(io.BytesIO(raw_bytes))
+    except zipfile.BadZipFile as exc:
+        raise RuntimeError("Unable to read Excel file contents.") from exc
+
+    namespace = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+
+    shared_strings = []
+    if "xl/sharedStrings.xml" in workbook.namelist():
+        shared_root = ElementTree.fromstring(workbook.read("xl/sharedStrings.xml"))
+        for node in shared_root.findall("main:si", namespace):
+            text_parts = [text_node.text or "" for text_node in node.findall(".//main:t", namespace)]
+            shared_strings.append("".join(text_parts))
+
+    sheet_candidates = [
+        name for name in workbook.namelist() if name.startswith("xl/worksheets/")
+    ]
+    sheet_path = "xl/worksheets/sheet1.xml"
+    if sheet_path not in workbook.namelist():
+        sheet_path = sheet_candidates[0] if sheet_candidates else None
+    if not sheet_path or sheet_path not in workbook.namelist():
+        raise RuntimeError("Unable to locate the first worksheet in the spreadsheet.")
+
+    sheet_root = ElementTree.fromstring(workbook.read(sheet_path))
+    rows = []
+    for row in sheet_root.findall("main:sheetData/main:row", namespace):
+        row_map = {}
+        max_index = -1
+        for cell in row.findall("main:c", namespace):
+            column_index = _excel_column_index(cell.get("r"))
+            if column_index is None:
+                continue
+
+            value = None
+            cell_type = cell.get("t")
+            if cell_type == "s":
+                node = cell.find("main:v", namespace)
+                if node is not None and node.text is not None:
+                    idx = int(node.text)
+                    if 0 <= idx < len(shared_strings):
+                        value = shared_strings[idx]
+            elif cell_type == "inlineStr":
+                text_nodes = cell.findall(".//main:t", namespace)
+                value = "".join(node.text or "" for node in text_nodes)
+            else:
+                node = cell.find("main:v", namespace)
+                if node is not None and node.text is not None:
+                    raw_text = node.text
+                    try:
+                        if cell_type == "b":
+                            value = raw_text == "1"
+                        elif "." in raw_text:
+                            value = float(raw_text)
+                        else:
+                            value = int(raw_text)
+                    except (TypeError, ValueError):
+                        value = raw_text
+            if value is None:
+                node = cell.find("main:v", namespace)
+                if node is not None and node.text is not None:
+                    value = node.text
+
+            row_map[column_index] = value
+            if column_index > max_index:
+                max_index = column_index
+
+        if max_index < 0:
+            rows.append([])
+            continue
+
+        row_values = [None] * (max_index + 1)
+        for index, value in row_map.items():
+            row_values[index] = value
+        rows.append(row_values)
+
+    if not rows:
+        return []
+
+    header_cells = rows[0]
+    headers = [str(cell).strip() if cell is not None else "" for cell in header_cells]
+
+    processed_rows = []
+    for values in rows[1:]:
+        if not values:
+            continue
+        row_dict = {}
+        has_data = False
+        for index, header in enumerate(headers):
+            if not header:
+                continue
+            value = values[index] if index < len(values) else None
+            if isinstance(value, str):
+                value = value.strip()
+            if value not in (None, ""):
+                has_data = True
+            row_dict[header] = value
+        if has_data:
+            processed_rows.append(row_dict)
+
+    return processed_rows
+
+
+def _read_excel_rows(raw_bytes):
+    try:
+        from openpyxl import load_workbook  # type: ignore
+    except ImportError:
+        return _read_excel_via_zip(raw_bytes)
+
+    workbook = load_workbook(filename=io.BytesIO(raw_bytes), data_only=True)
+    sheet = workbook.active
+    rows_iter = sheet.iter_rows(values_only=True)
+    try:
+        header_row = next(rows_iter)
+    except StopIteration:
+        return []
+
+    header = [str(cell).strip() if cell is not None else "" for cell in header_row]
+
+    processed_rows = []
+    for values in rows_iter:
+        if values is None:
+            continue
+        row_dict = {}
+        has_data = False
+        for index, key in enumerate(header):
+            if not key:
+                continue
+            value = values[index] if index < len(values) else None
+            if isinstance(value, str):
+                value = value.strip()
+            if value not in (None, ""):
+                has_data = True
+            row_dict[key] = value
+        if has_data:
+            processed_rows.append(row_dict)
+
+    return processed_rows
+
+
+def _read_uploaded_rows(file_storage):
+    filename = (file_storage.filename or "").lower()
+    raw_bytes = file_storage.read()
+    if not raw_bytes:
+        return []
+
+    if filename.endswith((".xlsx", ".xlsm", ".xltx", ".xltm")):
+        return _read_excel_rows(raw_bytes)
+
+    text = raw_bytes.decode("utf-8-sig")
+    return list(csv.DictReader(io.StringIO(text)))
 
 ############################
 # HOME
@@ -479,6 +677,11 @@ def list_items():
         "list_price": Item.list_price.asc(),
         "last_unit_cost": Item.last_unit_cost.asc(),
         "item_class": Item.item_class.asc(),
+        "on_hand": Item.on_hand_quantity.asc(),
+        "current_cost": Item.current_cost.asc(),
+        "demonstrated_lead_time": Item.demonstrated_lead_time.asc(),
+        "make_buy": Item.make_buy.asc(),
+        "abc_code": Item.abc_code.asc(),
     }
     query = query.order_by(sort_columns.get(sort_param, Item.sku.asc()))
 
@@ -521,6 +724,14 @@ def add_item():
         notes = notes_raw.strip() if notes_raw is not None else None
         notes_value = notes or None
 
+        on_hand_value = _parse_int(request.form.get("on_hand_quantity"))
+        current_cost_value = _parse_decimal(request.form.get("current_cost"))
+        demonstrated_lead_time_value = _parse_decimal(
+            request.form.get("demonstrated_lead_time")
+        )
+        make_buy_value = request.form.get("make_buy", "").strip() or None
+        abc_code_value = request.form.get("abc_code", "").strip() or None
+
         item = Item(
             sku=next_sku,
             name=request.form["name"],
@@ -532,6 +743,11 @@ def add_item():
             list_price=_parse_decimal(request.form.get("list_price")),
             last_unit_cost=_parse_decimal(request.form.get("last_unit_cost")),
             item_class=request.form.get("item_class", "").strip() or None,
+            on_hand_quantity=on_hand_value,
+            current_cost=current_cost_value,
+            demonstrated_lead_time=demonstrated_lead_time_value,
+            make_buy=make_buy_value,
+            abc_code=abc_code_value,
         )
         db.session.add(item)
         db.session.commit()
@@ -575,6 +791,13 @@ def edit_item(item_id):
         item.list_price = _parse_decimal(request.form.get("list_price"))
         item.last_unit_cost = _parse_decimal(request.form.get("last_unit_cost"))
         item.item_class = request.form.get("item_class", "").strip() or None
+        item.on_hand_quantity = _parse_int(request.form.get("on_hand_quantity"))
+        item.current_cost = _parse_decimal(request.form.get("current_cost"))
+        item.demonstrated_lead_time = _parse_decimal(
+            request.form.get("demonstrated_lead_time")
+        )
+        item.make_buy = request.form.get("make_buy", "").strip() or None
+        item.abc_code = request.form.get("abc_code", "").strip() or None
 
         db.session.commit()
         if notes_raw is not None:
@@ -623,30 +846,129 @@ def delete_item(item_id):
 
 @bp.route("/items/import", methods=["GET", "POST"])
 def import_items():
-    """
-    Import items from CSV.
-    - If sku exists → update the record.
-    - If sku missing → auto-generate next sequential sku.
-    - 'id' column (from export) is ignored if present.
-    """
+    """Import items from a CSV export or the planning spreadsheet."""
+
     if request.method == "POST":
-        file = request.files["file"]
+        file = request.files.get("file")
         if not file:
             flash("No file uploaded", "danger")
             return redirect(request.url)
 
-        stream = io.StringIO(file.stream.read().decode("UTF8"))
-        csv_input = csv.DictReader(stream)
+        try:
+            rows = _read_uploaded_rows(file)
+        except RuntimeError as exc:
+            flash(str(exc), "danger")
+            return redirect(request.url)
+
+        if not rows:
+            flash("Uploaded file is empty.", "danger")
+            return redirect(request.url)
 
         max_sku_val = db.session.query(db.func.max(Item.sku.cast(db.Integer))).scalar()
         next_sku = int(max_sku_val) + 1 if max_sku_val else 1
 
         count_new, count_updated = 0, 0
-        for row in csv_input:
-            sku = row.get("sku", "").strip()
-            name = row.get("name", "").strip()
-            unit = row.get("unit", "ea").strip()
-            description = row.get("description", "").strip()
+        for row in rows:
+            normalized = {}
+            for raw_key, value in row.items():
+                if raw_key is None:
+                    continue
+                norm_key = _normalize_key(raw_key)
+                if not norm_key:
+                    continue
+                normalized[norm_key] = value
+
+            if "item number" in normalized or "item name" in normalized:
+                item_number = _clean_string(normalized.get("item number"))
+                item_name = _clean_string(normalized.get("item name"))
+                uom_raw = (
+                    normalized.get("uom")
+                    or normalized.get("unit")
+                    or normalized.get("uom2")
+                )
+                unit_value = _clean_string(uom_raw) if uom_raw is not None else ""
+                on_hand_value = _parse_int(normalized.get("on hand"))
+                current_cost_value = _parse_decimal(normalized.get("current cost"))
+                demonstrated_lead_time_value = _parse_decimal(
+                    normalized.get("demonstrated lead time")
+                )
+                make_buy_raw = (
+                    normalized.get("make/ buy")
+                    or normalized.get("make/buy")
+                    or normalized.get("make - buy")
+                )
+                make_buy_value = (
+                    _clean_string(make_buy_raw) if make_buy_raw is not None else None
+                )
+                abc_code_raw = normalized.get("abc code")
+                abc_code_value = (
+                    _clean_string(abc_code_raw) if abc_code_raw is not None else None
+                )
+
+                existing = None
+                if item_number and item_name:
+                    existing = (
+                        Item.query.filter(
+                            func.lower(Item.name) == item_number.lower(),
+                            func.lower(Item.description) == item_name.lower(),
+                        )
+                        .first()
+                    )
+                if not existing and item_number:
+                    existing = (
+                        Item.query.filter(func.lower(Item.name) == item_number.lower())
+                        .first()
+                    )
+                if not existing and item_name:
+                    existing = (
+                        Item.query.filter(
+                            func.lower(Item.description) == item_name.lower()
+                        )
+                        .first()
+                    )
+
+                if existing:
+                    if item_number:
+                        existing.name = item_number
+                    if item_name:
+                        existing.description = item_name
+                    if unit_value:
+                        existing.unit = unit_value
+                    if on_hand_value is not None or "on hand" in normalized:
+                        existing.on_hand_quantity = on_hand_value
+                    if "current cost" in normalized:
+                        existing.current_cost = current_cost_value
+                    if "demonstrated lead time" in normalized:
+                        existing.demonstrated_lead_time = (
+                            demonstrated_lead_time_value
+                        )
+                    if make_buy_raw is not None:
+                        existing.make_buy = make_buy_value or None
+                    if abc_code_raw is not None:
+                        existing.abc_code = abc_code_value or None
+                    count_updated += 1
+                else:
+                    sku_value = str(next_sku)
+                    next_sku += 1
+                    new_item = Item(
+                        sku=sku_value,
+                        name=item_number or item_name or sku_value,
+                        description=item_name or None,
+                        unit=unit_value or "ea",
+                        on_hand_quantity=on_hand_value,
+                        current_cost=current_cost_value,
+                        demonstrated_lead_time=demonstrated_lead_time_value,
+                        make_buy=(make_buy_value or None),
+                        abc_code=(abc_code_value or None),
+                    )
+                    db.session.add(new_item)
+                    count_new += 1
+                continue
+
+            sku = _clean_string(row.get("sku"))
+            name = _clean_string(row.get("name"))
+            unit = _clean_string(row.get("unit")) or "ea"
+            description = _clean_string(row.get("description"))
             min_stock_raw = row.get("min_stock", 0)
             try:
                 min_stock = int(min_stock_raw or 0)
@@ -654,11 +976,13 @@ def import_items():
                 min_stock = 0
 
             has_type_column = "type" in row
-            item_type = (row.get("type") or "").strip() if has_type_column else None
+            item_type = (
+                _clean_string(row.get("type")) if has_type_column else None
+            )
             has_notes_column = "notes" in row
             if has_notes_column:
                 notes_raw = row.get("notes")
-                notes_clean = notes_raw.strip() if notes_raw is not None else ""
+                notes_clean = _clean_string(notes_raw)
                 notes_value = notes_clean or None
             else:
                 notes_value = None
@@ -676,7 +1000,7 @@ def import_items():
                 else None
             )
             item_class_value = (
-                (row.get("item_class") or "").strip() if has_item_class_column else None
+                _clean_string(row.get("item_class")) if has_item_class_column else None
             )
 
             existing = Item.query.filter_by(sku=sku).first() if sku else None
@@ -721,11 +1045,7 @@ def import_items():
 
         db.session.commit()
         flash(
-            (
-                "Items imported: "
-                f"{count_new} new, {count_updated} updated "
-                "(extended fields processed)"
-            ),
+            f"Items imported: {count_new} new, {count_updated} updated",
             "success",
         )
         return redirect(url_for("inventory.list_items"))

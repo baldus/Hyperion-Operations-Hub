@@ -1,9 +1,49 @@
 from datetime import datetime
 
+from flask_login import UserMixin
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.orm import synonym
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from invapp.extensions import db
+
+
+user_roles = db.Table(
+    "user_role",
+    db.Column("user_id", db.Integer, db.ForeignKey("user.id"), primary_key=True),
+    db.Column("role_id", db.Integer, db.ForeignKey("role.id"), primary_key=True),
+)
+
+
+class Role(db.Model):
+    __tablename__ = "role"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String, unique=True, nullable=False)
+
+    def __repr__(self):
+        return f"<Role {self.name}>"
+
+
+class User(UserMixin, db.Model):
+    __tablename__ = "user"
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String, unique=True, nullable=False)
+    password_hash = db.Column(db.String, nullable=False)
+    roles = db.relationship("Role", secondary=user_roles, backref="users")
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+    def has_role(self, role_name):
+        return any(role.name == role_name for role in self.roles)
+
+    def __repr__(self):
+        return f"<User {self.username}>"
 
 class Item(db.Model):
     __tablename__ = "item"
@@ -18,6 +58,11 @@ class Item(db.Model):
     list_price = db.Column(db.Numeric(12, 2))
     last_unit_cost = db.Column(db.Numeric(12, 2))
     item_class = db.Column(db.String)
+    on_hand_quantity = db.Column(db.Integer)
+    current_cost = db.Column(db.Numeric(12, 2))
+    demonstrated_lead_time = db.Column(db.Numeric(12, 2))
+    make_buy = db.Column(db.String)
+    abc_code = db.Column(db.String)
 
 
 class Location(db.Model):

@@ -2,12 +2,20 @@
 {% block content %}
 <h2>Import Items</h2>
 <form method="POST" enctype="multipart/form-data">
-    <label>Upload CSV File:</label><br>
-    <input type="file" name="file" accept=".csv" required><br><br>
+    <label>Upload CSV or Excel File:</label><br>
+    <input type="file" name="file" accept=".csv,.xlsx,.xlsm,.xltx,.xltm" required><br><br>
     <button type="submit">Import</button>
 </form>
 <p>
-  Expected CSV columns: sku, name, type, unit, description, min_stock, notes,
-  list_price, last_unit_cost, item_class (additional fields optional)
+  <strong>Spreadsheet format:</strong> include the planning columns such as
+  <em>Item Number</em>, <em>Item Name</em>, <em>UoM</em>, <em>On Hand</em>,
+  <em>Current Cost</em>, <em>Demonstrated Lead Time</em>, <em>Make/Buy</em>, and
+  <em>Abc Code</em>. Existing items are matched on Item Number and Item Name,
+  and any new rows are added with auto-assigned SKUs.
+</p>
+<p>
+  <strong>Legacy CSV format:</strong> the original export columns (sku, name,
+  type, unit, description, min_stock, notes, list_price, last_unit_cost,
+  item_class) are still supported for backwards compatibility.
 </p>
 {% endblock %}

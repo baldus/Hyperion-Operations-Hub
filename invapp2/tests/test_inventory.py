@@ -108,6 +108,11 @@ def test_add_item_with_notes(client, app):
             "last_unit_cost": "9.87",
             "item_class": "Hardware",
             "notes": "Handle with care",
+            "on_hand_quantity": "25",
+            "current_cost": "7.77",
+            "demonstrated_lead_time": "4.5",
+            "make_buy": "MAKE",
+            "abc_code": "A",
         },
     )
     assert response.status_code == 302
@@ -118,6 +123,11 @@ def test_add_item_with_notes(client, app):
         assert item.list_price == Decimal("12.34")
         assert item.last_unit_cost == Decimal("9.87")
         assert item.item_class == "Hardware"
+        assert item.on_hand_quantity == 25
+        assert item.current_cost == Decimal("7.77")
+        assert item.demonstrated_lead_time == Decimal("4.50")
+        assert item.make_buy == "MAKE"
+        assert item.abc_code == "A"
 
 
 def test_edit_item_updates_notes(client, app):
@@ -129,6 +139,11 @@ def test_edit_item_updates_notes(client, app):
             list_price=Decimal("1.00"),
             last_unit_cost=Decimal("0.50"),
             item_class="Legacy",
+            on_hand_quantity=7,
+            current_cost=Decimal("1.23"),
+            demonstrated_lead_time=Decimal("2.50"),
+            make_buy="MAKE",
+            abc_code="B",
         )
         db.session.add(item)
         db.session.commit()
@@ -149,6 +164,11 @@ def test_edit_item_updates_notes(client, app):
             "last_unit_cost": "1.11",
             "item_class": "Updated",
             "notes": "Updated notes",
+            "on_hand_quantity": "12",
+            "current_cost": "3.33",
+            "demonstrated_lead_time": "6.25",
+            "make_buy": "BUY",
+            "abc_code": "C",
         },
     )
     assert response.status_code == 302
@@ -159,6 +179,11 @@ def test_edit_item_updates_notes(client, app):
         assert updated.list_price == Decimal("2.22")
         assert updated.last_unit_cost == Decimal("1.11")
         assert updated.item_class == "Updated"
+        assert updated.on_hand_quantity == 12
+        assert updated.current_cost == Decimal("3.33")
+        assert updated.demonstrated_lead_time == Decimal("6.25")
+        assert updated.make_buy == "BUY"
+        assert updated.abc_code == "C"
 
     response = client.post(
         f"/inventory/item/{item_id}/edit",
@@ -172,6 +197,11 @@ def test_edit_item_updates_notes(client, app):
             "last_unit_cost": "",
             "item_class": "",
             "notes": "",
+            "on_hand_quantity": "",
+            "current_cost": "",
+            "demonstrated_lead_time": "",
+            "make_buy": "",
+            "abc_code": "",
         },
     )
     assert response.status_code == 302
@@ -182,6 +212,11 @@ def test_edit_item_updates_notes(client, app):
         assert cleared.list_price is None
         assert cleared.last_unit_cost is None
         assert cleared.item_class is None
+        assert cleared.on_hand_quantity is None
+        assert cleared.current_cost is None
+        assert cleared.demonstrated_lead_time is None
+        assert cleared.make_buy is None
+        assert cleared.abc_code is None
 
 
 def test_edit_item_requires_admin(client, app):
@@ -390,12 +425,22 @@ def test_import_export_items_with_notes(client, app):
         assert updated_existing.list_price == Decimal("5.50")
         assert updated_existing.last_unit_cost == Decimal("4.40")
         assert updated_existing.item_class == "Legacy"
+        assert updated_existing.on_hand_quantity is None
+        assert updated_existing.current_cost is None
+        assert updated_existing.demonstrated_lead_time is None
+        assert updated_existing.make_buy is None
+        assert updated_existing.abc_code is None
 
         new_item = Item.query.filter(Item.sku != "300").one()
         assert new_item.notes == "Fresh notes"
         assert new_item.list_price == Decimal("6.60")
         assert new_item.last_unit_cost == Decimal("5.50")
         assert new_item.item_class == "New"
+        assert new_item.on_hand_quantity is None
+        assert new_item.current_cost is None
+        assert new_item.demonstrated_lead_time is None
+        assert new_item.make_buy is None
+        assert new_item.abc_code is None
 
     export_response = client.get("/inventory/items/export")
     assert export_response.status_code == 200
@@ -428,6 +473,123 @@ def test_import_export_items_with_notes(client, app):
     assert new_rows[0][7] == "6.60"
     assert new_rows[0][8] == "5.50"
     assert new_rows[0][9] == "New"
+
+
+def test_import_items_from_planning_spreadsheet(client, app):
+    headers = [
+        "KEY",
+        "Item Number",
+        "Item Name",
+        "Warehouse Name",
+        "Warehouse",
+        "Lead Time",
+        "Last Lead Time",
+        "Demonstrated Lead Time",
+        "UoM",
+        "Current Cost",
+        "Unique Item Number",
+        "Abc Code",
+        "Make/ Buy",
+        "ERP ABC",
+        "Buyer Planner",
+        "Item",
+        "EndDate",
+        "UoM2",
+        "ItemClassification",
+        "Item Name3",
+        "StartDate",
+        "ABC (sug)",
+        "LTM Max tooltip",
+        "Year of StartDate",
+        "Qty Con",
+        "Months with Con",
+        "Avg Con LT",
+        "On Hand",
+        "ERP MOQ",
+        "ERP SS",
+        "Rec SS",
+        "Rec ROP",
+        "SS Ratio",
+        "CoV",
+        "Turns",
+        "MaxDemandLTM",
+        "StdDevDemandLTM",
+        "Rec EOQ",
+        "Rec Inv $",
+        "Rec ROP4",
+        "Service Level",
+    ]
+
+    with app.app_context():
+        existing = Item(
+            sku="100",
+            name="ITEM-001",
+            description="Widget One",
+            unit="ea",
+            on_hand_quantity=5,
+            current_cost=Decimal("1.00"),
+            demonstrated_lead_time=Decimal("2.00"),
+            make_buy="BUY",
+            abc_code="Z",
+        )
+        db.session.add(existing)
+        db.session.commit()
+
+    existing_row = {
+        "Item Number": "ITEM-001",
+        "Item Name": "Widget One Updated",
+        "UoM": "BX",
+        "On Hand": 42,
+        "Current Cost": 12.34,
+        "Demonstrated Lead Time": 5.5,
+        "Make/ Buy": "MAKE",
+        "Abc Code": "A",
+    }
+    new_row = {
+        "Item Number": "ITEM-002",
+        "Item Name": "Widget Two",
+        "UoM": "EA",
+        "On Hand": 10,
+        "Current Cost": 3.21,
+        "Demonstrated Lead Time": 7,
+        "Make/ Buy": "BUY",
+        "Abc Code": "B",
+    }
+
+    csv_buffer = io.StringIO()
+    writer = csv.writer(csv_buffer)
+    writer.writerow(headers)
+    writer.writerow([existing_row.get(column, "") for column in headers])
+    writer.writerow([new_row.get(column, "") for column in headers])
+    buffer = io.BytesIO(csv_buffer.getvalue().encode("utf-8"))
+
+    response = client.post(
+        "/inventory/items/import",
+        data={"file": (buffer, "planning.csv")},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        updated_existing = Item.query.filter_by(sku="100").one()
+        assert updated_existing.description == "Widget One Updated"
+        assert updated_existing.unit == "BX"
+        assert updated_existing.on_hand_quantity == 42
+        assert updated_existing.current_cost == Decimal("12.34")
+        assert updated_existing.demonstrated_lead_time == Decimal("5.50")
+        assert updated_existing.make_buy == "MAKE"
+        assert updated_existing.abc_code == "A"
+
+        new_item = Item.query.filter(Item.sku != "100").one()
+        assert new_item.sku == "101"
+        assert new_item.name == "ITEM-002"
+        assert new_item.description == "Widget Two"
+        assert new_item.unit == "EA"
+        assert new_item.on_hand_quantity == 10
+        assert new_item.current_cost == Decimal("3.21")
+        assert new_item.demonstrated_lead_time == Decimal("7.00")
+        assert new_item.make_buy == "BUY"
+        assert new_item.abc_code == "B"
 
 
 def test_inventory_scan_page(client):

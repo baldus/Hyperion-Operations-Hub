@@ -4,7 +4,7 @@
 
 <div>
   <a href="{{ url_for('inventory.add_item') }}" class="bubble-btn">Add Item</a>
-  <a href="{{ url_for('inventory.import_items') }}" class="bubble-btn">Bulk Import Items (CSV)</a>
+  <a href="{{ url_for('inventory.import_items') }}" class="bubble-btn">Bulk Import Items</a>
   <a href="{{ url_for('inventory.export_items') }}" class="bubble-btn">Export Items</a>
 </div>
 <br>
@@ -37,6 +37,11 @@
     <option value="list_price" {% if sort == 'list_price' %}selected{% endif %}>List Price</option>
     <option value="last_unit_cost" {% if sort == 'last_unit_cost' %}selected{% endif %}>Last Unit Cost</option>
     <option value="item_class" {% if sort == 'item_class' %}selected{% endif %}>Item Class</option>
+    <option value="on_hand" {% if sort == 'on_hand' %}selected{% endif %}>On Hand</option>
+    <option value="current_cost" {% if sort == 'current_cost' %}selected{% endif %}>Current Cost</option>
+    <option value="demonstrated_lead_time" {% if sort == 'demonstrated_lead_time' %}selected{% endif %}>Demonstrated Lead Time</option>
+    <option value="make_buy" {% if sort == 'make_buy' %}selected{% endif %}>Make/Buy</option>
+    <option value="abc_code" {% if sort == 'abc_code' %}selected{% endif %}>ABC Code</option>
   </select>
 
   <input type="hidden" name="search" value="{{ search }}">
@@ -59,6 +64,11 @@
         <th>List Price</th>
         <th>Last Unit Cost</th>
         <th>Item Class</th>
+        <th>On Hand</th>
+        <th>Current Cost</th>
+        <th>Demonstrated Lead Time</th>
+        <th>Make/Buy</th>
+        <th>ABC Code</th>
         <th>Notes</th>
       </tr>
     </thead>
@@ -86,6 +96,23 @@
           {% endif %}
         </td>
         <td>{{ item.item_class or '-' }}</td>
+        <td>{{ item.on_hand_quantity if item.on_hand_quantity is not none else '-' }}</td>
+        <td>
+          {% if item.current_cost is not none %}
+            {{ "{:.2f}".format(item.current_cost) }}
+          {% else %}
+            -
+          {% endif %}
+        </td>
+        <td>
+          {% if item.demonstrated_lead_time is not none %}
+            {{ "{:.2f}".format(item.demonstrated_lead_time) }}
+          {% else %}
+            -
+          {% endif %}
+        </td>
+        <td>{{ item.make_buy or '-' }}</td>
+        <td>{{ item.abc_code or '-' }}</td>
         <td>
           {% if item.notes %}
             {{ item.notes|truncate(80) }}
