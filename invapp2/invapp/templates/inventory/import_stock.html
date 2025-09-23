@@ -8,5 +8,10 @@
   <button type="submit" class="bubble-btn">Upload</button>
 </form>
 
-<p>Expected CSV columns: <code>sku, location_code, quantity, lot_number, person, reference</code></p>
+<p>
+  Expected CSV columns:
+  <code>sku, location_code, quantity, lot_number, person, reference</code>.
+  The <code>location_code</code> field may be left blank to use the unassigned staging
+  location (<code>UNASSIGNED</code>).
+</p>
 {% endblock %}
