@@ -1,5 +1,9 @@
 import csv
 import io
+import os
+import secrets
+import tempfile
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -40,6 +44,105 @@ bp = Blueprint("inventory", __name__, url_prefix="/inventory")
 UNASSIGNED_LOCATION_CODE = "UNASSIGNED"
 
 
+ITEM_IMPORT_FIELDS = [
+    {"field": "sku", "label": "SKU", "required": False},
+    {"field": "name", "label": "Name", "required": True},
+    {"field": "type", "label": "Type", "required": False},
+    {"field": "unit", "label": "Unit", "required": False},
+    {"field": "description", "label": "Description", "required": False},
+    {"field": "min_stock", "label": "Minimum Stock", "required": False},
+    {"field": "notes", "label": "Notes", "required": False},
+    {"field": "list_price", "label": "List Price", "required": False},
+    {"field": "last_unit_cost", "label": "Last Unit Cost", "required": False},
+    {"field": "item_class", "label": "Item Class", "required": False},
+]
+
+LOCATION_IMPORT_FIELDS = [
+    {"field": "code", "label": "Location Code", "required": True},
+    {"field": "description", "label": "Description", "required": False},
+]
+
+STOCK_IMPORT_FIELDS = [
+    {"field": "sku", "label": "Item SKU", "required": True},
+    {"field": "location_code", "label": "Location Code", "required": False},
+    {"field": "quantity", "label": "Quantity", "required": True},
+    {"field": "lot_number", "label": "Lot Number", "required": False},
+    {"field": "person", "label": "Person", "required": False},
+    {"field": "reference", "label": "Reference", "required": False},
+]
+
+
+IMPORT_STORAGE_ROOT = os.path.join(tempfile.gettempdir(), "invapp_imports")
+IMPORT_FILE_TTL_SECONDS = 3600  # one hour
+
+
+def _get_import_storage_dir(namespace):
+    path = os.path.join(IMPORT_STORAGE_ROOT, namespace)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _cleanup_import_storage(namespace, now=None):
+    """Remove stale cached CSV files from previous imports for a namespace."""
+
+    storage_dir = _get_import_storage_dir(namespace)
+    current_time = now or time.time()
+    try:
+        for name in os.listdir(storage_dir):
+            path = os.path.join(storage_dir, name)
+            if not os.path.isfile(path):
+                continue
+            try:
+                if current_time - os.path.getmtime(path) > IMPORT_FILE_TTL_SECONDS:
+                    os.remove(path)
+            except OSError:
+                continue
+    except FileNotFoundError:
+        # Directory was removed between ensure + listdir; recreate lazily later
+        pass
+
+
+def _store_import_csv(namespace, csv_text, token=None):
+    """Persist CSV text for an import namespace and return its token."""
+
+    _cleanup_import_storage(namespace)
+    if token and any(ch in token for ch in ("/", "\\")):
+        token = None
+    if not token:
+        token = secrets.token_urlsafe(16)
+
+    path = os.path.join(_get_import_storage_dir(namespace), f"{token}.csv")
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(csv_text)
+    except OSError:
+        if token:
+            return token
+        return None
+    return token
+
+
+def _load_import_csv(namespace, token):
+    if not token or any(ch in token for ch in ("/", "\\")):
+        return None
+    path = os.path.join(_get_import_storage_dir(namespace), f"{token}.csv")
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return handle.read()
+    except OSError:
+        return None
+
+
+def _remove_import_csv(namespace, token):
+    if not token or any(ch in token for ch in ("/", "\\")):
+        return
+    path = os.path.join(_get_import_storage_dir(namespace), f"{token}.csv")
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def _parse_decimal(value):
     if value is None:
         return None
@@ -58,6 +161,62 @@ def _decimal_to_string(value):
     if value is None:
         return ""
     return f"{Decimal(value):.2f}"
+
+def _prepare_import_mapping_context(
+    csv_text, fields, namespace, selected_mappings=None, token=None
+):
+    stream = io.StringIO(csv_text)
+    reader = csv.reader(stream)
+    try:
+        headers = next(reader)
+    except StopIteration:
+        headers = []
+
+    sample_rows = []
+    if headers:
+        for _ in range(5):
+            try:
+                sample_rows.append(next(reader))
+            except StopIteration:
+                break
+
+    import_token = _store_import_csv(namespace, csv_text, token=token)
+
+    return {
+        "headers": headers,
+        "sample_rows": sample_rows,
+        "import_token": import_token,
+        "fields": fields,
+        "selected_mappings": selected_mappings or {},
+    }
+
+
+def _prepare_item_import_mapping_context(csv_text, selected_mappings=None, token=None):
+    return _prepare_import_mapping_context(
+        csv_text, ITEM_IMPORT_FIELDS, "items", selected_mappings=selected_mappings, token=token
+    )
+
+
+def _prepare_location_import_mapping_context(
+    csv_text, selected_mappings=None, token=None
+):
+    return _prepare_import_mapping_context(
+        csv_text,
+        LOCATION_IMPORT_FIELDS,
+        "locations",
+        selected_mappings=selected_mappings,
+        token=token,
+    )
+
+
+def _prepare_stock_import_mapping_context(csv_text, selected_mappings=None, token=None):
+    return _prepare_import_mapping_context(
+        csv_text,
+        STOCK_IMPORT_FIELDS,
+        "stock",
+        selected_mappings=selected_mappings,
+        token=token,
+    )
 
 ############################
 # HOME
@@ -782,108 +941,226 @@ def import_items():
     - 'id' column (from export) is ignored if present.
     """
     if request.method == "POST":
-        file = request.files["file"]
-        if not file:
+        step = request.form.get("step")
+        if step == "mapping":
+            import_token = request.form.get("import_token", "")
+            if not import_token:
+                flash("No CSV data found. Please upload the file again.", "danger")
+                return redirect(url_for("inventory.import_items"))
+
+            csv_text = _load_import_csv("items", import_token)
+            if csv_text is None:
+                flash(
+                    "Could not read the uploaded CSV data. Please upload the file again.",
+                    "danger",
+                )
+                _remove_import_csv("items", import_token)
+                return redirect(url_for("inventory.import_items"))
+
+            selected_mappings = {}
+            for field_cfg in ITEM_IMPORT_FIELDS:
+                selected_header = request.form.get(f"mapping_{field_cfg['field']}", "")
+                if selected_header:
+                    selected_mappings[field_cfg["field"]] = selected_header
+
+            missing_required = [
+                field_cfg["label"]
+                for field_cfg in ITEM_IMPORT_FIELDS
+                if field_cfg["required"] and field_cfg["field"] not in selected_mappings
+            ]
+            if missing_required:
+                flash(
+                    "Please select a column for: " + ", ".join(missing_required) + ".",
+                    "danger",
+                )
+                context = _prepare_item_import_mapping_context(
+                    csv_text,
+                    selected_mappings=selected_mappings,
+                    token=import_token,
+                )
+                context.update(
+                    {
+                        "submit_label": "Import Items",
+                        "start_over_url": url_for("inventory.import_items"),
+                    }
+                )
+                return render_template("inventory/import_mapping.html", **context)
+
+            reader = csv.DictReader(io.StringIO(csv_text))
+            if not reader.fieldnames:
+                flash("Uploaded CSV does not contain a header row.", "danger")
+                _remove_import_csv("items", import_token)
+                return redirect(url_for("inventory.import_items"))
+
+            invalid_columns = [
+                header
+                for header in selected_mappings.values()
+                if header not in reader.fieldnames
+            ]
+            if invalid_columns:
+                flash(
+                    "Some selected columns could not be found in the file. Please upload the file again.",
+                    "danger",
+                )
+                context = _prepare_item_import_mapping_context(
+                    csv_text,
+                    selected_mappings=selected_mappings,
+                    token=import_token,
+                )
+                context.update(
+                    {
+                        "submit_label": "Import Items",
+                        "start_over_url": url_for("inventory.import_items"),
+                    }
+                )
+                return render_template("inventory/import_mapping.html", **context)
+
+            max_sku_val = db.session.query(db.func.max(Item.sku.cast(db.Integer))).scalar()
+            next_sku = int(max_sku_val) + 1 if max_sku_val else 1
+
+            def extract(row, field):
+                header = selected_mappings.get(field)
+                if not header:
+                    return ""
+                value = row.get(header)
+                return value if value is not None else ""
+
+            count_new, count_updated = 0, 0
+            for row in reader:
+                sku = extract(row, "sku").strip()
+                name = extract(row, "name").strip()
+                unit = (
+                    extract(row, "unit").strip()
+                    if "unit" in selected_mappings
+                    else "ea"
+                )
+                description = extract(row, "description").strip()
+                min_stock_raw = (
+                    extract(row, "min_stock") if "min_stock" in selected_mappings else 0
+                )
+                try:
+                    min_stock = int(min_stock_raw or 0)
+                except (TypeError, ValueError):
+                    min_stock = 0
+
+                has_type_column = "type" in selected_mappings
+                item_type = (
+                    extract(row, "type").strip() if has_type_column else None
+                )
+
+                has_notes_column = "notes" in selected_mappings
+                if has_notes_column:
+                    notes_raw = extract(row, "notes")
+                    notes_clean = notes_raw.strip() if notes_raw is not None else ""
+                    notes_value = notes_clean or None
+                else:
+                    notes_value = None
+
+                has_list_price_column = "list_price" in selected_mappings
+                has_last_unit_cost_column = "last_unit_cost" in selected_mappings
+                has_item_class_column = "item_class" in selected_mappings
+
+                list_price_value = (
+                    _parse_decimal(extract(row, "list_price"))
+                    if has_list_price_column
+                    else None
+                )
+                last_unit_cost_value = (
+                    _parse_decimal(extract(row, "last_unit_cost"))
+                    if has_last_unit_cost_column
+                    else None
+                )
+                item_class_value = (
+                    (extract(row, "item_class") or "").strip()
+                    if has_item_class_column
+                    else None
+                )
+
+                existing = Item.query.filter_by(sku=sku).first() if sku else None
+                if existing:
+                    existing.name = name or existing.name
+                    existing.unit = unit or existing.unit
+                    existing.description = description or existing.description
+                    existing.min_stock = min_stock or existing.min_stock
+                    if has_type_column:
+                        existing.type = item_type or None
+                    if has_notes_column:
+                        existing.notes = notes_value
+                    if has_list_price_column:
+                        existing.list_price = list_price_value
+                    if has_last_unit_cost_column:
+                        existing.last_unit_cost = last_unit_cost_value
+                    if has_item_class_column:
+                        existing.item_class = item_class_value or None
+                    count_updated += 1
+                else:
+                    if not sku:
+                        sku = str(next_sku)
+                        next_sku += 1
+                    item = Item(
+                        sku=sku,
+                        name=name,
+                        type=(item_type or None) if has_type_column else None,
+                        unit=unit,
+                        description=description,
+                        min_stock=min_stock,
+                        notes=notes_value if has_notes_column else None,
+                        list_price=list_price_value if has_list_price_column else None,
+                        last_unit_cost=(
+                            last_unit_cost_value if has_last_unit_cost_column else None
+                        ),
+                        item_class=(
+                            (item_class_value or None) if has_item_class_column else None
+                        ),
+                    )
+                    db.session.add(item)
+                    count_new += 1
+
+            db.session.commit()
+            _remove_import_csv("items", import_token)
+            flash(
+                (
+                    "Items imported: "
+                    f"{count_new} new, {count_updated} updated "
+                    "(extended fields processed)"
+                ),
+                "success",
+            )
+            return redirect(url_for("inventory.list_items"))
+
+        file = request.files.get("file")
+        if not file or file.filename == "":
             flash("No file uploaded", "danger")
             return redirect(request.url)
 
-        stream = io.StringIO(file.stream.read().decode("UTF8"))
-        csv_input = csv.DictReader(stream)
+        try:
+            csv_text = file.stream.read().decode("utf-8-sig")
+        except UnicodeDecodeError:
+            flash("CSV import files must be UTF-8 encoded.", "danger")
+            return redirect(request.url)
 
-        max_sku_val = db.session.query(db.func.max(Item.sku.cast(db.Integer))).scalar()
-        next_sku = int(max_sku_val) + 1 if max_sku_val else 1
-
-        count_new, count_updated = 0, 0
-        for row in csv_input:
-            sku = row.get("sku", "").strip()
-            name = row.get("name", "").strip()
-            unit = row.get("unit", "ea").strip()
-            description = row.get("description", "").strip()
-            min_stock_raw = row.get("min_stock", 0)
-            try:
-                min_stock = int(min_stock_raw or 0)
-            except (TypeError, ValueError):
-                min_stock = 0
-
-            has_type_column = "type" in row
-            item_type = (row.get("type") or "").strip() if has_type_column else None
-            has_notes_column = "notes" in row
-            if has_notes_column:
-                notes_raw = row.get("notes")
-                notes_clean = notes_raw.strip() if notes_raw is not None else ""
-                notes_value = notes_clean or None
-            else:
-                notes_value = None
-
-            has_list_price_column = "list_price" in row
-            has_last_unit_cost_column = "last_unit_cost" in row
-            has_item_class_column = "item_class" in row
-
-            list_price_value = (
-                _parse_decimal(row.get("list_price")) if has_list_price_column else None
-            )
-            last_unit_cost_value = (
-                _parse_decimal(row.get("last_unit_cost"))
-                if has_last_unit_cost_column
-                else None
-            )
-            item_class_value = (
-                (row.get("item_class") or "").strip() if has_item_class_column else None
-            )
-
-            existing = Item.query.filter_by(sku=sku).first() if sku else None
-            if existing:
-                existing.name = name or existing.name
-                existing.unit = unit or existing.unit
-                existing.description = description or existing.description
-                existing.min_stock = min_stock or existing.min_stock
-                if has_type_column:
-                    existing.type = item_type or None
-                if has_notes_column:
-                    existing.notes = notes_value
-                if has_list_price_column:
-                    existing.list_price = list_price_value
-                if has_last_unit_cost_column:
-                    existing.last_unit_cost = last_unit_cost_value
-                if has_item_class_column:
-                    existing.item_class = item_class_value or None
-                count_updated += 1
-            else:
-                if not sku:
-                    sku = str(next_sku)
-                    next_sku += 1
-                item = Item(
-                    sku=sku,
-                    name=name,
-                    type=(item_type or None) if has_type_column else None,
-                    unit=unit,
-                    description=description,
-                    min_stock=min_stock,
-                    notes=notes_value if has_notes_column else None,
-                    list_price=list_price_value if has_list_price_column else None,
-                    last_unit_cost=(
-                        last_unit_cost_value if has_last_unit_cost_column else None
-                    ),
-                    item_class=(
-                        (item_class_value or None) if has_item_class_column else None
-                    ),
-                )
-                db.session.add(item)
-                count_new += 1
-
-        db.session.commit()
-        flash(
-            (
-                "Items imported: "
-                f"{count_new} new, {count_updated} updated "
-                "(extended fields processed)"
-            ),
-            "success",
+        context = _prepare_item_import_mapping_context(csv_text)
+        context.update(
+            {
+                "submit_label": "Import Items",
+                "start_over_url": url_for("inventory.import_items"),
+            }
         )
-        return redirect(url_for("inventory.list_items"))
+        import_token = context.get("import_token")
+        if not import_token:
+            flash(
+                "Could not prepare the uploaded CSV. Please try again.",
+                "danger",
+            )
+            return redirect(request.url)
+        if not context["headers"]:
+            _remove_import_csv("items", import_token)
+            flash("Uploaded CSV does not contain a header row.", "danger")
+            return redirect(request.url)
+
+        return render_template("inventory/import_mapping.html", **context)
 
     return render_template("inventory/import_items.html")
-
 
 @bp.route("/items/export")
 def export_items():
@@ -1062,31 +1339,146 @@ def import_locations():
     - 'id' column is ignored.
     """
     if request.method == "POST":
-        file = request.files["file"]
-        if not file:
+        step = request.form.get("step")
+        if step == "mapping":
+            import_token = request.form.get("import_token", "")
+            if not import_token:
+                flash("No CSV data found. Please upload the file again.", "danger")
+                return redirect(url_for("inventory.import_locations"))
+
+            csv_text = _load_import_csv("locations", import_token)
+            if csv_text is None:
+                flash(
+                    "Could not read the uploaded CSV data. Please upload the file again.",
+                    "danger",
+                )
+                _remove_import_csv("locations", import_token)
+                return redirect(url_for("inventory.import_locations"))
+
+            selected_mappings = {}
+            for field_cfg in LOCATION_IMPORT_FIELDS:
+                selected_header = request.form.get(f"mapping_{field_cfg['field']}", "")
+                if selected_header:
+                    selected_mappings[field_cfg["field"]] = selected_header
+
+            missing_required = [
+                field_cfg["label"]
+                for field_cfg in LOCATION_IMPORT_FIELDS
+                if field_cfg["required"] and field_cfg["field"] not in selected_mappings
+            ]
+            if missing_required:
+                flash(
+                    "Please select a column for: " + ", ".join(missing_required) + ".",
+                    "danger",
+                )
+                context = _prepare_location_import_mapping_context(
+                    csv_text,
+                    selected_mappings=selected_mappings,
+                    token=import_token,
+                )
+                context.update(
+                    {
+                        "mapping_title": "Map Location Columns",
+                        "submit_label": "Import Locations",
+                        "start_over_url": url_for("inventory.import_locations"),
+                    }
+                )
+                return render_template("inventory/import_mapping.html", **context)
+
+            reader = csv.DictReader(io.StringIO(csv_text))
+            if not reader.fieldnames:
+                flash("Uploaded CSV does not contain a header row.", "danger")
+                _remove_import_csv("locations", import_token)
+                return redirect(url_for("inventory.import_locations"))
+
+            invalid_columns = [
+                header
+                for header in selected_mappings.values()
+                if header not in reader.fieldnames
+            ]
+            if invalid_columns:
+                flash(
+                    "Some selected columns could not be found in the file. Please upload the file again.",
+                    "danger",
+                )
+                context = _prepare_location_import_mapping_context(
+                    csv_text,
+                    selected_mappings=selected_mappings,
+                    token=import_token,
+                )
+                context.update(
+                    {
+                        "mapping_title": "Map Location Columns",
+                        "submit_label": "Import Locations",
+                        "start_over_url": url_for("inventory.import_locations"),
+                    }
+                )
+                return render_template("inventory/import_mapping.html", **context)
+
+            def extract(row, field):
+                header = selected_mappings.get(field)
+                if not header:
+                    return ""
+                value = row.get(header)
+                return value if value is not None else ""
+
+            count_new, count_updated = 0, 0
+            for row in reader:
+                code = extract(row, "code").strip()
+                if not code:
+                    continue
+                description = extract(row, "description").strip()
+
+                existing = Location.query.filter_by(code=code).first()
+                if existing:
+                    if description:
+                        existing.description = description
+                    count_updated += 1
+                else:
+                    loc = Location(code=code, description=description)
+                    db.session.add(loc)
+                    count_new += 1
+
+            db.session.commit()
+            _remove_import_csv("locations", import_token)
+            flash(
+                f"Locations imported: {count_new} new, {count_updated} updated",
+                "success",
+            )
+            return redirect(url_for("inventory.list_locations"))
+
+        file = request.files.get("file")
+        if not file or file.filename == "":
             flash("No file uploaded", "danger")
             return redirect(request.url)
 
-        stream = io.StringIO(file.stream.read().decode("UTF8"))
-        csv_input = csv.DictReader(stream)
+        try:
+            csv_text = file.stream.read().decode("utf-8-sig")
+        except UnicodeDecodeError:
+            flash("CSV import files must be UTF-8 encoded.", "danger")
+            return redirect(request.url)
 
-        count_new, count_updated = 0, 0
-        for row in csv_input:
-            code = row["code"].strip()
-            desc = row.get("description", "").strip()
+        context = _prepare_location_import_mapping_context(csv_text)
+        context.update(
+            {
+                "mapping_title": "Map Location Columns",
+                "submit_label": "Import Locations",
+                "start_over_url": url_for("inventory.import_locations"),
+            }
+        )
+        import_token = context.get("import_token")
+        if not import_token:
+            flash(
+                "Could not prepare the uploaded CSV. Please try again.",
+                "danger",
+            )
+            return redirect(request.url)
+        if not context["headers"]:
+            _remove_import_csv("locations", import_token)
+            flash("Uploaded CSV does not contain a header row.", "danger")
+            return redirect(request.url)
 
-            existing = Location.query.filter_by(code=code).first()
-            if existing:
-                existing.description = desc or existing.description
-                count_updated += 1
-            else:
-                loc = Location(code=code, description=desc)
-                db.session.add(loc)
-                count_new += 1
-
-        db.session.commit()
-        flash(f"Locations imported: {count_new} new, {count_updated} updated", "success")
-        return redirect(url_for("inventory.list_locations"))
+        return render_template("inventory/import_mapping.html", **context)
 
     return render_template("inventory/import_locations.html")
 
@@ -1280,70 +1672,192 @@ def import_stock():
     Expected CSV columns: sku, location_code, quantity, lot_number (optional), person (optional), reference (optional)
     """
     if request.method == "POST":
-        file = request.files["file"]
-        if not file:
+        step = request.form.get("step")
+        if step == "mapping":
+            import_token = request.form.get("import_token", "")
+            if not import_token:
+                flash("No CSV data found. Please upload the file again.", "danger")
+                return redirect(url_for("inventory.import_stock"))
+
+            csv_text = _load_import_csv("stock", import_token)
+            if csv_text is None:
+                flash(
+                    "Could not read the uploaded CSV data. Please upload the file again.",
+                    "danger",
+                )
+                _remove_import_csv("stock", import_token)
+                return redirect(url_for("inventory.import_stock"))
+
+            selected_mappings = {}
+            for field_cfg in STOCK_IMPORT_FIELDS:
+                selected_header = request.form.get(f"mapping_{field_cfg['field']}", "")
+                if selected_header:
+                    selected_mappings[field_cfg["field"]] = selected_header
+
+            missing_required = [
+                field_cfg["label"]
+                for field_cfg in STOCK_IMPORT_FIELDS
+                if field_cfg["required"] and field_cfg["field"] not in selected_mappings
+            ]
+            if missing_required:
+                flash(
+                    "Please select a column for: " + ", ".join(missing_required) + ".",
+                    "danger",
+                )
+                context = _prepare_stock_import_mapping_context(
+                    csv_text,
+                    selected_mappings=selected_mappings,
+                    token=import_token,
+                )
+                context.update(
+                    {
+                        "mapping_title": "Map Stock Adjustment Columns",
+                        "submit_label": "Import Stock Adjustments",
+                        "start_over_url": url_for("inventory.import_stock"),
+                    }
+                )
+                return render_template("inventory/import_mapping.html", **context)
+
+            reader = csv.DictReader(io.StringIO(csv_text))
+            if not reader.fieldnames:
+                flash("Uploaded CSV does not contain a header row.", "danger")
+                _remove_import_csv("stock", import_token)
+                return redirect(url_for("inventory.import_stock"))
+
+            invalid_columns = [
+                header
+                for header in selected_mappings.values()
+                if header not in reader.fieldnames
+            ]
+            if invalid_columns:
+                flash(
+                    "Some selected columns could not be found in the file. Please upload the file again.",
+                    "danger",
+                )
+                context = _prepare_stock_import_mapping_context(
+                    csv_text,
+                    selected_mappings=selected_mappings,
+                    token=import_token,
+                )
+                context.update(
+                    {
+                        "mapping_title": "Map Stock Adjustment Columns",
+                        "submit_label": "Import Stock Adjustments",
+                        "start_over_url": url_for("inventory.import_stock"),
+                    }
+                )
+                return render_template("inventory/import_mapping.html", **context)
+
+            item_map = {i.sku: i for i in Item.query.all()}
+            loc_map = {l.code: l for l in Location.query.all()}
+
+            placeholder_location = loc_map.get(UNASSIGNED_LOCATION_CODE)
+            if not placeholder_location:
+                placeholder_location = Location(
+                    code=UNASSIGNED_LOCATION_CODE,
+                    description="Unassigned staging location",
+                )
+                db.session.add(placeholder_location)
+                db.session.flush()
+                loc_map[UNASSIGNED_LOCATION_CODE] = placeholder_location
+
+            def extract(row, field):
+                header = selected_mappings.get(field)
+                if not header:
+                    return ""
+                value = row.get(header)
+                return value if value is not None else ""
+
+            count_new, count_updated = 0, 0
+            for row in reader:
+                sku = extract(row, "sku").strip()
+                if not sku:
+                    continue
+
+                quantity_raw = extract(row, "quantity").strip()
+                try:
+                    qty = int(quantity_raw)
+                except (TypeError, ValueError):
+                    continue
+
+                loc_code = extract(row, "location_code").strip()
+                lot_number = extract(row, "lot_number").strip() or None
+                person = extract(row, "person").strip() or None
+                reference = extract(row, "reference").strip() or "Bulk Adjust"
+
+                item = item_map.get(sku)
+                if not item:
+                    continue
+
+                location = loc_map.get(loc_code) if loc_code else None
+                if not location:
+                    location = placeholder_location
+
+                batch = None
+                if lot_number:
+                    batch = Batch.query.filter_by(
+                        item_id=item.id, lot_number=lot_number
+                    ).first()
+                    if not batch:
+                        batch = Batch(item_id=item.id, lot_number=lot_number, quantity=0)
+                        db.session.add(batch)
+                        db.session.flush()
+                        count_new += 1
+                    else:
+                        count_updated += 1
+                    batch.quantity = (batch.quantity or 0) + qty
+
+                mv = Movement(
+                    item_id=item.id,
+                    batch_id=batch.id if batch else None,
+                    location_id=location.id,
+                    quantity=qty,
+                    movement_type="ADJUST",
+                    person=person,
+                    reference=reference,
+                )
+                db.session.add(mv)
+
+            db.session.commit()
+            _remove_import_csv("stock", import_token)
+            flash(
+                f"Stock adjustments processed: {count_new} new batches, {count_updated} updated batches",
+                "success",
+            )
+            return redirect(url_for("inventory.list_stock"))
+
+        file = request.files.get("file")
+        if not file or file.filename == "":
             flash("No file uploaded", "danger")
             return redirect(request.url)
 
-        stream = io.StringIO(file.stream.read().decode("UTF8"))
-        csv_input = csv.DictReader(stream)
+        try:
+            csv_text = file.stream.read().decode("utf-8-sig")
+        except UnicodeDecodeError:
+            flash("CSV import files must be UTF-8 encoded.", "danger")
+            return redirect(request.url)
 
-        item_map = {i.sku: i for i in Item.query.all()}
-        loc_map = {l.code: l for l in Location.query.all()}
-
-        placeholder_location = loc_map.get(UNASSIGNED_LOCATION_CODE)
-        if not placeholder_location:
-            placeholder_location = Location(
-                code=UNASSIGNED_LOCATION_CODE,
-                description="Unassigned staging location",
+        context = _prepare_stock_import_mapping_context(csv_text)
+        context.update(
+            {
+                "mapping_title": "Map Stock Adjustment Columns",
+                "submit_label": "Import Stock Adjustments",
+                "start_over_url": url_for("inventory.import_stock"),
+            }
+        )
+        import_token = context.get("import_token")
+        if not import_token:
+            flash(
+                "Could not prepare the uploaded CSV. Please try again.",
+                "danger",
             )
-            db.session.add(placeholder_location)
-            db.session.flush()
-            loc_map[UNASSIGNED_LOCATION_CODE] = placeholder_location
+            return redirect(request.url)
+        if not context["headers"]:
+            _remove_import_csv("stock", import_token)
+            flash("Uploaded CSV does not contain a header row.", "danger")
+            return redirect(request.url)
 
-        count_new, count_updated = 0, 0
-        for row in csv_input:
-            sku = row["sku"].strip()
-            loc_code = (row.get("location_code") or "").strip()
-            qty = int(row.get("quantity", 0))
-            lot_number = (row.get("lot_number") or "").strip() or None
-            person = (row.get("person") or "").strip() or None
-            reference = (row.get("reference") or "Bulk Adjust").strip()
-
-            item = item_map.get(sku)
-            if not item:
-                continue
-
-            location = loc_map.get(loc_code) if loc_code else None
-            if not location:
-                location = placeholder_location
-
-            batch = None
-            if lot_number:
-                batch = Batch.query.filter_by(item_id=item.id, lot_number=lot_number).first()
-                if not batch:
-                    batch = Batch(item_id=item.id, lot_number=lot_number, quantity=0)
-                    db.session.add(batch)
-                    db.session.flush()
-                    count_new += 1
-                else:
-                    count_updated += 1
-                batch.quantity = (batch.quantity or 0) + qty
-
-            mv = Movement(
-                item_id=item.id,
-                batch_id=batch.id if batch else None,
-                location_id=location.id,
-                quantity=qty,
-                movement_type="ADJUST",
-                person=person,
-                reference=reference
-            )
-            db.session.add(mv)
-
-        db.session.commit()
-        flash(f"Stock adjustments processed: {count_new} new batches, {count_updated} updated batches", "success")
-        return redirect(url_for("inventory.list_stock"))
+        return render_template("inventory/import_mapping.html", **context)
 
     return render_template("inventory/import_stock.html")
 

@@ -1,6 +1,7 @@
 import csv
 import io
 import os
+import re
 import sys
 from decimal import Decimal
 
@@ -23,6 +24,7 @@ from invapp.models import (
     RoutingStepComponent,
     RoutingStepConsumption,
 )
+from invapp.routes.inventory import UNASSIGNED_LOCATION_CODE
 
 
 @pytest.fixture
@@ -712,11 +714,36 @@ def test_import_export_items_with_notes(client, app):
         ]
     )
 
+    csv_text = csv_data.getvalue()
+
     response = client.post(
         "/inventory/items/import",
-        data={"file": (io.BytesIO(csv_data.getvalue().encode("utf-8")), "items.csv")},
+        data={"file": (io.BytesIO(csv_text.encode("utf-8")), "items.csv")},
         content_type="multipart/form-data",
     )
+    assert response.status_code == 200
+
+    page = response.get_data(as_text=True)
+    token_match = re.search(r'name="import_token" value="([^"]+)"', page)
+    assert token_match
+    import_token = token_match.group(1)
+
+    mapping_payload = {
+        "step": "mapping",
+        "import_token": import_token,
+        "mapping_sku": "sku",
+        "mapping_name": "name",
+        "mapping_type": "type",
+        "mapping_unit": "unit",
+        "mapping_description": "description",
+        "mapping_min_stock": "min_stock",
+        "mapping_notes": "notes",
+        "mapping_list_price": "list_price",
+        "mapping_last_unit_cost": "last_unit_cost",
+        "mapping_item_class": "item_class",
+    }
+
+    response = client.post("/inventory/items/import", data=mapping_payload)
     assert response.status_code == 302
 
     with app.app_context():
@@ -772,3 +799,159 @@ def test_inventory_scan_page(client):
     assert response.status_code == 200
     body = response.get_data(as_text=True)
     assert "cameraPreview" in body
+
+
+def test_import_items_shows_mapping_page(client):
+    csv_text = "sku,name\n100,Widget\n"
+    response = client.post(
+        "/inventory/items/import",
+        data={"file": (io.BytesIO(csv_text.encode("utf-8")), "items.csv")},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "Map Imported Columns" in page
+    assert "mapping_name" in page
+
+
+def test_import_items_creates_records_with_mapping(client, app):
+    csv_text = "sku,name,min_stock\n100,Widget,5\n,NoSku,3\n"
+
+    upload_response = client.post(
+        "/inventory/items/import",
+        data={"file": (io.BytesIO(csv_text.encode("utf-8")), "items.csv")},
+        content_type="multipart/form-data",
+    )
+    assert upload_response.status_code == 200
+
+    upload_page = upload_response.get_data(as_text=True)
+    token_match = re.search(r'name="import_token" value="([^"]+)"', upload_page)
+    assert token_match
+    import_token = token_match.group(1)
+
+    response = client.post(
+        "/inventory/items/import",
+        data={
+            "step": "mapping",
+            "import_token": import_token,
+            "mapping_sku": "sku",
+            "mapping_name": "name",
+            "mapping_min_stock": "min_stock",
+        },
+    )
+
+    assert response.status_code == 302
+
+    with app.app_context():
+        widget = Item.query.filter_by(sku="100").one()
+        assert widget.name == "Widget"
+        assert widget.min_stock == 5
+        assert widget.unit == "ea"
+
+        generated = Item.query.filter(Item.sku != "100").one()
+        assert generated.name == "NoSku"
+        assert generated.min_stock == 3
+        assert generated.sku == "1"
+
+
+def test_import_locations_mapping_flow(client, app):
+    with app.app_context():
+        existing = Location(code="MAIN", description="Existing")
+        db.session.add(existing)
+        db.session.commit()
+
+    csv_text = "code,description\nMAIN,Updated Main\nSIDE,Side Location\n"
+
+    upload_response = client.post(
+        "/inventory/locations/import",
+        data={"file": (io.BytesIO(csv_text.encode("utf-8")), "locations.csv")},
+        content_type="multipart/form-data",
+    )
+    assert upload_response.status_code == 200
+
+    upload_page = upload_response.get_data(as_text=True)
+    assert "Map Location Columns" in upload_page
+    token_match = re.search(r'name="import_token" value="([^"]+)"', upload_page)
+    assert token_match
+    import_token = token_match.group(1)
+
+    mapping_payload = {
+        "step": "mapping",
+        "import_token": import_token,
+        "mapping_code": "code",
+        "mapping_description": "description",
+    }
+
+    response = client.post("/inventory/locations/import", data=mapping_payload)
+    assert response.status_code == 302
+
+    with app.app_context():
+        updated = Location.query.filter_by(code="MAIN").one()
+        assert updated.description == "Updated Main"
+
+        created = Location.query.filter_by(code="SIDE").one()
+        assert created.description == "Side Location"
+
+
+def test_import_stock_mapping_flow(client, app):
+    with app.app_context():
+        item = Item(sku="SKU-1", name="Widget")
+        main = Location(code="MAIN", description="Main")
+        db.session.add_all([item, main])
+        db.session.commit()
+
+    csv_text = (
+        "sku,location_code,quantity,lot_number,person,reference\n"
+        "SKU-1,MAIN,5,BATCH-1,Alex,Initial\n"
+        "SKU-1,,3,BATCH-1,,\n"
+    )
+
+    upload_response = client.post(
+        "/inventory/stock/import",
+        data={"file": (io.BytesIO(csv_text.encode("utf-8")), "stock.csv")},
+        content_type="multipart/form-data",
+    )
+    assert upload_response.status_code == 200
+
+    upload_page = upload_response.get_data(as_text=True)
+    assert "Map Stock Adjustment Columns" in upload_page
+    token_match = re.search(r'name="import_token" value="([^"]+)"', upload_page)
+    assert token_match
+    import_token = token_match.group(1)
+
+    mapping_payload = {
+        "step": "mapping",
+        "import_token": import_token,
+        "mapping_sku": "sku",
+        "mapping_location_code": "location_code",
+        "mapping_quantity": "quantity",
+        "mapping_lot_number": "lot_number",
+        "mapping_person": "person",
+        "mapping_reference": "reference",
+    }
+
+    response = client.post("/inventory/stock/import", data=mapping_payload)
+    assert response.status_code == 302
+
+    with app.app_context():
+        batch = Batch.query.filter_by(
+            item_id=Item.query.filter_by(sku="SKU-1").one().id,
+            lot_number="BATCH-1",
+        ).one()
+        assert batch.quantity == 8
+
+        movements = Movement.query.filter_by(item_id=batch.item_id).order_by(Movement.id).all()
+        assert len(movements) == 2
+        assert movements[0].location.code == "MAIN"
+        assert movements[0].quantity == 5
+        assert movements[0].person == "Alex"
+        assert movements[0].reference == "Initial"
+
+        # Second movement should default to the unassigned location when none provided.
+        assert movements[1].location.code == UNASSIGNED_LOCATION_CODE
+        assert movements[1].quantity == 3
+        assert movements[1].person is None
+        assert movements[1].reference == "Bulk Adjust"
+
+        placeholder = Location.query.filter_by(code=UNASSIGNED_LOCATION_CODE).one()
+        assert placeholder.description == "Unassigned staging location"
