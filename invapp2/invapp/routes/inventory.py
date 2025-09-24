@@ -20,6 +20,8 @@ from sqlalchemy.orm import joinedload, load_only
 
 from invapp.models import (
     Batch,
+    BillOfMaterial,
+    BillOfMaterialComponent,
     Item,
     Location,
     Movement,
@@ -618,6 +620,47 @@ def delete_item(item_id):
     db.session.delete(item)
     db.session.commit()
     flash(f"Item {sku} deleted successfully.", "success")
+    return redirect(url_for("inventory.list_items"))
+
+
+@bp.route("/items/delete-all", methods=["POST"])
+def delete_all_items():
+    if not session.get("is_admin"):
+        flash("Administrator access is required to delete items.", "danger")
+        next_target = url_for("inventory.list_items")
+        return redirect(url_for("admin.login", next=next_target))
+
+    dependency_checks = [
+        ("stock movements", db.session.query(Movement.id).limit(1).first()),
+        ("stock batches", db.session.query(Batch.id).limit(1).first()),
+        ("order lines", db.session.query(OrderLine.id).limit(1).first()),
+        ("order components", db.session.query(OrderComponent.id).limit(1).first()),
+        ("reservations", db.session.query(Reservation.id).limit(1).first()),
+        ("bills of material", db.session.query(BillOfMaterial.id).limit(1).first()),
+        (
+            "bill of material components",
+            db.session.query(BillOfMaterialComponent.id).limit(1).first(),
+        ),
+    ]
+
+    blocked_sources = [name for name, exists in dependency_checks if exists]
+    if blocked_sources:
+        joined = ", ".join(blocked_sources)
+        flash(
+            "Cannot delete all items because related records exist in the following "
+            f"tables: {joined}. Remove those records first.",
+            "danger",
+        )
+        return redirect(url_for("inventory.list_items"))
+
+    deleted_count = Item.query.delete(synchronize_session=False)
+    db.session.commit()
+
+    if deleted_count:
+        flash(f"All {deleted_count} items deleted successfully.", "success")
+    else:
+        flash("There were no items to delete.", "info")
+
     return redirect(url_for("inventory.list_items"))
 
 
