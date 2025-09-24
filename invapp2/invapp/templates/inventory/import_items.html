@@ -2,12 +2,19 @@
 {% block content %}
 <h2>Import Items</h2>
 <form method="POST" enctype="multipart/form-data">
-    <label>Upload CSV File:</label><br>
-    <input type="file" name="file" accept=".csv" required><br><br>
-    <button type="submit">Import</button>
+    <label class="form-label">Upload CSV File:</label>
+    <input type="file" class="form-control" name="file" accept=".csv" required>
+    <div class="mt-3">
+        <button type="submit" class="btn btn-primary">Continue</button>
+    </div>
 </form>
+<p class="mt-3">
+  After uploading your file you'll be prompted to map each CSV column to the
+  corresponding item field before the import is completed.
+</p>
 <p>
-  Expected CSV columns: sku, name, type, unit, description, min_stock, notes,
-  list_price, last_unit_cost, item_class (additional fields optional)
+  Columns that can be imported include: sku, name, type, unit, description,
+  min_stock, notes, list_price, last_unit_cost, and item_class. Columns may be
+  omitted if they are not needed.
 </p>
 {% endblock %}

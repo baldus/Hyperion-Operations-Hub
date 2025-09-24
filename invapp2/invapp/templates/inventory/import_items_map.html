@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Map Imported Columns</h2>
+<p>Select which CSV column should populate each item field. Required fields are marked with an asterisk (*).</p>
+<form method="POST">
+    <input type="hidden" name="step" value="mapping">
+    <input type="hidden" name="csv_data" value="{{ csv_data|e }}">
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th>Item Field</th>
+                    <th>CSV Column</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for field in fields %}
+                <tr>
+                    <td>
+                        {{ field.label }}{% if field.required %} *{% endif %}
+                    </td>
+                    <td>
+                        <select name="mapping_{{ field.field }}" class="form-select" {% if field.required %}required{% endif %}>
+                            <option value="">{% if field.required %}Select column{% else %}Ignore{% endif %}</option>
+                            {% for header in headers %}
+                            <option value="{{ header }}" {% if selected_mappings.get(field.field) == header %}selected{% endif %}>{{ header }}</option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <h3>CSV Preview</h3>
+    <div class="table-responsive">
+        <table class="table table-bordered table-sm">
+            <thead>
+                <tr>
+                    {% for header in headers %}
+                    <th>{{ header }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% if sample_rows %}
+                    {% for row in sample_rows %}
+                    <tr>
+                        {% for cell in row %}
+                        <td>{{ cell }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="{{ headers|length }}" class="text-muted">No sample data found in the uploaded file.</td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Import Items</button>
+    <a href="{{ url_for('inventory.import_items') }}" class="btn btn-secondary">Start Over</a>
+</form>
+{% endblock %}
