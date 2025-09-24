@@ -6,7 +6,7 @@
   <label for="barcodeOutput">SKU:</label><br>
   <input type="text" id="barcodeOutput" name="sku" value="{{ prefill_sku }}" required><br><br>
 
-  {% include "inventory/_barcode_scanner.html" with input_id="barcodeOutput" lookup_template=lookup_template %}
+  {% include "inventory/_barcode_scanner.html" %}
   <br>
 
   <label>Batch / Lot:</label><br>
