@@ -20,6 +20,8 @@ from sqlalchemy.orm import joinedload, load_only
 
 from invapp.models import (
     Batch,
+    BillOfMaterial,
+    BillOfMaterialComponent,
     Item,
     Location,
     Movement,
@@ -492,6 +494,7 @@ def list_items():
         .order_by(Item.type.asc())
     )
     available_types = [row[0] for row in types_query]
+    delete_all_prompt = session.pop("delete_all_prompt", None)
     return render_template(
         "inventory/list_items.html",
         items=pagination.items,
@@ -502,6 +505,7 @@ def list_items():
         selected_type=selected_type,
         sort=sort_param,
         search=search,
+        delete_all_prompt=delete_all_prompt,
     )
 
 
@@ -618,6 +622,112 @@ def delete_item(item_id):
     db.session.delete(item)
     db.session.commit()
     flash(f"Item {sku} deleted successfully.", "success")
+    return redirect(url_for("inventory.list_items"))
+
+
+def _gather_item_dependency_info():
+    dependency_columns = [
+        ("stock movements", Movement.item_id),
+        ("stock batches", Batch.item_id),
+        ("order lines", OrderLine.item_id),
+        ("order components", OrderComponent.component_item_id),
+        ("reservations", Reservation.item_id),
+        ("bills of material", BillOfMaterial.item_id),
+        ("bill of material components", BillOfMaterialComponent.component_item_id),
+    ]
+
+    blocked_sources = []
+    dependent_item_ids = set()
+
+    for name, column in dependency_columns:
+        query = db.session.query(column).filter(column.isnot(None))
+        if query.limit(1).first():
+            blocked_sources.append(name)
+            dependent_item_ids.update(value for (value,) in query.distinct())
+
+    return blocked_sources, dependent_item_ids
+
+
+def _deletable_items_query(dependent_item_ids):
+    query = Item.query
+    if dependent_item_ids:
+        query = query.filter(~Item.id.in_(dependent_item_ids))
+    return query
+
+
+@bp.route("/items/delete-all", methods=["POST"])
+def delete_all_items():
+    if not session.get("is_admin"):
+        flash("Administrator access is required to delete items.", "danger")
+        next_target = url_for("inventory.list_items")
+        return redirect(url_for("admin.login", next=next_target))
+
+    blocked_sources, dependent_item_ids = _gather_item_dependency_info()
+    if blocked_sources:
+        deletable_query = _deletable_items_query(dependent_item_ids)
+        deletable_count = deletable_query.count()
+        session["delete_all_prompt"] = {
+            "blocked_sources": blocked_sources,
+            "deletable_count": deletable_count,
+        }
+        joined = ", ".join(blocked_sources)
+        flash(
+            "Cannot delete all items because related records exist in the following "
+            f"tables: {joined}. Remove those records first.",
+            "danger",
+        )
+        return redirect(url_for("inventory.list_items"))
+
+    deleted_count = Item.query.delete(synchronize_session=False)
+    db.session.commit()
+
+    if deleted_count:
+        flash(f"All {deleted_count} items deleted successfully.", "success")
+    else:
+        flash("There were no items to delete.", "info")
+
+    return redirect(url_for("inventory.list_items"))
+
+
+@bp.route("/items/delete-available", methods=["POST"])
+def delete_available_items():
+    if not session.get("is_admin"):
+        flash("Administrator access is required to delete items.", "danger")
+        next_target = url_for("inventory.list_items")
+        return redirect(url_for("admin.login", next=next_target))
+
+    blocked_sources, dependent_item_ids = _gather_item_dependency_info()
+    deletable_query = _deletable_items_query(dependent_item_ids)
+    deletable_count = deletable_query.count()
+
+    if deletable_count == 0:
+        if blocked_sources:
+            session["delete_all_prompt"] = {
+                "blocked_sources": blocked_sources,
+                "deletable_count": 0,
+            }
+        flash(
+            "No items can be deleted while related records remain. Remove those "
+            "records before trying again.",
+            "info",
+        )
+        return redirect(url_for("inventory.list_items"))
+
+    deleted = deletable_query.delete(synchronize_session=False)
+    db.session.commit()
+    flash(
+        f"Deleted {deleted} item{'s' if deleted != 1 else ''} that had no related records.",
+        "success",
+    )
+
+    remaining_sources, remaining_dependency_ids = _gather_item_dependency_info()
+    remaining_deletable = _deletable_items_query(remaining_dependency_ids).count()
+    if remaining_sources:
+        session["delete_all_prompt"] = {
+            "blocked_sources": remaining_sources,
+            "deletable_count": remaining_deletable,
+        }
+
     return redirect(url_for("inventory.list_items"))
 
 

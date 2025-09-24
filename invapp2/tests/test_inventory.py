@@ -243,6 +243,169 @@ def test_delete_item_succeeds_without_references(client, app):
         assert Item.query.get(item_id) is None
 
 
+def test_delete_all_items_requires_admin(client, app):
+    with app.app_context():
+        db.session.add_all([
+            Item(sku="BULK-1", name="Bulk Item 1"),
+            Item(sku="BULK-2", name="Bulk Item 2"),
+        ])
+        db.session.commit()
+
+    response = client.post("/inventory/items/delete-all")
+    assert response.status_code == 302
+    assert "/admin/login" in response.headers["Location"]
+    assert "next=%2Finventory%2Fitems" in response.headers["Location"]
+
+    with app.app_context():
+        assert Item.query.count() == 2
+
+
+def test_delete_all_items_removes_items(client, app):
+    with app.app_context():
+        db.session.add_all([
+            Item(sku="WIPE-1", name="Wipe Item 1"),
+            Item(sku="WIPE-2", name="Wipe Item 2"),
+        ])
+        db.session.commit()
+
+    with client.session_transaction() as session:
+        session["is_admin"] = True
+
+    response = client.post("/inventory/items/delete-all")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/inventory/items")
+
+    with app.app_context():
+        assert Item.query.count() == 0
+
+
+def test_delete_all_items_blocks_when_dependencies_exist(client, app):
+    with app.app_context():
+        location = Location(code="KEEP-LOC")
+        item = Item(sku="KEEP-1", name="Keep Item")
+        db.session.add_all([location, item])
+        db.session.commit()
+
+        movement = Movement(
+            item_id=item.id,
+            location_id=location.id,
+            quantity=1,
+            movement_type="ADJUST",
+        )
+        db.session.add(movement)
+        db.session.commit()
+
+    with client.session_transaction() as session:
+        session["is_admin"] = True
+
+    response = client.post("/inventory/items/delete-all")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/inventory/items")
+
+    with client.session_transaction() as flask_session:
+        prompt = flask_session.get("delete_all_prompt")
+        assert prompt is not None
+        assert prompt["deletable_count"] == 0
+        assert "stock movements" in prompt["blocked_sources"]
+
+    with app.app_context():
+        assert Item.query.count() == 1
+
+    page = client.get("/inventory/items").get_data(as_text=True)
+    assert "No items can be deleted until the related records are removed." in page
+
+    with client.session_transaction() as flask_session:
+        assert "delete_all_prompt" not in flask_session
+
+
+def test_delete_all_items_offers_partial_cleanup(client, app):
+    with app.app_context():
+        location = Location(code="PROMPT-LOC")
+        keep_item = Item(sku="PROMPT-KEEP", name="Keep With Movement")
+        free_item = Item(sku="PROMPT-FREE", name="Free To Delete")
+        db.session.add_all([location, keep_item, free_item])
+        db.session.commit()
+
+        movement = Movement(
+            item_id=keep_item.id,
+            location_id=location.id,
+            quantity=1,
+            movement_type="ADJUST",
+        )
+        db.session.add(movement)
+        db.session.commit()
+
+    with client.session_transaction() as flask_session:
+        flask_session["is_admin"] = True
+
+    response = client.post("/inventory/items/delete-all")
+    assert response.status_code == 302
+
+    with client.session_transaction() as flask_session:
+        prompt = flask_session.get("delete_all_prompt")
+        assert prompt is not None
+        assert prompt["deletable_count"] == 1
+        assert "stock movements" in prompt["blocked_sources"]
+
+    page = client.get("/inventory/items").get_data(as_text=True)
+    assert "Would you like to delete the 1 item that has no related records?" in page
+    assert "Delete 1 Available Item" in page
+
+    with client.session_transaction() as flask_session:
+        assert "delete_all_prompt" not in flask_session
+
+    with app.app_context():
+        assert sorted(item.sku for item in Item.query.all()) == [
+            "PROMPT-FREE",
+            "PROMPT-KEEP",
+        ]
+
+
+def test_delete_available_items_requires_admin(client, app):
+    with app.app_context():
+        db.session.add(Item(sku="SAFE-ONLY", name="Safe Item"))
+        db.session.commit()
+
+    response = client.post("/inventory/items/delete-available")
+    assert response.status_code == 302
+    assert "/admin/login" in response.headers["Location"]
+
+    with app.app_context():
+        assert Item.query.count() == 1
+
+
+def test_delete_available_items_removes_unreferenced(client, app):
+    with app.app_context():
+        location = Location(code="PARTIAL-LOC")
+        kept = Item(sku="PARTIAL-KEEP", name="Keep Me")
+        removable = Item(sku="PARTIAL-FREE", name="Remove Me")
+        db.session.add_all([location, kept, removable])
+        db.session.commit()
+
+        movement = Movement(
+            item_id=kept.id,
+            location_id=location.id,
+            quantity=2,
+            movement_type="ADJUST",
+        )
+        db.session.add(movement)
+        db.session.commit()
+
+    with client.session_transaction() as flask_session:
+        flask_session["is_admin"] = True
+
+    response = client.post("/inventory/items/delete-available")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/inventory/items")
+
+    with app.app_context():
+        remaining = sorted(item.sku for item in Item.query.all())
+        assert remaining == ["PARTIAL-KEEP"]
+
+    page = client.get("/inventory/items").get_data(as_text=True)
+    assert "No items can be deleted until the related records are removed." in page
+
+
 def test_edit_location_requires_admin(client, app):
     with app.app_context():
         location = Location(code="EDIT-LOC", description="Old desc")
