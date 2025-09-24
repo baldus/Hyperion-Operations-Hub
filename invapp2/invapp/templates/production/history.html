@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Production History</h2>
+<p class="section-help">Select a date range to review production totals, customer breakdowns, and month-to-date trends.</p>
+
+<form method="get" class="date-range-form">
+    <div class="form-field">
+        <label for="start_date" class="field-label">Start Date</label>
+        <input type="date" id="start_date" name="start_date" value="{{ start_date.isoformat() }}">
+    </div>
+    <div class="form-field">
+        <label for="end_date" class="field-label">End Date</label>
+        <input type="date" id="end_date" name="end_date" value="{{ end_date.isoformat() }}">
+    </div>
+    <div class="form-actions">
+        <button type="submit">Update Range</button>
+    </div>
+</form>
+
+{% if not chart_labels %}
+    <p class="chart-empty">No production records were found for the selected dates.</p>
+{% else %}
+    <section class="dashboard-section">
+        <h3>Visual Breakdown</h3>
+        <div class="chart-grid">
+            <div class="chart-card">
+                <canvas id="gatesProducedChart" aria-label="Stacked column chart showing gates produced per customer"></canvas>
+            </div>
+            <div class="chart-card">
+                <canvas id="cumulativeChart" aria-label="Line chart showing cumulative month-to-date production totals"></canvas>
+            </div>
+        </div>
+    </section>
+
+    <section class="dashboard-section">
+        <h3>Daily Detail</h3>
+        <div class="table-scroll">
+            <table class="inventory-table production-history-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Date</th>
+                        <th scope="col">Day</th>
+                        <th scope="col">Gates Produced</th>
+                        <th scope="col">Gates Packaged</th>
+                        <th scope="col">Controllers<br><small>4 Stop / 6 Stop</small></th>
+                        <th scope="col">Door Locks<br><small>LH / RH</small></th>
+                        <th scope="col">Operators</th>
+                        <th scope="col">COPs</th>
+                        <th scope="col">Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in table_rows %}
+                        <tr>
+                            <td>{{ row.record.entry_date.strftime('%Y-%m-%d') }}</td>
+                            <td>{{ row.record.day_of_week }}</td>
+                            <td>
+                                <strong>{{ row.produced_sum }}</strong>
+                                <div class="totals-breakdown">
+                                    {% for label, _ in customers %}
+                                        <span>{{ label }}: {{ row.per_customer_produced[label] }}</span>
+                                    {% endfor %}
+                                </div>
+                            </td>
+                            <td>
+                                <strong>{{ row.packaged_sum }}</strong>
+                                <div class="totals-breakdown">
+                                    {% for label, _ in customers %}
+                                        <span>{{ label }}: {{ row.per_customer_packaged[label] }}</span>
+                                    {% endfor %}
+                                </div>
+                            </td>
+                            <td>
+                                <div class="metric-pair">
+                                    <span>{{ row.record.controllers_4_stop }}</span>
+                                    <span>{{ row.record.controllers_6_stop }}</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="metric-pair">
+                                    <span>{{ row.record.door_locks_lh }}</span>
+                                    <span>{{ row.record.door_locks_rh }}</span>
+                                </div>
+                            </td>
+                            <td>{{ row.operators_total }}</td>
+                            <td>{{ row.cops_total }}</td>
+                            <td>{{ row.record.daily_notes or '—' }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    const chartLabels = {{ chart_labels|tojson }};
+    const stackedDatasets = {{ stacked_datasets|tojson }};
+    const lineDatasets = {{ line_datasets|tojson }};
+
+    if (chartLabels.length) {
+        const barContext = document.getElementById('gatesProducedChart');
+        if (barContext) {
+            new Chart(barContext, {
+                type: 'bar',
+                data: {
+                    labels: chartLabels,
+                    datasets: stackedDatasets,
+                },
+                options: {
+                    responsive: true,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Gates Produced by Customer',
+                        },
+                        legend: {
+                            position: 'bottom',
+                        },
+                    },
+                    scales: {
+                        x: {
+                            stacked: true,
+                        },
+                        y: {
+                            stacked: true,
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Units',
+                            },
+                        },
+                    },
+                },
+            });
+        }
+
+        const lineContext = document.getElementById('cumulativeChart');
+        if (lineContext) {
+            new Chart(lineContext, {
+                type: 'line',
+                data: {
+                    labels: chartLabels,
+                    datasets: lineDatasets,
+                },
+                options: {
+                    responsive: true,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Cumulative Month-to-Date Totals',
+                        },
+                        legend: {
+                            position: 'bottom',
+                        },
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Units',
+                            },
+                        },
+                    },
+                },
+            });
+        }
+    }
+</script>
+{% endblock %}

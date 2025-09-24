@@ -64,6 +64,102 @@ class WorkInstruction(db.Model):
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+class ProductionDailyRecord(db.Model):
+    __tablename__ = "production_daily_record"
+
+    id = db.Column(db.Integer, primary_key=True)
+    entry_date = db.Column(db.Date, unique=True, index=True, nullable=False)
+    day_of_week = db.Column(db.String(9), nullable=False)
+
+    gates_produced_ahe = db.Column(db.Integer, nullable=False, default=0)
+    gates_produced_bella = db.Column(db.Integer, nullable=False, default=0)
+    gates_produced_rei = db.Column(db.Integer, nullable=False, default=0)
+    gates_produced_savaria = db.Column(db.Integer, nullable=False, default=0)
+    gates_produced_eleshi = db.Column(db.Integer, nullable=False, default=0)
+    gates_produced_mornst = db.Column(db.Integer, nullable=False, default=0)
+    gates_produced_maine = db.Column(db.Integer, nullable=False, default=0)
+    gates_produced_garpa = db.Column(db.Integer, nullable=False, default=0)
+    gates_produced_dmeacc = db.Column(db.Integer, nullable=False, default=0)
+    gates_produced_admy = db.Column(db.Integer, nullable=False, default=0)
+    gates_produced_other = db.Column(db.Integer, nullable=False, default=0)
+
+    gates_packaged_ahe = db.Column(db.Integer, nullable=False, default=0)
+    gates_packaged_bella = db.Column(db.Integer, nullable=False, default=0)
+    gates_packaged_rei = db.Column(db.Integer, nullable=False, default=0)
+    gates_packaged_savaria = db.Column(db.Integer, nullable=False, default=0)
+    gates_packaged_eleshi = db.Column(db.Integer, nullable=False, default=0)
+    gates_packaged_mornst = db.Column(db.Integer, nullable=False, default=0)
+    gates_packaged_maine = db.Column(db.Integer, nullable=False, default=0)
+    gates_packaged_garpa = db.Column(db.Integer, nullable=False, default=0)
+    gates_packaged_dmeacc = db.Column(db.Integer, nullable=False, default=0)
+    gates_packaged_admy = db.Column(db.Integer, nullable=False, default=0)
+    gates_packaged_other = db.Column(db.Integer, nullable=False, default=0)
+
+    controllers_4_stop = db.Column(db.Integer, nullable=False, default=0)
+    controllers_6_stop = db.Column(db.Integer, nullable=False, default=0)
+    door_locks_lh = db.Column(db.Integer, nullable=False, default=0)
+    door_locks_rh = db.Column(db.Integer, nullable=False, default=0)
+    operators_produced = db.Column(db.Integer, nullable=False, default=0)
+    cops_produced = db.Column(db.Integer, nullable=False, default=0)
+    daily_notes = db.Column(db.Text, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    @property
+    def total_gates_produced(self) -> int:
+        return sum(
+            getattr(self, field)
+            for field in _GATE_PRODUCED_FIELDS
+        )
+
+    @property
+    def total_gates_packaged(self) -> int:
+        return sum(
+            getattr(self, field)
+            for field in _GATE_PACKAGED_FIELDS
+        )
+
+    @property
+    def total_controllers(self) -> int:
+        return (self.controllers_4_stop or 0) + (self.controllers_6_stop or 0)
+
+    @property
+    def total_door_locks(self) -> int:
+        return (self.door_locks_lh or 0) + (self.door_locks_rh or 0)
+
+
+_GATE_PRODUCED_FIELDS = [
+    "gates_produced_ahe",
+    "gates_produced_bella",
+    "gates_produced_rei",
+    "gates_produced_savaria",
+    "gates_produced_eleshi",
+    "gates_produced_mornst",
+    "gates_produced_maine",
+    "gates_produced_garpa",
+    "gates_produced_dmeacc",
+    "gates_produced_admy",
+    "gates_produced_other",
+]
+
+_GATE_PACKAGED_FIELDS = [
+    "gates_packaged_ahe",
+    "gates_packaged_bella",
+    "gates_packaged_rei",
+    "gates_packaged_savaria",
+    "gates_packaged_eleshi",
+    "gates_packaged_mornst",
+    "gates_packaged_maine",
+    "gates_packaged_garpa",
+    "gates_packaged_dmeacc",
+    "gates_packaged_admy",
+    "gates_packaged_other",
+]
+
+
 class OrderStatus:
     SCHEDULED = "SCHEDULED"
     OPEN = "OPEN"
