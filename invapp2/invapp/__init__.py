@@ -90,6 +90,40 @@ def _ensure_order_schema(engine):
                 )
 
 
+def _ensure_production_schema(engine):
+    """Align legacy production tables with the current model definitions."""
+
+    inspector = inspect(engine)
+    try:
+        columns = inspector.get_columns("production_daily_record")
+    except (NoSuchTableError, OperationalError):
+        return
+
+    desired_length = 32
+    for column in columns:
+        if column["name"] != "day_of_week":
+            continue
+
+        current_type = column.get("type")
+        current_length = getattr(current_type, "length", None)
+        if current_length is None or current_length >= desired_length:
+            return
+
+        # SQLite cannot alter column types easily, but new databases will pick up
+        # the updated length from ``db.create_all()``.
+        if engine.dialect.name == "sqlite":
+            return
+
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE production_daily_record "
+                    f"ALTER COLUMN day_of_week TYPE VARCHAR({desired_length})"
+                )
+            )
+        return
+
+
 def create_app(config_override=None):
     app = Flask(__name__)
 
@@ -105,6 +139,7 @@ def create_app(config_override=None):
         db.create_all()
         _ensure_item_columns(db.engine)
         _ensure_order_schema(db.engine)
+        _ensure_production_schema(db.engine)
         # ✅ ensure default production customers at startup
         production._ensure_default_customers()
 

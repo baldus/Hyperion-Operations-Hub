@@ -88,7 +88,8 @@ class ProductionDailyRecord(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     entry_date = db.Column(db.Date, unique=True, index=True, nullable=False)
-    day_of_week = db.Column(db.String(9), nullable=False)
+    # Allow room for locales with longer weekday names (e.g., "Donnerstag")
+    day_of_week = db.Column(db.String(32), nullable=False)
 
 
     controllers_4_stop = db.Column(db.Integer, nullable=False, default=0)
