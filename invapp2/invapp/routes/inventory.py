@@ -1,3 +1,4 @@
+import base64
 import csv
 import io
 from collections import defaultdict
@@ -40,6 +41,20 @@ bp = Blueprint("inventory", __name__, url_prefix="/inventory")
 UNASSIGNED_LOCATION_CODE = "UNASSIGNED"
 
 
+ITEM_IMPORT_FIELDS = [
+    {"field": "sku", "label": "SKU", "required": False},
+    {"field": "name", "label": "Name", "required": True},
+    {"field": "type", "label": "Type", "required": False},
+    {"field": "unit", "label": "Unit", "required": False},
+    {"field": "description", "label": "Description", "required": False},
+    {"field": "min_stock", "label": "Minimum Stock", "required": False},
+    {"field": "notes", "label": "Notes", "required": False},
+    {"field": "list_price", "label": "List Price", "required": False},
+    {"field": "last_unit_cost", "label": "Last Unit Cost", "required": False},
+    {"field": "item_class", "label": "Item Class", "required": False},
+]
+
+
 def _parse_decimal(value):
     if value is None:
         return None
@@ -58,6 +73,32 @@ def _decimal_to_string(value):
     if value is None:
         return ""
     return f"{Decimal(value):.2f}"
+
+def _prepare_item_import_mapping_context(csv_text, selected_mappings=None):
+    stream = io.StringIO(csv_text)
+    reader = csv.reader(stream)
+    try:
+        headers = next(reader)
+    except StopIteration:
+        headers = []
+
+    sample_rows = []
+    if headers:
+        for _ in range(5):
+            try:
+                sample_rows.append(next(reader))
+            except StopIteration:
+                break
+
+    csv_data_b64 = base64.b64encode(csv_text.encode("utf-8")).decode("ascii")
+
+    return {
+        "headers": headers,
+        "sample_rows": sample_rows,
+        "csv_data": csv_data_b64,
+        "fields": ITEM_IMPORT_FIELDS,
+        "selected_mappings": selected_mappings or {},
+    }
 
 ############################
 # HOME
@@ -782,108 +823,195 @@ def import_items():
     - 'id' column (from export) is ignored if present.
     """
     if request.method == "POST":
-        file = request.files["file"]
-        if not file:
+        step = request.form.get("step")
+        if step == "mapping":
+            csv_data_b64 = request.form.get("csv_data", "")
+            if not csv_data_b64:
+                flash("No CSV data found. Please upload the file again.", "danger")
+                return redirect(url_for("inventory.import_items"))
+
+            try:
+                csv_bytes = base64.b64decode(csv_data_b64.encode("utf-8"), validate=True)
+                csv_text = csv_bytes.decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                flash(
+                    "Could not read the uploaded CSV data. Please upload the file again.",
+                    "danger",
+                )
+                return redirect(url_for("inventory.import_items"))
+
+            selected_mappings = {}
+            for field_cfg in ITEM_IMPORT_FIELDS:
+                selected_header = request.form.get(f"mapping_{field_cfg['field']}", "")
+                if selected_header:
+                    selected_mappings[field_cfg["field"]] = selected_header
+
+            missing_required = [
+                field_cfg["label"]
+                for field_cfg in ITEM_IMPORT_FIELDS
+                if field_cfg["required"] and field_cfg["field"] not in selected_mappings
+            ]
+            if missing_required:
+                flash(
+                    "Please select a column for: " + ", ".join(missing_required) + ".",
+                    "danger",
+                )
+                context = _prepare_item_import_mapping_context(
+                    csv_text, selected_mappings=selected_mappings
+                )
+                return render_template("inventory/import_items_map.html", **context)
+
+            reader = csv.DictReader(io.StringIO(csv_text))
+            if not reader.fieldnames:
+                flash("Uploaded CSV does not contain a header row.", "danger")
+                return redirect(url_for("inventory.import_items"))
+
+            invalid_columns = [
+                header
+                for header in selected_mappings.values()
+                if header not in reader.fieldnames
+            ]
+            if invalid_columns:
+                flash(
+                    "Some selected columns could not be found in the file. Please upload the file again.",
+                    "danger",
+                )
+                context = _prepare_item_import_mapping_context(
+                    csv_text, selected_mappings=selected_mappings
+                )
+                return render_template("inventory/import_items_map.html", **context)
+
+            max_sku_val = db.session.query(db.func.max(Item.sku.cast(db.Integer))).scalar()
+            next_sku = int(max_sku_val) + 1 if max_sku_val else 1
+
+            def extract(row, field):
+                header = selected_mappings.get(field)
+                if not header:
+                    return ""
+                value = row.get(header)
+                return value if value is not None else ""
+
+            count_new, count_updated = 0, 0
+            for row in reader:
+                sku = extract(row, "sku").strip()
+                name = extract(row, "name").strip()
+                unit = (
+                    extract(row, "unit").strip()
+                    if "unit" in selected_mappings
+                    else "ea"
+                )
+                description = extract(row, "description").strip()
+                min_stock_raw = (
+                    extract(row, "min_stock") if "min_stock" in selected_mappings else 0
+                )
+                try:
+                    min_stock = int(min_stock_raw or 0)
+                except (TypeError, ValueError):
+                    min_stock = 0
+
+                has_type_column = "type" in selected_mappings
+                item_type = (
+                    extract(row, "type").strip() if has_type_column else None
+                )
+
+                has_notes_column = "notes" in selected_mappings
+                if has_notes_column:
+                    notes_raw = extract(row, "notes")
+                    notes_clean = notes_raw.strip() if notes_raw is not None else ""
+                    notes_value = notes_clean or None
+                else:
+                    notes_value = None
+
+                has_list_price_column = "list_price" in selected_mappings
+                has_last_unit_cost_column = "last_unit_cost" in selected_mappings
+                has_item_class_column = "item_class" in selected_mappings
+
+                list_price_value = (
+                    _parse_decimal(extract(row, "list_price"))
+                    if has_list_price_column
+                    else None
+                )
+                last_unit_cost_value = (
+                    _parse_decimal(extract(row, "last_unit_cost"))
+                    if has_last_unit_cost_column
+                    else None
+                )
+                item_class_value = (
+                    (extract(row, "item_class") or "").strip()
+                    if has_item_class_column
+                    else None
+                )
+
+                existing = Item.query.filter_by(sku=sku).first() if sku else None
+                if existing:
+                    existing.name = name or existing.name
+                    existing.unit = unit or existing.unit
+                    existing.description = description or existing.description
+                    existing.min_stock = min_stock or existing.min_stock
+                    if has_type_column:
+                        existing.type = item_type or None
+                    if has_notes_column:
+                        existing.notes = notes_value
+                    if has_list_price_column:
+                        existing.list_price = list_price_value
+                    if has_last_unit_cost_column:
+                        existing.last_unit_cost = last_unit_cost_value
+                    if has_item_class_column:
+                        existing.item_class = item_class_value or None
+                    count_updated += 1
+                else:
+                    if not sku:
+                        sku = str(next_sku)
+                        next_sku += 1
+                    item = Item(
+                        sku=sku,
+                        name=name,
+                        type=(item_type or None) if has_type_column else None,
+                        unit=unit,
+                        description=description,
+                        min_stock=min_stock,
+                        notes=notes_value if has_notes_column else None,
+                        list_price=list_price_value if has_list_price_column else None,
+                        last_unit_cost=(
+                            last_unit_cost_value if has_last_unit_cost_column else None
+                        ),
+                        item_class=(
+                            (item_class_value or None) if has_item_class_column else None
+                        ),
+                    )
+                    db.session.add(item)
+                    count_new += 1
+
+            db.session.commit()
+            flash(
+                (
+                    "Items imported: "
+                    f"{count_new} new, {count_updated} updated "
+                    "(extended fields processed)"
+                ),
+                "success",
+            )
+            return redirect(url_for("inventory.list_items"))
+
+        file = request.files.get("file")
+        if not file or file.filename == "":
             flash("No file uploaded", "danger")
             return redirect(request.url)
 
-        stream = io.StringIO(file.stream.read().decode("UTF8"))
-        csv_input = csv.DictReader(stream)
+        try:
+            csv_text = file.stream.read().decode("utf-8-sig")
+        except UnicodeDecodeError:
+            flash("CSV import files must be UTF-8 encoded.", "danger")
+            return redirect(request.url)
 
-        max_sku_val = db.session.query(db.func.max(Item.sku.cast(db.Integer))).scalar()
-        next_sku = int(max_sku_val) + 1 if max_sku_val else 1
+        context = _prepare_item_import_mapping_context(csv_text)
+        if not context["headers"]:
+            flash("Uploaded CSV does not contain a header row.", "danger")
+            return redirect(request.url)
 
-        count_new, count_updated = 0, 0
-        for row in csv_input:
-            sku = row.get("sku", "").strip()
-            name = row.get("name", "").strip()
-            unit = row.get("unit", "ea").strip()
-            description = row.get("description", "").strip()
-            min_stock_raw = row.get("min_stock", 0)
-            try:
-                min_stock = int(min_stock_raw or 0)
-            except (TypeError, ValueError):
-                min_stock = 0
-
-            has_type_column = "type" in row
-            item_type = (row.get("type") or "").strip() if has_type_column else None
-            has_notes_column = "notes" in row
-            if has_notes_column:
-                notes_raw = row.get("notes")
-                notes_clean = notes_raw.strip() if notes_raw is not None else ""
-                notes_value = notes_clean or None
-            else:
-                notes_value = None
-
-            has_list_price_column = "list_price" in row
-            has_last_unit_cost_column = "last_unit_cost" in row
-            has_item_class_column = "item_class" in row
-
-            list_price_value = (
-                _parse_decimal(row.get("list_price")) if has_list_price_column else None
-            )
-            last_unit_cost_value = (
-                _parse_decimal(row.get("last_unit_cost"))
-                if has_last_unit_cost_column
-                else None
-            )
-            item_class_value = (
-                (row.get("item_class") or "").strip() if has_item_class_column else None
-            )
-
-            existing = Item.query.filter_by(sku=sku).first() if sku else None
-            if existing:
-                existing.name = name or existing.name
-                existing.unit = unit or existing.unit
-                existing.description = description or existing.description
-                existing.min_stock = min_stock or existing.min_stock
-                if has_type_column:
-                    existing.type = item_type or None
-                if has_notes_column:
-                    existing.notes = notes_value
-                if has_list_price_column:
-                    existing.list_price = list_price_value
-                if has_last_unit_cost_column:
-                    existing.last_unit_cost = last_unit_cost_value
-                if has_item_class_column:
-                    existing.item_class = item_class_value or None
-                count_updated += 1
-            else:
-                if not sku:
-                    sku = str(next_sku)
-                    next_sku += 1
-                item = Item(
-                    sku=sku,
-                    name=name,
-                    type=(item_type or None) if has_type_column else None,
-                    unit=unit,
-                    description=description,
-                    min_stock=min_stock,
-                    notes=notes_value if has_notes_column else None,
-                    list_price=list_price_value if has_list_price_column else None,
-                    last_unit_cost=(
-                        last_unit_cost_value if has_last_unit_cost_column else None
-                    ),
-                    item_class=(
-                        (item_class_value or None) if has_item_class_column else None
-                    ),
-                )
-                db.session.add(item)
-                count_new += 1
-
-        db.session.commit()
-        flash(
-            (
-                "Items imported: "
-                f"{count_new} new, {count_updated} updated "
-                "(extended fields processed)"
-            ),
-            "success",
-        )
-        return redirect(url_for("inventory.list_items"))
+        return render_template("inventory/import_items_map.html", **context)
 
     return render_template("inventory/import_items.html")
-
 
 @bp.route("/items/export")
 def export_items():
