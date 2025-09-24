@@ -6,6 +6,9 @@
 <div class="button-grid">
     <a href="{{ url_for('settings.settings_home') }}" class="action-btn">Settings</a>
     <a href="{{ url_for('reports.reports_home') }}" class="action-btn">Reports</a>
+    <a href="{{ url_for('production.daily_entry') }}" class="action-btn">Daily Production Entry</a>
+    <a href="{{ url_for('production.history') }}" class="action-btn">Production History</a>
+    <a href="{{ url_for('production.production_settings') }}" class="action-btn">Production Settings</a>
     {% if session.get('is_admin') %}
         <a href="{{ url_for('printers.printer_settings') }}" class="action-btn">Admin Tools</a>
         <a href="{{ url_for('admin.logout', next=request.path) }}" class="action-btn">Admin Logout</a>

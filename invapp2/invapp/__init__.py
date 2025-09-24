@@ -5,7 +5,16 @@ from sqlalchemy import func, inspect, text
 from sqlalchemy.exc import NoSuchTableError, OperationalError
 
 from .extensions import db
-from .routes import admin, inventory, reports, orders, work, settings, printers
+from .routes import (
+    admin,
+    inventory,
+    orders,
+    printers,
+    production,
+    reports,
+    settings,
+    work,
+)
 from config import Config
 from . import models  # ensure models are registered with SQLAlchemy
 
@@ -104,6 +113,7 @@ def create_app(config_override=None):
     app.register_blueprint(work.bp)
     app.register_blueprint(settings.bp)
     app.register_blueprint(printers.bp)
+    app.register_blueprint(production.bp)
     app.register_blueprint(admin.bp)
 
     @app.route("/")

@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block content %}
+<nav class="production-nav" aria-label="Production pages">
+    <a href="{{ url_for('production.daily_entry') }}" class="production-nav-link">Daily Entry</a>
+    <a href="{{ url_for('production.history') }}" class="production-nav-link">History</a>
+    <a href="{{ url_for('production.production_settings') }}" class="production-nav-link is-active">Settings</a>
+</nav>
+
+<h2>Production Settings</h2>
+<p class="section-help">Configure which customers appear on the daily entry form, control their chart colors, and decide which ones should be grouped into the Other category.</p>
+{% if grouped_customers %}
+    <p class="chart-note">Grouped customers are currently rolled into the <strong>Other</strong> series: {{ grouped_customers | map(attribute='name') | join(', ') }}.</p>
+{% endif %}
+
+<section class="form-section">
+    <h3>Manage Customers</h3>
+    <form method="post" class="form-stack">
+        <input type="hidden" name="action" value="update">
+        <div class="table-scroll">
+            <table class="inventory-table production-settings-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Customer</th>
+                        <th scope="col">Color</th>
+                        <th scope="col">Group into Other</th>
+                        <th scope="col">Show on Entry</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for customer in customers %}
+                        <tr class="{% if customer.is_other_bucket %}other-row{% endif %}">
+                            <td>
+                                {% if customer.is_other_bucket %}
+                                    <strong>{{ customer.name }}</strong>
+                                    <input type="hidden" name="name_{{ customer.id }}" value="{{ customer.name }}">
+                                    <p class="field-note">Used for totals that do not belong to a specific customer.</p>
+                                {% else %}
+                                    <input type="text" name="name_{{ customer.id }}" value="{{ customer.name }}" required>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <input type="color" name="color_{{ customer.id }}" value="{{ customer.color or '#3b82f6' }}" aria-label="Color for {{ customer.name }}">
+                            </td>
+                            <td>
+                                {% if customer.is_other_bucket %}
+                                    <span class="badge">Always on</span>
+                                {% else %}
+                                    <label class="checkbox-inline">
+                                    <input type="checkbox" name="lump_into_other_{{ customer.id }}" {% if customer.lump_into_other %}checked{% endif %}>
+                                    <span>Include with Other</span>
+                                    </label>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if customer.is_other_bucket %}
+                                    <span class="badge">Required</span>
+                                {% else %}
+                                    <label class="checkbox-inline">
+                                        <input type="checkbox" name="is_active_{{ customer.id }}" {% if customer.is_active %}checked{% endif %}>
+                                        <span>Active</span>
+                                    </label>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="form-actions">
+            <button type="submit">Save Changes</button>
+        </div>
+    </form>
+</section>
+
+<section class="form-section">
+    <h3>Add Customer</h3>
+    <form method="post" class="form-stack">
+        <input type="hidden" name="action" value="add">
+        <div class="form-grid">
+            <div class="form-field">
+                <label for="new_customer_name" class="field-label">Customer Name</label>
+                <input type="text" id="new_customer_name" name="new_customer_name" required>
+            </div>
+            <div class="form-field">
+                <label for="new_customer_color" class="field-label">Chart Color</label>
+                <input type="color" id="new_customer_color" name="new_customer_color" value="#3b82f6">
+                <p class="field-note">Pick a color that will be used on stacked charts.</p>
+            </div>
+        </div>
+        <div class="form-actions">
+            <button type="submit">Add Customer</button>
+        </div>
+    </form>
+</section>
+{% endblock %}
