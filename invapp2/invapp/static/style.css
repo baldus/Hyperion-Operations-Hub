@@ -141,6 +141,7 @@ body.light .icon-btn:hover {
     display: inline;
 }
 
+
 .admin-delete-callout {
     margin-top: 16px;
     padding: 16px;
@@ -162,6 +163,7 @@ body.light .admin-delete-callout {
     border-color: #a62828;
     color: #5a1a1a;
 }
+
 
 .bubble-btn.danger {
     background-color: #a62828;

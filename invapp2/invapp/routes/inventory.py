@@ -678,6 +678,7 @@ def _flash_stock_deletion_summary(consumptions_deleted, movements_deleted, batch
     if consumptions_deleted:
         label = "routing consumption record" if consumptions_deleted == 1 else "routing consumption records"
         parts.append(f"{consumptions_deleted} {label}")
+        
 
     if parts:
         if len(parts) == 1:
@@ -701,6 +702,7 @@ def delete_all_items():
         next_target = url_for("inventory.list_items")
         return redirect(url_for("admin.login", next=next_target))
 
+
     blocked_sources, dependent_item_ids = _gather_item_dependency_info()
     if blocked_sources:
         deletable_query = _deletable_items_query(dependent_item_ids)
@@ -709,6 +711,7 @@ def delete_all_items():
             "blocked_sources": blocked_sources,
             "deletable_count": deletable_count,
         }
+
         joined = ", ".join(blocked_sources)
         flash(
             "Cannot delete all items because related records exist in the following "
@@ -726,6 +729,7 @@ def delete_all_items():
         flash("There were no items to delete.", "info")
 
     return redirect(url_for("inventory.list_items"))
+
 
 
 @bp.route("/items/delete-available", methods=["POST"])
@@ -768,7 +772,6 @@ def delete_available_items():
         }
 
     return redirect(url_for("inventory.list_items"))
-
 
 @bp.route("/items/import", methods=["GET", "POST"])
 def import_items():

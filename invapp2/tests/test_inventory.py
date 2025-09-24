@@ -580,7 +580,6 @@ def test_delete_all_history_removes_records(client, app):
         assert Movement.query.count() == 0
         assert Batch.query.count() == 0
 
-
 def test_edit_location_requires_admin(client, app):
     with app.app_context():
         location = Location(code="EDIT-LOC", description="Old desc")
