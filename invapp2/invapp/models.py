@@ -64,6 +64,25 @@ class WorkInstruction(db.Model):
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+
+class ProductionCustomer(db.Model):
+    __tablename__ = "production_customer"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), unique=True, nullable=False)
+    color = db.Column(db.String(7), nullable=False, default="#3b82f6")
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    is_other_bucket = db.Column(db.Boolean, nullable=False, default=False)
+    lump_into_other = db.Column(db.Boolean, nullable=False, default=False)
+
+    totals = db.relationship(
+        "ProductionDailyCustomerTotal",
+        back_populates="customer",
+        cascade="all, delete-orphan",
+    )
+
+
+
 class ProductionDailyRecord(db.Model):
     __tablename__ = "production_daily_record"
 
@@ -71,29 +90,6 @@ class ProductionDailyRecord(db.Model):
     entry_date = db.Column(db.Date, unique=True, index=True, nullable=False)
     day_of_week = db.Column(db.String(9), nullable=False)
 
-    gates_produced_ahe = db.Column(db.Integer, nullable=False, default=0)
-    gates_produced_bella = db.Column(db.Integer, nullable=False, default=0)
-    gates_produced_rei = db.Column(db.Integer, nullable=False, default=0)
-    gates_produced_savaria = db.Column(db.Integer, nullable=False, default=0)
-    gates_produced_eleshi = db.Column(db.Integer, nullable=False, default=0)
-    gates_produced_mornst = db.Column(db.Integer, nullable=False, default=0)
-    gates_produced_maine = db.Column(db.Integer, nullable=False, default=0)
-    gates_produced_garpa = db.Column(db.Integer, nullable=False, default=0)
-    gates_produced_dmeacc = db.Column(db.Integer, nullable=False, default=0)
-    gates_produced_admy = db.Column(db.Integer, nullable=False, default=0)
-    gates_produced_other = db.Column(db.Integer, nullable=False, default=0)
-
-    gates_packaged_ahe = db.Column(db.Integer, nullable=False, default=0)
-    gates_packaged_bella = db.Column(db.Integer, nullable=False, default=0)
-    gates_packaged_rei = db.Column(db.Integer, nullable=False, default=0)
-    gates_packaged_savaria = db.Column(db.Integer, nullable=False, default=0)
-    gates_packaged_eleshi = db.Column(db.Integer, nullable=False, default=0)
-    gates_packaged_mornst = db.Column(db.Integer, nullable=False, default=0)
-    gates_packaged_maine = db.Column(db.Integer, nullable=False, default=0)
-    gates_packaged_garpa = db.Column(db.Integer, nullable=False, default=0)
-    gates_packaged_dmeacc = db.Column(db.Integer, nullable=False, default=0)
-    gates_packaged_admy = db.Column(db.Integer, nullable=False, default=0)
-    gates_packaged_other = db.Column(db.Integer, nullable=False, default=0)
 
     controllers_4_stop = db.Column(db.Integer, nullable=False, default=0)
     controllers_6_stop = db.Column(db.Integer, nullable=False, default=0)
@@ -108,19 +104,22 @@ class ProductionDailyRecord(db.Model):
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
 
+
+    customer_totals = db.relationship(
+        "ProductionDailyCustomerTotal",
+        back_populates="record",
+        cascade="all, delete-orphan",
+        lazy="joined",
+    )
+
     @property
     def total_gates_produced(self) -> int:
-        return sum(
-            getattr(self, field)
-            for field in _GATE_PRODUCED_FIELDS
-        )
+        return sum(total.gates_produced or 0 for total in self.customer_totals)
 
     @property
     def total_gates_packaged(self) -> int:
-        return sum(
-            getattr(self, field)
-            for field in _GATE_PACKAGED_FIELDS
-        )
+        return sum(total.gates_packaged or 0 for total in self.customer_totals)
+
 
     @property
     def total_controllers(self) -> int:
@@ -131,33 +130,40 @@ class ProductionDailyRecord(db.Model):
         return (self.door_locks_lh or 0) + (self.door_locks_rh or 0)
 
 
-_GATE_PRODUCED_FIELDS = [
-    "gates_produced_ahe",
-    "gates_produced_bella",
-    "gates_produced_rei",
-    "gates_produced_savaria",
-    "gates_produced_eleshi",
-    "gates_produced_mornst",
-    "gates_produced_maine",
-    "gates_produced_garpa",
-    "gates_produced_dmeacc",
-    "gates_produced_admy",
-    "gates_produced_other",
-]
+class ProductionDailyCustomerTotal(db.Model):
+    __tablename__ = "production_daily_customer_total"
 
-_GATE_PACKAGED_FIELDS = [
-    "gates_packaged_ahe",
-    "gates_packaged_bella",
-    "gates_packaged_rei",
-    "gates_packaged_savaria",
-    "gates_packaged_eleshi",
-    "gates_packaged_mornst",
-    "gates_packaged_maine",
-    "gates_packaged_garpa",
-    "gates_packaged_dmeacc",
-    "gates_packaged_admy",
-    "gates_packaged_other",
-]
+    id = db.Column(db.Integer, primary_key=True)
+    record_id = db.Column(
+        db.Integer,
+        db.ForeignKey("production_daily_record.id"),
+        nullable=False,
+    )
+    customer_id = db.Column(
+        db.Integer,
+        db.ForeignKey("production_customer.id"),
+        nullable=False,
+    )
+    gates_produced = db.Column(db.Integer, nullable=False, default=0)
+    gates_packaged = db.Column(db.Integer, nullable=False, default=0)
+
+    record = db.relationship(
+        "ProductionDailyRecord",
+        back_populates="customer_totals",
+    )
+    customer = db.relationship(
+        "ProductionCustomer",
+        back_populates="totals",
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "record_id",
+            "customer_id",
+            name="uq_production_record_customer",
+        ),
+    )
+
 
 
 class OrderStatus:

@@ -1,8 +1,18 @@
 {% extends "base.html" %}
 
 {% block content %}
+<nav class="production-nav" aria-label="Production pages">
+    <a href="{{ url_for('production.daily_entry') }}" class="production-nav-link is-active">Daily Entry</a>
+    <a href="{{ url_for('production.history') }}" class="production-nav-link">History</a>
+    <a href="{{ url_for('production.production_settings') }}" class="production-nav-link">Settings</a>
+</nav>
+
 <h2>Daily Production Entry</h2>
 <p class="section-help">Record production totals for each customer and component. Use the selector below to view or update a different day.</p>
+{% if grouped_customers %}
+    <p class="chart-note">The following customers will be rolled into the <strong>Other</strong> category on dashboards: {{ grouped_customers | map(attribute='name') | join(', ') }}.</p>
+{% endif %}
+
 
 <form method="get" class="date-selector" aria-label="Load production entry for a different day">
     <label for="entry_date_lookup" class="field-label">Jump to Date</label>
@@ -33,7 +43,11 @@
     </div>
 
     <div class="form-section">
-        <h3>Gates Produced &amp; Packaged</h3>
+        <div class="section-heading">
+            <h3>Gates Produced &amp; Packaged</h3>
+            <a href="{{ url_for('production.production_settings') }}" class="section-link">Manage customers</a>
+        </div>
+
         <div class="table-scroll">
             <table class="form-table production-table">
                 <thead>
@@ -44,14 +58,20 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {% for label, key in customers %}
+                    {% for customer in customers %}
                         <tr>
-                            <th scope="row">{{ label }}</th>
+                            <th scope="row">
+                                {{ customer.name }}
+                                {% if customer.lump_into_other and not customer.is_other_bucket %}
+                                    <span class="customer-chip" title="Counts are rolled into Other on charts">Grouped</span>
+                                {% endif %}
+                            </th>
                             <td>
-                                <input type="number" min="0" name="gates_produced_{{ key }}" value="{{ form_values.gates_produced[key] }}">
+                                <input type="number" min="0" name="gates_produced_{{ customer.id }}" value="{{ form_values.gates_produced[customer.id] }}">
                             </td>
                             <td>
-                                <input type="number" min="0" name="gates_packaged_{{ key }}" value="{{ form_values.gates_packaged[key] }}">
+                                <input type="number" min="0" name="gates_packaged_{{ customer.id }}" value="{{ form_values.gates_packaged[customer.id] }}">
+
                             </td>
                         </tr>
                     {% endfor %}

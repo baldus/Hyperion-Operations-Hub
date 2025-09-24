@@ -397,6 +397,103 @@ body.light .home-summary-critical {
     box-sizing: border-box;
 }
 
+.production-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.production-nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 18px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.05);
+    color: inherit;
+    text-decoration: none;
+    font-weight: 600;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.production-nav-link:hover {
+    background: rgba(59, 130, 246, 0.3);
+    border-color: rgba(59, 130, 246, 0.5);
+}
+
+.production-nav-link.is-active {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
+}
+
+body.light .production-nav-link {
+    border-color: rgba(0, 0, 0, 0.12);
+    background: rgba(0, 0, 0, 0.04);
+}
+
+body.light .production-nav-link:hover {
+    background: rgba(37, 99, 235, 0.12);
+    border-color: rgba(37, 99, 235, 0.3);
+}
+
+body.light .production-nav-link.is-active {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
+}
+
+.section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.section-heading h3 {
+    margin: 0;
+}
+
+.section-link {
+    font-size: 0.9rem;
+    color: #60a5fa;
+    text-decoration: none;
+}
+
+.section-link:hover {
+    text-decoration: underline;
+}
+
+body.light .section-link {
+    color: #2563eb;
+}
+
+.chart-note {
+    margin: 8px 0 18px;
+    font-size: 0.9rem;
+    opacity: 0.8;
+}
+
+.customer-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    margin-left: 8px;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    background: rgba(96, 165, 250, 0.25);
+    color: #bfdbfe;
+}
+
+body.light .customer-chip {
+    background: rgba(37, 99, 235, 0.15);
+    color: #1d4ed8;
+}
+
 .dashboard-section {
     margin-top: 32px;
 }
@@ -429,6 +526,51 @@ body.light .home-summary-critical {
 body.light .chart-controls select {
     background: #fff;
     border-color: rgba(0, 0, 0, 0.18);
+}
+
+.chart-control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.chart-control-title {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    opacity: 0.7;
+}
+
+.chart-toggle-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.toggle-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.toggle-chip input {
+    margin: 0;
+}
+
+.color-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+body.light .toggle-chip {
+    background: rgba(0, 0, 0, 0.06);
 }
 
 .chart-wrapper {
@@ -569,6 +711,63 @@ body.light .inventory-table tr.match {
 
 .inventory-table td a:hover {
     text-decoration: none;
+}
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.1);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+body.light .badge {
+    background: rgba(0, 0, 0, 0.08);
+    color: #1f2937;
+}
+
+.checkbox-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.checkbox-inline input {
+    margin: 0;
+}
+
+.production-settings-table input[type="text"] {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.production-settings-table input[type="color"] {
+    width: 48px;
+    height: 32px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+}
+
+.production-settings-table .field-note {
+    margin-top: 6px;
+    font-size: 0.75rem;
+    opacity: 0.7;
+}
+
+.production-settings-table .other-row {
+    background: rgba(37, 99, 235, 0.12);
+}
+
+body.light .production-settings-table .other-row {
+    background: rgba(37, 99, 235, 0.08);
 }
 
 /* --- Work instructions --- */

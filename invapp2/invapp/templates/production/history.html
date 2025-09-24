@@ -1,8 +1,18 @@
 {% extends "base.html" %}
 
 {% block content %}
+<nav class="production-nav" aria-label="Production pages">
+    <a href="{{ url_for('production.daily_entry') }}" class="production-nav-link">Daily Entry</a>
+    <a href="{{ url_for('production.history') }}" class="production-nav-link is-active">History</a>
+    <a href="{{ url_for('production.production_settings') }}" class="production-nav-link">Settings</a>
+</nav>
+
 <h2>Production History</h2>
 <p class="section-help">Select a date range to review production totals, customer breakdowns, and month-to-date trends.</p>
+{% if grouped_customer_names %}
+    <p class="chart-note">Customers grouped into the <strong>Other</strong> series: {{ grouped_customer_names | join(', ') }}.</p>
+{% endif %}
+
 
 <form method="get" class="date-range-form">
     <div class="form-field">
@@ -23,7 +33,33 @@
 {% else %}
     <section class="dashboard-section">
         <h3>Visual Breakdown</h3>
-        <div class="chart-grid">
+        <div class="chart-controls">
+            <div class="chart-control-group">
+                <span class="chart-control-title">Customers</span>
+                <div class="chart-toggle-grid" data-chart-target="gates-produced">
+                    {% for dataset in stacked_datasets %}
+                        <label class="toggle-chip">
+                            <input type="checkbox" data-dataset-index="{{ loop.index0 }}" checked>
+                            <span class="color-dot" style="background-color: {{ dataset.backgroundColor }}"></span>
+                            {{ dataset.label }}
+                        </label>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="chart-control-group">
+                <span class="chart-control-title">Production Metrics</span>
+                <div class="chart-toggle-grid" data-chart-target="cumulative-lines">
+                    {% for dataset in line_datasets %}
+                        <label class="toggle-chip">
+                            <input type="checkbox" data-dataset-index="{{ loop.index0 }}" checked>
+                            <span class="color-dot" style="background-color: {{ dataset.borderColor }}"></span>
+                            {{ dataset.label }}
+                        </label>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+lass="chart-grid">
             <div class="chart-card">
                 <canvas id="gatesProducedChart" aria-label="Stacked column chart showing gates produced per customer"></canvas>
             </div>
@@ -58,16 +94,18 @@
                             <td>
                                 <strong>{{ row.produced_sum }}</strong>
                                 <div class="totals-breakdown">
-                                    {% for label, _ in customers %}
-                                        <span>{{ label }}: {{ row.per_customer_produced[label] }}</span>
+                                    {% for customer in customers %}
+                                        <span>{{ customer.name }}: {{ row.per_customer_produced.get(customer.id, 0) }}</span>
+
                                     {% endfor %}
                                 </div>
                             </td>
                             <td>
                                 <strong>{{ row.packaged_sum }}</strong>
                                 <div class="totals-breakdown">
-                                    {% for label, _ in customers %}
-                                        <span>{{ label }}: {{ row.per_customer_packaged[label] }}</span>
+                                    {% for customer in customers %}
+                                        <span>{{ customer.name }}: {{ row.per_customer_packaged.get(customer.id, 0) }}</span>
+
                                     {% endfor %}
                                 </div>
                             </td>
@@ -104,8 +142,10 @@
 
     if (chartLabels.length) {
         const barContext = document.getElementById('gatesProducedChart');
+        let barChart = null;
         if (barContext) {
-            new Chart(barContext, {
+            barChart = new Chart(barContext, {
+
                 type: 'bar',
                 data: {
                     labels: chartLabels,
@@ -141,8 +181,10 @@
         }
 
         const lineContext = document.getElementById('cumulativeChart');
+        let lineChart = null;
         if (lineContext) {
-            new Chart(lineContext, {
+            lineChart = new Chart(lineContext, {
+
                 type: 'line',
                 data: {
                     labels: chartLabels,
@@ -172,6 +214,33 @@
                 },
             });
         }
+
+        const customerToggleGrid = document.querySelector('.chart-toggle-grid[data-chart-target="gates-produced"]');
+        if (customerToggleGrid && barChart) {
+            customerToggleGrid.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+                checkbox.addEventListener('change', (event) => {
+                    const datasetIndex = Number(event.target.dataset.datasetIndex);
+                    if (!Number.isNaN(datasetIndex) && barChart.data.datasets[datasetIndex]) {
+                        barChart.data.datasets[datasetIndex].hidden = !event.target.checked;
+                        barChart.update();
+                    }
+                });
+            });
+        }
+
+        const lineToggleGrid = document.querySelector('.chart-toggle-grid[data-chart-target="cumulative-lines"]');
+        if (lineToggleGrid && lineChart) {
+            lineToggleGrid.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+                checkbox.addEventListener('change', (event) => {
+                    const datasetIndex = Number(event.target.dataset.datasetIndex);
+                    if (!Number.isNaN(datasetIndex) && lineChart.data.datasets[datasetIndex]) {
+                        lineChart.data.datasets[datasetIndex].hidden = !event.target.checked;
+                        lineChart.update();
+                    }
+                });
+            });
+        }
+
     }
 </script>
 {% endblock %}
