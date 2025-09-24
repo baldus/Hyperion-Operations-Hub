@@ -79,10 +79,18 @@
                         <th scope="col">Day</th>
                         <th scope="col">Gates Produced</th>
                         <th scope="col">Gates Packaged</th>
+                        <th scope="col">Gate Combined Output</th>
+                        <th scope="col">Gate Labor<br><small>Employees / OT Hours</small></th>
+                        <th scope="col">Gate Labor Hours</th>
+                        <th scope="col">Gate Output / Labor Hr</th>
                         <th scope="col">Controllers<br><small>4 Stop / 6 Stop</small></th>
                         <th scope="col">Door Locks<br><small>LH / RH</small></th>
                         <th scope="col">Operators</th>
                         <th scope="col">COPs</th>
+                        <th scope="col">Additional Output</th>
+                        <th scope="col">Additional Labor<br><small>Employees / OT Hours</small></th>
+                        <th scope="col">Additional Labor Hours</th>
+                        <th scope="col">Additional Output / Labor Hr</th>
                         <th scope="col">Notes</th>
                     </tr>
                 </thead>
@@ -109,6 +117,21 @@
                                     {% endfor %}
                                 </div>
                             </td>
+                            <td>{{ row.gate_combined_output }}</td>
+                            <td>
+                                <div class="metric-pair">
+                                    <span>{{ row.gate_employees }}</span>
+                                    <span>{{ '{:.2f}'.format(row.gate_ot_hours) }}</span>
+                                </div>
+                            </td>
+                            <td>{{ '{:.2f}'.format(row.gate_total_hours) }}</td>
+                            <td>
+                                {% if row.gate_output_per_hour is not none %}
+                                    {{ '{:.2f}'.format(row.gate_output_per_hour) }}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
                             <td>
                                 <div class="metric-pair">
                                     <span>{{ row.record.controllers_4_stop }}</span>
@@ -123,6 +146,21 @@
                             </td>
                             <td>{{ row.operators_total }}</td>
                             <td>{{ row.cops_total }}</td>
+                            <td>{{ row.additional_output }}</td>
+                            <td>
+                                <div class="metric-pair">
+                                    <span>{{ row.additional_employees }}</span>
+                                    <span>{{ '{:.2f}'.format(row.additional_ot_hours) }}</span>
+                                </div>
+                            </td>
+                            <td>{{ '{:.2f}'.format(row.additional_total_hours) }}</td>
+                            <td>
+                                {% if row.additional_output_per_hour is not none %}
+                                    {{ '{:.2f}'.format(row.additional_output_per_hour) }}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
                             <td>{{ row.record.daily_notes or '—' }}</td>
                         </tr>
                     {% endfor %}

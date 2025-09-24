@@ -48,6 +48,17 @@
             <a href="{{ url_for('production.production_settings') }}" class="section-link">Manage customers</a>
         </div>
 
+        <div class="form-grid">
+            <div class="form-field">
+                <label for="gates_employees" class="field-label">Number of Employees</label>
+                <input type="number" min="0" id="gates_employees" name="gates_employees" value="{{ form_values.gates_employees }}">
+            </div>
+            <div class="form-field">
+                <label for="gates_hours_ot" class="field-label">Hours OT Worked</label>
+                <input type="number" min="0" step="0.25" id="gates_hours_ot" name="gates_hours_ot" value="{{ form_values.gates_hours_ot }}">
+            </div>
+        </div>
+
         <div class="table-scroll">
             <table class="form-table production-table">
                 <thead>
@@ -82,6 +93,16 @@
 
     <div class="form-section">
         <h3>Additional Production Totals</h3>
+        <div class="form-grid">
+            <div class="form-field">
+                <label for="additional_employees" class="field-label">Number of Employees</label>
+                <input type="number" min="0" id="additional_employees" name="additional_employees" value="{{ form_values.additional_employees }}">
+            </div>
+            <div class="form-field">
+                <label for="additional_hours_ot" class="field-label">Hours OT Worked</label>
+                <input type="number" min="0" step="0.25" id="additional_hours_ot" name="additional_hours_ot" value="{{ form_values.additional_hours_ot }}">
+            </div>
+        </div>
         <div class="form-grid">
             <div class="form-field">
                 <label for="controllers_4_stop" class="field-label">Controllers (4 Stop)</label>

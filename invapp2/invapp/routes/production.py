@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from typing import Dict, List
 
 
@@ -46,6 +47,8 @@ LINE_SERIES: List[Dict[str, str]] = [
     {"label": "Operators", "key": "operators", "color": "#f97316"},
     {"label": "COPs", "key": "cops", "color": "#0ea5e9"},
 ]
+
+STANDARD_SHIFT_HOURS = 8
 
 
 def _ensure_default_customers() -> None:
@@ -123,6 +126,8 @@ def _empty_form_values(customers: List[ProductionCustomer]) -> Dict[str, object]
     return {
         "gates_produced": {customer.id: 0 for customer in customers},
         "gates_packaged": {customer.id: 0 for customer in customers},
+        "gates_employees": 0,
+        "gates_hours_ot": 0,
 
         "controllers_4_stop": 0,
         "controllers_6_stop": 0,
@@ -130,6 +135,8 @@ def _empty_form_values(customers: List[ProductionCustomer]) -> Dict[str, object]
         "door_locks_rh": 0,
         "operators_produced": 0,
         "cops_produced": 0,
+        "additional_employees": 0,
+        "additional_hours_ot": 0,
         "daily_notes": "",
     }
 
@@ -153,12 +160,16 @@ def _form_values_from_record(
             values["gates_packaged"][customer.id] = totals.gates_packaged or 0
 
 
+    values["gates_employees"] = record.gates_number_of_employees or 0
+    values["gates_hours_ot"] = float(record.gates_hours_ot or 0)
     values["controllers_4_stop"] = record.controllers_4_stop or 0
     values["controllers_6_stop"] = record.controllers_6_stop or 0
     values["door_locks_lh"] = record.door_locks_lh or 0
     values["door_locks_rh"] = record.door_locks_rh or 0
     values["operators_produced"] = record.operators_produced or 0
     values["cops_produced"] = record.cops_produced or 0
+    values["additional_employees"] = record.additional_number_of_employees or 0
+    values["additional_hours_ot"] = float(record.additional_hours_ot or 0)
     values["daily_notes"] = record.daily_notes or ""
     return values
 
@@ -171,6 +182,19 @@ def _get_int(form_key: str) -> int:
         return max(int(raw_value), 0)
     except ValueError:
         return 0
+
+
+def _get_decimal(form_key: str) -> Decimal:
+    raw_value = request.form.get(form_key)
+    if raw_value in (None, ""):
+        return Decimal("0")
+    try:
+        value = Decimal(raw_value)
+    except (InvalidOperation, ValueError):
+        return Decimal("0")
+    if value < 0:
+        return Decimal("0")
+    return value.quantize(Decimal("0.01"))
 
 
 @bp.route("/daily-entry", methods=["GET", "POST"])
@@ -205,6 +229,9 @@ def daily_entry():
 
         record.day_of_week = selected_date.strftime("%A")
 
+        record.gates_number_of_employees = _get_int("gates_employees")
+        record.gates_hours_ot = _get_decimal("gates_hours_ot")
+
         existing_totals = {
             total.customer_id: total for total in record.customer_totals
         }
@@ -225,6 +252,8 @@ def daily_entry():
         record.door_locks_rh = _get_int("door_locks_rh")
         record.operators_produced = _get_int("operators_produced")
         record.cops_produced = _get_int("cops_produced")
+        record.additional_number_of_employees = _get_int("additional_employees")
+        record.additional_hours_ot = _get_decimal("additional_hours_ot")
         record.daily_notes = request.form.get("daily_notes") or None
 
         db.session.commit()
@@ -362,6 +391,30 @@ def history():
         operators_total = record.operators_produced or 0
         cops_total = record.cops_produced or 0
 
+        gate_employees = record.gates_number_of_employees or 0
+        gate_ot_hours = float(record.gates_hours_ot or 0)
+        gate_total_hours = gate_employees * STANDARD_SHIFT_HOURS + gate_ot_hours
+        gate_combined_output = produced_sum + packaged_sum
+        gate_output_per_hour = (
+            gate_combined_output / gate_total_hours
+            if gate_total_hours
+            else None
+        )
+
+        additional_employees = record.additional_number_of_employees or 0
+        additional_ot_hours = float(record.additional_hours_ot or 0)
+        additional_total_hours = (
+            additional_employees * STANDARD_SHIFT_HOURS + additional_ot_hours
+        )
+        additional_output = (
+            controllers_total + door_locks_total + operators_total + cops_total
+        )
+        additional_output_per_hour = (
+            additional_output / additional_total_hours
+            if additional_total_hours
+            else None
+        )
+
         running_totals["produced"] += produced_sum
         running_totals["packaged"] += packaged_sum
         running_totals["controllers"] += controllers_total
@@ -384,6 +437,16 @@ def history():
                 "door_locks_total": door_locks_total,
                 "operators_total": operators_total,
                 "cops_total": cops_total,
+                "gate_employees": gate_employees,
+                "gate_ot_hours": gate_ot_hours,
+                "gate_total_hours": gate_total_hours,
+                "gate_combined_output": gate_combined_output,
+                "gate_output_per_hour": gate_output_per_hour,
+                "additional_employees": additional_employees,
+                "additional_ot_hours": additional_ot_hours,
+                "additional_total_hours": additional_total_hours,
+                "additional_output": additional_output,
+                "additional_output_per_hour": additional_output_per_hour,
             }
         )
 

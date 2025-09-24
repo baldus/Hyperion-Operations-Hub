@@ -91,6 +91,8 @@ class ProductionDailyRecord(db.Model):
     # Allow room for locales with longer weekday names (e.g., "Donnerstag")
     day_of_week = db.Column(db.String(32), nullable=False)
 
+    gates_number_of_employees = db.Column(db.Integer, nullable=False, default=0)
+    gates_hours_ot = db.Column(db.Numeric(6, 2), nullable=False, default=0)
 
     controllers_4_stop = db.Column(db.Integer, nullable=False, default=0)
     controllers_6_stop = db.Column(db.Integer, nullable=False, default=0)
@@ -98,6 +100,8 @@ class ProductionDailyRecord(db.Model):
     door_locks_rh = db.Column(db.Integer, nullable=False, default=0)
     operators_produced = db.Column(db.Integer, nullable=False, default=0)
     cops_produced = db.Column(db.Integer, nullable=False, default=0)
+    additional_number_of_employees = db.Column(db.Integer, nullable=False, default=0)
+    additional_hours_ot = db.Column(db.Numeric(6, 2), nullable=False, default=0)
     daily_notes = db.Column(db.Text, nullable=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
