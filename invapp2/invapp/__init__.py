@@ -100,11 +100,13 @@ def create_app(config_override=None):
 
     # ✅ init db with app
     db.init_app(app)
-    # create tables if they do not exist and ensure legacy schema has "type"
+    # create tables if they do not exist and ensure legacy schema
     with app.app_context():
         db.create_all()
         _ensure_item_columns(db.engine)
         _ensure_order_schema(db.engine)
+        # ✅ ensure default production customers at startup
+        production._ensure_default_customers()
 
     # register blueprints
     app.register_blueprint(inventory.bp)
@@ -115,11 +117,6 @@ def create_app(config_override=None):
     app.register_blueprint(printers.bp)
     app.register_blueprint(production.bp)
     app.register_blueprint(admin.bp)
-
-    # ✅ ensure default production customers on first request
-    @app.before_first_request
-    def bootstrap_production_defaults():
-        production._ensure_default_customers()
 
     @app.route("/")
     def home():
