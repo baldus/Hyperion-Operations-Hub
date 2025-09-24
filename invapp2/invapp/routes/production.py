@@ -399,7 +399,7 @@ def history():
                 "data": cumulative_series[series["key"]],
                 "borderColor": series["color"],
                 "backgroundColor": series["color"],
-sion": 0.2,
+                "version": 0.2,
                 "fill": False,
             }
         )
