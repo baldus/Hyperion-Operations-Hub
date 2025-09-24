@@ -344,6 +344,7 @@ def test_import_export_items_with_notes(client, app):
             "list_price",
             "last_unit_cost",
             "item_class",
+            "unexpected_column",
         ]
     )
     writer.writerow(
@@ -358,6 +359,7 @@ def test_import_export_items_with_notes(client, app):
             "5.50",
             "4.40",
             "Legacy",
+            "should be ignored",
         ]
     )
     writer.writerow(
@@ -372,6 +374,7 @@ def test_import_export_items_with_notes(client, app):
             "6.60",
             "5.50",
             "New",
+            "extra data",
         ]
     )
 
@@ -428,6 +431,69 @@ def test_import_export_items_with_notes(client, app):
     assert new_rows[0][7] == "6.60"
     assert new_rows[0][8] == "5.50"
     assert new_rows[0][9] == "New"
+
+
+def test_import_locations_ignores_extra_columns(client, app):
+    with app.app_context():
+        existing = Location(code="LOC-1", description="Original")
+        db.session.add(existing)
+        db.session.commit()
+
+    csv_data = io.StringIO()
+    writer = csv.writer(csv_data)
+    writer.writerow(["code", "description", "extra column"])
+    writer.writerow(["LOC-1", "Updated description", "ignored"])
+    writer.writerow(["LOC-2", "New location", "also ignored"])
+
+    response = client.post(
+        "/inventory/locations/import",
+        data={"file": (io.BytesIO(csv_data.getvalue().encode("utf-8")), "locations.csv")},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        updated = Location.query.filter_by(code="LOC-1").one()
+        created = Location.query.filter_by(code="LOC-2").one()
+        assert updated.description == "Updated description"
+        assert created.description == "New location"
+
+
+def test_import_stock_ignores_extra_columns(client, app):
+    with app.app_context():
+        item = Item(sku="STK-1", name="Stock Item")
+        location = Location(code="MAIN", description="Main floor")
+        db.session.add_all([item, location])
+        db.session.commit()
+
+    csv_data = io.StringIO()
+    writer = csv.writer(csv_data)
+    writer.writerow(
+        [
+            "sku",
+            "location_code",
+            "quantity",
+            "lot_number",
+            "person",
+            "reference",
+            "unused",
+        ]
+    )
+    writer.writerow(["STK-1", "MAIN", "5", "LOT-1", "Tester", "Cycle Count", "ignored"])
+
+    response = client.post(
+        "/inventory/stock/import",
+        data={"file": (io.BytesIO(csv_data.getvalue().encode("utf-8")), "stock.csv")},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        movements = Movement.query.filter_by(reference="Cycle Count").all()
+        assert len(movements) == 1
+        movement = movements[0]
+        assert movement.quantity == 5
+        assert movement.person == "Tester"
 
 
 def test_inventory_scan_page(client):

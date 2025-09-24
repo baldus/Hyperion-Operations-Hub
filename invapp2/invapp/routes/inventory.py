@@ -56,6 +56,26 @@ def _decimal_to_string(value):
         return ""
     return f"{Decimal(value):.2f}"
 
+
+def _normalize_csv_column(name):
+    if name is None:
+        return None
+    normalized = (name or "").strip().lower()
+    for character in (" ", "-", "\t"):
+        normalized = normalized.replace(character, "_")
+    return normalized or None
+
+
+def _normalize_csv_row(row):
+    normalized = {}
+    for key, value in (row or {}).items():
+        normalized_key = _normalize_csv_column(key)
+        if not normalized_key:
+            continue
+        if normalized_key not in normalized:
+            normalized[normalized_key] = value
+    return normalized
+
 ############################
 # HOME
 ############################
@@ -643,40 +663,49 @@ def import_items():
 
         count_new, count_updated = 0, 0
         for row in csv_input:
-            sku = row.get("sku", "").strip()
-            name = row.get("name", "").strip()
-            unit = row.get("unit", "ea").strip()
-            description = row.get("description", "").strip()
-            min_stock_raw = row.get("min_stock", 0)
+            normalized_row = _normalize_csv_row(row)
+            sku = (normalized_row.get("sku") or "").strip()
+            name = (normalized_row.get("name") or "").strip()
+            unit = (normalized_row.get("unit") or "ea").strip() or "ea"
+            description = (normalized_row.get("description") or "").strip()
+            min_stock_raw = normalized_row.get("min_stock", 0)
             try:
                 min_stock = int(min_stock_raw or 0)
             except (TypeError, ValueError):
                 min_stock = 0
 
-            has_type_column = "type" in row
-            item_type = (row.get("type") or "").strip() if has_type_column else None
-            has_notes_column = "notes" in row
+            has_type_column = "type" in normalized_row
+            item_type = (
+                (normalized_row.get("type") or "").strip()
+                if has_type_column
+                else None
+            )
+            has_notes_column = "notes" in normalized_row
             if has_notes_column:
-                notes_raw = row.get("notes")
+                notes_raw = normalized_row.get("notes")
                 notes_clean = notes_raw.strip() if notes_raw is not None else ""
                 notes_value = notes_clean or None
             else:
                 notes_value = None
 
-            has_list_price_column = "list_price" in row
-            has_last_unit_cost_column = "last_unit_cost" in row
-            has_item_class_column = "item_class" in row
+            has_list_price_column = "list_price" in normalized_row
+            has_last_unit_cost_column = "last_unit_cost" in normalized_row
+            has_item_class_column = "item_class" in normalized_row
 
             list_price_value = (
-                _parse_decimal(row.get("list_price")) if has_list_price_column else None
+                _parse_decimal(normalized_row.get("list_price"))
+                if has_list_price_column
+                else None
             )
             last_unit_cost_value = (
-                _parse_decimal(row.get("last_unit_cost"))
+                _parse_decimal(normalized_row.get("last_unit_cost"))
                 if has_last_unit_cost_column
                 else None
             )
             item_class_value = (
-                (row.get("item_class") or "").strip() if has_item_class_column else None
+                (normalized_row.get("item_class") or "").strip()
+                if has_item_class_column
+                else None
             )
 
             existing = Item.query.filter_by(sku=sku).first() if sku else None
@@ -892,8 +921,14 @@ def import_locations():
 
         count_new, count_updated = 0, 0
         for row in csv_input:
-            code = row["code"].strip()
-            desc = row.get("description", "").strip()
+            normalized_row = _normalize_csv_row(row)
+            code_value = normalized_row.get("code")
+            if not code_value:
+                continue
+            code = code_value.strip()
+            if not code:
+                continue
+            desc = (normalized_row.get("description") or "").strip()
 
             existing = Location.query.filter_by(code=code).first()
             if existing:
@@ -1110,12 +1145,21 @@ def import_stock():
 
         count_new, count_updated = 0, 0
         for row in csv_input:
-            sku = row["sku"].strip()
-            loc_code = (row.get("location_code") or "").strip()
-            qty = int(row.get("quantity", 0))
-            lot_number = (row.get("lot_number") or "").strip() or None
-            person = (row.get("person") or "").strip() or None
-            reference = (row.get("reference") or "Bulk Adjust").strip()
+            normalized_row = _normalize_csv_row(row)
+            sku = (normalized_row.get("sku") or "").strip()
+            if not sku:
+                continue
+            loc_code = (normalized_row.get("location_code") or "").strip()
+            quantity_raw = normalized_row.get("quantity", 0)
+            try:
+                qty = int(quantity_raw or 0)
+            except (TypeError, ValueError):
+                continue
+            lot_number = (normalized_row.get("lot_number") or "").strip() or None
+            person = (normalized_row.get("person") or "").strip() or None
+            reference = (
+                (normalized_row.get("reference") or "Bulk Adjust").strip() or "Bulk Adjust"
+            )
 
             item = item_map.get(sku)
             if not item:
