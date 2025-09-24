@@ -116,6 +116,11 @@ def create_app(config_override=None):
     app.register_blueprint(production.bp)
     app.register_blueprint(admin.bp)
 
+    # ✅ ensure default production customers on first request
+    @app.before_first_request
+    def bootstrap_production_defaults():
+        production._ensure_default_customers()
+
     @app.route("/")
     def home():
         today = date.today()
