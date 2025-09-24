@@ -2,6 +2,7 @@ import base64
 import csv
 import io
 import os
+import re
 import sys
 from decimal import Decimal
 
@@ -722,9 +723,15 @@ def test_import_export_items_with_notes(client, app):
     )
     assert response.status_code == 200
 
+    page = response.get_data(as_text=True)
+    token_match = re.search(r'name="import_token" value="([^"]+)"', page)
+    assert token_match
+    import_token = token_match.group(1)
+
     mapping_payload = {
         "step": "mapping",
-        "csv_data": base64.b64encode(csv_text.encode("utf-8")).decode("ascii"),
+        "import_token": import_token,
+
         "mapping_sku": "sku",
         "mapping_name": "name",
         "mapping_type": "type",
@@ -810,13 +817,26 @@ def test_import_items_shows_mapping_page(client):
 
 def test_import_items_creates_records_with_mapping(client, app):
     csv_text = "sku,name,min_stock\n100,Widget,5\n,NoSku,3\n"
-    encoded = base64.b64encode(csv_text.encode("utf-8")).decode("ascii")
+
+    upload_response = client.post(
+        "/inventory/items/import",
+        data={"file": (io.BytesIO(csv_text.encode("utf-8")), "items.csv")},
+        content_type="multipart/form-data",
+    )
+    assert upload_response.status_code == 200
+
+    upload_page = upload_response.get_data(as_text=True)
+    token_match = re.search(r'name="import_token" value="([^"]+)"', upload_page)
+    assert token_match
+    import_token = token_match.group(1)
+
 
     response = client.post(
         "/inventory/items/import",
         data={
             "step": "mapping",
-            "csv_data": encoded,
+            "import_token": import_token,
+
             "mapping_sku": "sku",
             "mapping_name": "name",
             "mapping_min_stock": "min_stock",

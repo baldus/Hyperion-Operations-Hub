@@ -4,7 +4,8 @@
 <p>Select which CSV column should populate each item field. Required fields are marked with an asterisk (*).</p>
 <form method="POST">
     <input type="hidden" name="step" value="mapping">
-    <input type="hidden" name="csv_data" value="{{ csv_data|e }}">
+    <input type="hidden" name="import_token" value="{{ import_token|e }}">
+
     <div class="table-responsive">
         <table class="table table-sm align-middle">
             <thead>

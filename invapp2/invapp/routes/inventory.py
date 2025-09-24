@@ -1,6 +1,10 @@
 import base64
 import csv
 import io
+import os
+import secrets
+import tempfile
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -55,6 +59,77 @@ ITEM_IMPORT_FIELDS = [
 ]
 
 
+ITEM_IMPORT_STORAGE_DIR = os.path.join(tempfile.gettempdir(), "invapp_item_imports")
+ITEM_IMPORT_FILE_TTL_SECONDS = 3600  # one hour
+
+
+def _ensure_item_import_storage():
+    os.makedirs(ITEM_IMPORT_STORAGE_DIR, exist_ok=True)
+
+
+def _cleanup_item_import_storage(now=None):
+    """Remove stale cached CSV files from previous imports."""
+
+    _ensure_item_import_storage()
+    current_time = now or time.time()
+    try:
+        for name in os.listdir(ITEM_IMPORT_STORAGE_DIR):
+            path = os.path.join(ITEM_IMPORT_STORAGE_DIR, name)
+            if not os.path.isfile(path):
+                continue
+            try:
+                if current_time - os.path.getmtime(path) > ITEM_IMPORT_FILE_TTL_SECONDS:
+                    os.remove(path)
+            except OSError:
+                continue
+    except FileNotFoundError:
+        # Directory was removed between ensure + listdir; recreate lazily later
+        pass
+
+
+def _store_item_import_csv(csv_text, token=None):
+    """Persist CSV text to a temporary file and return its token."""
+
+    _cleanup_item_import_storage()
+    if token:
+        # make sure token is safe for filenames
+        if any(ch in token for ch in ("/", "\\")):
+            token = None
+    if not token:
+        token = secrets.token_urlsafe(16)
+
+    filename = f"{token}.csv"
+    path = os.path.join(ITEM_IMPORT_STORAGE_DIR, filename)
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(csv_text)
+    except OSError:
+        if token:
+            return token
+        return None
+    return token
+
+
+def _load_item_import_csv(token):
+    if not token or any(ch in token for ch in ("/", "\\")):
+        return None
+    path = os.path.join(ITEM_IMPORT_STORAGE_DIR, f"{token}.csv")
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return handle.read()
+    except OSError:
+        return None
+
+
+def _remove_item_import_csv(token):
+    if not token or any(ch in token for ch in ("/", "\\")):
+        return
+    path = os.path.join(ITEM_IMPORT_STORAGE_DIR, f"{token}.csv")
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
 def _parse_decimal(value):
     if value is None:
         return None
@@ -74,7 +149,9 @@ def _decimal_to_string(value):
         return ""
     return f"{Decimal(value):.2f}"
 
-def _prepare_item_import_mapping_context(csv_text, selected_mappings=None):
+
+def _prepare_item_import_mapping_context(csv_text, selected_mappings=None, token=None):
+
     stream = io.StringIO(csv_text)
     reader = csv.reader(stream)
     try:
@@ -90,12 +167,13 @@ def _prepare_item_import_mapping_context(csv_text, selected_mappings=None):
             except StopIteration:
                 break
 
-    csv_data_b64 = base64.b64encode(csv_text.encode("utf-8")).decode("ascii")
+    import_token = _store_item_import_csv(csv_text, token=token)
 
     return {
         "headers": headers,
         "sample_rows": sample_rows,
-        "csv_data": csv_data_b64,
+        "import_token": import_token,
+
         "fields": ITEM_IMPORT_FIELDS,
         "selected_mappings": selected_mappings or {},
     }
@@ -825,19 +903,18 @@ def import_items():
     if request.method == "POST":
         step = request.form.get("step")
         if step == "mapping":
-            csv_data_b64 = request.form.get("csv_data", "")
-            if not csv_data_b64:
+            import_token = request.form.get("import_token", "")
+            if not import_token:
                 flash("No CSV data found. Please upload the file again.", "danger")
                 return redirect(url_for("inventory.import_items"))
 
-            try:
-                csv_bytes = base64.b64decode(csv_data_b64.encode("utf-8"), validate=True)
-                csv_text = csv_bytes.decode("utf-8")
-            except (ValueError, UnicodeDecodeError):
+            csv_text = _load_item_import_csv(import_token)
+            if csv_text is None:
                 flash(
                     "Could not read the uploaded CSV data. Please upload the file again.",
                     "danger",
                 )
+                _remove_item_import_csv(import_token)
                 return redirect(url_for("inventory.import_items"))
 
             selected_mappings = {}
@@ -857,13 +934,16 @@ def import_items():
                     "danger",
                 )
                 context = _prepare_item_import_mapping_context(
-                    csv_text, selected_mappings=selected_mappings
+                    csv_text,
+                    selected_mappings=selected_mappings,
+                    token=import_token,
                 )
                 return render_template("inventory/import_items_map.html", **context)
 
             reader = csv.DictReader(io.StringIO(csv_text))
             if not reader.fieldnames:
                 flash("Uploaded CSV does not contain a header row.", "danger")
+                _remove_item_import_csv(import_token)
                 return redirect(url_for("inventory.import_items"))
 
             invalid_columns = [
@@ -877,7 +957,9 @@ def import_items():
                     "danger",
                 )
                 context = _prepare_item_import_mapping_context(
-                    csv_text, selected_mappings=selected_mappings
+                    csv_text,
+                    selected_mappings=selected_mappings,
+                    token=import_token,
                 )
                 return render_template("inventory/import_items_map.html", **context)
 
@@ -983,6 +1065,7 @@ def import_items():
                     count_new += 1
 
             db.session.commit()
+            _remove_item_import_csv(import_token)
             flash(
                 (
                     "Items imported: "
@@ -1005,7 +1088,15 @@ def import_items():
             return redirect(request.url)
 
         context = _prepare_item_import_mapping_context(csv_text)
+        import_token = context.get("import_token")
+        if not import_token:
+            flash(
+                "Could not prepare the uploaded CSV. Please try again.",
+                "danger",
+            )
+            return redirect(request.url)
         if not context["headers"]:
+            _remove_item_import_csv(import_token)
             flash("Uploaded CSV does not contain a header row.", "danger")
             return redirect(request.url)
 
