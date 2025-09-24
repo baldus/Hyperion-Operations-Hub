@@ -13,6 +13,7 @@
     <p class="chart-note">The following customers will be rolled into the <strong>Other</strong> category on dashboards: {{ grouped_customers | map(attribute='name') | join(', ') }}.</p>
 {% endif %}
 
+
 <form method="get" class="date-selector" aria-label="Load production entry for a different day">
     <label for="entry_date_lookup" class="field-label">Jump to Date</label>
     <div class="date-selector-controls">
@@ -46,6 +47,7 @@
             <h3>Gates Produced &amp; Packaged</h3>
             <a href="{{ url_for('production.production_settings') }}" class="section-link">Manage customers</a>
         </div>
+
         <div class="table-scroll">
             <table class="form-table production-table">
                 <thead>
@@ -69,6 +71,7 @@
                             </td>
                             <td>
                                 <input type="number" min="0" name="gates_packaged_{{ customer.id }}" value="{{ form_values.gates_packaged[customer.id] }}">
+
                             </td>
                         </tr>
                     {% endfor %}

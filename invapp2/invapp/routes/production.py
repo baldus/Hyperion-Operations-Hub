@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Dict, List
 
+
 from flask import (
     Blueprint,
     flash,
@@ -112,6 +113,7 @@ def _active_customers() -> List[ProductionCustomer]:
     )
 
 
+
 def _parse_date(value: str | None) -> date | None:
     if not value:
         return None
@@ -125,6 +127,7 @@ def _empty_form_values(customers: List[ProductionCustomer]) -> Dict[str, object]
     return {
         "gates_produced": {customer.id: 0 for customer in customers},
         "gates_packaged": {customer.id: 0 for customer in customers},
+
         "controllers_4_stop": 0,
         "controllers_6_stop": 0,
         "door_locks_lh": 0,
@@ -152,6 +155,7 @@ def _form_values_from_record(
         if totals:
             values["gates_produced"][customer.id] = totals.gates_produced or 0
             values["gates_packaged"][customer.id] = totals.gates_packaged or 0
+
 
     values["controllers_4_stop"] = record.controllers_4_stop or 0
     values["controllers_6_stop"] = record.controllers_6_stop or 0
@@ -186,6 +190,7 @@ def daily_entry():
         .first()
     )
 
+
     if request.method == "POST":
         form_date = _parse_date(request.form.get("entry_date"))
         if form_date:
@@ -197,6 +202,7 @@ def daily_entry():
             .filter_by(entry_date=selected_date)
             .first()
         )
+
         if not record:
             record = ProductionDailyRecord(entry_date=selected_date)
             db.session.add(record)
@@ -215,6 +221,7 @@ def daily_entry():
                 record.customer_totals.append(totals)
             totals.gates_produced = produced_value
             totals.gates_packaged = packaged_value
+
 
         record.controllers_4_stop = _get_int("controllers_4_stop")
         record.controllers_6_stop = _get_int("controllers_6_stop")
@@ -243,6 +250,7 @@ def daily_entry():
         "production/daily_entry.html",
         customers=customers,
         grouped_customers=grouped_customers,
+
         selected_date=selected_date,
         form_values=form_values,
         record_exists=record is not None,
@@ -252,6 +260,7 @@ def daily_entry():
 @bp.route("/history")
 def history():
     customers = _active_customers()
+
     today = date.today()
     start_date = _parse_date(request.args.get("start_date")) or today.replace(day=1)
     end_date = _parse_date(request.args.get("end_date")) or today
@@ -263,6 +272,7 @@ def history():
             joinedload(ProductionDailyRecord.customer_totals)
         )
         .filter(
+
             ProductionDailyRecord.entry_date >= start_date,
             ProductionDailyRecord.entry_date <= end_date,
         )
@@ -292,6 +302,7 @@ def history():
     if other_customer:
         table_customers.append(other_customer)
 
+
     table_rows = []
     chart_labels: List[str] = []
     stack_datasets: List[Dict[str, object]] = []
@@ -311,6 +322,7 @@ def history():
 
     running_totals = {series["key"]: 0 for series in LINE_SERIES}
     current_month: tuple[int, int] | None = None
+
 
     for record in records:
         chart_labels.append(record.entry_date.strftime("%Y-%m-%d"))
@@ -346,6 +358,7 @@ def history():
                 )
             dataset["data"].append(produced_value)
 
+
         controllers_total = (record.controllers_4_stop or 0) + (
             record.controllers_6_stop or 0
         )
@@ -362,6 +375,7 @@ def history():
 
         for series in LINE_SERIES:
             cumulative_series[series["key"]].append(running_totals[series["key"]])
+
 
         table_rows.append(
             {
@@ -385,7 +399,7 @@ def history():
                 "data": cumulative_series[series["key"]],
                 "borderColor": series["color"],
                 "backgroundColor": series["color"],
-                "tension": 0.2,
+sion": 0.2,
                 "fill": False,
             }
         )
@@ -397,6 +411,7 @@ def history():
         customers=table_customers,
         chart_customers=stack_customers,
         grouped_customer_names=grouped_names,
+
         table_rows=table_rows,
         chart_labels=chart_labels,
         stacked_datasets=stack_datasets,
@@ -511,3 +526,4 @@ def production_settings():
         customers=customers,
         grouped_customers=grouped_customers,
     )
+

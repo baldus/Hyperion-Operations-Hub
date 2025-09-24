@@ -64,6 +64,7 @@ class WorkInstruction(db.Model):
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+
 class ProductionCustomer(db.Model):
     __tablename__ = "production_customer"
 
@@ -81,12 +82,14 @@ class ProductionCustomer(db.Model):
     )
 
 
+
 class ProductionDailyRecord(db.Model):
     __tablename__ = "production_daily_record"
 
     id = db.Column(db.Integer, primary_key=True)
     entry_date = db.Column(db.Date, unique=True, index=True, nullable=False)
     day_of_week = db.Column(db.String(9), nullable=False)
+
 
     controllers_4_stop = db.Column(db.Integer, nullable=False, default=0)
     controllers_6_stop = db.Column(db.Integer, nullable=False, default=0)
@@ -100,6 +103,7 @@ class ProductionDailyRecord(db.Model):
     updated_at = db.Column(
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
+
 
     customer_totals = db.relationship(
         "ProductionDailyCustomerTotal",
@@ -115,6 +119,7 @@ class ProductionDailyRecord(db.Model):
     @property
     def total_gates_packaged(self) -> int:
         return sum(total.gates_packaged or 0 for total in self.customer_totals)
+
 
     @property
     def total_controllers(self) -> int:
@@ -158,6 +163,7 @@ class ProductionDailyCustomerTotal(db.Model):
             name="uq_production_record_customer",
         ),
     )
+
 
 
 class OrderStatus:
