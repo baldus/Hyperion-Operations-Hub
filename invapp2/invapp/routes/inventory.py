@@ -30,6 +30,7 @@ from invapp.models import (
     OrderLine,
     OrderStatus,
     Reservation,
+    RoutingStepConsumption,
     db,
 )
 
@@ -494,6 +495,7 @@ def list_items():
         .order_by(Item.type.asc())
     )
     available_types = [row[0] for row in types_query]
+    delete_all_prompt = session.pop("delete_all_prompt", None)
     return render_template(
         "inventory/list_items.html",
         items=pagination.items,
@@ -504,6 +506,7 @@ def list_items():
         selected_type=selected_type,
         sort=sort_param,
         search=search,
+        delete_all_prompt=delete_all_prompt,
     )
 
 
@@ -623,6 +626,75 @@ def delete_item(item_id):
     return redirect(url_for("inventory.list_items"))
 
 
+def _gather_item_dependency_info():
+    dependency_columns = [
+        ("stock movements", Movement.item_id),
+        ("stock batches", Batch.item_id),
+        ("order lines", OrderLine.item_id),
+        ("order components", OrderComponent.component_item_id),
+        ("reservations", Reservation.item_id),
+        ("bills of material", BillOfMaterial.item_id),
+        ("bill of material components", BillOfMaterialComponent.component_item_id),
+    ]
+
+    blocked_sources = []
+    dependent_item_ids = set()
+
+    for name, column in dependency_columns:
+        query = db.session.query(column).filter(column.isnot(None))
+        if query.limit(1).first():
+            blocked_sources.append(name)
+            dependent_item_ids.update(value for (value,) in query.distinct())
+
+    return blocked_sources, dependent_item_ids
+
+
+def _deletable_items_query(dependent_item_ids):
+    query = Item.query
+    if dependent_item_ids:
+        query = query.filter(~Item.id.in_(dependent_item_ids))
+    return query
+
+
+def _delete_stock_records():
+    consumptions_deleted = RoutingStepConsumption.query.delete(synchronize_session=False)
+    movements_deleted = Movement.query.delete(synchronize_session=False)
+    batches_deleted = Batch.query.delete(synchronize_session=False)
+    db.session.commit()
+    return consumptions_deleted, movements_deleted, batches_deleted
+
+
+def _flash_stock_deletion_summary(consumptions_deleted, movements_deleted, batches_deleted):
+    parts = []
+
+    if movements_deleted:
+        label = "stock movement" if movements_deleted == 1 else "stock movements"
+        parts.append(f"{movements_deleted} {label}")
+
+    if batches_deleted:
+        label = "batch record" if batches_deleted == 1 else "batch records"
+        parts.append(f"{batches_deleted} {label}")
+
+    if consumptions_deleted:
+        label = "routing consumption record" if consumptions_deleted == 1 else "routing consumption records"
+        parts.append(f"{consumptions_deleted} {label}")
+        
+
+    if parts:
+        if len(parts) == 1:
+            message = f"Deleted {parts[0]}."
+        elif len(parts) == 2:
+            message = f"Deleted {parts[0]} and {parts[1]}."
+        else:
+            message = "Deleted " + ", ".join(parts[:-1]) + f", and {parts[-1]}."
+        flash(message, "success")
+    else:
+        flash(
+            "There were no stock movement, batch, or routing consumption records to delete.",
+            "info",
+        )
+
+
 @bp.route("/items/delete-all", methods=["POST"])
 def delete_all_items():
     if not session.get("is_admin"):
@@ -630,21 +702,16 @@ def delete_all_items():
         next_target = url_for("inventory.list_items")
         return redirect(url_for("admin.login", next=next_target))
 
-    dependency_checks = [
-        ("stock movements", db.session.query(Movement.id).limit(1).first()),
-        ("stock batches", db.session.query(Batch.id).limit(1).first()),
-        ("order lines", db.session.query(OrderLine.id).limit(1).first()),
-        ("order components", db.session.query(OrderComponent.id).limit(1).first()),
-        ("reservations", db.session.query(Reservation.id).limit(1).first()),
-        ("bills of material", db.session.query(BillOfMaterial.id).limit(1).first()),
-        (
-            "bill of material components",
-            db.session.query(BillOfMaterialComponent.id).limit(1).first(),
-        ),
-    ]
 
-    blocked_sources = [name for name, exists in dependency_checks if exists]
+    blocked_sources, dependent_item_ids = _gather_item_dependency_info()
     if blocked_sources:
+        deletable_query = _deletable_items_query(dependent_item_ids)
+        deletable_count = deletable_query.count()
+        session["delete_all_prompt"] = {
+            "blocked_sources": blocked_sources,
+            "deletable_count": deletable_count,
+        }
+
         joined = ", ".join(blocked_sources)
         flash(
             "Cannot delete all items because related records exist in the following "
@@ -663,6 +730,48 @@ def delete_all_items():
 
     return redirect(url_for("inventory.list_items"))
 
+
+
+@bp.route("/items/delete-available", methods=["POST"])
+def delete_available_items():
+    if not session.get("is_admin"):
+        flash("Administrator access is required to delete items.", "danger")
+        next_target = url_for("inventory.list_items")
+        return redirect(url_for("admin.login", next=next_target))
+
+    blocked_sources, dependent_item_ids = _gather_item_dependency_info()
+    deletable_query = _deletable_items_query(dependent_item_ids)
+    deletable_count = deletable_query.count()
+
+    if deletable_count == 0:
+        if blocked_sources:
+            session["delete_all_prompt"] = {
+                "blocked_sources": blocked_sources,
+                "deletable_count": 0,
+            }
+        flash(
+            "No items can be deleted while related records remain. Remove those "
+            "records before trying again.",
+            "info",
+        )
+        return redirect(url_for("inventory.list_items"))
+
+    deleted = deletable_query.delete(synchronize_session=False)
+    db.session.commit()
+    flash(
+        f"Deleted {deleted} item{'s' if deleted != 1 else ''} that had no related records.",
+        "success",
+    )
+
+    remaining_sources, remaining_dependency_ids = _gather_item_dependency_info()
+    remaining_deletable = _deletable_items_query(remaining_dependency_ids).count()
+    if remaining_sources:
+        session["delete_all_prompt"] = {
+            "blocked_sources": remaining_sources,
+            "deletable_count": remaining_deletable,
+        }
+
+    return redirect(url_for("inventory.list_items"))
 
 @bp.route("/items/import", methods=["GET", "POST"])
 def import_items():
@@ -833,6 +942,34 @@ def list_locations():
         size=size,
         pages=pagination.pages,
     )
+
+
+@bp.route("/locations/delete-all", methods=["POST"])
+def delete_all_locations():
+    if not session.get("is_admin"):
+        flash("Administrator access is required to delete locations.", "danger")
+        next_target = url_for("inventory.list_locations")
+        return redirect(url_for("admin.login", next=next_target))
+
+    has_movements = db.session.query(Movement.id).limit(1).first() is not None
+    if has_movements:
+        flash(
+            "Cannot delete all locations because inventory movements reference them. "
+            "Remove stock records before trying again.",
+            "danger",
+        )
+        return redirect(url_for("inventory.list_locations"))
+
+    deleted = Location.query.delete(synchronize_session=False)
+    db.session.commit()
+
+    if deleted:
+        label = "location" if deleted == 1 else "locations"
+        flash(f"Deleted {deleted} {label}.", "success")
+    else:
+        flash("There were no locations to delete.", "info")
+
+    return redirect(url_for("inventory.list_locations"))
 
 
 @bp.route("/location/add", methods=["GET", "POST"])
@@ -1076,6 +1213,19 @@ def list_stock():
         pages=pagination.pages,
         search=search,
     )
+
+
+@bp.route("/stock/delete-all", methods=["POST"])
+def delete_all_stock():
+    if not session.get("is_admin"):
+        flash("Administrator access is required to delete stock records.", "danger")
+        next_target = url_for("inventory.list_stock")
+        return redirect(url_for("admin.login", next=next_target))
+
+    consumptions_deleted, movements_deleted, batches_deleted = _delete_stock_records()
+    _flash_stock_deletion_summary(consumptions_deleted, movements_deleted, batches_deleted)
+
+    return redirect(url_for("inventory.list_stock"))
 
 
 @bp.route("/stock/adjust", methods=["GET", "POST"])
@@ -1455,6 +1605,19 @@ def history_home():
         locations=locations,
         batches=batches
     )
+
+
+@bp.route("/history/delete-all", methods=["POST"])
+def delete_all_history():
+    if not session.get("is_admin"):
+        flash("Administrator access is required to delete transaction history.", "danger")
+        next_target = url_for("inventory.history_home")
+        return redirect(url_for("admin.login", next=next_target))
+
+    consumptions_deleted, movements_deleted, batches_deleted = _delete_stock_records()
+    _flash_stock_deletion_summary(consumptions_deleted, movements_deleted, batches_deleted)
+
+    return redirect(url_for("inventory.history_home"))
 
 
 @bp.route("/history/export")

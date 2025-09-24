@@ -141,6 +141,30 @@ body.light .icon-btn:hover {
     display: inline;
 }
 
+
+.admin-delete-callout {
+    margin-top: 16px;
+    padding: 16px;
+    border-radius: 8px;
+    border: 1px solid #a62828;
+    background-color: rgba(166, 40, 40, 0.15);
+}
+
+.admin-delete-callout p {
+    margin: 0 0 10px 0;
+}
+
+.admin-delete-callout p:last-child {
+    margin-bottom: 0;
+}
+
+body.light .admin-delete-callout {
+    background-color: #f8d7da;
+    border-color: #a62828;
+    color: #5a1a1a;
+}
+
+
 .bubble-btn.danger {
     background-color: #a62828;
     color: #fff;

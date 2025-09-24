@@ -12,9 +12,33 @@
   </form>
   {% endif %}
 </div>
+{% if session.get('is_admin') and delete_all_prompt %}
+  <div class="admin-delete-callout">
+    {% set blocked = delete_all_prompt.blocked_sources or [] %}
+    {% if blocked %}
+      <p>Cannot delete all items because related records exist in the following tables: {{ blocked | join(', ') }}.</p>
+    {% else %}
+      <p>Cannot delete all items because related records remain.</p>
+    {% endif %}
+    {% set count = delete_all_prompt.deletable_count or 0 %}
+    {% if count > 0 %}
+      {% set item_label = 'item' if count == 1 else 'items' %}
+      {% set verb = 'has' if count == 1 else 'have' %}
+      {% set confirm_items_label = 'item' if count == 1 else 'items' %}
+      {% set confirm_text = 'Delete the ' ~ count ~ ' available ' ~ confirm_items_label ~ '? This action cannot be undone.' %}
+      <p>Would you like to delete the {{ count }} {{ item_label }} that {{ verb }} no related records?</p>
+      <form method="post" action="{{ url_for('inventory.delete_available_items') }}" class="inline-form" onsubmit="return confirm('{{ confirm_text }}');">
+        <button type="submit" class="bubble-btn danger">Delete {{ count }} Available {{ 'Item' if count == 1 else 'Items' }}</button>
+      </form>
+    {% else %}
+      <p>No items can be deleted until the related records are removed.</p>
+    {% endif %}
+  </div>
+{% endif %}
 <br>
 
 <form method="get" class="search-bar">
+
   <label for="search">Search:</label>
   <input type="text" id="search" name="search" value="{{ search }}" placeholder="Search by SKU or Name">
   <input type="hidden" name="type" value="{{ selected_type or '' }}">
