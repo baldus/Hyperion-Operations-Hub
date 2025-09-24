@@ -90,6 +90,59 @@ def _ensure_order_schema(engine):
                 )
 
 
+def _ensure_production_schema(engine):
+    """Align legacy production tables with the current model definitions."""
+
+    inspector = inspect(engine)
+    try:
+        columns = inspector.get_columns("production_daily_record")
+    except (NoSuchTableError, OperationalError):
+        return
+
+    desired_length = 32
+    needs_day_of_week_alter = False
+    numeric_columns_missing_default: list[str] = []
+
+    for column in columns:
+        column_name = column["name"]
+        if column_name == "day_of_week":
+            current_type = column.get("type")
+            current_length = getattr(current_type, "length", None)
+            if current_length is not None and current_length < desired_length:
+                needs_day_of_week_alter = True
+
+        if (
+            column_name.startswith(("gates_produced_", "gates_packaged_"))
+            and not column.get("nullable", True)
+            and column.get("default") is None
+        ):
+            numeric_columns_missing_default.append(column_name)
+
+    # SQLite cannot alter column types easily, but new databases will pick up the
+    # updated length and defaults from ``db.create_all()``.
+    if engine.dialect.name == "sqlite":
+        return
+
+    if needs_day_of_week_alter:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE production_daily_record "
+                    f"ALTER COLUMN day_of_week TYPE VARCHAR({desired_length})"
+                )
+            )
+
+    if numeric_columns_missing_default:
+        with engine.begin() as conn:
+            for column_name in numeric_columns_missing_default:
+                conn.execute(
+                    text(
+                        "ALTER TABLE production_daily_record "
+                        f"ALTER COLUMN {column_name} SET DEFAULT 0"
+                    )
+                )
+
+
 def create_app(config_override=None):
     app = Flask(__name__)
 
@@ -105,6 +158,7 @@ def create_app(config_override=None):
         db.create_all()
         _ensure_item_columns(db.engine)
         _ensure_order_schema(db.engine)
+        _ensure_production_schema(db.engine)
         # ✅ ensure default production customers at startup
         production._ensure_default_customers()
 
