@@ -243,6 +243,69 @@ def test_delete_item_succeeds_without_references(client, app):
         assert Item.query.get(item_id) is None
 
 
+def test_delete_all_items_requires_admin(client, app):
+    with app.app_context():
+        db.session.add_all([
+            Item(sku="BULK-1", name="Bulk Item 1"),
+            Item(sku="BULK-2", name="Bulk Item 2"),
+        ])
+        db.session.commit()
+
+    response = client.post("/inventory/items/delete-all")
+    assert response.status_code == 302
+    assert "/admin/login" in response.headers["Location"]
+    assert "next=%2Finventory%2Fitems" in response.headers["Location"]
+
+    with app.app_context():
+        assert Item.query.count() == 2
+
+
+def test_delete_all_items_removes_items(client, app):
+    with app.app_context():
+        db.session.add_all([
+            Item(sku="WIPE-1", name="Wipe Item 1"),
+            Item(sku="WIPE-2", name="Wipe Item 2"),
+        ])
+        db.session.commit()
+
+    with client.session_transaction() as session:
+        session["is_admin"] = True
+
+    response = client.post("/inventory/items/delete-all")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/inventory/items")
+
+    with app.app_context():
+        assert Item.query.count() == 0
+
+
+def test_delete_all_items_blocks_when_dependencies_exist(client, app):
+    with app.app_context():
+        location = Location(code="KEEP-LOC")
+        item = Item(sku="KEEP-1", name="Keep Item")
+        db.session.add_all([location, item])
+        db.session.commit()
+
+        movement = Movement(
+            item_id=item.id,
+            location_id=location.id,
+            quantity=1,
+            movement_type="ADJUST",
+        )
+        db.session.add(movement)
+        db.session.commit()
+
+    with client.session_transaction() as session:
+        session["is_admin"] = True
+
+    response = client.post("/inventory/items/delete-all")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/inventory/items")
+
+    with app.app_context():
+        assert Item.query.count() == 1
+
+
 def test_edit_location_requires_admin(client, app):
     with app.app_context():
         location = Location(code="EDIT-LOC", description="Old desc")

@@ -137,6 +137,28 @@ body.light .icon-btn:hover {
     background-color: #bbb;
 }
 
+.inline-form {
+    display: inline;
+}
+
+.bubble-btn.danger {
+    background-color: #a62828;
+    color: #fff;
+}
+
+.bubble-btn.danger:hover {
+    background-color: #c13c3c;
+}
+
+body.light .bubble-btn.danger {
+    background-color: #d9534f;
+    color: #fff;
+}
+
+body.light .bubble-btn.danger:hover {
+    background-color: #c9302c;
+}
+
 /* --- Content Area --- */
 .content-card {
     margin: 20px auto;

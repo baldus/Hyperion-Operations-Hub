@@ -6,6 +6,11 @@
   <a href="{{ url_for('inventory.add_item') }}" class="bubble-btn">Add Item</a>
   <a href="{{ url_for('inventory.import_items') }}" class="bubble-btn">Bulk Import Items (CSV)</a>
   <a href="{{ url_for('inventory.export_items') }}" class="bubble-btn">Export Items</a>
+  {% if session.get('is_admin') and items %}
+  <form method="post" action="{{ url_for('inventory.delete_all_items') }}" class="inline-form" onsubmit="return confirm('Are you sure you want to delete all items? This action cannot be undone.');">
+    <button type="submit" class="bubble-btn danger">Delete All Items</button>
+  </form>
+  {% endif %}
 </div>
 <br>
 
