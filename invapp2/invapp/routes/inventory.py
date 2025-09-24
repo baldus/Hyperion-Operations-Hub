@@ -1,3 +1,4 @@
+import base64
 import csv
 import io
 import os
@@ -57,6 +58,7 @@ ITEM_IMPORT_FIELDS = [
     {"field": "item_class", "label": "Item Class", "required": False},
 ]
 
+
 LOCATION_IMPORT_FIELDS = [
     {"field": "code", "label": "Location Code", "required": True},
     {"field": "description", "label": "Description", "required": False},
@@ -94,12 +96,14 @@ def _cleanup_import_storage(namespace, now=None):
                 continue
             try:
                 if current_time - os.path.getmtime(path) > IMPORT_FILE_TTL_SECONDS:
+
                     os.remove(path)
             except OSError:
                 continue
     except FileNotFoundError:
         # Directory was removed between ensure + listdir; recreate lazily later
         pass
+
 
 
 def _store_import_csv(namespace, csv_text, token=None):
@@ -112,6 +116,7 @@ def _store_import_csv(namespace, csv_text, token=None):
         token = secrets.token_urlsafe(16)
 
     path = os.path.join(_get_import_storage_dir(namespace), f"{token}.csv")
+
     try:
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(csv_text)
@@ -122,10 +127,12 @@ def _store_import_csv(namespace, csv_text, token=None):
     return token
 
 
+
 def _load_import_csv(namespace, token):
     if not token or any(ch in token for ch in ("/", "\\")):
         return None
     path = os.path.join(_get_import_storage_dir(namespace), f"{token}.csv")
+
     try:
         with open(path, "r", encoding="utf-8") as handle:
             return handle.read()
@@ -133,10 +140,12 @@ def _load_import_csv(namespace, token):
         return None
 
 
+
 def _remove_import_csv(namespace, token):
     if not token or any(ch in token for ch in ("/", "\\")):
         return
     path = os.path.join(_get_import_storage_dir(namespace), f"{token}.csv")
+
     try:
         os.remove(path)
     except OSError:
@@ -162,9 +171,11 @@ def _decimal_to_string(value):
         return ""
     return f"{Decimal(value):.2f}"
 
+
 def _prepare_import_mapping_context(
     csv_text, fields, namespace, selected_mappings=None, token=None
 ):
+
     stream = io.StringIO(csv_text)
     reader = csv.reader(stream)
     try:
@@ -180,12 +191,15 @@ def _prepare_import_mapping_context(
             except StopIteration:
                 break
 
+
     import_token = _store_import_csv(namespace, csv_text, token=token)
+
 
     return {
         "headers": headers,
         "sample_rows": sample_rows,
         "import_token": import_token,
+
         "fields": fields,
         "selected_mappings": selected_mappings or {},
     }
@@ -217,6 +231,7 @@ def _prepare_stock_import_mapping_context(csv_text, selected_mappings=None, toke
         selected_mappings=selected_mappings,
         token=token,
     )
+
 
 ############################
 # HOME
@@ -948,13 +963,17 @@ def import_items():
                 flash("No CSV data found. Please upload the file again.", "danger")
                 return redirect(url_for("inventory.import_items"))
 
+
             csv_text = _load_import_csv("items", import_token)
+
             if csv_text is None:
                 flash(
                     "Could not read the uploaded CSV data. Please upload the file again.",
                     "danger",
                 )
+
                 _remove_import_csv("items", import_token)
+
                 return redirect(url_for("inventory.import_items"))
 
             selected_mappings = {}
@@ -978,6 +997,7 @@ def import_items():
                     selected_mappings=selected_mappings,
                     token=import_token,
                 )
+
                 context.update(
                     {
                         "submit_label": "Import Items",
@@ -986,10 +1006,13 @@ def import_items():
                 )
                 return render_template("inventory/import_mapping.html", **context)
 
+
             reader = csv.DictReader(io.StringIO(csv_text))
             if not reader.fieldnames:
                 flash("Uploaded CSV does not contain a header row.", "danger")
+
                 _remove_import_csv("items", import_token)
+
                 return redirect(url_for("inventory.import_items"))
 
             invalid_columns = [
@@ -1007,6 +1030,7 @@ def import_items():
                     selected_mappings=selected_mappings,
                     token=import_token,
                 )
+
                 context.update(
                     {
                         "submit_label": "Import Items",
@@ -1014,6 +1038,7 @@ def import_items():
                     }
                 )
                 return render_template("inventory/import_mapping.html", **context)
+
 
             max_sku_val = db.session.query(db.func.max(Item.sku.cast(db.Integer))).scalar()
             next_sku = int(max_sku_val) + 1 if max_sku_val else 1
@@ -1117,7 +1142,9 @@ def import_items():
                     count_new += 1
 
             db.session.commit()
+
             _remove_import_csv("items", import_token)
+
             flash(
                 (
                     "Items imported: "
@@ -1139,6 +1166,7 @@ def import_items():
             flash("CSV import files must be UTF-8 encoded.", "danger")
             return redirect(request.url)
 
+
         context = _prepare_item_import_mapping_context(csv_text)
         context.update(
             {
@@ -1159,6 +1187,7 @@ def import_items():
             return redirect(request.url)
 
         return render_template("inventory/import_mapping.html", **context)
+
 
     return render_template("inventory/import_items.html")
 
