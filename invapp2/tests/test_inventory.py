@@ -1,3 +1,4 @@
+import base64
 import csv
 import io
 import os
@@ -730,6 +731,7 @@ def test_import_export_items_with_notes(client, app):
     mapping_payload = {
         "step": "mapping",
         "import_token": import_token,
+
         "mapping_sku": "sku",
         "mapping_name": "name",
         "mapping_type": "type",
@@ -828,11 +830,13 @@ def test_import_items_creates_records_with_mapping(client, app):
     assert token_match
     import_token = token_match.group(1)
 
+
     response = client.post(
         "/inventory/items/import",
         data={
             "step": "mapping",
             "import_token": import_token,
+
             "mapping_sku": "sku",
             "mapping_name": "name",
             "mapping_min_stock": "min_stock",

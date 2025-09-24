@@ -1,3 +1,4 @@
+import base64
 import csv
 import io
 import os
@@ -129,7 +130,6 @@ def _remove_item_import_csv(token):
     except OSError:
         pass
 
-
 def _parse_decimal(value):
     if value is None:
         return None
@@ -149,7 +149,9 @@ def _decimal_to_string(value):
         return ""
     return f"{Decimal(value):.2f}"
 
+
 def _prepare_item_import_mapping_context(csv_text, selected_mappings=None, token=None):
+
     stream = io.StringIO(csv_text)
     reader = csv.reader(stream)
     try:
@@ -171,6 +173,7 @@ def _prepare_item_import_mapping_context(csv_text, selected_mappings=None, token
         "headers": headers,
         "sample_rows": sample_rows,
         "import_token": import_token,
+
         "fields": ITEM_IMPORT_FIELDS,
         "selected_mappings": selected_mappings or {},
     }
