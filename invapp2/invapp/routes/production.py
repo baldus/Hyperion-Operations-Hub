@@ -100,10 +100,6 @@ def _ensure_default_customers() -> None:
         db.session.commit()
 
 
-@bp.before_app_first_request
-def _bootstrap_defaults() -> None:
-    _ensure_default_customers()
-
 
 def _active_customers() -> List[ProductionCustomer]:
     return (
