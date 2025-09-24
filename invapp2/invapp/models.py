@@ -1,3 +1,4 @@
+from decimal import Decimal
 from datetime import datetime
 
 from sqlalchemy.ext.associationproxy import association_proxy
@@ -92,12 +93,16 @@ class ProductionDailyRecord(db.Model):
     day_of_week = db.Column(db.String(32), nullable=False)
 
 
+    gates_employees = db.Column(db.Integer, nullable=False, default=0)
+    gates_hours_ot = db.Column(db.Numeric(7, 2), nullable=False, default=0)
     controllers_4_stop = db.Column(db.Integer, nullable=False, default=0)
     controllers_6_stop = db.Column(db.Integer, nullable=False, default=0)
     door_locks_lh = db.Column(db.Integer, nullable=False, default=0)
     door_locks_rh = db.Column(db.Integer, nullable=False, default=0)
     operators_produced = db.Column(db.Integer, nullable=False, default=0)
     cops_produced = db.Column(db.Integer, nullable=False, default=0)
+    additional_employees = db.Column(db.Integer, nullable=False, default=0)
+    additional_hours_ot = db.Column(db.Numeric(7, 2), nullable=False, default=0)
     daily_notes = db.Column(db.Text, nullable=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -112,6 +117,8 @@ class ProductionDailyRecord(db.Model):
         cascade="all, delete-orphan",
         lazy="joined",
     )
+
+    LABOR_SHIFT_HOURS = Decimal("8.0")
 
     @property
     def total_gates_produced(self) -> int:
@@ -129,6 +136,22 @@ class ProductionDailyRecord(db.Model):
     @property
     def total_door_locks(self) -> int:
         return (self.door_locks_lh or 0) + (self.door_locks_rh or 0)
+
+    @property
+    def gates_total_labor_hours(self) -> Decimal:
+        employees = Decimal(self.gates_employees or 0)
+        overtime = self.gates_hours_ot or Decimal("0")
+        return (employees * self.LABOR_SHIFT_HOURS + overtime).quantize(
+            Decimal("0.01")
+        )
+
+    @property
+    def additional_total_labor_hours(self) -> Decimal:
+        employees = Decimal(self.additional_employees or 0)
+        overtime = self.additional_hours_ot or Decimal("0")
+        return (employees * self.LABOR_SHIFT_HOURS + overtime).quantize(
+            Decimal("0.01")
+        )
 
 
 class ProductionDailyCustomerTotal(db.Model):

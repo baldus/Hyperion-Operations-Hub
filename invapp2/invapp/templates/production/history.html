@@ -71,6 +71,7 @@
 
     <section class="dashboard-section">
         <h3>Daily Detail</h3>
+        <p class="section-help">Labor hours assume an 8-hour base shift per employee plus the overtime entered for each section.</p>
         <div class="table-scroll">
             <table class="inventory-table production-history-table">
                 <thead>
@@ -79,10 +80,14 @@
                         <th scope="col">Day</th>
                         <th scope="col">Gates Produced</th>
                         <th scope="col">Gates Packaged</th>
+                        <th scope="col">Gates Labor<br><small>Employees / OT / Hours</small></th>
+                        <th scope="col">Output per Labor Hour<br><small>Gates Combined</small></th>
                         <th scope="col">Controllers<br><small>4 Stop / 6 Stop</small></th>
                         <th scope="col">Door Locks<br><small>LH / RH</small></th>
                         <th scope="col">Operators</th>
                         <th scope="col">COPs</th>
+                        <th scope="col">Additional Labor<br><small>Employees / OT / Hours</small></th>
+                        <th scope="col">Additional Output<br><small>Units per Labor Hour</small></th>
                         <th scope="col">Notes</th>
                     </tr>
                 </thead>
@@ -110,6 +115,23 @@
                                 </div>
                             </td>
                             <td>
+                                <div class="totals-breakdown">
+                                    <span>Employees: {{ row.gates_employees }}</span>
+                                    <span>OT Hours: {{ row.gates_hours_ot }}</span>
+                                    <span>Total Hours: {{ row.gates_total_hours }}</span>
+                                </div>
+                            </td>
+                            <td>
+                                {% if row.gates_output_per_hour %}
+                                    <strong>{{ row.gates_output_per_hour }}</strong>
+                                    <div class="totals-breakdown">
+                                        <span>Combined Output: {{ row.gates_combined_total }}</span>
+                                    </div>
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                            <td>
                                 <div class="metric-pair">
                                     <span>{{ row.record.controllers_4_stop }}</span>
                                     <span>{{ row.record.controllers_6_stop }}</span>
@@ -123,6 +145,24 @@
                             </td>
                             <td>{{ row.operators_total }}</td>
                             <td>{{ row.cops_total }}</td>
+                            <td>
+                                <div class="totals-breakdown">
+                                    <span>Employees: {{ row.additional_employees }}</span>
+                                    <span>OT Hours: {{ row.additional_hours_ot }}</span>
+                                    <span>Total Hours: {{ row.additional_total_hours }}</span>
+                                </div>
+                            </td>
+                            <td>
+                                {% if row.additional_per_hour %}
+                                    <div class="totals-breakdown">
+                                        {% for metric in row.additional_per_hour %}
+                                            <span>{{ metric.label }}: {{ metric.per_hour }}</span>
+                                        {% endfor %}
+                                    </div>
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
                             <td>{{ row.record.daily_notes or '—' }}</td>
                         </tr>
                     {% endfor %}

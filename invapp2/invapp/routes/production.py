@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import date
 from typing import Dict, List
 
@@ -46,6 +47,18 @@ LINE_SERIES: List[Dict[str, str]] = [
     {"label": "Operators", "key": "operators", "color": "#f97316"},
     {"label": "COPs", "key": "cops", "color": "#0ea5e9"},
 ]
+
+ADDITIONAL_METRICS: List[Dict[str, str]] = [
+    {"key": "controllers_4_stop", "label": "Controllers (4 Stop)"},
+    {"key": "controllers_6_stop", "label": "Controllers (6 Stop)"},
+    {"key": "door_locks_lh", "label": "Door Locks (LH)"},
+    {"key": "door_locks_rh", "label": "Door Locks (RH)"},
+    {"key": "operators_produced", "label": "Operators Produced"},
+    {"key": "cops_produced", "label": "COPs Produced"},
+]
+
+DECIMAL_ZERO = Decimal("0")
+DECIMAL_QUANT = Decimal("0.01")
 
 
 def _ensure_default_customers() -> None:
@@ -119,17 +132,32 @@ def _parse_date(value: str | None) -> date | None:
         return None
 
 
+def _format_decimal(value: Decimal | int | float | str | None) -> str:
+    if value is None:
+        decimal_value = DECIMAL_ZERO
+    else:
+        if isinstance(value, Decimal):
+            decimal_value = value
+        else:
+            decimal_value = Decimal(str(value))
+    return format(decimal_value.quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP), "f")
+
+
 def _empty_form_values(customers: List[ProductionCustomer]) -> Dict[str, object]:
     return {
         "gates_produced": {customer.id: 0 for customer in customers},
         "gates_packaged": {customer.id: 0 for customer in customers},
 
+        "gates_employees": 0,
+        "gates_hours_ot": _format_decimal(DECIMAL_ZERO),
         "controllers_4_stop": 0,
         "controllers_6_stop": 0,
         "door_locks_lh": 0,
         "door_locks_rh": 0,
         "operators_produced": 0,
         "cops_produced": 0,
+        "additional_employees": 0,
+        "additional_hours_ot": _format_decimal(DECIMAL_ZERO),
         "daily_notes": "",
     }
 
@@ -153,12 +181,16 @@ def _form_values_from_record(
             values["gates_packaged"][customer.id] = totals.gates_packaged or 0
 
 
+    values["gates_employees"] = record.gates_employees or 0
+    values["gates_hours_ot"] = _format_decimal(record.gates_hours_ot)
     values["controllers_4_stop"] = record.controllers_4_stop or 0
     values["controllers_6_stop"] = record.controllers_6_stop or 0
     values["door_locks_lh"] = record.door_locks_lh or 0
     values["door_locks_rh"] = record.door_locks_rh or 0
     values["operators_produced"] = record.operators_produced or 0
     values["cops_produced"] = record.cops_produced or 0
+    values["additional_employees"] = record.additional_employees or 0
+    values["additional_hours_ot"] = _format_decimal(record.additional_hours_ot)
     values["daily_notes"] = record.daily_notes or ""
     return values
 
@@ -171,6 +203,19 @@ def _get_int(form_key: str) -> int:
         return max(int(raw_value), 0)
     except ValueError:
         return 0
+
+
+def _get_decimal_value(form_key: str) -> Decimal:
+    raw_value = request.form.get(form_key)
+    if raw_value in (None, ""):
+        return DECIMAL_ZERO
+    try:
+        value = Decimal(raw_value)
+    except (InvalidOperation, ValueError):
+        return DECIMAL_ZERO
+    if value < DECIMAL_ZERO:
+        return DECIMAL_ZERO
+    return value.quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
 
 
 @bp.route("/daily-entry", methods=["GET", "POST"])
@@ -219,12 +264,16 @@ def daily_entry():
             totals.gates_packaged = packaged_value
 
 
+        record.gates_employees = _get_int("gates_employees")
+        record.gates_hours_ot = _get_decimal_value("gates_hours_ot")
         record.controllers_4_stop = _get_int("controllers_4_stop")
         record.controllers_6_stop = _get_int("controllers_6_stop")
         record.door_locks_lh = _get_int("door_locks_lh")
         record.door_locks_rh = _get_int("door_locks_rh")
         record.operators_produced = _get_int("operators_produced")
         record.cops_produced = _get_int("cops_produced")
+        record.additional_employees = _get_int("additional_employees")
+        record.additional_hours_ot = _get_decimal_value("additional_hours_ot")
         record.daily_notes = request.form.get("daily_notes") or None
 
         db.session.commit()
@@ -362,6 +411,37 @@ def history():
         operators_total = record.operators_produced or 0
         cops_total = record.cops_produced or 0
 
+        gates_total_hours_value = record.gates_total_labor_hours
+        gates_total_hours_display = _format_decimal(gates_total_hours_value)
+        gates_hours_ot_display = _format_decimal(record.gates_hours_ot)
+        gates_combined_total = produced_sum + packaged_sum
+        gates_output_per_hour_display: str | None = None
+        if gates_total_hours_value and gates_total_hours_value > DECIMAL_ZERO:
+            output_per_hour = (
+                Decimal(gates_combined_total) / gates_total_hours_value
+            ).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
+            gates_output_per_hour_display = _format_decimal(output_per_hour)
+
+        additional_total_hours_value = record.additional_total_labor_hours
+        additional_total_hours_display = _format_decimal(
+            additional_total_hours_value
+        )
+        additional_hours_ot_display = _format_decimal(record.additional_hours_ot)
+        additional_per_hour: List[Dict[str, str]] = []
+        if additional_total_hours_value and additional_total_hours_value > DECIMAL_ZERO:
+            for metric in ADDITIONAL_METRICS:
+                total_value = getattr(record, metric["key"]) or 0
+                per_hour_value = (
+                    Decimal(total_value) / additional_total_hours_value
+                ).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
+                additional_per_hour.append(
+                    {
+                        "key": metric["key"],
+                        "label": metric["label"],
+                        "per_hour": _format_decimal(per_hour_value),
+                    }
+                )
+
         running_totals["produced"] += produced_sum
         running_totals["packaged"] += packaged_sum
         running_totals["controllers"] += controllers_total
@@ -378,12 +458,21 @@ def history():
                 "record": record,
                 "produced_sum": produced_sum,
                 "packaged_sum": packaged_sum,
+                "gates_combined_total": gates_combined_total,
                 "per_customer_produced": per_customer_produced,
                 "per_customer_packaged": per_customer_packaged,
                 "controllers_total": controllers_total,
                 "door_locks_total": door_locks_total,
                 "operators_total": operators_total,
                 "cops_total": cops_total,
+                "gates_employees": record.gates_employees or 0,
+                "gates_hours_ot": gates_hours_ot_display,
+                "gates_total_hours": gates_total_hours_display,
+                "gates_output_per_hour": gates_output_per_hour_display,
+                "additional_employees": record.additional_employees or 0,
+                "additional_hours_ot": additional_hours_ot_display,
+                "additional_total_hours": additional_total_hours_display,
+                "additional_per_hour": additional_per_hour,
             }
         )
 
