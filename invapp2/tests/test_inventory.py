@@ -1,6 +1,7 @@
 import csv
 import io
 import os
+import re
 import sys
 from decimal import Decimal
 
@@ -712,11 +713,36 @@ def test_import_export_items_with_notes(client, app):
         ]
     )
 
+    csv_text = csv_data.getvalue()
+
     response = client.post(
         "/inventory/items/import",
-        data={"file": (io.BytesIO(csv_data.getvalue().encode("utf-8")), "items.csv")},
+        data={"file": (io.BytesIO(csv_text.encode("utf-8")), "items.csv")},
         content_type="multipart/form-data",
     )
+    assert response.status_code == 200
+
+    page = response.get_data(as_text=True)
+    token_match = re.search(r'name="import_token" value="([^"]+)"', page)
+    assert token_match
+    import_token = token_match.group(1)
+
+    mapping_payload = {
+        "step": "mapping",
+        "import_token": import_token,
+        "mapping_sku": "sku",
+        "mapping_name": "name",
+        "mapping_type": "type",
+        "mapping_unit": "unit",
+        "mapping_description": "description",
+        "mapping_min_stock": "min_stock",
+        "mapping_notes": "notes",
+        "mapping_list_price": "list_price",
+        "mapping_last_unit_cost": "last_unit_cost",
+        "mapping_item_class": "item_class",
+    }
+
+    response = client.post("/inventory/items/import", data=mapping_payload)
     assert response.status_code == 302
 
     with app.app_context():
@@ -772,3 +798,56 @@ def test_inventory_scan_page(client):
     assert response.status_code == 200
     body = response.get_data(as_text=True)
     assert "cameraPreview" in body
+
+
+def test_import_items_shows_mapping_page(client):
+    csv_text = "sku,name\n100,Widget\n"
+    response = client.post(
+        "/inventory/items/import",
+        data={"file": (io.BytesIO(csv_text.encode("utf-8")), "items.csv")},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "Map Imported Columns" in page
+    assert "mapping_name" in page
+
+
+def test_import_items_creates_records_with_mapping(client, app):
+    csv_text = "sku,name,min_stock\n100,Widget,5\n,NoSku,3\n"
+
+    upload_response = client.post(
+        "/inventory/items/import",
+        data={"file": (io.BytesIO(csv_text.encode("utf-8")), "items.csv")},
+        content_type="multipart/form-data",
+    )
+    assert upload_response.status_code == 200
+
+    upload_page = upload_response.get_data(as_text=True)
+    token_match = re.search(r'name="import_token" value="([^"]+)"', upload_page)
+    assert token_match
+    import_token = token_match.group(1)
+
+    response = client.post(
+        "/inventory/items/import",
+        data={
+            "step": "mapping",
+            "import_token": import_token,
+            "mapping_sku": "sku",
+            "mapping_name": "name",
+            "mapping_min_stock": "min_stock",
+        },
+    )
+
+    assert response.status_code == 302
+
+    with app.app_context():
+        widget = Item.query.filter_by(sku="100").one()
+        assert widget.name == "Widget"
+        assert widget.min_stock == 5
+        assert widget.unit == "ea"
+
+        generated = Item.query.filter(Item.sku != "100").one()
+        assert generated.name == "NoSku"
+        assert generated.min_stock == 3
+        assert generated.sku == "1"
