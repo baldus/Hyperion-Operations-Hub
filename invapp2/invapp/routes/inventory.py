@@ -30,6 +30,7 @@ from invapp.models import (
     OrderLine,
     OrderStatus,
     Reservation,
+    RoutingStepConsumption,
     db,
 )
 
@@ -655,6 +656,44 @@ def _deletable_items_query(dependent_item_ids):
     return query
 
 
+def _delete_stock_records():
+    consumptions_deleted = RoutingStepConsumption.query.delete(synchronize_session=False)
+    movements_deleted = Movement.query.delete(synchronize_session=False)
+    batches_deleted = Batch.query.delete(synchronize_session=False)
+    db.session.commit()
+    return consumptions_deleted, movements_deleted, batches_deleted
+
+
+def _flash_stock_deletion_summary(consumptions_deleted, movements_deleted, batches_deleted):
+    parts = []
+
+    if movements_deleted:
+        label = "stock movement" if movements_deleted == 1 else "stock movements"
+        parts.append(f"{movements_deleted} {label}")
+
+    if batches_deleted:
+        label = "batch record" if batches_deleted == 1 else "batch records"
+        parts.append(f"{batches_deleted} {label}")
+
+    if consumptions_deleted:
+        label = "routing consumption record" if consumptions_deleted == 1 else "routing consumption records"
+        parts.append(f"{consumptions_deleted} {label}")
+
+    if parts:
+        if len(parts) == 1:
+            message = f"Deleted {parts[0]}."
+        elif len(parts) == 2:
+            message = f"Deleted {parts[0]} and {parts[1]}."
+        else:
+            message = "Deleted " + ", ".join(parts[:-1]) + f", and {parts[-1]}."
+        flash(message, "success")
+    else:
+        flash(
+            "There were no stock movement, batch, or routing consumption records to delete.",
+            "info",
+        )
+
+
 @bp.route("/items/delete-all", methods=["POST"])
 def delete_all_items():
     if not session.get("is_admin"):
@@ -902,6 +941,34 @@ def list_locations():
     )
 
 
+@bp.route("/locations/delete-all", methods=["POST"])
+def delete_all_locations():
+    if not session.get("is_admin"):
+        flash("Administrator access is required to delete locations.", "danger")
+        next_target = url_for("inventory.list_locations")
+        return redirect(url_for("admin.login", next=next_target))
+
+    has_movements = db.session.query(Movement.id).limit(1).first() is not None
+    if has_movements:
+        flash(
+            "Cannot delete all locations because inventory movements reference them. "
+            "Remove stock records before trying again.",
+            "danger",
+        )
+        return redirect(url_for("inventory.list_locations"))
+
+    deleted = Location.query.delete(synchronize_session=False)
+    db.session.commit()
+
+    if deleted:
+        label = "location" if deleted == 1 else "locations"
+        flash(f"Deleted {deleted} {label}.", "success")
+    else:
+        flash("There were no locations to delete.", "info")
+
+    return redirect(url_for("inventory.list_locations"))
+
+
 @bp.route("/location/add", methods=["GET", "POST"])
 def add_location():
     if request.method == "POST":
@@ -1143,6 +1210,19 @@ def list_stock():
         pages=pagination.pages,
         search=search,
     )
+
+
+@bp.route("/stock/delete-all", methods=["POST"])
+def delete_all_stock():
+    if not session.get("is_admin"):
+        flash("Administrator access is required to delete stock records.", "danger")
+        next_target = url_for("inventory.list_stock")
+        return redirect(url_for("admin.login", next=next_target))
+
+    consumptions_deleted, movements_deleted, batches_deleted = _delete_stock_records()
+    _flash_stock_deletion_summary(consumptions_deleted, movements_deleted, batches_deleted)
+
+    return redirect(url_for("inventory.list_stock"))
 
 
 @bp.route("/stock/adjust", methods=["GET", "POST"])
@@ -1522,6 +1602,19 @@ def history_home():
         locations=locations,
         batches=batches
     )
+
+
+@bp.route("/history/delete-all", methods=["POST"])
+def delete_all_history():
+    if not session.get("is_admin"):
+        flash("Administrator access is required to delete transaction history.", "danger")
+        next_target = url_for("inventory.history_home")
+        return redirect(url_for("admin.login", next=next_target))
+
+    consumptions_deleted, movements_deleted, batches_deleted = _delete_stock_records()
+    _flash_stock_deletion_summary(consumptions_deleted, movements_deleted, batches_deleted)
+
+    return redirect(url_for("inventory.history_home"))
 
 
 @bp.route("/history/export")

@@ -10,7 +10,19 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from invapp import create_app
 from invapp.extensions import db
-from invapp.models import Item, Location, Movement
+from invapp.models import (
+    Batch,
+    Item,
+    Location,
+    Movement,
+    Order,
+    OrderComponent,
+    OrderLine,
+    OrderStatus,
+    RoutingStep,
+    RoutingStepComponent,
+    RoutingStepConsumption,
+)
 
 
 @pytest.fixture
@@ -404,6 +416,169 @@ def test_delete_available_items_removes_unreferenced(client, app):
 
     page = client.get("/inventory/items").get_data(as_text=True)
     assert "No items can be deleted until the related records are removed." in page
+
+
+def test_delete_all_stock_requires_admin(client):
+    response = client.post("/inventory/stock/delete-all")
+    assert response.status_code == 302
+    assert "/admin/login" in response.headers["Location"]
+    assert "next=%2Finventory%2Fstock" in response.headers["Location"]
+
+
+def test_delete_all_stock_removes_records(client, app):
+    with app.app_context():
+        finished = Item(sku="FG-STOCK", name="Finished Good")
+        component = Item(sku="COMP-STOCK", name="Component Item")
+        location = Location(code="STOCK-LOC")
+        db.session.add_all([finished, component, location])
+        db.session.commit()
+
+        batch = Batch(item_id=component.id, lot_number="STOCK-LOT", quantity=5)
+        db.session.add(batch)
+        db.session.commit()
+
+        movement = Movement(
+            item_id=component.id,
+            batch_id=batch.id,
+            location_id=location.id,
+            quantity=5,
+            movement_type="RECEIPT",
+        )
+        db.session.add(movement)
+        db.session.commit()
+
+        order = Order(order_number="ORD-STOCK", status=OrderStatus.OPEN)
+        line = OrderLine(item_id=finished.id, quantity=1)
+        order.order_lines.append(line)
+        component_link = OrderComponent(component_item_id=component.id, quantity=1)
+        line.components.append(component_link)
+        step = RoutingStep(sequence=1, description="Assembly")
+        order.routing_steps.append(step)
+        usage = RoutingStepComponent(order_component=component_link)
+        step.component_links.append(usage)
+        db.session.add(order)
+        db.session.commit()
+
+        consumption = RoutingStepConsumption(
+            routing_step_component_id=usage.id,
+            movement_id=movement.id,
+            quantity=1,
+        )
+        db.session.add(consumption)
+        db.session.commit()
+
+    with client.session_transaction() as session:
+        session["is_admin"] = True
+
+    response = client.post("/inventory/stock/delete-all")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/inventory/stock")
+
+    with app.app_context():
+        assert Movement.query.count() == 0
+        assert Batch.query.count() == 0
+        assert RoutingStepConsumption.query.count() == 0
+
+
+def test_delete_all_locations_requires_admin(client, app):
+    with app.app_context():
+        db.session.add_all([Location(code="LOC-A"), Location(code="LOC-B")])
+        db.session.commit()
+
+    response = client.post("/inventory/locations/delete-all")
+    assert response.status_code == 302
+    assert "/admin/login" in response.headers["Location"]
+    assert "next=%2Finventory%2Flocations" in response.headers["Location"]
+
+    with app.app_context():
+        assert Location.query.count() == 2
+
+
+def test_delete_all_locations_blocks_with_movements(client, app):
+    with app.app_context():
+        location = Location(code="LOCKED")
+        item = Item(sku="LOCKED-ITEM", name="Locked Item")
+        db.session.add_all([location, item])
+        db.session.commit()
+
+        movement = Movement(
+            item_id=item.id,
+            location_id=location.id,
+            quantity=3,
+            movement_type="ADJUST",
+        )
+        db.session.add(movement)
+        db.session.commit()
+
+    with client.session_transaction() as session:
+        session["is_admin"] = True
+
+    response = client.post("/inventory/locations/delete-all")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/inventory/locations")
+
+    with app.app_context():
+        assert Location.query.count() == 1
+        assert Movement.query.count() == 1
+
+
+def test_delete_all_locations_removes_all(client, app):
+    with app.app_context():
+        db.session.add_all([Location(code="DEL-1"), Location(code="DEL-2")])
+        db.session.commit()
+
+    with client.session_transaction() as session:
+        session["is_admin"] = True
+
+    response = client.post("/inventory/locations/delete-all")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/inventory/locations")
+
+    with app.app_context():
+        assert Location.query.count() == 0
+
+
+def test_delete_all_history_requires_admin(client, app):
+    with app.app_context():
+        item = Item(sku="HIST-ITEM", name="History Item")
+        location = Location(code="HIST-LOC")
+        db.session.add_all([item, location])
+        db.session.commit()
+
+    response = client.post("/inventory/history/delete-all")
+    assert response.status_code == 302
+    assert "/admin/login" in response.headers["Location"]
+    assert "next=%2Finventory%2Fhistory" in response.headers["Location"]
+
+
+def test_delete_all_history_removes_records(client, app):
+    with app.app_context():
+        item = Item(sku="HIST-1", name="History Item")
+        location = Location(code="HIST-STOCK")
+        batch = Batch(item=item, lot_number="HIST-LOT", quantity=3)
+        db.session.add_all([item, location, batch])
+        db.session.commit()
+
+        movement = Movement(
+            item_id=item.id,
+            batch_id=batch.id,
+            location_id=location.id,
+            quantity=3,
+            movement_type="RECEIPT",
+        )
+        db.session.add(movement)
+        db.session.commit()
+
+    with client.session_transaction() as session:
+        session["is_admin"] = True
+
+    response = client.post("/inventory/history/delete-all")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/inventory/history")
+
+    with app.app_context():
+        assert Movement.query.count() == 0
+        assert Batch.query.count() == 0
 
 
 def test_edit_location_requires_admin(client, app):
