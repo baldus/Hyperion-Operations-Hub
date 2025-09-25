@@ -14,6 +14,7 @@ from flask import (
     session,
     url_for,
 )
+from flask_login import login_required
 from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload
 
@@ -260,6 +261,7 @@ def _adjust_reservation(order_line: OrderLine, item_id: int, delta: int):
 
 
 @bp.route("/")
+@login_required
 def orders_home():
     search_term = request.args.get("q", "").strip()
     query = Order.query.options(

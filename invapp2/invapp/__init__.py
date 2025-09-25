@@ -4,9 +4,10 @@ from flask import Flask, render_template
 from sqlalchemy import func, inspect, text
 from sqlalchemy.exc import NoSuchTableError, OperationalError
 
-from .extensions import db
+from .extensions import db, login_manager
 from .routes import (
     admin,
+    auth,
     inventory,
     orders,
     printers,
@@ -177,16 +178,25 @@ def create_app(config_override=None):
 
     # ✅ init db with app
     db.init_app(app)
+    login_manager.init_app(app)
+    login_manager.login_view = "auth.login"
+    login_manager.login_message_category = "info"
+    login_manager.session_protection = "strong"
     # create tables if they do not exist and ensure legacy schema
     with app.app_context():
         db.create_all()
         _ensure_item_columns(db.engine)
         _ensure_order_schema(db.engine)
         _ensure_production_schema(db.engine)
+        if not models.Role.query.filter_by(name="user").first():
+            db.session.add(models.Role(name="user"))
+            db.session.commit()
         # ✅ ensure default production customers at startup
         production._ensure_default_customers()
+        production._ensure_output_formula()
 
     # register blueprints
+    app.register_blueprint(auth.bp)
     app.register_blueprint(inventory.bp)
     app.register_blueprint(reports.bp)
     app.register_blueprint(orders.bp)
@@ -312,3 +322,13 @@ def create_app(config_override=None):
         )
 
     return app
+
+
+@login_manager.user_loader
+def load_user(user_id: str):
+    if not user_id:
+        return None
+    try:
+        return models.User.query.get(int(user_id))
+    except (TypeError, ValueError):
+        return None
