@@ -25,7 +25,7 @@ def printer_settings():
         elif not is_admin:
             username = request.form.get("username")
             password = request.form.get("password")
-            if username == current_app.config.get("ADMIN_USER", "admin") and password == current_app.config.get("ADMIN_PASSWORD", "password"):
+            if username == current_app.config.get("ADMIN_USER", "superuser") and password == current_app.config.get("ADMIN_PASSWORD", "joshbaldus"):
                 session["is_admin"] = True
                 session_admin = True
                 is_admin = True
