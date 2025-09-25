@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>{{ title }}</h2>
+<form method="post" action="{{ form_action }}" class="user-form">
+    <table class="form-table">
+        <tbody>
+            <tr>
+                <th scope="row"><label for="username">Username</label></th>
+                <td><input id="username" type="text" name="username" value="{{ username_value }}" required></td>
+            </tr>
+            {% if include_password %}
+            <tr>
+                <th scope="row"><label for="password">Password</label></th>
+                <td><input id="password" type="password" name="password" required></td>
+            </tr>
+            {% endif %}
+            <tr>
+                <th scope="row">Roles</th>
+                <td>
+                    {% if roles %}
+                        <div class="role-checkboxes" style="display:flex; flex-direction:column; gap:6px;">
+                            {% for role in roles %}
+                                <label>
+                                    <input type="checkbox" name="roles" value="{{ role.id }}" {% if role.id|string in selected_roles %}checked{% endif %}>
+                                    {{ role.name }}{% if role.description %} — {{ role.description }}{% endif %}
+                                </label>
+                            {% endfor %}
+                        </div>
+                        <p class="field-note">Leave all unchecked to assign the default "user" role.</p>
+                    {% else %}
+                        <p class="field-note">No roles defined yet. The default "user" role will be created automatically.</p>
+                    {% endif %}
+                </td>
+            </tr>
+        </tbody>
+    </table>
+    <div style="margin-top: 16px; display:flex; gap:12px;">
+        <button type="submit" class="action-btn">{{ submit_label }}</button>
+        <a class="action-btn" href="{{ url_for('users.list_users') }}">Cancel</a>
+    </div>
+</form>
+{% endblock %}

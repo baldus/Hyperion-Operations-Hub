@@ -1,37 +1,20 @@
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
 from invapp.extensions import db
 from invapp.login import current_user, login_required, login_user, logout_user
-from invapp.models import Role, User
+from invapp.models import User
 
 bp = Blueprint("auth", __name__, url_prefix="/auth")
 
 
 @bp.route("/register", methods=["GET", "POST"])
+@login_required
 def register():
-    if current_user.is_authenticated:
-        return redirect(url_for("home"))
+    admin_username = current_app.config.get("ADMIN_USER", "superuser")
+    if current_user.username != admin_username:
+        abort(404)
 
-    if request.method == "POST":
-        username = request.form["username"].strip()
-        password = request.form["password"].strip()
-        if not username or not password:
-            flash("Username and password required", "danger")
-            return redirect(url_for("auth.register"))
-        if User.query.filter_by(username=username).first():
-            flash("Username already exists", "danger")
-            return redirect(url_for("auth.register"))
-        user = User(username=username)
-        user.set_password(password)
-        role = Role.query.filter_by(name="user").first()
-        if not role:
-            role = Role(name="user")
-            db.session.add(role)
-        user.roles.append(role)
-        db.session.add(user)
-        db.session.commit()
-        flash("Registration successful", "success")
-        return redirect(url_for("auth.login"))
-    return render_template("auth/register.html")
+    flash("User management has moved to the dedicated admin tools.", "info")
+    return redirect(url_for("users.create"))
 
 
 @bp.route("/login", methods=["GET", "POST"])

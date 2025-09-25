@@ -10,7 +10,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from invapp import create_app
 from invapp.extensions import db
-from invapp.models import Item, Location, Batch, Movement
+from invapp.models import Item, Location, Batch, Movement, Role, User
 
 @pytest.fixture
 def app():
@@ -26,8 +26,23 @@ def client(app):
     return app.test_client()
 
 
-def login(client):
-    client.post('/auth/register', data={'username': 'u', 'password': 'p'})
+def ensure_user(app, username='u', password='p'):
+    with app.app_context():
+        user = User.query.filter_by(username=username).first()
+        if user is None:
+            user = User(username=username)
+            user.set_password(password)
+            role = Role.query.filter_by(name='user').first()
+            if role is None:
+                role = Role(name='user')
+                db.session.add(role)
+            user.roles.append(role)
+            db.session.add(user)
+            db.session.commit()
+
+
+def login(client, app):
+    ensure_user(app)
     client.post('/auth/login', data={'username': 'u', 'password': 'p'})
 
 
@@ -46,7 +61,7 @@ def seed_data(app):
 
 
 def test_summary_data(client, app):
-    login(client)
+    login(client, app)
     seed_data(app)
     resp = client.get('/reports/summary_data?sku=SKU1&location=LOC1&start=2020-12-31&end=2021-01-03')
     assert resp.status_code == 200
@@ -62,7 +77,7 @@ def test_summary_data(client, app):
 
 
 def test_export(client, app):
-    login(client)
+    login(client, app)
     seed_data(app)
     resp = client.get('/reports/export?sku=SKU1')
     assert resp.status_code == 200
