@@ -1143,6 +1143,35 @@ body.light .section-help {
     gap: 16px;
 }
 
+.role-fieldset {
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    padding: 12px 16px;
+    min-width: 0;
+}
+
+body.light .role-fieldset {
+    border-color: #c5cad6;
+}
+
+.role-fieldset legend {
+    padding: 0 6px;
+    font-weight: 600;
+}
+
+.checkbox-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.checkbox-grid label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.95rem;
+}
+
 .form-field {
     display: flex;
     flex-direction: column;

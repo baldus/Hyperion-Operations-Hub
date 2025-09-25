@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>User Accounts</h2>
+<p>Manage application access by creating user accounts, updating their roles, resetting passwords, or removing inactive accounts.</p>
+
+<section class="card-section">
+    <h3>Create a New Account</h3>
+    <form method="post" class="form-grid">
+        <div class="form-field">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" required>
+        </div>
+        <div class="form-field">
+            <label for="password">Temporary Password</label>
+            <input type="password" id="password" name="password" required>
+        </div>
+        <fieldset class="form-field role-fieldset">
+            <legend>Roles</legend>
+            <div class="checkbox-grid">
+                {% for role in roles %}
+                <label>
+                    <input type="checkbox" name="roles" value="{{ role.id }}"{% if role.name == 'user' %} checked{% endif %}>
+                    {{ role.name|title }}
+                </label>
+                {% endfor %}
+            </div>
+        </fieldset>
+        <div class="form-actions">
+            <button type="submit" class="action-btn">Create Account</button>
+        </div>
+    </form>
+</section>
+
+<section class="card-section">
+    <h3>Existing Users</h3>
+    {% if users %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th scope="col">Username</th>
+                <th scope="col">Roles</th>
+                <th scope="col">Reset Password</th>
+                <th scope="col">Delete</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in users %}
+            <tr>
+                <td>{{ user.username }}</td>
+                <td>
+                    <form method="post" action="{{ url_for('settings.update_user_roles', user_id=user.id) }}" class="inline-form">
+                        <div class="checkbox-grid">
+                            {% for role in roles %}
+                            <label>
+                                <input type="checkbox" name="roles" value="{{ role.id }}"{% if role in user.roles %} checked{% endif %}>
+                                {{ role.name|title }}
+                            </label>
+                            {% endfor %}
+                        </div>
+                        <button type="submit" class="action-btn">Update Roles</button>
+                    </form>
+                </td>
+                <td>
+                    <form method="post" action="{{ url_for('settings.reset_user_password', user_id=user.id) }}" class="inline-form">
+                        <label class="sr-only" for="new-password-{{ user.id }}">New password for {{ user.username }}</label>
+                        <input type="password" id="new-password-{{ user.id }}" name="new_password" placeholder="New password" required>
+                        <button type="submit" class="action-btn">Reset</button>
+                    </form>
+                </td>
+                <td>
+                    {% if user.id == current_user.id %}
+                    <em>Current session</em>
+                    {% else %}
+                    <form method="post" action="{{ url_for('settings.delete_user', user_id=user.id) }}" class="inline-form" onsubmit="return confirm('Delete the account for {{ user.username }}?');">
+                        <button type="submit" class="action-btn action-btn--danger">Delete</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No users found.</p>
+    {% endif %}
+</section>
+{% endblock %}

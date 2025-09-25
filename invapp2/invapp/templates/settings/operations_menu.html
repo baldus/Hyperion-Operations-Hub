@@ -10,6 +10,10 @@
     <a href="{{ url_for('production.history') }}" class="action-btn">Production History</a>
     <a href="{{ url_for('production.production_settings') }}" class="action-btn">Production Settings</a>
 
+    {% if session.get('is_admin') or (current_user.is_authenticated and current_user.has_role('admin')) %}
+        <a href="{{ url_for('settings.manage_accounts') }}" class="action-btn">User Accounts</a>
+    {% endif %}
+
     {% if session.get('is_admin') %}
         <a href="{{ url_for('admin.data_backup') }}" class="action-btn">Data Backup</a>
         <a href="{{ url_for('printers.printer_settings') }}" class="action-btn">Admin Tools</a>
