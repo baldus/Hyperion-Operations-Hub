@@ -373,6 +373,12 @@ def _format_decimal(value: Decimal | int | float | str | None) -> str:
     return format(decimal_value.quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP), "f")
 
 
+def _format_optional_decimal(value: Decimal | None) -> str:
+    if value is None:
+        return ""
+    return format(value.quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP), "f")
+
+
 def _empty_form_values(customers: List[ProductionCustomer]) -> Dict[str, object]:
     return {
         "gates_produced": {customer.id: 0 for customer in customers},
@@ -740,6 +746,8 @@ def history():
                 for variable in variable_values
             ]
 
+        overlay_values.append(float(output_value) if output_value is not None else None)
+
 
         additional_total_hours_value = record.additional_total_labor_hours
         additional_total_hours_display = _format_decimal(
@@ -900,9 +908,21 @@ def production_settings():
         ).all()
     )
     formula_setting = _ensure_output_formula()
+    chart_settings = ProductionChartSettings.get_or_create()
     formula_form_values = {
         "formula": formula_setting.formula,
         "variables": formula_setting.variables or [],
+    }
+
+    chart_settings_form_values = {
+        "primary_min": _format_optional_decimal(chart_settings.primary_min),
+        "primary_max": _format_optional_decimal(chart_settings.primary_max),
+        "primary_step": _format_optional_decimal(chart_settings.primary_step),
+        "secondary_min": _format_optional_decimal(chart_settings.secondary_min),
+        "secondary_max": _format_optional_decimal(chart_settings.secondary_max),
+        "secondary_step": _format_optional_decimal(chart_settings.secondary_step),
+        "goal_value": _format_optional_decimal(chart_settings.goal_value),
+        "show_goal": chart_settings.show_goal,
     }
 
 
@@ -998,6 +1018,48 @@ def production_settings():
                 flash("Output per labor hour formula updated.", "success")
                 return redirect(url_for("production.production_settings"))
 
+        elif action == "update_chart":
+            field_labels = {
+                "primary_min": "Primary axis minimum",
+                "primary_max": "Primary axis maximum",
+                "primary_step": "Primary axis step",
+                "secondary_min": "Secondary axis minimum",
+                "secondary_max": "Secondary axis maximum",
+                "secondary_step": "Secondary axis step",
+                "goal_value": "Goal value",
+            }
+            parsed_values: Dict[str, Decimal | None] = {}
+            has_errors = False
+            for field, label in field_labels.items():
+                raw_value = request.form.get(field)
+                parsed = _parse_optional_decimal(raw_value)
+                if raw_value not in (None, "") and parsed is None:
+                    flash(f"Enter a valid number for {label}.", "error")
+                    has_errors = True
+                    continue
+                parsed_values[field] = parsed
+
+            show_goal_value = request.form.get("show_goal") is not None
+
+            if has_errors:
+                chart_settings_form_values = {
+                    "primary_min": request.form.get("primary_min", ""),
+                    "primary_max": request.form.get("primary_max", ""),
+                    "primary_step": request.form.get("primary_step", ""),
+                    "secondary_min": request.form.get("secondary_min", ""),
+                    "secondary_max": request.form.get("secondary_max", ""),
+                    "secondary_step": request.form.get("secondary_step", ""),
+                    "goal_value": request.form.get("goal_value", ""),
+                    "show_goal": show_goal_value,
+                }
+            else:
+                for field in field_labels:
+                    setattr(chart_settings, field, parsed_values[field])
+                chart_settings.show_goal = show_goal_value
+                db.session.commit()
+                flash("Chart settings updated.", "success")
+                return redirect(url_for("production.production_settings"))
+
 
     grouped_customers = [
         customer
@@ -1010,6 +1072,7 @@ def production_settings():
         grouped_customers=grouped_customers,
         output_formula_form=formula_form_values,
         formula_metric_hints=FORMULA_METRIC_HINTS,
+        chart_settings_form=chart_settings_form_values,
 
     )
 
