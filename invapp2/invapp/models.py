@@ -6,6 +6,29 @@ from sqlalchemy.orm import synonym
 
 from invapp.extensions import db
 
+
+class ProductionChartSettings(db.Model):
+    __tablename__ = "production_chart_settings"
+
+    id = db.Column(db.Integer, primary_key=True)
+    primary_min = db.Column(db.Numeric(10, 2), nullable=True)
+    primary_max = db.Column(db.Numeric(10, 2), nullable=True)
+    primary_step = db.Column(db.Numeric(10, 2), nullable=True)
+    secondary_min = db.Column(db.Numeric(10, 2), nullable=True)
+    secondary_max = db.Column(db.Numeric(10, 2), nullable=True)
+    secondary_step = db.Column(db.Numeric(10, 2), nullable=True)
+    goal_value = db.Column(db.Numeric(10, 2), nullable=True)
+    show_goal = db.Column(db.Boolean, nullable=False, default=False)
+
+    @classmethod
+    def get_or_create(cls):
+        settings = cls.query.first()
+        if settings is None:
+            settings = cls()
+            db.session.add(settings)
+            db.session.commit()
+        return settings
+
 class Item(db.Model):
     __tablename__ = "item"
     id = db.Column(db.Integer, primary_key=True)  # system key

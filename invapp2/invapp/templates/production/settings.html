@@ -93,4 +93,58 @@
         </div>
     </form>
 </section>
+
+<section class="form-section">
+    <h3>Chart Display Settings</h3>
+    <form method="post" class="form-stack">
+        <input type="hidden" name="action" value="update_chart">
+        <div class="form-grid chart-settings-grid">
+            <div class="form-field">
+                <label class="field-label" for="primary_min">Primary Axis Minimum</label>
+                <input type="number" step="0.01" id="primary_min" name="primary_min" value="{{ chart_settings.primary_min if chart_settings.primary_min is not none else '' }}">
+                <p class="field-note">Controls the starting value for gates produced.</p>
+            </div>
+            <div class="form-field">
+                <label class="field-label" for="primary_max">Primary Axis Maximum</label>
+                <input type="number" step="0.01" id="primary_max" name="primary_max" value="{{ chart_settings.primary_max if chart_settings.primary_max is not none else '' }}">
+            </div>
+            <div class="form-field">
+                <label class="field-label" for="primary_step">Primary Axis Step</label>
+                <input type="number" step="0.01" id="primary_step" name="primary_step" value="{{ chart_settings.primary_step if chart_settings.primary_step is not none else '' }}">
+                <p class="field-note">Set the tick interval for gates produced.</p>
+            </div>
+        </div>
+        <div class="form-grid chart-settings-grid">
+            <div class="form-field">
+                <label class="field-label" for="secondary_min">Secondary Axis Minimum</label>
+                <input type="number" step="0.01" id="secondary_min" name="secondary_min" value="{{ chart_settings.secondary_min if chart_settings.secondary_min is not none else '' }}">
+                <p class="field-note">Used for the output per labor hour line.</p>
+            </div>
+            <div class="form-field">
+                <label class="field-label" for="secondary_max">Secondary Axis Maximum</label>
+                <input type="number" step="0.01" id="secondary_max" name="secondary_max" value="{{ chart_settings.secondary_max if chart_settings.secondary_max is not none else '' }}">
+            </div>
+            <div class="form-field">
+                <label class="field-label" for="secondary_step">Secondary Axis Step</label>
+                <input type="number" step="0.01" id="secondary_step" name="secondary_step" value="{{ chart_settings.secondary_step if chart_settings.secondary_step is not none else '' }}">
+            </div>
+        </div>
+        <div class="form-grid chart-settings-grid">
+            <div class="form-field">
+                <label class="field-label" for="goal_value">Goal Line Value</label>
+                <input type="number" step="0.01" id="goal_value" name="goal_value" value="{{ chart_settings.goal_value if chart_settings.goal_value is not none else '' }}">
+                <p class="field-note">Displayed on the primary axis when enabled.</p>
+            </div>
+            <div class="form-field checkbox-field">
+                <label class="checkbox-inline">
+                    <input type="checkbox" id="show_goal" name="show_goal" {% if chart_settings.show_goal and chart_settings.goal_value is not none %}checked{% endif %}>
+                    <span>Show goal line on chart</span>
+                </label>
+            </div>
+        </div>
+        <div class="form-actions">
+            <button type="submit">Save Chart Settings</button>
+        </div>
+    </form>
+</section>
 {% endblock %}
