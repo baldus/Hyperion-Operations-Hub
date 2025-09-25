@@ -133,6 +133,14 @@ invapp2/
    flask run --host=0.0.0.0 --port=5000
    ```
 
+   Or use the bundled helper script which bootstraps a local virtual
+   environment, installs the dependencies listed in
+   [`requirements.txt`](invapp2/requirements.txt), and starts the server:
+
+   ```bash
+   ./invapp2/start_inventory.sh
+   ```
+
 5. Access via browser:
    ```
    http://<raspberry-pi-ip>:5000
