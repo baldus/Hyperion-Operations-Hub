@@ -133,6 +133,14 @@ invapp2/
    flask run --host=0.0.0.0 --port=5000
    ```
 
+   Or use the convenience launcher which will bootstrap a virtual environment,
+   install the dependencies from `requirements.txt`, and then start the
+   application:
+
+   ```bash
+   ./start_inventory.sh
+   ```
+
 5. Access via browser:
    ```
    http://<raspberry-pi-ip>:5000

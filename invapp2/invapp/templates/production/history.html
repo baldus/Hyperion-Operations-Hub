@@ -124,10 +124,14 @@
                             <td>
                                 {% if row.gates_output_per_hour %}
                                     <strong>{{ row.gates_output_per_hour }}</strong>
+                                {% endif %}
+                                {% if row.output_variables %}
                                     <div class="totals-breakdown">
-                                        <span>Combined Output: {{ row.gates_combined_total }}</span>
+                                        {% for metric in row.output_variables %}
+                                            <span>{{ metric.label }}: {{ metric.value }}</span>
+                                        {% endfor %}
                                     </div>
-                                {% else %}
+                                {% elif not row.gates_output_per_hour %}
                                     —
                                 {% endif %}
                             </td>

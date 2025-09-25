@@ -1,13 +1,16 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash
-from flask_login import login_user, logout_user, login_required, current_user
+from flask import Blueprint, flash, redirect, render_template, request, url_for
 from invapp.extensions import db
-from invapp.models import User, Role
+from invapp.login import current_user, login_required, login_user, logout_user
+from invapp.models import Role, User
 
 bp = Blueprint("auth", __name__, url_prefix="/auth")
 
 
 @bp.route("/register", methods=["GET", "POST"])
 def register():
+    if current_user.is_authenticated:
+        return redirect(url_for("home"))
+
     if request.method == "POST":
         username = request.form["username"].strip()
         password = request.form["password"].strip()
@@ -33,12 +36,18 @@ def register():
 
 @bp.route("/login", methods=["GET", "POST"])
 def login():
+    if current_user.is_authenticated:
+        return redirect(url_for("home"))
+
     if request.method == "POST":
         username = request.form["username"].strip()
         password = request.form["password"].strip()
         user = User.query.filter_by(username=username).first()
         if user and user.check_password(password):
             login_user(user)
+            next_url = request.args.get("next")
+            if next_url:
+                return redirect(next_url)
             flash("Logged in", "success")
             return redirect(url_for("home"))
         flash("Invalid credentials", "danger")

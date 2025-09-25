@@ -1,19 +1,120 @@
-import io, csv, zipfile
+import csv
+import io
+import zipfile
 from datetime import datetime, timedelta
 from decimal import Decimal
+from typing import Iterable, Optional
 
-from flask import Blueprint, Response, render_template
+from flask import (
+    Blueprint,
+    Response,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
+from invapp.login import current_user
 from sqlalchemy import case, func
+from sqlalchemy.orm import joinedload
 
-from invapp.models import db, Item, Location, Batch, Movement
+from invapp.extensions import db
+from invapp.models import Batch, Item, Location, Movement
 
 bp = Blueprint("reports", __name__, url_prefix="/reports")
+
+
+@bp.before_request
+def require_login():
+    if not current_user.is_authenticated:
+        return redirect(url_for("auth.login", next=request.url))
 
 
 def _decimal_to_string(value):
     if value is None:
         return ""
     return f"{Decimal(value):.2f}"
+
+
+def _parse_date_param(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _movement_trends(
+    sku: Optional[str],
+    location: Optional[str],
+    start_dt: Optional[datetime],
+    end_dt: Optional[datetime],
+):
+    query = (
+        db.session.query(Movement)
+        .options(joinedload(Movement.item), joinedload(Movement.location))
+        .order_by(Movement.date.asc())
+    )
+    if sku:
+        query = query.filter(Movement.item.has(Item.sku == sku))
+    if location:
+        query = query.filter(Movement.location.has(Location.code == location))
+    if start_dt:
+        query = query.filter(Movement.date >= start_dt)
+    if end_dt:
+        query = query.filter(Movement.date <= end_dt)
+
+    rows = []
+    for movement in query.all():
+        item = movement.item
+        location_obj = movement.location
+        rows.append(
+            {
+                "date": movement.date.strftime("%Y-%m-%d") if movement.date else None,
+                "sku": item.sku if item else None,
+                "item_name": item.name if item else None,
+                "movement_type": movement.movement_type,
+                "quantity": int(movement.quantity or 0),
+                "location": location_obj.code if location_obj else None,
+            }
+        )
+    return rows
+
+
+def _stock_aging(sku: Optional[str]):
+    query = db.session.query(Batch).options(joinedload(Batch.item))
+    if sku:
+        query = query.filter(Batch.item.has(Item.sku == sku))
+
+    today = datetime.utcnow().date()
+    rows = []
+    for batch in query.all():
+        item = batch.item
+        received_date = batch.received_date.date() if batch.received_date else today
+        days = max((today - received_date).days, 0)
+        rows.append(
+            {
+                "sku": item.sku if item else None,
+                "lot_number": batch.lot_number,
+                "quantity": int(batch.quantity or 0),
+                "days": days,
+            }
+        )
+    return rows
+
+
+def _rows_to_csv(rows: Iterable[dict], headers: list[str]) -> str:
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(headers)
+    for row in rows:
+        writer.writerow([
+            "" if row.get(header) is None else row.get(header)
+            for header in headers
+        ])
+    return output.getvalue()
+
 
 @bp.route("/")
 def reports_home():
@@ -82,12 +183,56 @@ def reports_home():
         usage_window_90=usage_window_90,
     )
 
+
+@bp.route("/summary_data")
+def summary_data():
+    sku = request.args.get("sku") or None
+    location = request.args.get("location") or None
+    start_dt = _parse_date_param(request.args.get("start"))
+    end_dt = _parse_date_param(request.args.get("end"))
+
+    movements = _movement_trends(sku, location, start_dt, end_dt)
+    aging = _stock_aging(sku)
+
+    return jsonify({"movement_trends": movements, "stock_aging": aging})
+
+
+@bp.route("/export")
+def export():
+    sku = request.args.get("sku") or None
+    location = request.args.get("location") or None
+    start_dt = _parse_date_param(request.args.get("start"))
+    end_dt = _parse_date_param(request.args.get("end"))
+
+    movements = _movement_trends(sku, location, start_dt, end_dt)
+    aging = _stock_aging(sku)
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(
+            "stock_aging.csv",
+            _rows_to_csv(aging, ["sku", "lot_number", "quantity", "days"]),
+        )
+        zf.writestr(
+            "movement_trends.csv",
+            _rows_to_csv(
+                movements,
+                ["date", "sku", "movement_type", "quantity", "location"],
+            ),
+        )
+
+    zip_buffer.seek(0)
+    return Response(
+        zip_buffer.getvalue(),
+        mimetype="application/zip",
+        headers={"Content-Disposition": "attachment; filename=reports.zip"},
+    )
+
+
 @bp.route("/generate")
 def generate_reports():
-    # In-memory zip file
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w") as zf:
-        # Items
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(
@@ -121,29 +266,43 @@ def generate_reports():
             )
         zf.writestr("items.csv", output.getvalue())
 
-        # Locations
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(["code", "description"])
-        for l in Location.query.all():
-            writer.writerow([l.code, l.description])
+        for location in Location.query.all():
+            writer.writerow([location.code, location.description])
         zf.writestr("locations.csv", output.getvalue())
 
-        # Batches
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(["id", "item_sku", "lot_number", "quantity"])
-        for b in Batch.query.all():
-            writer.writerow([b.id, b.item.sku if b.item else "?", b.lot_number, b.quantity])
+        for batch in Batch.query.all():
+            writer.writerow(
+                [
+                    batch.id,
+                    batch.item.sku if batch.item else "?",
+                    batch.lot_number,
+                    batch.quantity,
+                ]
+            )
         zf.writestr("batches.csv", output.getvalue())
 
-        # Movements
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow([
-            "date", "sku", "item_name", "movement_type", "quantity",
-            "location", "lot_number", "person", "reference", "po_number"
-        ])
+        writer.writerow(
+            [
+                "date",
+                "sku",
+                "item_name",
+                "movement_type",
+                "quantity",
+                "location",
+                "lot_number",
+                "person",
+                "reference",
+                "po_number",
+            ]
+        )
         query = (
             db.session.query(
                 Movement.date,
@@ -163,7 +322,7 @@ def generate_reports():
             .order_by(Movement.date.desc())
         )
         for (
-            date,
+            move_date,
             sku,
             item_name,
             movement_type,
@@ -174,23 +333,25 @@ def generate_reports():
             reference,
             po_number,
         ) in query:
-            writer.writerow([
-                date.strftime("%Y-%m-%d %H:%M"),
-                sku,
-                item_name,
-                movement_type,
-                quantity,
-                location_code,
-                lot_number or "-",
-                person or "-",
-                reference or "-",
-                po_number or "-"
-            ])
+            writer.writerow(
+                [
+                    move_date.strftime("%Y-%m-%d %H:%M"),
+                    sku,
+                    item_name,
+                    movement_type,
+                    quantity,
+                    location_code,
+                    lot_number or "-",
+                    person or "-",
+                    reference or "-",
+                    po_number or "-",
+                ]
+            )
         zf.writestr("movements.csv", output.getvalue())
 
     zip_buffer.seek(0)
     return Response(
         zip_buffer.getvalue(),
         mimetype="application/zip",
-        headers={"Content-Disposition": "attachment; filename=reports.zip"}
+        headers={"Content-Disposition": "attachment; filename=reports.zip"},
     )
