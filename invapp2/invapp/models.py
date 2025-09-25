@@ -1,12 +1,12 @@
 from decimal import Decimal
 from datetime import datetime
 
-from flask_login import UserMixin
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.orm import synonym
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from invapp.extensions import db
+from invapp.login import UserMixin
 
 class Item(db.Model):
     __tablename__ = "item"

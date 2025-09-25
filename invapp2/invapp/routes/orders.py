@@ -14,11 +14,11 @@ from flask import (
     session,
     url_for,
 )
-from flask_login import login_required
 from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload
 
 from invapp.extensions import db
+from invapp.login import login_required
 from invapp.models import (
     BillOfMaterial,
     BillOfMaterialComponent,

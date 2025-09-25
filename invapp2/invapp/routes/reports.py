@@ -14,7 +14,7 @@ from flask import (
     request,
     url_for,
 )
-from flask_login import current_user
+from invapp.login import current_user
 from sqlalchemy import case, func
 from sqlalchemy.orm import joinedload
 

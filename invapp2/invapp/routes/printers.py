@@ -1,6 +1,6 @@
 from flask import abort, Blueprint, current_app, render_template, request, session
-from flask_login import login_required
 
+from invapp.login import login_required
 from invapp.models import User
 
 bp = Blueprint("printers", __name__, url_prefix="/settings/printers")

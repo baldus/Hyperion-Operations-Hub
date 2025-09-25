@@ -1,6 +1,7 @@
 from functools import wraps
-from flask_login import login_required, current_user
 from flask import abort
+
+from invapp.login import current_user, login_required
 
 
 def role_required(role_name):
