@@ -185,6 +185,7 @@ def create_app(config_override=None):
         _ensure_production_schema(db.engine)
         # ✅ ensure default production customers at startup
         production._ensure_default_customers()
+        production._ensure_output_formula()
 
     # register blueprints
     app.register_blueprint(inventory.bp)
