@@ -1,6 +1,11 @@
 # 📦 invapp2 — Inventory Management System
 
-**invapp2** is a lightweight inventory management system built with **Flask** for small manufacturing teams. It runs happily on a Raspberry Pi or other low-power edge devices and keeps stock, locations, production orders, and work instructions in sync for floor operators and supervisors alike.
+
+**invapp2** is a lightweight inventory management system built with **Flask**, designed to run on edge-friendly hardware such as a **Raspberry Pi**.
+It supports tracking items, locations, stock balances, receiving, cycle counts, stock adjustments, transfers, and full transaction history.
+
+> Looking for the quickest path to production? Start with the [hardware recommendations](docs/HARDWARE.md) and then follow the setup guide below.
+
 
 ---
 
@@ -59,7 +64,24 @@ invapp2/
 
 ---
 
-## 🖥️ System Requirements
+## 🖥 Recommended Hardware
+
+invapp2 runs comfortably on inexpensive single-board computers and scales up to
+mini-PCs as your facility grows. A quick summary is below—see
+[`docs/HARDWARE.md`](docs/HARDWARE.md) for full details and peripheral
+recommendations.
+
+| Deployment Size | Suggested Platform | Memory | Storage |
+|-----------------|--------------------|--------|---------|
+| Pilot / kiosk | Raspberry Pi 4 Model B | 4 GB | 64 GB A2 microSD |
+| Small team | Raspberry Pi 4 Model B | 8 GB | 128 GB USB 3.0 SSD |
+| Multi-workcell | Intel NUC / Ryzen mini-PC | 16 GB | 256 GB NVMe SSD |
+
+Pair the host with wired Ethernet, a networked Zebra label printer, and USB or
+network wedge barcode scanners for the smoothest operator experience.
+
+## ⚡ Setup Instructions
+
 
 ### Software
 - Python 3.10+
@@ -99,7 +121,17 @@ For a reliable shop-floor deployment, start with the following baseline. See the
 
    > The application expects PostgreSQL connectivity via `psycopg2-binary`. On Debian/Raspberry Pi systems ensure the `libpq` client libraries are installed (`sudo apt install libpq5 libpq-dev`).
 
-3. **Configure the database and environment variables** (see [Environment Configuration](#-environment-configuration))
+3. Set up your database and environment variables (see [`config.py`](invapp2/config.py) for all available options):
+
+   | Variable | Description | Example |
+   |----------|-------------|---------|
+   | `DB_URL` | SQLAlchemy connection string for PostgreSQL. | `postgresql+psycopg2://USER:PASSWORD@localhost/invdb` |
+   | `SECRET_KEY` | Flask secret used for sessions and CSRF protection. | `export SECRET_KEY="change_me"` |
+   | `ZEBRA_PRINTER_HOST` | Hostname or IP for the Zebra printer service. | `printer.local` |
+   | `ZEBRA_PRINTER_PORT` | TCP port that the printer listens on. | `9100` |
+
+   Export the values and initialize the schema:
+
    ```bash
    export DB_URL="postgresql+psycopg2://USER:PASSWORD@localhost/invdb"
    export SECRET_KEY="change_me"
@@ -131,7 +163,17 @@ For a reliable shop-floor deployment, start with the following baseline. See the
 
 ---
 
-## ⚙️ Environment Configuration
+
+## 📚 Additional Documentation
+
+- [`docs/HARDWARE.md`](docs/HARDWARE.md) — Bill of materials and environmental
+  guidance for pilots through multi-workcell deployments.
+- _Coming soon:_ Deployment runbook and database backup checklist.
+
+---
+
+## 🔄 Upgrading Existing Installations
+
 
 All configuration values are read from environment variables with sane defaults defined in [`config.py`](invapp2/config.py).
 
