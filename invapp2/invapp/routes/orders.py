@@ -14,6 +14,7 @@ from flask import (
     session,
     url_for,
 )
+from flask_login import current_user
 from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload
 
@@ -261,6 +262,9 @@ def _adjust_reservation(order_line: OrderLine, item_id: int, delta: int):
 
 @bp.route("/")
 def orders_home():
+    if not current_user.is_authenticated and not session.get("is_admin"):
+        return redirect(url_for("auth.login"))
+
     search_term = request.args.get("q", "").strip()
     query = Order.query.options(
         joinedload(Order.order_lines).joinedload(OrderLine.item),

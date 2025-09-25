@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import ast
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import date
-from typing import Dict, List
+from typing import Dict, List, Any
 
 
 from flask import (
@@ -21,6 +22,7 @@ from invapp.models import (
     ProductionCustomer,
     ProductionDailyCustomerTotal,
     ProductionDailyRecord,
+    ProductionHistorySettings,
 )
 
 bp = Blueprint("production", __name__, url_prefix="/production")
@@ -56,6 +58,21 @@ ADDITIONAL_METRICS: List[Dict[str, str]] = [
     {"key": "operators_produced", "label": "Operators Produced"},
     {"key": "cops_produced", "label": "COPs Produced"},
 ]
+
+OUTPUT_VARIABLE_SOURCES: List[Dict[str, str]] = [
+    {"value": "produced_sum", "label": "Gates Produced"},
+    {"value": "packaged_sum", "label": "Gates Packaged"},
+    {"value": "combined_total", "label": "Produced + Packaged"},
+    {"value": "gates_total_hours", "label": "Gates Labor Hours"},
+    {"value": "gates_employees", "label": "Gates Employees"},
+    {"value": "gates_hours_ot", "label": "Gates Overtime Hours"},
+    {"value": "controllers_total", "label": "Controllers (Total)"},
+    {"value": "door_locks_total", "label": "Door Locks (Total)"},
+    {"value": "operators_total", "label": "Operators"},
+    {"value": "cops_total", "label": "COPs"},
+]
+
+MAX_FORMULA_VARIABLES = 8
 
 DECIMAL_ZERO = Decimal("0")
 DECIMAL_QUANT = Decimal("0.01")
@@ -141,6 +158,102 @@ def _format_decimal(value: Decimal | int | float | str | None) -> str:
         else:
             decimal_value = Decimal(str(value))
     return format(decimal_value.quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP), "f")
+
+
+def _get_history_settings() -> ProductionHistorySettings:
+    settings = ProductionHistorySettings.query.first()
+    if not settings:
+        settings = ProductionHistorySettings()
+        db.session.add(settings)
+        db.session.commit()
+    return settings
+
+
+def _to_decimal(value: Any) -> Decimal:
+    if value is None:
+        return DECIMAL_ZERO
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return DECIMAL_ZERO
+
+
+def _evaluate_output_formula(
+    formula: str, variables: Dict[str, Decimal]
+) -> Decimal | None:
+    if not formula:
+        return None
+
+    def _eval(node: ast.AST) -> Decimal:
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+        if isinstance(node, ast.BinOp):
+            left = _eval(node.left)
+            right = _eval(node.right)
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            if isinstance(node.op, ast.Div):
+                if right == DECIMAL_ZERO:
+                    raise InvalidOperation("division by zero")
+                return left / right
+            if isinstance(node.op, ast.Pow):
+                return left ** right
+            raise ValueError("Unsupported binary operation")
+        if isinstance(node, ast.UnaryOp):
+            operand = _eval(node.operand)
+            if isinstance(node.op, ast.UAdd):
+                return operand
+            if isinstance(node.op, ast.USub):
+                return -operand
+            raise ValueError("Unsupported unary operation")
+        if isinstance(node, ast.Name):
+            if node.id not in variables:
+                raise ValueError(f"Unknown variable: {node.id}")
+            return variables[node.id]
+        if isinstance(node, ast.Constant):
+            value = node.value
+            if isinstance(value, (int, float, str)):
+                return _to_decimal(value)
+            raise ValueError("Unsupported constant type")
+        raise ValueError("Unsupported expression element")
+
+    try:
+        parsed = ast.parse(formula, mode="eval")
+        result = _eval(parsed)
+        return result
+    except (SyntaxError, ValueError, InvalidOperation):
+        return None
+
+
+def _clean_axis_config(config: Dict[str, Any] | None) -> Dict[str, Dict[str, float | None]]:
+    default = {
+        "primary": {"min": None, "max": None, "step": None},
+        "secondary": {"min": None, "max": None, "step": None},
+    }
+    if not isinstance(config, dict):
+        return default
+
+    cleaned: Dict[str, Dict[str, float | None]] = {}
+    for axis_key, axis_default in default.items():
+        axis_values = config.get(axis_key) or {}
+        cleaned_axis: Dict[str, float | None] = {}
+        for tick_key in axis_default:
+            raw_value = axis_values.get(tick_key)
+            if raw_value in (None, ""):
+                cleaned_axis[tick_key] = None
+            else:
+                try:
+                    cleaned_axis[tick_key] = float(raw_value)
+                except (TypeError, ValueError):
+                    cleaned_axis[tick_key] = None
+        cleaned[axis_key] = cleaned_axis
+    return cleaned
 
 
 def _empty_form_values(customers: List[ProductionCustomer]) -> Dict[str, object]:
@@ -305,6 +418,8 @@ def daily_entry():
 @bp.route("/history")
 def history():
     customers = _active_customers()
+    history_settings = _get_history_settings()
+    axis_config = _clean_axis_config(history_settings.axis_config)
 
     today = date.today()
     start_date = _parse_date(request.args.get("start_date")) or today.replace(day=1)
@@ -362,12 +477,15 @@ def history():
                 "data": [],
                 "backgroundColor": customer.color or "#3b82f6",
                 "stack": "gates-produced",
+                "yAxisID": "primary",
             }
         )
 
     running_totals = {series["key"]: 0 for series in LINE_SERIES}
     current_month: tuple[int, int] | None = None
 
+
+    output_per_hour_points: List[float | None] = []
 
     for record in records:
         chart_labels.append(record.entry_date.strftime("%Y-%m-%d"))
@@ -415,12 +533,39 @@ def history():
         gates_total_hours_display = _format_decimal(gates_total_hours_value)
         gates_hours_ot_display = _format_decimal(record.gates_hours_ot)
         gates_combined_total = produced_sum + packaged_sum
-        gates_output_per_hour_display: str | None = None
-        if gates_total_hours_value and gates_total_hours_value > DECIMAL_ZERO:
-            output_per_hour = (
-                Decimal(gates_combined_total) / gates_total_hours_value
-            ).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
-            gates_output_per_hour_display = _format_decimal(output_per_hour)
+        available_values = {
+            "produced_sum": _to_decimal(produced_sum),
+            "packaged_sum": _to_decimal(packaged_sum),
+            "combined_total": _to_decimal(gates_combined_total),
+            "gates_total_hours": _to_decimal(gates_total_hours_value),
+            "gates_employees": _to_decimal(record.gates_employees or 0),
+            "gates_hours_ot": _to_decimal(record.gates_hours_ot or 0),
+            "controllers_total": _to_decimal(controllers_total),
+            "door_locks_total": _to_decimal(door_locks_total),
+            "operators_total": _to_decimal(operators_total),
+            "cops_total": _to_decimal(cops_total),
+        }
+
+        variable_values: Dict[str, Decimal] = {}
+        for variable in history_settings.output_variables or []:
+            name = (variable.get("name") or "").strip()
+            source = variable.get("source")
+            if not name or source not in available_values:
+                continue
+            variable_values[name] = available_values[source]
+
+        output_per_hour_result = _evaluate_output_formula(
+            history_settings.output_formula, variable_values
+        )
+        output_per_hour_display: str | None = None
+        if output_per_hour_result is not None:
+            output_per_hour_result = output_per_hour_result.quantize(
+                DECIMAL_QUANT, rounding=ROUND_HALF_UP
+            )
+            output_per_hour_display = _format_decimal(output_per_hour_result)
+            output_per_hour_points.append(float(output_per_hour_result))
+        else:
+            output_per_hour_points.append(None)
 
         additional_total_hours_value = record.additional_total_labor_hours
         additional_total_hours_display = _format_decimal(
@@ -468,7 +613,7 @@ def history():
                 "gates_employees": record.gates_employees or 0,
                 "gates_hours_ot": gates_hours_ot_display,
                 "gates_total_hours": gates_total_hours_display,
-                "gates_output_per_hour": gates_output_per_hour_display,
+                "gates_output_per_hour": output_per_hour_display,
                 "additional_employees": record.additional_employees or 0,
                 "additional_hours_ot": additional_hours_ot_display,
                 "additional_total_hours": additional_total_hours_display,
@@ -489,6 +634,40 @@ def history():
             }
         )
 
+    overlay_dataset: Dict[str, object] | None = None
+    if any(value is not None for value in output_per_hour_points):
+        overlay_dataset = {
+            "label": history_settings.output_label,
+            "data": output_per_hour_points,
+            "type": "line",
+            "yAxisID": "secondary",
+            "borderColor": "#0f766e",
+            "backgroundColor": "#0f766e",
+            "tension": 0.2,
+            "fill": False,
+            "spanGaps": True,
+            "pointRadius": 3,
+        }
+
+    goal_dataset: Dict[str, object] | None = None
+    if (
+        history_settings.show_goal_line
+        and history_settings.goal_line_value is not None
+        and chart_labels
+    ):
+        goal_value = _to_decimal(history_settings.goal_line_value)
+        goal_dataset = {
+            "label": "Goal",
+            "data": [float(goal_value) for _ in chart_labels],
+            "type": "line",
+            "yAxisID": "primary",
+            "borderColor": "#fbbf24",
+            "backgroundColor": "#fbbf24",
+            "borderDash": [6, 6],
+            "fill": False,
+            "pointRadius": 0,
+        }
+
     grouped_names = [customer.name for customer in grouped_customers]
 
     return render_template(
@@ -501,8 +680,12 @@ def history():
         chart_labels=chart_labels,
         stacked_datasets=stack_datasets,
         line_datasets=line_datasets,
+        overlay_dataset=overlay_dataset,
+        goal_dataset=goal_dataset,
         start_date=start_date,
         end_date=end_date,
+        history_settings=history_settings,
+        axis_config=axis_config,
     )
 
 
@@ -514,6 +697,8 @@ def production_settings():
             ProductionCustomer.is_other_bucket.asc(), ProductionCustomer.name.asc()
         ).all()
     )
+    history_settings = _get_history_settings()
+    axis_config = _clean_axis_config(history_settings.axis_config)
 
     if request.method == "POST":
         action = request.form.get("action")
@@ -601,6 +786,98 @@ def production_settings():
                 flash("No changes detected.", "info")
             return redirect(url_for("production.production_settings"))
 
+        if action == "update-history-settings":
+            output_label = (request.form.get("output_label") or "").strip()
+            output_formula = (request.form.get("output_formula") or "").strip()
+
+            errors: List[str] = []
+            if not output_formula:
+                errors.append("Formula is required.")
+
+            variables: List[Dict[str, str]] = []
+            valid_sources = {option["value"] for option in OUTPUT_VARIABLE_SOURCES}
+            for index in range(MAX_FORMULA_VARIABLES):
+                variable_name = (
+                    request.form.get(f"variable_name_{index}") or ""
+                ).strip()
+                variable_source = request.form.get(f"variable_source_{index}") or ""
+
+                if not variable_name and not variable_source:
+                    continue
+                if not variable_name or not variable_source:
+                    errors.append("Each variable requires both a name and a source.")
+                    continue
+                if variable_source not in valid_sources:
+                    errors.append(
+                        f"Invalid data source selected for {variable_name}."
+                    )
+                    continue
+                variables.append({"name": variable_name, "source": variable_source})
+
+            axis_values = {
+                "primary": {"min": None, "max": None, "step": None},
+                "secondary": {"min": None, "max": None, "step": None},
+            }
+            axis_field_map = {
+                "primary_min": ("primary", "min", "Primary axis minimum"),
+                "primary_max": ("primary", "max", "Primary axis maximum"),
+                "primary_step": ("primary", "step", "Primary axis increment"),
+                "secondary_min": ("secondary", "min", "Secondary axis minimum"),
+                "secondary_max": ("secondary", "max", "Secondary axis maximum"),
+                "secondary_step": ("secondary", "step", "Secondary axis increment"),
+            }
+
+            for field, (axis_key, axis_attr, label) in axis_field_map.items():
+                raw_value = request.form.get(field)
+                if raw_value in (None, ""):
+                    axis_values[axis_key][axis_attr] = None
+                    continue
+                try:
+                    axis_values[axis_key][axis_attr] = float(
+                        Decimal(str(raw_value))
+                    )
+                except (InvalidOperation, ValueError):
+                    errors.append(f"{label} must be a number.")
+                    axis_values[axis_key][axis_attr] = None
+
+            show_goal_line = bool(request.form.get("show_goal_line"))
+            goal_line_value_raw = request.form.get("goal_line_value")
+            goal_line_value: Decimal | None = history_settings.goal_line_value
+            if show_goal_line:
+                if goal_line_value_raw in (None, ""):
+                    errors.append(
+                        "Goal line value is required when the goal line is enabled."
+                    )
+                else:
+                    try:
+                        goal_line_value = Decimal(str(goal_line_value_raw)).quantize(
+                            DECIMAL_QUANT, rounding=ROUND_HALF_UP
+                        )
+                    except (InvalidOperation, ValueError):
+                        errors.append("Goal line value must be a number.")
+
+            if not variables:
+                errors.append("At least one variable must be defined for the formula.")
+
+            if errors:
+                for message in errors:
+                    flash(message, "error")
+            else:
+                history_settings.output_label = (
+                    output_label or "Output per Labor Hour"
+                )
+                history_settings.output_formula = output_formula
+                history_settings.output_variables = variables
+                history_settings.axis_config = axis_values
+                history_settings.show_goal_line = (
+                    show_goal_line and goal_line_value is not None
+                )
+                history_settings.goal_line_value = goal_line_value
+                db.session.add(history_settings)
+                db.session.commit()
+                flash("Production history settings updated", "success")
+            return redirect(url_for("production.production_settings"))
+
     grouped_customers = [
         customer
         for customer in customers
@@ -610,5 +887,9 @@ def production_settings():
         "production/settings.html",
         customers=customers,
         grouped_customers=grouped_customers,
+        history_settings=history_settings,
+        axis_config=axis_config,
+        variable_sources=OUTPUT_VARIABLE_SOURCES,
+        max_formula_variables=MAX_FORMULA_VARIABLES,
     )
 

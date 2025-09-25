@@ -81,7 +81,7 @@
                         <th scope="col">Gates Produced</th>
                         <th scope="col">Gates Packaged</th>
                         <th scope="col">Gates Labor<br><small>Employees / OT / Hours</small></th>
-                        <th scope="col">Output per Labor Hour<br><small>Gates Combined</small></th>
+                        <th scope="col">{{ history_settings.output_label }}<br><small>Custom Formula</small></th>
                         <th scope="col">Controllers<br><small>4 Stop / 6 Stop</small></th>
                         <th scope="col">Door Locks<br><small>LH / RH</small></th>
                         <th scope="col">Operators</th>
@@ -179,6 +179,21 @@
     const chartLabels = {{ chart_labels|tojson }};
     const stackedDatasets = {{ stacked_datasets|tojson }};
     const lineDatasets = {{ line_datasets|tojson }};
+    const overlayDataset = {{ overlay_dataset|tojson }};
+    const goalDataset = {{ goal_dataset|tojson }};
+    const axisConfig = {
+        primary: {
+            min: {{ axis_config.primary.min|tojson }},
+            max: {{ axis_config.primary.max|tojson }},
+            step: {{ axis_config.primary.step|tojson }},
+        },
+        secondary: {
+            min: {{ axis_config.secondary.min|tojson }},
+            max: {{ axis_config.secondary.max|tojson }},
+            step: {{ axis_config.secondary.step|tojson }},
+        },
+    };
+    const outputLabel = {{ history_settings.output_label|tojson }};
 
     if (chartLabels.length) {
         const barContext = document.getElementById('gatesProducedChart');
@@ -189,7 +204,21 @@
                 type: 'bar',
                 data: {
                     labels: chartLabels,
-                    datasets: stackedDatasets,
+                    datasets: (() => {
+                        const barDatasets = stackedDatasets.map((dataset) => ({
+                            ...dataset,
+                            type: 'bar',
+                            yAxisID: 'primary',
+                        }));
+                        const combined = [...barDatasets];
+                        if (overlayDataset) {
+                            combined.push(overlayDataset);
+                        }
+                        if (goalDataset) {
+                            combined.push(goalDataset);
+                        }
+                        return combined;
+                    })(),
                 },
                 options: {
                     responsive: true,
@@ -207,12 +236,36 @@
                         x: {
                             stacked: true,
                         },
-                        y: {
+                        primary: {
+                            type: 'linear',
+                            position: 'left',
                             stacked: true,
-                            beginAtZero: true,
+                            beginAtZero: axisConfig.primary.min === null,
+                            min: axisConfig.primary.min,
+                            max: axisConfig.primary.max,
+                            ticks: {
+                                stepSize: axisConfig.primary.step ?? undefined,
+                            },
                             title: {
                                 display: true,
                                 text: 'Units',
+                            },
+                        },
+                        secondary: {
+                            type: 'linear',
+                            position: 'right',
+                            beginAtZero: axisConfig.secondary.min === null,
+                            min: axisConfig.secondary.min,
+                            max: axisConfig.secondary.max,
+                            ticks: {
+                                stepSize: axisConfig.secondary.step ?? undefined,
+                            },
+                            grid: {
+                                drawOnChartArea: false,
+                            },
+                            title: {
+                                display: true,
+                                text: outputLabel,
                             },
                         },
                     },

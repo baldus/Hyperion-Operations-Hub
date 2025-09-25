@@ -4,9 +4,10 @@ from flask import Flask, render_template
 from sqlalchemy import func, inspect, text
 from sqlalchemy.exc import NoSuchTableError, OperationalError
 
-from .extensions import db
+from .extensions import db, login_manager
 from .routes import (
     admin,
+    auth,
     inventory,
     orders,
     printers,
@@ -187,6 +188,16 @@ def create_app(config_override=None):
         production._ensure_default_customers()
 
     # register blueprints
+    login_manager.init_app(app)
+
+    @login_manager.user_loader
+    def load_user(user_id: str):
+        try:
+            return models.User.query.get(int(user_id))
+        except (TypeError, ValueError):
+            return None
+
+    app.register_blueprint(auth.bp)
     app.register_blueprint(inventory.bp)
     app.register_blueprint(reports.bp)
     app.register_blueprint(orders.bp)

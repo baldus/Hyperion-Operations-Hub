@@ -1,10 +1,83 @@
 from decimal import Decimal
 from datetime import datetime
 
+from flask_login import UserMixin
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.orm import synonym
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from invapp.extensions import db
+
+
+def _default_output_variables() -> list[dict[str, str]]:
+    return [
+        {"name": "produced", "source": "produced_sum"},
+        {"name": "packaged", "source": "packaged_sum"},
+        {"name": "labor_hours", "source": "gates_total_hours"},
+    ]
+
+
+def _default_axis_config() -> dict[str, dict[str, float | None]]:
+    return {
+        "primary": {"min": None, "max": None, "step": None},
+        "secondary": {"min": None, "max": None, "step": None},
+    }
+
+
+roles_users = db.Table(
+    "user_role",
+    db.Column("user_id", db.Integer, db.ForeignKey("user.id"), primary_key=True),
+    db.Column("role_id", db.Integer, db.ForeignKey("role.id"), primary_key=True),
+)
+
+
+class Role(db.Model):
+    __tablename__ = "role"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(64), unique=True, nullable=False)
+    description = db.Column(db.String(255), nullable=True)
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging helper
+        return f"<Role name={self.name!r}>"
+
+
+class User(db.Model, UserMixin):
+    __tablename__ = "user"
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    roles = db.relationship(
+        "Role",
+        secondary=roles_users,
+        backref=db.backref("users", lazy="dynamic"),
+    )
+
+    def set_password(self, password: str) -> None:
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password: str) -> bool:
+        if not self.password_hash:
+            return False
+        return check_password_hash(self.password_hash, password)
+
+    def has_role(self, role_name: str) -> bool:
+        return (
+            db.session.query(Role)
+            .join(roles_users, Role.id == roles_users.c.role_id)
+            .filter(roles_users.c.user_id == self.id, Role.name == role_name)
+            .first()
+            is not None
+        )
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging helper
+        return f"<User username={self.username!r}>"
 
 class Item(db.Model):
     __tablename__ = "item"
@@ -64,6 +137,27 @@ class WorkInstruction(db.Model):
     original_name = db.Column(db.String, nullable=False)
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+
+class ProductionHistorySettings(db.Model):
+    __tablename__ = "production_history_settings"
+
+    id = db.Column(db.Integer, primary_key=True)
+    output_label = db.Column(
+        db.String(120), nullable=False, default="Output per Labor Hour"
+    )
+    output_formula = db.Column(
+        db.Text, nullable=False, default="(produced + packaged) / labor_hours"
+    )
+    output_variables = db.Column(
+        db.JSON, nullable=False, default=_default_output_variables
+    )
+    axis_config = db.Column(db.JSON, nullable=False, default=_default_axis_config)
+    show_goal_line = db.Column(db.Boolean, nullable=False, default=False)
+    goal_line_value = db.Column(db.Numeric(10, 2), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
 
 
 class ProductionCustomer(db.Model):

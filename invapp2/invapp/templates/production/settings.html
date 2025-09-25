@@ -93,4 +93,108 @@
         </div>
     </form>
 </section>
+
+<section class="form-section">
+    <h3>Production History Metrics</h3>
+    <p class="section-help">Customize the metric shown as the output per labor hour on the history dashboard, define the variables used in the formula, and control the axes and goal line that appear on the chart.</p>
+    <form method="post" class="form-stack">
+        <input type="hidden" name="action" value="update-history-settings">
+        <div class="form-grid">
+            <div class="form-field">
+                <label for="output_label" class="field-label">Metric Label</label>
+                <input type="text" id="output_label" name="output_label" value="{{ history_settings.output_label }}" required>
+                <p class="field-note">This label is used for the table column, chart legend, and axis title.</p>
+            </div>
+            <div class="form-field">
+                <label for="output_formula" class="field-label">Formula</label>
+                <input type="text" id="output_formula" name="output_formula" value="{{ history_settings.output_formula }}" required>
+                <p class="field-note">Use the variables defined below. Basic math operators (+, -, *, /, ^) are supported.</p>
+            </div>
+        </div>
+
+        <div class="table-scroll">
+            <table class="inventory-table production-settings-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Variable Name</th>
+                        <th scope="col">Data Source</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for index in range(max_formula_variables) %}
+                        {% set variable = history_settings.output_variables[index] if index < history_settings.output_variables|length else None %}
+                        <tr>
+                            <td>
+                                <input type="text" name="variable_name_{{ index }}" value="{{ variable.name if variable else '' }}" placeholder="e.g. produced">
+                            </td>
+                            <td>
+                                <select name="variable_source_{{ index }}">
+                                    <option value="">Select data source</option>
+                                    {% for source in variable_sources %}
+                                        <option value="{{ source.value }}" {% if variable and variable.source == source.value %}selected{% endif %}>{{ source.label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p class="field-note">Leave a row blank to remove a variable. Available sources pull from each day&rsquo;s totals before the formula is evaluated.</p>
+
+        <div class="form-grid">
+            <fieldset class="form-field">
+                <legend class="field-label">Primary Axis (Gates Produced)</legend>
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label for="primary_min" class="field-label">Min</label>
+                        <input type="number" step="0.01" id="primary_min" name="primary_min" value="{{ axis_config.primary.min if axis_config.primary.min is not none else '' }}">
+                    </div>
+                    <div class="form-field">
+                        <label for="primary_max" class="field-label">Max</label>
+                        <input type="number" step="0.01" id="primary_max" name="primary_max" value="{{ axis_config.primary.max if axis_config.primary.max is not none else '' }}">
+                    </div>
+                    <div class="form-field">
+                        <label for="primary_step" class="field-label">Increment</label>
+                        <input type="number" step="0.01" id="primary_step" name="primary_step" value="{{ axis_config.primary.step if axis_config.primary.step is not none else '' }}">
+                    </div>
+                </div>
+                <p class="field-note">Leave blank to let the chart choose automatic values.</p>
+            </fieldset>
+            <fieldset class="form-field">
+                <legend class="field-label">Secondary Axis ({{ history_settings.output_label }})</legend>
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label for="secondary_min" class="field-label">Min</label>
+                        <input type="number" step="0.01" id="secondary_min" name="secondary_min" value="{{ axis_config.secondary.min if axis_config.secondary.min is not none else '' }}">
+                    </div>
+                    <div class="form-field">
+                        <label for="secondary_max" class="field-label">Max</label>
+                        <input type="number" step="0.01" id="secondary_max" name="secondary_max" value="{{ axis_config.secondary.max if axis_config.secondary.max is not none else '' }}">
+                    </div>
+                    <div class="form-field">
+                        <label for="secondary_step" class="field-label">Increment</label>
+                        <input type="number" step="0.01" id="secondary_step" name="secondary_step" value="{{ axis_config.secondary.step if axis_config.secondary.step is not none else '' }}">
+                    </div>
+                </div>
+            </fieldset>
+        </div>
+
+        <div class="form-field">
+            <label class="checkbox-inline">
+                <input type="checkbox" name="show_goal_line" {% if history_settings.show_goal_line %}checked{% endif %}>
+                <span>Show goal line on the gates produced axis</span>
+            </label>
+            <div class="form-field">
+                <label for="goal_line_value" class="field-label">Goal Line Value</label>
+                <input type="number" step="0.01" id="goal_line_value" name="goal_line_value" value="{{ history_settings.goal_line_value if history_settings.goal_line_value is not none else '' }}">
+            </div>
+            <p class="field-note">The goal line shares the primary axis and is plotted as a horizontal target across the entire chart.</p>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit">Save Metric Settings</button>
+        </div>
+    </form>
+</section>
 {% endblock %}

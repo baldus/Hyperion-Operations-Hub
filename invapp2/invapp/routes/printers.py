@@ -1,14 +1,37 @@
-from flask import Blueprint, render_template, request, session, current_app
+from flask import Blueprint, render_template, request, session, current_app, abort
+from flask_login import login_required
+
+from invapp.extensions import db
+from invapp.models import Role, roles_users
 
 bp = Blueprint("printers", __name__, url_prefix="/settings/printers")
 
+@bp.route("", methods=["GET", "POST"])
 @bp.route("/", methods=["GET", "POST"])
+@login_required
 def printer_settings():
     theme = session.get("theme", "dark")
-    is_admin = session.get("is_admin", False)
+    session_admin = session.get("is_admin", False)
+    role_admin = False
+    user_id = session.get("_user_id")
+    if user_id:
+        try:
+            role_admin = (
+                db.session.query(Role)
+                .join(roles_users, Role.id == roles_users.c.role_id)
+                .filter(roles_users.c.user_id == int(user_id), Role.name == "admin")
+                .first()
+                is not None
+            )
+        except (ValueError, TypeError):
+            role_admin = False
+    is_admin = session_admin or role_admin
     printer_host = current_app.config.get("ZEBRA_PRINTER_HOST", "")
     printer_port = current_app.config.get("ZEBRA_PRINTER_PORT", "")
     message = None
+
+    if request.method == "GET" and not is_admin:
+        abort(403)
 
     if request.method == "POST":
         if "theme" in request.form:
@@ -19,6 +42,7 @@ def printer_settings():
             password = request.form.get("password")
             if username == current_app.config.get("ADMIN_USER", "admin") and password == current_app.config.get("ADMIN_PASSWORD", "password"):
                 session["is_admin"] = True
+                session_admin = True
                 is_admin = True
             else:
                 message = "Invalid credentials"
