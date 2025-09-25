@@ -18,7 +18,6 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload
 
 from invapp.extensions import db
-from invapp.login import login_required
 from invapp.models import (
     BillOfMaterial,
     BillOfMaterialComponent,
@@ -261,7 +260,6 @@ def _adjust_reservation(order_line: OrderLine, item_id: int, delta: int):
 
 
 @bp.route("/")
-@login_required
 def orders_home():
     search_term = request.args.get("q", "").strip()
     query = Order.query.options(
