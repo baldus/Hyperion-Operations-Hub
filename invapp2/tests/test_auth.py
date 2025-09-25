@@ -26,12 +26,24 @@ def client(app):
     return app.test_client()
 
 
-def register(client, username="alice", password="password"):
-    return client.post(
-        "/auth/register",
-        data={"username": username, "password": password},
-        follow_redirects=True,
-    )
+def create_user(app, username="alice", password="password", role_names=("user",)):
+    with app.app_context():
+        user = User(username=username)
+        user.set_password(password)
+
+        assigned_roles = []
+        if role_names:
+            for role_name in role_names:
+                role = Role.query.filter_by(name=role_name).first()
+                if role is None:
+                    role = Role(name=role_name)
+                    db.session.add(role)
+                assigned_roles.append(role)
+
+        user.roles = assigned_roles
+        db.session.add(user)
+        db.session.commit()
+        return user
 
 
 def login(client, username="alice", password="password"):
@@ -67,8 +79,8 @@ def test_superuser_standard_login(client):
     assert protected_response.status_code == 200
 
 
-def test_registration_and_login(client):
-    register(client)
+def test_login_with_created_user(client, app):
+    create_user(app)
     resp = login(client)
     assert b"Invalid credentials" not in resp.data
     resp = client.get("/orders/", follow_redirects=True)
@@ -82,7 +94,7 @@ def test_login_required_redirect(client):
 
 
 def test_role_restriction(client, app):
-    register(client, "bob", "pw")
+    create_user(app, "bob", "pw", role_names=("user",))
     login(client, "bob", "pw")
     # No admin role yet -> forbidden
     resp = client.get("/settings/printers")
@@ -101,8 +113,8 @@ def test_role_restriction(client, app):
     assert resp.status_code == 200
 
 
-def test_password_reset(client):
-    register(client, "carol", "pw1")
+def test_password_reset(client, app):
+    create_user(app, "carol", "pw1", role_names=("user",))
     login(client, "carol", "pw1")
     resp = client.post(
         "/auth/reset-password",
@@ -153,3 +165,17 @@ def test_admin_session_timeout(client):
 
     with client.session_transaction() as session:
         assert not session.get("is_admin")
+
+
+def test_register_route_restricted(client, app):
+    create_user(app, "eve", "secret", role_names=("user",))
+    login(client, "eve", "secret")
+
+    response = client.get("/auth/register")
+    assert response.status_code == 404
+
+    client.get("/auth/logout")
+    login(client, DEFAULT_SUPERUSER_USERNAME, DEFAULT_SUPERUSER_PASSWORD)
+    response = client.get("/auth/register", follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["Location"].startswith("/users/create")

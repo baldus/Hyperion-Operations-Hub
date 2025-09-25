@@ -14,6 +14,7 @@ from .routes import (
     production,
     reports,
     settings,
+    users,
     work,
 )
 from config import Config
@@ -239,6 +240,7 @@ def create_app(config_override=None):
     app.register_blueprint(printers.bp)
     app.register_blueprint(production.bp)
     app.register_blueprint(admin.bp)
+    app.register_blueprint(users.bp)
 
     @app.route("/")
     def home():
