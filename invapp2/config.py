@@ -7,6 +7,8 @@ class Config:
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SECRET_KEY = os.getenv("SECRET_KEY", "supersecret")
+    ADMIN_USER = os.getenv("ADMIN_USER", "superuser")
+    ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "joshbaldus")
     ADMIN_SESSION_TIMEOUT = int(os.getenv("ADMIN_SESSION_TIMEOUT", 300))
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     WORK_INSTRUCTION_UPLOAD_FOLDER = os.path.join(

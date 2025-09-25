@@ -20,6 +20,31 @@ from config import Config
 from . import models  # ensure models are registered with SQLAlchemy
 
 
+def _ensure_superuser_account(admin_username: str, admin_password: str) -> None:
+    """Create or update the default administrative user."""
+
+    if not admin_username:
+        return
+
+    admin_role = models.Role.query.filter_by(name="admin").first()
+    if admin_role is None:
+        admin_role = models.Role(name="admin", description="Administrator")
+        db.session.add(admin_role)
+
+    user = models.User.query.filter_by(username=admin_username).first()
+    if user is None:
+        user = models.User(username=admin_username)
+        db.session.add(user)
+
+    if admin_password:
+        user.set_password(admin_password)
+
+    if admin_role not in user.roles:
+        user.roles.append(admin_role)
+
+    db.session.commit()
+
+
 def _ensure_item_columns(engine):
     """Ensure legacy databases include the latest ``item`` columns."""
 
@@ -199,6 +224,10 @@ def create_app(config_override=None):
         # ✅ ensure default production customers at startup
         production._ensure_default_customers()
         production._ensure_output_formula()
+        _ensure_superuser_account(
+            app.config.get("ADMIN_USER", "superuser"),
+            app.config.get("ADMIN_PASSWORD", "joshbaldus"),
+        )
 
     # register blueprints
     app.register_blueprint(auth.bp)

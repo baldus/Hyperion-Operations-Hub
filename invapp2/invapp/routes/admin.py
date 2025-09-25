@@ -88,8 +88,8 @@ def login():
     if request.method == "POST" and not is_admin:
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
-        admin_user = current_app.config.get("ADMIN_USER", "admin")
-        admin_password = current_app.config.get("ADMIN_PASSWORD", "password")
+        admin_user = current_app.config.get("ADMIN_USER", "superuser")
+        admin_password = current_app.config.get("ADMIN_PASSWORD", "joshbaldus")
 
         if username == admin_user and password == admin_password:
             session["is_admin"] = True
