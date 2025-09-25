@@ -178,18 +178,66 @@
 <script>
     const chartLabels = {{ chart_labels|tojson }};
     const stackedDatasets = {{ stacked_datasets|tojson }};
+    const overlayDatasets = {{ overlay_datasets|tojson }};
     const lineDatasets = {{ line_datasets|tojson }};
+    const chartAxisSettings = {{ chart_axis_settings|tojson }};
 
     if (chartLabels.length) {
         const barContext = document.getElementById('gatesProducedChart');
         let barChart = null;
         if (barContext) {
+            const combinedDatasets = stackedDatasets.concat(overlayDatasets || []);
+
+            const primaryScale = {
+                stacked: true,
+                beginAtZero: chartAxisSettings.primary.min === null,
+                title: {
+                    display: true,
+                    text: 'Units',
+                },
+            };
+
+            if (chartAxisSettings.primary.min !== null) {
+                primaryScale.min = chartAxisSettings.primary.min;
+            }
+            if (chartAxisSettings.primary.max !== null) {
+                primaryScale.max = chartAxisSettings.primary.max;
+            }
+            if (chartAxisSettings.primary.step !== null) {
+                primaryScale.ticks = Object.assign({}, primaryScale.ticks, {
+                    stepSize: chartAxisSettings.primary.step,
+                });
+            }
+
+            const secondaryScale = {
+                position: 'right',
+                beginAtZero: chartAxisSettings.secondary.min === null,
+                grid: {
+                    drawOnChartArea: false,
+                },
+                title: {
+                    display: true,
+                    text: 'Output per Labor Hour',
+                },
+            };
+            if (chartAxisSettings.secondary.min !== null) {
+                secondaryScale.min = chartAxisSettings.secondary.min;
+            }
+            if (chartAxisSettings.secondary.max !== null) {
+                secondaryScale.max = chartAxisSettings.secondary.max;
+            }
+            if (chartAxisSettings.secondary.step !== null) {
+                secondaryScale.ticks = Object.assign({}, secondaryScale.ticks, {
+                    stepSize: chartAxisSettings.secondary.step,
+                });
+            }
+
             barChart = new Chart(barContext, {
 
                 type: 'bar',
                 data: {
                     labels: chartLabels,
-                    datasets: stackedDatasets,
+                    datasets: combinedDatasets,
                 },
                 options: {
                     responsive: true,
@@ -207,14 +255,8 @@
                         x: {
                             stacked: true,
                         },
-                        y: {
-                            stacked: true,
-                            beginAtZero: true,
-                            title: {
-                                display: true,
-                                text: 'Units',
-                            },
-                        },
+                        y: primaryScale,
+                        'y-output': secondaryScale,
                     },
                 },
             });

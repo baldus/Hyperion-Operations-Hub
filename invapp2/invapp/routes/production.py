@@ -18,6 +18,7 @@ from sqlalchemy.orm import joinedload
 
 from invapp.extensions import db
 from invapp.models import (
+    ProductionChartSettings,
     ProductionCustomer,
     ProductionDailyCustomerTotal,
     ProductionDailyRecord,
@@ -47,6 +48,15 @@ LINE_SERIES: List[Dict[str, str]] = [
     {"label": "Operators", "key": "operators", "color": "#f97316"},
     {"label": "COPs", "key": "cops", "color": "#0ea5e9"},
 ]
+
+
+def _parse_optional_decimal(value: str | None) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(value)
+    except (InvalidOperation, TypeError):
+        return None
 
 ADDITIONAL_METRICS: List[Dict[str, str]] = [
     {"key": "controllers_4_stop", "label": "Controllers (4 Stop)"},
@@ -312,6 +322,8 @@ def history():
     if end_date < start_date:
         start_date, end_date = end_date, start_date
 
+    chart_settings = ProductionChartSettings.get_or_create()
+
     records = (
         ProductionDailyRecord.query.options(
             joinedload(ProductionDailyRecord.customer_totals)
@@ -351,6 +363,7 @@ def history():
     table_rows = []
     chart_labels: List[str] = []
     stack_datasets: List[Dict[str, object]] = []
+    overlay_values: List[float | None] = []
     cumulative_series: Dict[str, List[int]] = {
         series["key"]: [] for series in LINE_SERIES
     }
@@ -416,11 +429,16 @@ def history():
         gates_hours_ot_display = _format_decimal(record.gates_hours_ot)
         gates_combined_total = produced_sum + packaged_sum
         gates_output_per_hour_display: str | None = None
+        gates_output_per_hour_value: Decimal | None = None
         if gates_total_hours_value and gates_total_hours_value > DECIMAL_ZERO:
             output_per_hour = (
                 Decimal(gates_combined_total) / gates_total_hours_value
             ).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
             gates_output_per_hour_display = _format_decimal(output_per_hour)
+            gates_output_per_hour_value = output_per_hour
+        overlay_values.append(
+            float(gates_output_per_hour_value) if gates_output_per_hour_value is not None else None
+        )
 
         additional_total_hours_value = record.additional_total_labor_hours
         additional_total_hours_display = _format_decimal(
@@ -491,6 +509,69 @@ def history():
 
     grouped_names = [customer.name for customer in grouped_customers]
 
+    overlay_datasets: List[Dict[str, object]] = []
+    if any(value is not None for value in overlay_values):
+        overlay_datasets.append(
+            {
+                "label": "Output per Labor Hour",
+                "data": overlay_values,
+                "type": "line",
+                "yAxisID": "y-output",
+                "borderColor": "#22c55e",
+                "backgroundColor": "rgba(34, 197, 94, 0.3)",
+                "tension": 0.3,
+                "fill": False,
+                "pointRadius": 3,
+                "spanGaps": True,
+                "order": 2,
+            }
+        )
+
+    goal_value = (
+        float(chart_settings.goal_value)
+        if chart_settings.goal_value is not None
+        else None
+    )
+    if chart_labels and chart_settings.show_goal and goal_value is not None:
+        overlay_datasets.append(
+            {
+                "label": "Gates Goal",
+                "data": [goal_value for _ in chart_labels],
+                "type": "line",
+                "yAxisID": "y",
+                "borderColor": "#f97316",
+                "borderDash": [6, 6],
+                "pointRadius": 0,
+                "fill": False,
+                "order": 3,
+            }
+        )
+
+    chart_axis_settings = {
+        "primary": {
+            "min": float(chart_settings.primary_min)
+            if chart_settings.primary_min is not None
+            else None,
+            "max": float(chart_settings.primary_max)
+            if chart_settings.primary_max is not None
+            else None,
+            "step": float(chart_settings.primary_step)
+            if chart_settings.primary_step is not None
+            else None,
+        },
+        "secondary": {
+            "min": float(chart_settings.secondary_min)
+            if chart_settings.secondary_min is not None
+            else None,
+            "max": float(chart_settings.secondary_max)
+            if chart_settings.secondary_max is not None
+            else None,
+            "step": float(chart_settings.secondary_step)
+            if chart_settings.secondary_step is not None
+            else None,
+        },
+    }
+
     return render_template(
         "production/history.html",
         customers=table_customers,
@@ -501,6 +582,8 @@ def history():
         chart_labels=chart_labels,
         stacked_datasets=stack_datasets,
         line_datasets=line_datasets,
+        overlay_datasets=overlay_datasets,
+        chart_axis_settings=chart_axis_settings,
         start_date=start_date,
         end_date=end_date,
     )
@@ -514,6 +597,7 @@ def production_settings():
             ProductionCustomer.is_other_bucket.asc(), ProductionCustomer.name.asc()
         ).all()
     )
+    chart_settings = ProductionChartSettings.get_or_create()
 
     if request.method == "POST":
         action = request.form.get("action")
@@ -601,6 +685,35 @@ def production_settings():
                 flash("No changes detected.", "info")
             return redirect(url_for("production.production_settings"))
 
+        if action == "update_chart":
+            primary_min = _parse_optional_decimal(request.form.get("primary_min"))
+            primary_max = _parse_optional_decimal(request.form.get("primary_max"))
+            primary_step = _parse_optional_decimal(request.form.get("primary_step"))
+            secondary_min = _parse_optional_decimal(request.form.get("secondary_min"))
+            secondary_max = _parse_optional_decimal(request.form.get("secondary_max"))
+            secondary_step = _parse_optional_decimal(request.form.get("secondary_step"))
+            goal_value = _parse_optional_decimal(request.form.get("goal_value"))
+            show_goal = request.form.get("show_goal") is not None
+
+            if show_goal and goal_value is None:
+                flash(
+                    "A goal value is required when enabling the goal line.",
+                    "error",
+                )
+                return redirect(url_for("production.production_settings"))
+
+            chart_settings.primary_min = primary_min
+            chart_settings.primary_max = primary_max
+            chart_settings.primary_step = primary_step
+            chart_settings.secondary_min = secondary_min
+            chart_settings.secondary_max = secondary_max
+            chart_settings.secondary_step = secondary_step
+            chart_settings.goal_value = goal_value
+            chart_settings.show_goal = show_goal and goal_value is not None
+            db.session.commit()
+            flash("Chart display settings updated.", "success")
+            return redirect(url_for("production.production_settings"))
+
     grouped_customers = [
         customer
         for customer in customers
@@ -610,5 +723,6 @@ def production_settings():
         "production/settings.html",
         customers=customers,
         grouped_customers=grouped_customers,
+        chart_settings=chart_settings,
     )
 
