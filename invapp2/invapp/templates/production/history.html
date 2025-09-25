@@ -33,32 +33,6 @@
 {% else %}
     <section class="dashboard-section">
         <h3>Visual Breakdown</h3>
-        <div class="chart-controls">
-            <div class="chart-control-group">
-                <span class="chart-control-title">Customers</span>
-                <div class="chart-toggle-grid" data-chart-target="gates-produced">
-                    {% for dataset in stacked_datasets %}
-                        <label class="toggle-chip">
-                            <input type="checkbox" data-dataset-index="{{ loop.index0 }}" checked>
-                            <span class="color-dot" style="background-color: {{ dataset.backgroundColor }}"></span>
-                            {{ dataset.label }}
-                        </label>
-                    {% endfor %}
-                </div>
-            </div>
-            <div class="chart-control-group">
-                <span class="chart-control-title">Production Metrics</span>
-                <div class="chart-toggle-grid" data-chart-target="cumulative-lines">
-                    {% for dataset in line_datasets %}
-                        <label class="toggle-chip">
-                            <input type="checkbox" data-dataset-index="{{ loop.index0 }}" checked>
-                            <span class="color-dot" style="background-color: {{ dataset.borderColor }}"></span>
-                            {{ dataset.label }}
-                        </label>
-                    {% endfor %}
-                </div>
-            </div>
-        </div>
         <div class="chart-grid">
             <div class="chart-card">
                 <canvas id="gatesProducedChart" aria-label="Stacked column chart showing gates produced per customer"></canvas>
@@ -68,6 +42,13 @@
             </div>
         </div>
     </section>
+
+    <div class="chart-modal is-hidden" id="chartModal" role="dialog" aria-modal="true" aria-label="Expanded chart view">
+        <div class="chart-modal-dialog">
+            <button type="button" class="chart-modal-close" data-modal-dismiss aria-label="Close expanded chart">&times;</button>
+            <canvas id="expandedChart" aria-label="Expanded chart canvas"></canvas>
+        </div>
+    </div>
 
     <section class="dashboard-section">
         <h3>Daily Detail</h3>
@@ -301,32 +282,105 @@
             });
         }
 
-        const customerToggleGrid = document.querySelector('.chart-toggle-grid[data-chart-target="gates-produced"]');
-        if (customerToggleGrid && barChart) {
-            customerToggleGrid.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
-                checkbox.addEventListener('change', (event) => {
-                    const datasetIndex = Number(event.target.dataset.datasetIndex);
-                    if (!Number.isNaN(datasetIndex) && barChart.data.datasets[datasetIndex]) {
-                        barChart.data.datasets[datasetIndex].hidden = !event.target.checked;
-                        barChart.update();
-                    }
-                });
+        const chartModal = document.getElementById('chartModal');
+        const modalCanvas = document.getElementById('expandedChart');
+        const dismissButtons = chartModal ? chartModal.querySelectorAll('[data-modal-dismiss]') : [];
+        let modalChart = null;
+
+        const cloneChartConfig = (chartInstance) => {
+            const clonedData = JSON.parse(JSON.stringify(chartInstance.data));
+            const clonedOptions = JSON.parse(JSON.stringify(chartInstance.options || {}));
+            return {
+                type: chartInstance.config.type,
+                data: clonedData,
+                options: Object.assign({}, clonedOptions, {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                }),
+            };
+        };
+
+        const closeChartModal = () => {
+            if (!chartModal) {
+                return;
+            }
+            if (modalChart) {
+                modalChart.destroy();
+                modalChart = null;
+            }
+            chartModal.classList.add('is-hidden');
+            chartModal.setAttribute('aria-label', 'Expanded chart view');
+        };
+
+        const openChartModal = (chartInstance) => {
+            if (!chartModal || !modalCanvas || !chartInstance) {
+                return;
+            }
+
+            chartModal.classList.remove('is-hidden');
+
+            window.requestAnimationFrame(() => {
+                const config = cloneChartConfig(chartInstance);
+                if (modalChart) {
+                    modalChart.destroy();
+                    modalChart = null;
+                }
+                modalChart = new Chart(modalCanvas.getContext('2d'), config);
+                const modalTitle = chartInstance.options?.plugins?.title?.text;
+                if (modalTitle) {
+                    chartModal.setAttribute('aria-label', `Expanded chart view: ${modalTitle}`);
+                } else {
+                    chartModal.setAttribute('aria-label', 'Expanded chart view');
+                }
+            });
+        };
+
+        if (chartModal) {
+            chartModal.addEventListener('click', (event) => {
+                if (event.target === chartModal) {
+                    closeChartModal();
+                }
             });
         }
 
-        const lineToggleGrid = document.querySelector('.chart-toggle-grid[data-chart-target="cumulative-lines"]');
-        if (lineToggleGrid && lineChart) {
-            lineToggleGrid.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
-                checkbox.addEventListener('change', (event) => {
-                    const datasetIndex = Number(event.target.dataset.datasetIndex);
-                    if (!Number.isNaN(datasetIndex) && lineChart.data.datasets[datasetIndex]) {
-                        lineChart.data.datasets[datasetIndex].hidden = !event.target.checked;
-                        lineChart.update();
-                    }
-                });
-            });
-        }
+        dismissButtons.forEach((button) => {
+            button.addEventListener('click', closeChartModal);
+        });
 
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && chartModal && !chartModal.classList.contains('is-hidden')) {
+                closeChartModal();
+            }
+        });
+
+        const registerChartForExpansion = (canvasElement, chartInstance) => {
+            if (!canvasElement || !chartInstance) {
+                return;
+            }
+
+            canvasElement.classList.add('chart-expandable');
+            canvasElement.setAttribute('tabindex', '0');
+            canvasElement.setAttribute('role', 'button');
+
+            const originalLabel = canvasElement.getAttribute('aria-label') || 'Chart';
+            if (!originalLabel.toLowerCase().includes('click to expand')) {
+                canvasElement.setAttribute('aria-label', `${originalLabel} (click to expand)`);
+            }
+
+            canvasElement.addEventListener('click', () => {
+                openChartModal(chartInstance);
+            });
+
+            canvasElement.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    openChartModal(chartInstance);
+                }
+            });
+        };
+
+        registerChartForExpansion(barContext, barChart);
+        registerChartForExpansion(lineContext, lineChart);
     }
 </script>
 {% endblock %}

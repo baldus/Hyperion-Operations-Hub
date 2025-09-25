@@ -1601,11 +1601,89 @@ body.light .production-table input[type="date"] {
     border-radius: 16px;
     background-color: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.08);
+    position: relative;
+}
+
+.chart-card canvas.chart-expandable {
+    cursor: zoom-in;
+    outline: none;
+}
+
+.chart-card canvas.chart-expandable:focus-visible {
+    outline: 3px solid #2563eb;
+    border-radius: 8px;
 }
 
 body.light .chart-card {
     background-color: #ffffff;
     border-color: rgba(0, 0, 0, 0.08);
+}
+
+.chart-modal {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.78);
+    padding: 24px;
+    z-index: 2000;
+}
+
+.chart-modal.is-hidden {
+    display: none;
+}
+
+.chart-modal-dialog {
+    position: relative;
+    width: min(960px, 100%);
+    height: min(90vh, 720px);
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 16px;
+    padding: 48px 28px 32px;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.45);
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+}
+
+.chart-modal-dialog canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.chart-modal-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: transparent;
+    border: none;
+    color: inherit;
+    font-size: 1.8rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px 8px;
+}
+
+.chart-modal-close:hover,
+.chart-modal-close:focus-visible {
+    color: #f87171;
+}
+
+body.light .chart-modal-dialog {
+    background: #ffffff;
+    border-color: rgba(15, 23, 42, 0.15);
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.25);
+}
+
+body.light .chart-modal-close {
+    color: #1f2937;
+}
+
+.chart-modal-close:focus-visible {
+    outline: 2px solid #f87171;
+    border-radius: 8px;
 }
 
 .totals-breakdown {
