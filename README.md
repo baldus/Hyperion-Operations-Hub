@@ -1,79 +1,54 @@
-[README.md](https://github.com/user-attachments/files/22282410/README.md)
-# 📦 invapp2 — Inventory Management System  
+# 📦 invapp2 — Inventory Management System
+
 
 **invapp2** is a lightweight inventory management system built with **Flask**, designed to run on edge-friendly hardware such as a **Raspberry Pi**.
 It supports tracking items, locations, stock balances, receiving, cycle counts, stock adjustments, transfers, and full transaction history.
 
 > Looking for the quickest path to production? Start with the [hardware recommendations](docs/HARDWARE.md) and then follow the setup guide below.
 
+
+---
+
+## 📚 Table of Contents
+- [Features](#-features)
+- [Technology Overview](#-technology-overview)
+- [System Requirements](#-system-requirements)
+- [Quick Start](#-quick-start)
+- [Environment Configuration](#-environment-configuration)
+- [Operational Docs](#-operational-docs)
+- [Roadmap](#-roadmap)
+- [Contributing](#-contributing)
+- [License](#-license)
+
 ---
 
 ## 🚀 Features
 
-- **Item Management**
-  - Add, edit, import, and export items (CSV).
-  - Define min stock levels per SKU.
-
-- **Location Management**
-  - Add, import, and export storage locations.
-  - Codes and descriptions for warehouse/bin tracking.
-
-- **Stock Management**
-  - View stock by SKU, batch, and location.
-  - Manual adjustments with audit trail.
-  - Bulk stock imports via CSV.
-  - Export stock balances.
-
-- **Receiving**
-  - Receive items into stock.
-  - Auto-generate unique lot/batch numbers (`SKU-YYMMDD-##`).
-  - Record PO numbers and receiving personnel.
-
-- **Cycle Counts**
-  - Log physical counts vs. book stock.
-  - Movement types: `CYCLE_COUNT_CONFIRM` and `CYCLE_COUNT_ADJUSTMENT`.
-  - Export cycle counts to CSV.
-
-- **Transfers (Move)**
-  - Move stock between locations while preserving lot/batch tracking.
-
-- **Transaction History**
-  - Full log of all stock movements.
-  - Exportable to CSV.
-  - Color-coded and striped UI for readability.
-
-- **Reports (`/reports`)**
-  - One-click export of all tables (Items, Locations, Batches, Movements) into a single ZIP.
-
-- **Production Orders (`/orders`)**
-  - Track open, scheduled, and closed production orders with BOM and routing details.
-  - Validate BOM components, plan routing steps, and automatically reserve material when available.
-  - Update routing progress, manage order status changes, and audit shortages.
-
-- **Work Instructions (`/work`)**
-  - Upload PDF/allowed documents to a managed directory for shop-floor use.
-  - Admins can remove outdated instructions; all users can view the catalog.
-
-- **Settings & Printers (`/settings`, `/settings/printers`)**
-  - Toggle between dark and light UI themes per session.
-  - Configure Zebra printer host/port values after admin authentication.
-
-- **Admin Tools (`/admin`)**
-  - Privileged login/logout flow for unlocking admin-only features.
-  - Automatic admin session timeout enforcement for security.
+- **Item Management** – add, edit, import, and export SKUs (CSV) with minimum-stock thresholds.
+- **Location Management** – maintain warehouse/bin codes and descriptions with import/export tooling.
+- **Stock Management** – view stock by SKU, batch, and location; perform manual adjustments with a full audit trail; import balances in bulk.
+- **Receiving** – capture receipts, auto-generate unique lot numbers (`SKU-YYMMDD-##`), and log purchase order / receiver info.
+- **Cycle Counts** – reconcile book vs. physical counts with `CYCLE_COUNT_CONFIRM` and `CYCLE_COUNT_ADJUSTMENT` movement types and CSV exports.
+- **Transfers** – move stock between locations while preserving lot/batch tracking.
+- **Transaction History** – review every movement with color-coded tables and CSV export.
+- **Reports** – `/reports` generates a single ZIP containing Items, Locations, Batches, and Movements.
+- **Production Orders** – `/orders` tracks BOMs, routing steps, reservations, shortages, and progress updates.
+- **Work Instructions** – `/work` provides a managed document repository for PDFs and other allowed files.
+- **Settings & Printers** – configure UI theme and Zebra printer host/port with admin authentication.
+- **Admin Tools** – secure privileged actions behind a session-based admin login with auto-timeout.
 
 ---
 
-## 🛠 Tech Stack  
+## 🧱 Technology Overview
 
-- **Backend**: Flask, SQLAlchemy  
-- **Database**: PostgreSQL  
-- **Frontend**: Jinja2 templates (dark theme, bubble-style buttons)  
-- **Platform**: Raspberry Pi (Linux)  
+| Layer      | Technology |
+|------------|------------|
+| Backend    | Flask, SQLAlchemy |
+| Frontend   | Jinja2 templates (dark-friendly theme) |
+| Database   | PostgreSQL (via `psycopg2`) |
+| Platform   | Linux edge hardware (Raspberry Pi recommended) |
 
----
-
-## 📂 Project Structure  
+Project layout highlights:
 
 ```
 invapp2/
@@ -82,20 +57,9 @@ invapp2/
 ├── invapp/
 │   ├── __init__.py       # App factory + blueprint registration
 │   ├── models.py         # Database models
-│   ├── routes/
-│   │   ├── admin.py      # Admin login/session management
-│   │   ├── inventory.py  # Inventory and stock operations
-│   │   ├── orders.py     # Production orders with BOM, routing, reservations
-│   │   ├── printers.py   # Zebra printer configuration UI
-│   │   ├── reports.py    # CSV/ZIP reporting endpoints
-│   │   ├── settings.py   # Theme toggles and settings landing page
-│   │   └── work.py       # Work instruction upload/listing views
-│   └── templates/
-│       ├── inventory/    # Inventory HTML templates
-│       ├── orders/       # Orders pages (home, detail, forms)
-│       ├── reports/      # Reports HTML templates
-│       ├── settings/     # Settings and printer management views
-│       └── work/         # Work instruction browser
+│   ├── routes/           # Admin, inventory, orders, printers, reports, settings, work
+│   └── templates/        # HTML templates grouped by feature
+└── start_inventory.sh    # Helper script for bootstrapping the environment
 ```
 
 ---
@@ -118,22 +82,44 @@ network wedge barcode scanners for the smoothest operator experience.
 
 ## ⚡ Setup Instructions
 
-1. Clone the repo:  
+
+### Software
+- Python 3.10+
+- PostgreSQL 13 or newer
+- `libpq` client libraries (for compiling/installing `psycopg2` on Debian/Raspberry Pi)
+- `pip`, `setuptools`, and `wheel`
+
+### Recommended Hardware
+For a reliable shop-floor deployment, start with the following baseline. See the [Hardware Guide](docs/hardware-guide.md) for more detailed options and sizing notes.
+
+| Component | Recommendation | Notes |
+|-----------|----------------|-------|
+| Compute   | Raspberry Pi 4 Model B (4 GB or 8 GB RAM) | Provides enough CPU/RAM headroom for PostgreSQL and Flask. Passive cooling or a small case fan is advised. |
+| Storage   | 128 GB+ high-endurance microSD **or** USB SSD | SSD preferred for write-heavy environments; microSD must be industrial/high-endurance grade. |
+| Power     | Official Raspberry Pi USB-C power supply | Stable 5V/3A output prevents brownouts during printer bursts. |
+| Networking| Wired Ethernet connection | Reduces latency and increases reliability for printer and database traffic. |
+| Label Printer | Zebra GK420d / ZD421d (networked) | Works with the Zebra TCP host/port configuration exposed under `/settings/printers`. |
+| Optional Peripherals | USB barcode scanner, small touchscreen/monitor | Enhances on-floor data entry and visibility. |
+
+---
+
+## ⚡ Quick Start
+
+1. **Clone the repository**
    ```bash
    git clone https://github.com/YOUR-USERNAME/invapp2.git
    cd invapp2
    ```
 
-2. Create a virtual environment & install Python dependencies from `invapp2/requirements.txt`:
+2. **Create and activate a virtual environment**
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
-   # upgrade packaging tools on fresh environments
    pip install --upgrade pip setuptools wheel
    pip install -r requirements.txt
    ```
 
-   > **Note:** The app expects PostgreSQL connectivity via `psycopg2-binary`. On Debian/Raspberry Pi systems ensure the `libpq` client libraries are installed (e.g. `sudo apt install libpq5`).
+   > The application expects PostgreSQL connectivity via `psycopg2-binary`. On Debian/Raspberry Pi systems ensure the `libpq` client libraries are installed (`sudo apt install libpq5 libpq-dev`).
 
 3. Set up your database and environment variables (see [`config.py`](invapp2/config.py) for all available options):
 
@@ -145,40 +131,38 @@ network wedge barcode scanners for the smoothest operator experience.
    | `ZEBRA_PRINTER_PORT` | TCP port that the printer listens on. | `9100` |
 
    Export the values and initialize the schema:
+
    ```bash
    export DB_URL="postgresql+psycopg2://USER:PASSWORD@localhost/invdb"
    export SECRET_KEY="change_me"
-   export ZEBRA_PRINTER_HOST="printer.local"  # network address of your Zebra printer
-   export ZEBRA_PRINTER_PORT=9100              # port for the printer connection
+   export ZEBRA_PRINTER_HOST="printer.local"
+   export ZEBRA_PRINTER_PORT=9100
+
    flask shell
    >>> from invapp.extensions import db
    >>> db.create_all()
    ```
 
-4. Run the app:
+4. **Run the app**
    ```bash
    flask run --host=0.0.0.0 --port=5000
    ```
 
-   Or use the convenience launcher which will bootstrap a virtual environment,
-   install the dependencies from `requirements.txt`, and then start the
-   application:
+   Or use the helper script which bootstraps a virtual environment, installs dependencies, and launches the server:
 
    ```bash
    ./start_inventory.sh
    ```
 
-5. Access via browser:
-   ```
-   http://<raspberry-pi-ip>:5000
-   ```
+5. **Access the UI** at `http://<host-or-pi-ip>:5000`.
 
-6. (Optional) Run the automated tests once the app dependencies are installed:
+6. **Run automated tests** (optional):
    ```bash
    pytest
    ```
 
 ---
+
 
 ## 📚 Additional Documentation
 
@@ -190,13 +174,24 @@ network wedge barcode scanners for the smoothest operator experience.
 
 ## 🔄 Upgrading Existing Installations
 
-Existing deployments created before the introduction of item notes need a one-time
-database migration. Run the following SQL against your production database (or
-allow the application to run once so it can apply the change automatically):
 
-```sql
-ALTER TABLE item ADD COLUMN notes TEXT;
-```
+All configuration values are read from environment variables with sane defaults defined in [`config.py`](invapp2/config.py).
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `DB_URL` | SQLAlchemy connection string for PostgreSQL | `postgresql+psycopg2://inv:change_me@localhost/invdb` |
+| `SECRET_KEY` | Flask session secret | `supersecret` |
+| `ADMIN_SESSION_TIMEOUT` | Admin session inactivity timeout (seconds) | `300` |
+| `ZEBRA_PRINTER_HOST` | Zebra printer hostname/IP | `localhost` |
+| `ZEBRA_PRINTER_PORT` | Zebra printer TCP port | `9100` |
+
+Uploaded work instructions are stored in `invapp/static/work_instructions` and limited to file extensions listed in `Config.WORK_INSTRUCTION_ALLOWED_EXTENSIONS`.
+
+---
+
+## 🛠 Operational Docs
+- [Hardware Guide](docs/hardware-guide.md) – Bill of materials, sizing advice, and optional peripherals.
+- [Deployment Guide](docs/deployment-guide.md) – Provisioning steps for Raspberry Pi OS, PostgreSQL setup, service hardening, and backup recommendations.
 
 ---
 
@@ -205,22 +200,22 @@ ALTER TABLE item ADD COLUMN notes TEXT;
 - [x] Inventory module (MVP complete)
 - [x] Reports module (ZIP export)
 - [x] Orders module (BOM authoring, routing progress, material reservations)
-- [ ] User authentication & admin roles  
-- [ ] More advanced reporting  
+- [ ] User authentication & admin roles
+- [ ] More advanced reporting
 
 ---
 
-## 🤝 Contributing  
+## 🤝 Contributing
 
-Contributions are welcome!  
-- Fork the repo  
-- Create a new branch (`git checkout -b feature/your-feature`)  
-- Commit changes (`git commit -m "Add feature"`)  
-- Push branch (`git push origin feature/your-feature`)  
-- Open a Pull Request  
+Contributions are welcome!
+1. Fork the repo
+2. Create a new branch (`git checkout -b feature/your-feature`)
+3. Commit changes (`git commit -m "Add feature"`)
+4. Push branch (`git push origin feature/your-feature`)
+5. Open a Pull Request
 
 ---
 
-## 📜 License  
+## 📜 License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.  
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
