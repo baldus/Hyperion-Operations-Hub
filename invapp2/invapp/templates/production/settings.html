@@ -93,4 +93,62 @@
         </div>
     </form>
 </section>
+
+<section class="form-section">
+    <h3>Output per Labor Hour</h3>
+    <p class="section-help">
+        Customize the variables and formula that power the Production History "Output per Labor Hour" column.
+    </p>
+    <form method="post" class="form-stack">
+        <input type="hidden" name="action" value="update_formula">
+        <div class="form-field">
+            <label for="output_formula" class="field-label">Formula</label>
+            <textarea id="output_formula" name="output_formula" rows="2" required>{{ output_formula_form.formula }}</textarea>
+            <p class="field-note">
+                Reference variables by name. Example: <code>combined_output / total_hours</code>.
+            </p>
+        </div>
+        <div class="form-field">
+            <span class="field-label">Variables</span>
+            <div class="table-scroll">
+                <table class="inventory-table production-settings-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Variable Name</th>
+                            <th scope="col">Display Label</th>
+                            <th scope="col">Expression</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% set existing_variables = output_formula_form.variables or [] %}
+                        {% set total_rows = existing_variables|length + 2 %}
+                        {% for idx in range(total_rows) %}
+                            {% set variable = existing_variables[idx] if idx < existing_variables|length else None %}
+                            <tr>
+                                <td>
+                                    <input type="text" name="variable_name" value="{{ variable.name if variable else '' }}" placeholder="combined_output">
+                                </td>
+                                <td>
+                                    <input type="text" name="variable_label" value="{{ variable.label if variable else '' }}" placeholder="Combined Output">
+                                </td>
+                                <td>
+                                    <input type="text" name="variable_expression" value="{{ variable.expression if variable else '' }}" placeholder="produced + packaged">
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <p class="field-note">Expressions can reference the base metrics listed below.</p>
+            <ul class="field-note">
+                {% for metric in formula_metric_hints %}
+                    <li><code>{{ metric.key }}</code> &mdash; {{ metric.description }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        <div class="form-actions">
+            <button type="submit">Save Formula</button>
+        </div>
+    </form>
+</section>
 {% endblock %}
