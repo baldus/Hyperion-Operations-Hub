@@ -102,6 +102,8 @@ def _ensure_production_schema(engine):
     desired_length = 32
     needs_day_of_week_alter = False
     numeric_columns_missing_default: list[str] = []
+    existing_column_names = {column["name"] for column in columns}
+    columns_to_add: list[str] = []
 
     for column in columns:
         column_name = column["name"]
@@ -118,9 +120,31 @@ def _ensure_production_schema(engine):
         ):
             numeric_columns_missing_default.append(column_name)
 
+    def _queue_column_add(column_name: str, column_type: str, default: str) -> None:
+        if column_name in existing_column_names:
+            return
+
+        add_clause = (
+            "ALTER TABLE production_daily_record "
+            f"ADD COLUMN {column_name} {column_type} DEFAULT {default} NOT NULL"
+        )
+        columns_to_add.append(add_clause)
+
+    _queue_column_add("gates_employees", "INTEGER", "0")
+    _queue_column_add("gates_hours_ot", "NUMERIC(7, 2)", "0")
+    _queue_column_add("additional_employees", "INTEGER", "0")
+    _queue_column_add("additional_hours_ot", "NUMERIC(7, 2)", "0")
+
     # SQLite cannot alter column types easily, but new databases will pick up the
     # updated length and defaults from ``db.create_all()``.
-    if engine.dialect.name == "sqlite":
+    is_sqlite = engine.dialect.name == "sqlite"
+
+    if columns_to_add:
+        with engine.begin() as conn:
+            for statement in columns_to_add:
+                conn.execute(text(statement))
+
+    if is_sqlite:
         return
 
     if needs_day_of_week_alter:
