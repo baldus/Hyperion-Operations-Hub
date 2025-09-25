@@ -198,6 +198,62 @@ body.light .content-card {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
+.lead {
+    margin-bottom: 1.5rem;
+    font-size: 1.1rem;
+}
+
+.card-section {
+    margin-bottom: 24px;
+    padding: 16px;
+    border-radius: 10px;
+    background-color: rgba(60, 60, 60, 0.75);
+}
+
+body.light .card-section {
+    background-color: #f4f4f4;
+}
+
+.card-section h3 {
+    margin-top: 0;
+}
+
+.card-section form {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.card-section input[type="file"] {
+    color: inherit;
+}
+
+.table-list {
+    list-style: disc;
+    margin: 0;
+    padding-left: 20px;
+    columns: 2;
+    column-gap: 24px;
+}
+
+@media (max-width: 700px) {
+    .table-list {
+        columns: 1;
+    }
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}
+
 @media (max-width: 768px) {
     .content-card {
         padding: 16px;

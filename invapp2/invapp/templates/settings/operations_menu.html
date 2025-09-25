@@ -11,6 +11,7 @@
     <a href="{{ url_for('production.production_settings') }}" class="action-btn">Production Settings</a>
 
     {% if session.get('is_admin') %}
+        <a href="{{ url_for('admin.data_backup') }}" class="action-btn">Data Backup</a>
         <a href="{{ url_for('printers.printer_settings') }}" class="action-btn">Admin Tools</a>
         <a href="{{ url_for('admin.logout', next=request.path) }}" class="action-btn">Admin Logout</a>
     {% else %}
