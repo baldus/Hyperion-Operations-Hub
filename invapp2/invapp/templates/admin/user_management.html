@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>User Management</h2>
+<p class="section-intro">
+    Create accounts for teammates, assign roles, and control who has access to administrative tools.
+</p>
+
+<section class="card-section">
+    <h3>Create New Account</h3>
+    <form method="post" action="{{ url_for('admin.create_user') }}" class="stacked-form">
+        <div class="form-field">
+            <label for="new-username">Username</label>
+            <input id="new-username" name="username" type="text" required autocomplete="off">
+        </div>
+        <div class="form-field">
+            <label for="new-password">Password</label>
+            <input id="new-password" name="password" type="password" required autocomplete="new-password">
+        </div>
+        <div class="form-field">
+            <span>Roles</span>
+            <div class="role-list">
+                {% for role in roles %}
+                    <label>
+                        <input type="checkbox" name="roles" value="{{ role.name }}" {% if role.name == 'user' %}checked{% endif %}>
+                        <span class="role-name">{{ role.name|capitalize }}</span>
+                        {% if role.description %}<span class="role-description">{{ role.description }}</span>{% endif %}
+                    </label>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="form-field">
+            <label class="checkbox-field">
+                <input type="checkbox" name="is_active" checked>
+                <span>Account is active</span>
+            </label>
+        </div>
+        <button type="submit">Create Account</button>
+    </form>
+</section>
+
+<section class="card-section">
+    <h3>Existing Accounts</h3>
+    {% if not users %}
+        <p>No accounts found yet. Use the form above to create the first one.</p>
+    {% else %}
+        <div class="table-scroll">
+            <table class="form-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Username</th>
+                        <th scope="col">Roles &amp; Status</th>
+                        <th scope="col">Reset Password</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in users %}
+                        <tr>
+                            <td data-label="Username">
+                                <strong>{{ user.username }}</strong>
+                                {% if not user.is_active %}
+                                    <span class="status-pill danger">Disabled</span>
+                                {% endif %}
+                            </td>
+                            <td data-label="Roles &amp; Status">
+                                <form method="post" action="{{ url_for('admin.update_user', user_id=user.id) }}" class="inline-form role-form">
+                                    <div class="role-list">
+                                        {% for role in roles %}
+                                            <label>
+                                                <input type="checkbox" name="roles" value="{{ role.name }}" {% if role in user.roles %}checked{% endif %}>
+                                                <span class="role-name">{{ role.name|capitalize }}</span>
+                                            </label>
+                                        {% endfor %}
+                                    </div>
+                                    <label class="checkbox-field">
+                                        <input type="checkbox" name="is_active" {% if user.is_active %}checked{% endif %}>
+                                        <span>Active</span>
+                                    </label>
+                                    <button type="submit">Save</button>
+                                </form>
+                            </td>
+                            <td data-label="Reset Password">
+                                <form method="post" action="{{ url_for('admin.reset_user_password', user_id=user.id) }}" class="inline-form password-form">
+                                    <label>
+                                        <span class="sr-only">New password for {{ user.username }}</span>
+                                        <input type="password" name="new_password" placeholder="New password" autocomplete="new-password" required>
+                                    </label>
+                                    <label>
+                                        <span class="sr-only">Confirm password for {{ user.username }}</span>
+                                        <input type="password" name="confirm_password" placeholder="Confirm" autocomplete="new-password" required>
+                                    </label>
+                                    <button type="submit">Update</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+</section>
+{% endblock %}

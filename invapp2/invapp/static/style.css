@@ -1149,6 +1149,95 @@ body.light .section-help {
     gap: 6px;
 }
 
+.section-intro {
+    margin: 0 0 18px 0;
+    color: rgba(255, 255, 255, 0.75);
+    max-width: 720px;
+}
+
+body.light .section-intro {
+    color: #4a4a4a;
+}
+
+.card-section {
+    margin: 28px 0;
+    padding: 20px;
+    border-radius: 12px;
+    background-color: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+body.light .card-section {
+    background-color: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.08);
+}
+
+.stacked-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    max-width: 520px;
+}
+
+.role-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 18px;
+}
+
+.role-list label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.95rem;
+}
+
+.role-name {
+    font-weight: 600;
+}
+
+.role-description {
+    font-size: 0.85rem;
+    opacity: 0.75;
+}
+
+.checkbox-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.95rem;
+}
+
+.role-form,
+.password-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.role-form button,
+.password-form button {
+    align-self: flex-start;
+}
+
+.password-form {
+    gap: 10px;
+}
+
+.password-form input[type="password"] {
+    width: min(260px, 100%);
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background-color: rgba(0, 0, 0, 0.35);
+    color: inherit;
+}
+
+body.light .password-form input[type="password"] {
+    background-color: #fff;
+    border-color: #c5cad6;
+}
+
 .form-field .field-label {
     font-weight: 600;
     font-size: 0.95rem;
@@ -1416,6 +1505,16 @@ body.light .status-pill.status-complete {
 .status-pill.status-pending {
     background-color: rgba(158, 158, 158, 0.22);
     color: #e4e4e4;
+}
+
+.status-pill.danger {
+    background-color: rgba(166, 40, 40, 0.25);
+    color: #ffb3b3;
+}
+
+body.light .status-pill.danger {
+    background-color: rgba(166, 40, 40, 0.15);
+    color: #7a1c1c;
 }
 
 body.light .status-pill.status-pending {

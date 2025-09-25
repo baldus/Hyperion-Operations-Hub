@@ -57,10 +57,14 @@ def test_role_restriction(client, app):
     # grant admin role
     with app.app_context():
         user = User.query.filter_by(username='bob').first()
-        admin = Role(name='admin')
-        db.session.add(admin)
+        admin = Role.query.filter_by(name='admin').first()
+        if admin is None:
+            admin = Role(name='admin')
+            db.session.add(admin)
         user.roles.append(admin)
         db.session.commit()
+    client.get('/auth/logout', follow_redirects=True)
+    login(client, 'bob', 'pw')
     resp = client.get('/settings/printers')
     assert resp.status_code == 200
 
@@ -107,3 +111,18 @@ def test_admin_session_timeout(client):
 
     with client.session_transaction() as session:
         assert not session.get('is_admin')
+
+
+def test_inactive_user_cannot_login(client, app):
+    register(client, 'dave', 'pw')
+    with app.app_context():
+        user = User.query.filter_by(username='dave').first()
+        user.is_active = False
+        db.session.commit()
+
+    response = client.post('/auth/login', data={'username': 'dave', 'password': 'pw'}, follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers['Location'].endswith('/auth/login')
+    resp = client.get('/orders/', follow_redirects=False)
+    assert resp.status_code == 302
+    assert '/auth/login' in resp.headers['Location']

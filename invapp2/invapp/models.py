@@ -1,6 +1,7 @@
 from decimal import Decimal
 from datetime import datetime
 
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.orm import synonym
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -257,6 +258,7 @@ class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(255), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
+    _is_active = db.Column("is_active", db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
@@ -274,6 +276,21 @@ class User(UserMixin, db.Model):
 
     def check_password(self, password: str) -> bool:
         return check_password_hash(self.password_hash, password)
+
+    @property
+    def is_active(self) -> bool:
+        state = sa_inspect(self)
+        if state.detached:
+            identity = state.identity
+            if not identity:
+                return False
+            refreshed = type(self).query.get(identity[0])
+            return bool(refreshed._is_active) if refreshed else False
+        return bool(self._is_active)
+
+    @is_active.setter
+    def is_active(self, value: bool) -> None:
+        self._is_active = bool(value)
 
     def has_role(self, role_name: str) -> bool:
         return any(role.name == role_name for role in self.roles)

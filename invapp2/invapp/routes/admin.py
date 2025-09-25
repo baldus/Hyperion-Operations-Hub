@@ -3,6 +3,7 @@ import json
 import time
 from datetime import date, datetime, time as time_type
 from decimal import Decimal
+from typing import Optional
 from urllib.parse import urljoin
 
 from flask import (
@@ -21,6 +22,7 @@ from sqlalchemy.sql.sqltypes import DateTime as SQLDateTime
 from sqlalchemy.sql.sqltypes import Numeric
 
 from invapp.extensions import db
+from invapp.models import Role, User
 
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -45,8 +47,64 @@ def _get_safe_redirect_target(default: str = "home") -> str:
     return url_for(default)
 
 
-def _redirect_non_admin():
+def _has_admin_privileges() -> bool:
+    """Return ``True`` if the session has elevated administrator access."""
+
     if session.get("is_admin"):
+        return True
+
+    user_id = session.get("_user_id")
+    if user_id is None:
+        return False
+
+    try:
+        user_id_value = int(user_id)
+    except (TypeError, ValueError):
+        return False
+
+    user = User.query.get(user_id_value)
+    if not user or not user.is_active:
+        return False
+
+    return user.has_role("admin")
+
+
+def _active_admin_count(exclude_user_id: Optional[int] = None) -> int:
+    """Return the number of active users who hold the ``admin`` role."""
+
+    query = (
+        User.query.join(User.roles)
+        .filter(User._is_active.is_(True), Role.name == "admin")
+    )
+    if exclude_user_id is not None:
+        query = query.filter(User.id != exclude_user_id)
+    return query.count()
+
+
+def _ensure_core_roles() -> None:
+    """Ensure the built-in roles exist for the management interface."""
+
+    defaults = {
+        "user": "Standard access to operational tools.",
+        "admin": "Full administrative control, including user management.",
+    }
+
+    updated = False
+    for name, description in defaults.items():
+        role = Role.query.filter_by(name=name).first()
+        if role is None:
+            db.session.add(Role(name=name, description=description))
+            updated = True
+        elif description and role.description != description:
+            role.description = description
+            updated = True
+
+    if updated:
+        db.session.commit()
+
+
+def _redirect_non_admin():
+    if _has_admin_privileges():
         return None
 
     flash("Admin access required.", "warning")
@@ -232,3 +290,130 @@ def import_data():
 
     flash("Backup imported successfully.", "success")
     return redirect(url_for("admin.data_backup"))
+
+
+@bp.route("/users", methods=["GET"])
+def manage_users():
+    """Render the management console for application accounts."""
+
+    redirect_response = _redirect_non_admin()
+    if redirect_response:
+        return redirect_response
+
+    _ensure_core_roles()
+    users = User.query.order_by(User.username).all()
+    roles = Role.query.order_by(Role.name).all()
+    return render_template("admin/user_management.html", users=users, roles=roles)
+
+
+@bp.route("/users", methods=["POST"])
+def create_user():
+    """Create a new application user from the management console."""
+
+    redirect_response = _redirect_non_admin()
+    if redirect_response:
+        return redirect_response
+
+    _ensure_core_roles()
+
+    username = request.form.get("username", "").strip()
+    password = request.form.get("password", "")
+    is_active = bool(request.form.get("is_active"))
+    selected_roles = request.form.getlist("roles")
+
+    if not username or not password:
+        flash("Username and password are required to create an account.", "danger")
+        return redirect(url_for("admin.manage_users"))
+
+    if User.query.filter_by(username=username).first():
+        flash("That username is already in use.", "danger")
+        return redirect(url_for("admin.manage_users"))
+
+    user = User(username=username)
+    user.set_password(password)
+    user.is_active = is_active
+
+    roles_to_assign = []
+    if selected_roles:
+        roles_to_assign = Role.query.filter(Role.name.in_(selected_roles)).all()
+    if not roles_to_assign:
+        default_role = Role.query.filter_by(name="user").first()
+        if default_role:
+            roles_to_assign = [default_role]
+
+    for role in roles_to_assign:
+        user.roles.append(role)
+
+    db.session.add(user)
+    db.session.commit()
+
+    flash("User account created successfully.", "success")
+    return redirect(url_for("admin.manage_users"))
+
+
+@bp.route("/users/<int:user_id>/update", methods=["POST"])
+def update_user(user_id: int):
+    """Update role assignments or activation status for a user."""
+
+    redirect_response = _redirect_non_admin()
+    if redirect_response:
+        return redirect_response
+
+    _ensure_core_roles()
+
+    user = User.query.get_or_404(user_id)
+    selected_roles = request.form.getlist("roles")
+    is_active = bool(request.form.get("is_active"))
+
+    roles_to_assign = []
+    if selected_roles:
+        roles_to_assign = Role.query.filter(Role.name.in_(selected_roles)).all()
+    if not roles_to_assign:
+        default_role = Role.query.filter_by(name="user").first()
+        if default_role:
+            roles_to_assign = [default_role]
+
+    removing_admin = user.has_role("admin") and all(
+        role.name != "admin" for role in roles_to_assign
+    )
+    deactivating_admin = user.has_role("admin") and not is_active
+
+    if (removing_admin or deactivating_admin) and _active_admin_count(
+        exclude_user_id=user.id
+    ) == 0:
+        flash("At least one active administrator is required.", "warning")
+        return redirect(url_for("admin.manage_users"))
+
+    user.roles = roles_to_assign
+    user.is_active = is_active
+    db.session.commit()
+
+    flash("User access updated.", "success")
+    return redirect(url_for("admin.manage_users"))
+
+
+@bp.route("/users/<int:user_id>/password", methods=["POST"])
+def reset_user_password(user_id: int):
+    """Reset the password for a user account."""
+
+    redirect_response = _redirect_non_admin()
+    if redirect_response:
+        return redirect_response
+
+    new_password = request.form.get("new_password", "").strip()
+    confirm_password = request.form.get("confirm_password", "").strip()
+
+    if not new_password:
+        flash("A new password is required.", "danger")
+        return redirect(url_for("admin.manage_users"))
+
+    if new_password != confirm_password:
+        flash("Passwords do not match.", "danger")
+        return redirect(url_for("admin.manage_users"))
+
+    user = User.query.get_or_404(user_id)
+    user.set_password(new_password)
+    db.session.commit()
+
+    flash("Password updated for user.", "success")
+    return redirect(url_for("admin.manage_users"))

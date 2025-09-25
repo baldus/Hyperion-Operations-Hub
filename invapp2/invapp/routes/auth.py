@@ -44,6 +44,9 @@ def login():
         password = request.form["password"].strip()
         user = User.query.filter_by(username=username).first()
         if user and user.check_password(password):
+            if not user.is_active:
+                flash("Account is disabled", "danger")
+                return redirect(url_for("auth.login"))
             login_user(user)
             next_url = request.args.get("next")
             if next_url:
