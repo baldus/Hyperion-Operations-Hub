@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import ast
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import date
-from typing import Dict, List
+from typing import Any, Dict, List
 
 
 from flask import (
@@ -21,6 +22,7 @@ from invapp.models import (
     ProductionCustomer,
     ProductionDailyCustomerTotal,
     ProductionDailyRecord,
+    ProductionOutputFormula,
 )
 
 bp = Blueprint("production", __name__, url_prefix="/production")
@@ -55,6 +57,78 @@ ADDITIONAL_METRICS: List[Dict[str, str]] = [
     {"key": "door_locks_rh", "label": "Door Locks (RH)"},
     {"key": "operators_produced", "label": "Operators Produced"},
     {"key": "cops_produced", "label": "COPs Produced"},
+]
+
+DEFAULT_OUTPUT_FORMULA = "combined_output / total_hours"
+DEFAULT_OUTPUT_VARIABLES = [
+    {
+        "name": "combined_output",
+        "label": "Combined Output",
+        "expression": "produced + packaged",
+    },
+    {
+        "name": "total_hours",
+        "label": "Labor Hours",
+        "expression": "total_hours",
+    },
+]
+
+FORMULA_METRIC_HINTS: List[Dict[str, str]] = [
+    {
+        "key": "produced",
+        "label": "Gates Produced",
+        "description": "Total gates produced for the day.",
+    },
+    {
+        "key": "packaged",
+        "label": "Gates Packaged",
+        "description": "Total gates packaged for the day.",
+    },
+    {
+        "key": "combined",
+        "label": "Combined Gates Output",
+        "description": "Sum of produced and packaged gates.",
+    },
+    {
+        "key": "employees",
+        "label": "Gate Employees",
+        "description": "Employees assigned to gates production.",
+    },
+    {
+        "key": "shift_hours",
+        "label": "Shift Hours",
+        "description": "Base shift hours per employee (8).",
+    },
+    {
+        "key": "overtime",
+        "label": "Overtime Hours",
+        "description": "Overtime hours recorded for gates production.",
+    },
+    {
+        "key": "total_hours",
+        "label": "Total Labor Hours",
+        "description": "Employees * shift hours plus overtime.",
+    },
+    {
+        "key": "controllers",
+        "label": "Controllers Produced",
+        "description": "Total controllers (4 & 6 stop).",
+    },
+    {
+        "key": "door_locks",
+        "label": "Door Locks Produced",
+        "description": "Total door locks (LH & RH).",
+    },
+    {
+        "key": "operators",
+        "label": "Operators Produced",
+        "description": "Total operators completed.",
+    },
+    {
+        "key": "cops",
+        "label": "COPs Produced",
+        "description": "Total COP units completed.",
+    },
 ]
 
 DECIMAL_ZERO = Decimal("0")
@@ -112,6 +186,152 @@ def _ensure_default_customers() -> None:
     if needs_commit:
         db.session.commit()
 
+
+
+class FormulaEvaluationError(Exception):
+    """Raised when a user-defined production formula cannot be evaluated."""
+
+
+def _ensure_output_formula() -> ProductionOutputFormula:
+    setting = ProductionOutputFormula.query.first()
+    if setting is None:
+        setting = ProductionOutputFormula(
+            formula=DEFAULT_OUTPUT_FORMULA,
+            variables=[dict(variable) for variable in DEFAULT_OUTPUT_VARIABLES],
+        )
+        db.session.add(setting)
+        db.session.commit()
+    return setting
+
+
+def _to_decimal(value: Any) -> Decimal:
+    if isinstance(value, Decimal):
+        return value
+    if value in (None, ""):
+        return DECIMAL_ZERO
+    return Decimal(str(value))
+
+
+def _default_formula_context() -> Dict[str, Decimal]:
+    context = {
+        "produced": Decimal("12"),
+        "packaged": Decimal("6"),
+        "combined": Decimal("18"),
+        "employees": Decimal("3"),
+        "shift_hours": ProductionDailyRecord.LABOR_SHIFT_HOURS,
+        "overtime": Decimal("2"),
+        "total_hours": Decimal("26"),
+        "controllers": Decimal("8"),
+        "door_locks": Decimal("5"),
+        "operators": Decimal("4"),
+        "cops": Decimal("3"),
+    }
+    for metric in ADDITIONAL_METRICS:
+        context.setdefault(metric["key"], Decimal("1"))
+    return context
+
+
+def _build_formula_context(
+    record: ProductionDailyRecord,
+    produced_sum: int,
+    packaged_sum: int,
+    controllers_total: int,
+    door_locks_total: int,
+    operators_total: int,
+    cops_total: int,
+) -> Dict[str, Decimal]:
+    combined_total = produced_sum + packaged_sum
+    context: Dict[str, Decimal] = {
+        "produced": Decimal(produced_sum),
+        "packaged": Decimal(packaged_sum),
+        "combined": Decimal(combined_total),
+        "employees": Decimal(record.gates_employees or 0),
+        "shift_hours": ProductionDailyRecord.LABOR_SHIFT_HOURS,
+        "overtime": _to_decimal(record.gates_hours_ot),
+        "total_hours": _to_decimal(record.gates_total_labor_hours),
+        "controllers": Decimal(controllers_total),
+        "door_locks": Decimal(door_locks_total),
+        "operators": Decimal(operators_total),
+        "cops": Decimal(cops_total),
+    }
+    for metric in ADDITIONAL_METRICS:
+        context[metric["key"]] = Decimal(getattr(record, metric["key"]) or 0)
+    return context
+
+
+def _evaluate_decimal_expression(
+    expression: str, context: Dict[str, Decimal]
+) -> Decimal:
+    if not expression:
+        raise FormulaEvaluationError("Expression cannot be blank.")
+    try:
+        parsed = ast.parse(expression, mode="eval")
+    except SyntaxError as exc:  # pragma: no cover - defensive
+        raise FormulaEvaluationError("Invalid expression syntax.") from exc
+
+    def _eval(node: ast.AST) -> Decimal:
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+        if isinstance(node, ast.BinOp):
+            left = _eval(node.left)
+            right = _eval(node.right)
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            if isinstance(node.op, ast.Div):
+                if right == DECIMAL_ZERO:
+                    raise FormulaEvaluationError("Division by zero.")
+                return left / right
+            raise FormulaEvaluationError("Unsupported operator.")
+        if isinstance(node, ast.UnaryOp):
+            operand = _eval(node.operand)
+            if isinstance(node.op, ast.UAdd):
+                return operand
+            if isinstance(node.op, ast.USub):
+                return -operand
+            raise FormulaEvaluationError("Unsupported unary operator.")
+        if isinstance(node, ast.Name):
+            if node.id not in context:
+                raise FormulaEvaluationError(f"Unknown variable '{node.id}'.")
+            return _to_decimal(context[node.id])
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, (int, float, str)):
+                return Decimal(str(node.value))
+            raise FormulaEvaluationError("Unsupported constant type.")
+        if isinstance(node, ast.Num):  # pragma: no cover - legacy Python
+            return Decimal(str(node.n))
+        paren_expr = getattr(ast, "ParenExpr", None)
+        if paren_expr is not None and isinstance(node, paren_expr):  # pragma: no cover - Python 3.12+
+            return _eval(node.expression)
+        raise FormulaEvaluationError("Unsupported expression component.")
+
+    result = _eval(parsed.body if isinstance(parsed, ast.Expression) else parsed)
+    return result
+
+
+def _compute_output_values(
+    formula_config: Dict[str, Any], context: Dict[str, Decimal]
+) -> tuple[Decimal, List[Dict[str, Any]]]:
+    working_context = dict(context)
+    variables: List[Dict[str, Any]] = []
+    for variable in formula_config.get("variables") or []:
+        name = (variable.get("name") or "").strip()
+        expression = (variable.get("expression") or "").strip()
+        if not name or not expression:
+            continue
+        label = (variable.get("label") or name).strip() or name
+        value = _evaluate_decimal_expression(expression, working_context)
+        working_context[name] = value
+        variables.append({"name": name, "label": label, "value": value})
+
+    formula_text = (formula_config.get("formula") or "").strip()
+    if not formula_text:
+        raise FormulaEvaluationError("Formula is required.")
+    result = _evaluate_decimal_expression(formula_text, working_context)
+    return result, variables
 
 
 def _active_customers() -> List[ProductionCustomer]:
@@ -216,6 +436,64 @@ def _get_decimal_value(form_key: str) -> Decimal:
     if value < DECIMAL_ZERO:
         return DECIMAL_ZERO
     return value.quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
+
+
+def _process_output_formula_form(
+    setting: ProductionOutputFormula,
+) -> tuple[bool, Dict[str, Any]]:
+    formula_text = (request.form.get("output_formula") or "").strip()
+    names = [value.strip() for value in request.form.getlist("variable_name")]
+    labels = [value.strip() for value in request.form.getlist("variable_label")]
+    expressions = [value.strip() for value in request.form.getlist("variable_expression")]
+
+    variables: List[Dict[str, str]] = []
+    seen_names: set[str] = set()
+    has_errors = False
+
+    for name, label, expression in zip(names, labels, expressions):
+        if not name and not expression and not label:
+            continue
+        if not name:
+            flash("Variable name is required for each row.", "error")
+            has_errors = True
+            continue
+        if name in seen_names:
+            flash(f"Duplicate variable name '{name}'.", "error")
+            has_errors = True
+            continue
+        if not expression:
+            flash(f"Expression is required for variable '{name}'.", "error")
+            has_errors = True
+            continue
+        seen_names.add(name)
+        variables.append(
+            {
+                "name": name,
+                "label": label or name,
+                "expression": expression,
+            }
+        )
+
+    if not formula_text:
+        flash("Output formula is required.", "error")
+        has_errors = True
+
+    if has_errors:
+        return False, {"formula": formula_text, "variables": variables}
+
+    try:
+        _compute_output_values(
+            {"formula": formula_text, "variables": variables},
+            _default_formula_context(),
+        )
+    except FormulaEvaluationError as exc:
+        flash(f"Unable to evaluate formula: {exc}", "error")
+        return False, {"formula": formula_text, "variables": variables}
+
+    setting.formula = formula_text
+    setting.variables = variables
+    db.session.commit()
+    return True, {"formula": setting.formula, "variables": variables}
 
 
 @bp.route("/daily-entry", methods=["GET", "POST"])
@@ -367,6 +645,11 @@ def history():
 
     running_totals = {series["key"]: 0 for series in LINE_SERIES}
     current_month: tuple[int, int] | None = None
+    formula_setting = _ensure_output_formula()
+    formula_config = {
+        "formula": formula_setting.formula,
+        "variables": formula_setting.variables or [],
+    }
 
 
     for record in records:
@@ -416,11 +699,33 @@ def history():
         gates_hours_ot_display = _format_decimal(record.gates_hours_ot)
         gates_combined_total = produced_sum + packaged_sum
         gates_output_per_hour_display: str | None = None
-        if gates_total_hours_value and gates_total_hours_value > DECIMAL_ZERO:
-            output_per_hour = (
-                Decimal(gates_combined_total) / gates_total_hours_value
-            ).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
-            gates_output_per_hour_display = _format_decimal(output_per_hour)
+        output_variables_display: List[Dict[str, str]] = []
+        try:
+            output_value, variable_values = _compute_output_values(
+                formula_config,
+                _build_formula_context(
+                    record,
+                    produced_sum,
+                    packaged_sum,
+                    controllers_total,
+                    door_locks_total,
+                    operators_total,
+                    cops_total,
+                ),
+            )
+        except FormulaEvaluationError:
+            output_value = None
+            variable_values = []
+        else:
+            gates_output_per_hour_display = _format_decimal(output_value)
+            output_variables_display = [
+                {
+                    "name": variable["name"],
+                    "label": variable["label"],
+                    "value": _format_decimal(variable["value"]),
+                }
+                for variable in variable_values
+            ]
 
         additional_total_hours_value = record.additional_total_labor_hours
         additional_total_hours_display = _format_decimal(
@@ -469,6 +774,7 @@ def history():
                 "gates_hours_ot": gates_hours_ot_display,
                 "gates_total_hours": gates_total_hours_display,
                 "gates_output_per_hour": gates_output_per_hour_display,
+                "output_variables": output_variables_display,
                 "additional_employees": record.additional_employees or 0,
                 "additional_hours_ot": additional_hours_ot_display,
                 "additional_total_hours": additional_total_hours_display,
@@ -514,6 +820,11 @@ def production_settings():
             ProductionCustomer.is_other_bucket.asc(), ProductionCustomer.name.asc()
         ).all()
     )
+    formula_setting = _ensure_output_formula()
+    formula_form_values = {
+        "formula": formula_setting.formula,
+        "variables": formula_setting.variables or [],
+    }
 
     if request.method == "POST":
         action = request.form.get("action")
@@ -545,7 +856,7 @@ def production_settings():
             flash(f"Added customer {name}.", "success")
             return redirect(url_for("production.production_settings"))
 
-        if action == "update":
+        elif action == "update":
             changes_made = False
             for customer in customers:
                 color_value = (request.form.get(f"color_{customer.id}") or customer.color).strip()
@@ -601,6 +912,12 @@ def production_settings():
                 flash("No changes detected.", "info")
             return redirect(url_for("production.production_settings"))
 
+        elif action == "update_formula":
+            success, formula_form_values = _process_output_formula_form(formula_setting)
+            if success:
+                flash("Output per labor hour formula updated.", "success")
+                return redirect(url_for("production.production_settings"))
+
     grouped_customers = [
         customer
         for customer in customers
@@ -610,5 +927,7 @@ def production_settings():
         "production/settings.html",
         customers=customers,
         grouped_customers=grouped_customers,
+        output_formula_form=formula_form_values,
+        formula_metric_hints=FORMULA_METRIC_HINTS,
     )
 
