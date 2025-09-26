@@ -812,6 +812,35 @@ body.light .customer-chip {
     font-weight: 600;
 }
 
+.chart-action-button {
+    padding: 8px 16px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(59, 130, 246, 0.15);
+    color: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.chart-action-button:hover,
+.chart-action-button:focus {
+    background: rgba(59, 130, 246, 0.3);
+    border-color: rgba(59, 130, 246, 0.45);
+}
+
+body.light .chart-action-button {
+    background: rgba(59, 130, 246, 0.12);
+    border-color: rgba(37, 99, 235, 0.25);
+    color: #1d4ed8;
+}
+
+body.light .chart-action-button:hover,
+body.light .chart-action-button:focus {
+    background: rgba(37, 99, 235, 0.22);
+    border-color: rgba(37, 99, 235, 0.4);
+}
+
 .chart-controls select {
     padding: 8px 14px;
     border-radius: 24px;
@@ -1956,6 +1985,66 @@ body.light .chart-modal-close {
 .chart-modal-close:focus-visible {
     outline: 2px solid #f87171;
     border-radius: 8px;
+}
+
+.chart-modal-dialog--wide {
+    width: min(1120px, 100%);
+}
+
+.email-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.email-summary__help {
+    opacity: 0.75;
+}
+
+.email-summary__section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.email-summary__notes {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.email-summary__note {
+    line-height: 1.4;
+}
+
+.email-summary__charts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+}
+
+.email-summary__chart {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start;
+}
+
+.email-summary__chart img {
+    width: 100%;
+    height: auto;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.08);
+    padding: 8px;
+}
+
+body.light .email-summary__chart img {
+    background: rgba(37, 99, 235, 0.08);
+}
+
+.email-summary__chart figcaption {
+    font-size: 0.85rem;
+    opacity: 0.8;
 }
 
 .totals-breakdown {

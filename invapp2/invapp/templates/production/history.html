@@ -38,6 +38,9 @@
                 <input type="checkbox" id="collapseWeekendsToggle" name="collapse_weekends">
                 Collapse weekends
             </label>
+            <button type="button" class="chart-action-button" id="emailDataButton">
+                Email Data
+            </button>
         </div>
         <div class="chart-grid">
             <div class="chart-card">
@@ -53,6 +56,33 @@
         <div class="chart-modal-dialog">
             <button type="button" class="chart-modal-close" data-modal-dismiss aria-label="Close expanded chart">&times;</button>
             <canvas id="expandedChart" aria-label="Expanded chart canvas"></canvas>
+        </div>
+    </div>
+
+    <div class="chart-modal is-hidden" id="emailDataModal" role="dialog" aria-modal="true" aria-label="Email-friendly production summary">
+        <div class="chart-modal-dialog chart-modal-dialog--wide">
+            <button type="button" class="chart-modal-close" data-email-modal-dismiss aria-label="Close email summary">&times;</button>
+            <div class="email-summary">
+                <h4>Email Summary</h4>
+                <p class="email-summary__help">Copy the notes and charts below into your email.</p>
+                <section class="email-summary__section" aria-labelledby="emailSummaryNotesHeading">
+                    <h5 id="emailSummaryNotesHeading">Daily Notes</h5>
+                    <div id="emailNotesList" class="email-summary__notes"></div>
+                </section>
+                <section class="email-summary__section" aria-labelledby="emailSummaryChartsHeading">
+                    <h5 id="emailSummaryChartsHeading">Charts</h5>
+                    <div class="email-summary__charts">
+                        <figure class="email-summary__chart">
+                            <img id="emailGatesImage" alt="Gates produced by customer chart copy" />
+                            <figcaption>Gates Produced by Customer</figcaption>
+                        </figure>
+                        <figure class="email-summary__chart">
+                            <img id="emailCumulativeImage" alt="Cumulative month-to-date totals chart copy" />
+                            <figcaption>Cumulative Month-to-Date Totals</figcaption>
+                        </figure>
+                    </div>
+                </section>
+            </div>
         </div>
     </div>
 
@@ -633,6 +663,116 @@
 
         registerChartForExpansion(barContext, barChart);
         registerChartForExpansion(lineContext, lineChart);
+
+        const emailDataButton = document.getElementById('emailDataButton');
+        const emailModal = document.getElementById('emailDataModal');
+        const emailDismissButtons = emailModal ? emailModal.querySelectorAll('[data-email-modal-dismiss]') : [];
+        const emailNotesList = document.getElementById('emailNotesList');
+        const emailGatesImage = document.getElementById('emailGatesImage');
+        const emailCumulativeImage = document.getElementById('emailCumulativeImage');
+
+        const closeEmailModal = () => {
+            if (!emailModal) {
+                return;
+            }
+            emailModal.classList.add('is-hidden');
+            emailModal.setAttribute('aria-label', 'Email-friendly production summary');
+        };
+
+        const extractDailyNotes = () => {
+            if (!emailNotesList) {
+                return;
+            }
+
+            emailNotesList.innerHTML = '';
+            const tableRows = document.querySelectorAll('.production-history-table tbody tr');
+            if (!tableRows.length) {
+                const emptyMessage = document.createElement('p');
+                emptyMessage.textContent = 'No notes available for the selected range.';
+                emailNotesList.appendChild(emptyMessage);
+                return;
+            }
+
+            tableRows.forEach((row) => {
+                const cells = Array.from(row.cells || []);
+                if (!cells.length) {
+                    return;
+                }
+
+                const dateCell = cells[0];
+                const dayCell = cells[1];
+                const noteCell = cells[cells.length - 1];
+                if (!dateCell || !dayCell || !noteCell) {
+                    return;
+                }
+
+                const noteText = noteCell.textContent.trim();
+                const displayNote = noteText && noteText !== '—'
+                    ? noteText
+                    : 'No notes recorded.';
+
+                const noteWrapper = document.createElement('p');
+                noteWrapper.className = 'email-summary__note';
+                const strong = document.createElement('strong');
+                strong.textContent = `${dateCell.textContent.trim()} (${dayCell.textContent.trim()}): `;
+                const noteSpan = document.createElement('span');
+                noteSpan.textContent = displayNote;
+                noteWrapper.appendChild(strong);
+                noteWrapper.appendChild(noteSpan);
+
+                emailNotesList.appendChild(noteWrapper);
+            });
+        };
+
+        const updateEmailChartImages = () => {
+            if (emailGatesImage && barChart) {
+                try {
+                    emailGatesImage.src = barChart.toBase64Image();
+                } catch (error) {
+                    emailGatesImage.removeAttribute('src');
+                }
+            }
+            if (emailCumulativeImage && lineChart) {
+                try {
+                    emailCumulativeImage.src = lineChart.toBase64Image();
+                } catch (error) {
+                    emailCumulativeImage.removeAttribute('src');
+                }
+            }
+        };
+
+        const openEmailModal = () => {
+            if (!emailModal) {
+                return;
+            }
+
+            extractDailyNotes();
+            updateEmailChartImages();
+            emailModal.classList.remove('is-hidden');
+            emailModal.setAttribute('aria-label', 'Email-friendly production summary (press Escape to close)');
+        };
+
+        if (emailDataButton) {
+            emailDataButton.addEventListener('click', openEmailModal);
+        }
+
+        if (emailModal) {
+            emailModal.addEventListener('click', (event) => {
+                if (event.target === emailModal) {
+                    closeEmailModal();
+                }
+            });
+        }
+
+        emailDismissButtons.forEach((button) => {
+            button.addEventListener('click', closeEmailModal);
+        });
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && emailModal && !emailModal.classList.contains('is-hidden')) {
+                closeEmailModal();
+            }
+        });
     }
 </script>
 {% endblock %}
