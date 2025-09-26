@@ -1,20 +1,21 @@
 {% extends "base.html" %}
 {% block content %}
-{% if not current_user.is_authenticated %}
-<h2>Welcome to Hyperion Operations Hub</h2>
-<p class="home-lede">
-  Sign in with your assigned account to view production, orders, and inventory insights tailored to your role.
-</p>
-<p>
-  If you do not yet have credentials, please contact a system administrator for access.
-</p>
-<a class="home-summary-link" href="{{ url_for('auth.login') }}">Log in to continue →</a>
-{% else %}
 {% set show_orders = order_summary is not none %}
 {% set show_inventory = inventory_summary is not none %}
 
 <h2>Hyperion Operations Overview</h2>
 <p class="home-lede">Stay ahead of production promises and inventory risks with the highlights below.</p>
+
+{% if not current_user.is_authenticated %}
+<p class="home-summary-note">
+  You are viewing a public, read-only snapshot of current shop activity.
+  <a class="home-summary-link" href="{{ login_url }}">Log In</a> to update data or run jobs.
+</p>
+{% elif not (can_manage_orders or can_manage_inventory) %}
+<p class="home-summary-note">
+  Your account can view dashboard information but cannot make changes. Contact an administrator if you need additional access.
+</p>
+{% endif %}
 
 {% if show_orders or show_inventory %}
 <div class="home-summary-grid">
@@ -74,7 +75,13 @@
     {% endif %}
 
     <div class="home-summary-footer">
+      {% if can_manage_orders %}
       <a class="home-summary-link" href="{{ url_for('orders.orders_home') }}">Go to Orders →</a>
+      {% elif current_user.is_authenticated %}
+      <span class="home-summary-note">You do not have permission to manage orders.</span>
+      {% else %}
+      <a class="home-summary-link" href="{{ login_orders_url }}">Log In to manage orders →</a>
+      {% endif %}
     </div>
   </section>
   {% endif %}
@@ -115,13 +122,18 @@
     {% endif %}
 
     <div class="home-summary-footer">
+      {% if can_manage_inventory %}
       <a class="home-summary-link" href="{{ url_for('inventory.inventory_home') }}">Go to Inventory →</a>
+      {% elif current_user.is_authenticated %}
+      <span class="home-summary-note">You do not have permission to manage inventory.</span>
+      {% else %}
+      <a class="home-summary-link" href="{{ login_inventory_url }}">Log In to manage inventory →</a>
+      {% endif %}
     </div>
   </section>
   {% endif %}
 </div>
 {% else %}
-<p class="home-summary-empty">You are signed in, but your account does not have access to the shared order or inventory dashboards. Use the navigation menu to explore the areas available to you.</p>
-{% endif %}
+<p class="home-summary-empty">No order or inventory highlights are available yet. Check back soon as data is added.</p>
 {% endif %}
 {% endblock %}

@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 
-from flask import Flask, render_template
+from flask import Flask, render_template, url_for
 from sqlalchemy import func, inspect, text
 from sqlalchemy.exc import NoSuchTableError, OperationalError
 
@@ -256,133 +256,150 @@ def create_app(config_override=None):
     app.register_blueprint(admin.bp)
     app.register_blueprint(users.bp)
 
+    def _build_order_summary():
+        today = date.today()
+        due_soon_window = timedelta(days=3)
+        soon_cutoff = today + due_soon_window
+        active_statuses = tuple(models.OrderStatus.ACTIVE_STATES)
+
+        due_soon_query = models.Order.query.filter(
+            models.Order.status.in_(active_statuses),
+            models.Order.promised_date.isnot(None),
+            models.Order.promised_date >= today,
+            models.Order.promised_date <= soon_cutoff,
+        )
+        due_soon_count = due_soon_query.count()
+        due_soon_preview = (
+            due_soon_query.order_by(
+                models.Order.promised_date.asc(),
+                models.Order.order_number.asc(),
+            )
+            .limit(5)
+            .all()
+        )
+
+        overdue_query = models.Order.query.filter(
+            models.Order.status.in_(active_statuses),
+            models.Order.promised_date.isnot(None),
+            models.Order.promised_date < today,
+        )
+        overdue_count = overdue_query.count()
+        overdue_preview = (
+            overdue_query.order_by(
+                models.Order.promised_date.asc(),
+                models.Order.order_number.asc(),
+            )
+            .limit(5)
+            .all()
+        )
+
+        waiting_material_count = (
+            models.Order.query.filter(
+                models.Order.status == models.OrderStatus.WAITING_MATERIAL
+            ).count()
+        )
+
+        return {
+            "due_soon_window_days": due_soon_window.days,
+            "due_soon_count": due_soon_count,
+            "due_soon_preview": due_soon_preview,
+            "overdue_count": overdue_count,
+            "overdue_preview": overdue_preview,
+            "waiting_material_count": waiting_material_count,
+            "preview_limit": 5,
+        }
+
+    def _build_inventory_summary():
+        movement_totals = (
+            db.session.query(
+                models.Movement.item_id,
+                func.coalesce(func.sum(models.Movement.quantity), 0).label(
+                    "on_hand"
+                ),
+            )
+            .group_by(models.Movement.item_id)
+            .all()
+        )
+        on_hand_map = {item_id: int(total or 0) for item_id, total in movement_totals}
+
+        items = models.Item.query.order_by(models.Item.sku).all()
+
+        low_items = []
+        out_items = []
+        for item in items:
+            min_stock_raw = item.min_stock or 0
+            try:
+                min_stock = int(min_stock_raw)
+            except (TypeError, ValueError):
+                min_stock = 0
+            if min_stock <= 0:
+                continue
+            on_hand = on_hand_map.get(item.id, 0)
+            shortage = max(min_stock - on_hand, 0)
+            entry = {
+                "item": item,
+                "on_hand": on_hand,
+                "min_stock": min_stock,
+                "shortage": shortage,
+            }
+            if on_hand <= 0:
+                entry["is_out"] = True
+                out_items.append(entry)
+            elif on_hand < min_stock:
+                entry["is_out"] = False
+                low_items.append(entry)
+
+        out_items.sort(key=lambda entry: (-entry["shortage"], entry["item"].sku))
+        low_items.sort(key=lambda entry: (-entry["shortage"], entry["item"].sku))
+
+        preview_limit = 5
+        inventory_preview = (out_items + low_items)[:preview_limit]
+
+        return {
+            "out_count": len(out_items),
+            "low_count": len(low_items),
+            "preview": inventory_preview,
+            "preview_limit": preview_limit,
+            "total_alerts": len(out_items) + len(low_items),
+        }
+
     @app.route("/")
     def home():
-        if not current_user.is_authenticated:
-            return render_template(
-                "home.html",
-                order_summary=None,
-                inventory_summary=None,
-            )
-
-        order_summary = None
-        inventory_summary = None
+        order_summary = _build_order_summary()
+        inventory_summary = _build_inventory_summary()
 
         orders_roles = resolve_allowed_roles("orders")
-        if current_user.has_any_role(orders_roles):
-            today = date.today()
-            due_soon_window = timedelta(days=3)
-            soon_cutoff = today + due_soon_window
-            active_statuses = tuple(models.OrderStatus.ACTIVE_STATES)
-
-            due_soon_query = models.Order.query.filter(
-                models.Order.status.in_(active_statuses),
-                models.Order.promised_date.isnot(None),
-                models.Order.promised_date >= today,
-                models.Order.promised_date <= soon_cutoff,
-            )
-            due_soon_count = due_soon_query.count()
-            due_soon_preview = (
-                due_soon_query.order_by(
-                    models.Order.promised_date.asc(),
-                    models.Order.order_number.asc(),
-                )
-                .limit(5)
-                .all()
-            )
-
-            overdue_query = models.Order.query.filter(
-                models.Order.status.in_(active_statuses),
-                models.Order.promised_date.isnot(None),
-                models.Order.promised_date < today,
-            )
-            overdue_count = overdue_query.count()
-            overdue_preview = (
-                overdue_query.order_by(
-                    models.Order.promised_date.asc(),
-                    models.Order.order_number.asc(),
-                )
-                .limit(5)
-                .all()
-            )
-
-            waiting_material_count = (
-                models.Order.query.filter(
-                    models.Order.status == models.OrderStatus.WAITING_MATERIAL
-                ).count()
-            )
-
-            order_summary = {
-                "due_soon_window_days": due_soon_window.days,
-                "due_soon_count": due_soon_count,
-                "due_soon_preview": due_soon_preview,
-                "overdue_count": overdue_count,
-                "overdue_preview": overdue_preview,
-                "waiting_material_count": waiting_material_count,
-                "preview_limit": 5,
-            }
-
         inventory_roles = resolve_allowed_roles("inventory")
-        if current_user.has_any_role(inventory_roles):
-            movement_totals = (
-                db.session.query(
-                    models.Movement.item_id,
-                    func.coalesce(func.sum(models.Movement.quantity), 0).label(
-                        "on_hand"
-                    ),
-                )
-                .group_by(models.Movement.item_id)
-                .all()
-            )
-            on_hand_map = {
-                item_id: int(total or 0) for item_id, total in movement_totals
-            }
 
-            items = models.Item.query.order_by(models.Item.sku).all()
+        can_manage_orders = False
+        if current_user.is_authenticated:
+            if not orders_roles:
+                can_manage_orders = True
+            else:
+                can_manage_orders = current_user.has_any_role(orders_roles)
 
-            low_items = []
-            out_items = []
-            for item in items:
-                min_stock_raw = item.min_stock or 0
-                try:
-                    min_stock = int(min_stock_raw)
-                except (TypeError, ValueError):
-                    min_stock = 0
-                if min_stock <= 0:
-                    continue
-                on_hand = on_hand_map.get(item.id, 0)
-                shortage = max(min_stock - on_hand, 0)
-                entry = {
-                    "item": item,
-                    "on_hand": on_hand,
-                    "min_stock": min_stock,
-                    "shortage": shortage,
-                }
-                if on_hand <= 0:
-                    entry["is_out"] = True
-                    out_items.append(entry)
-                elif on_hand < min_stock:
-                    entry["is_out"] = False
-                    low_items.append(entry)
+        can_manage_inventory = False
+        if current_user.is_authenticated:
+            if not inventory_roles:
+                can_manage_inventory = True
+            else:
+                can_manage_inventory = current_user.has_any_role(inventory_roles)
 
-            out_items.sort(key=lambda entry: (-entry["shortage"], entry["item"].sku))
-            low_items.sort(key=lambda entry: (-entry["shortage"], entry["item"].sku))
-
-            preview_limit = 5
-            inventory_preview = (out_items + low_items)[:preview_limit]
-
-            inventory_summary = {
-                "out_count": len(out_items),
-                "low_count": len(low_items),
-                "preview": inventory_preview,
-                "preview_limit": preview_limit,
-                "total_alerts": len(out_items) + len(low_items),
-            }
+        login_url = url_for("auth.login", next=url_for("home"))
+        login_orders_url = url_for("auth.login", next=url_for("orders.orders_home"))
+        login_inventory_url = url_for(
+            "auth.login", next=url_for("inventory.inventory_home")
+        )
 
         return render_template(
             "home.html",
             order_summary=order_summary,
             inventory_summary=inventory_summary,
+            can_manage_orders=can_manage_orders,
+            can_manage_inventory=can_manage_inventory,
+            login_url=login_url,
+            login_orders_url=login_orders_url,
+            login_inventory_url=login_inventory_url,
         )
 
     return app
