@@ -25,6 +25,8 @@ from invapp.models import (
     OrderComponent,
     OrderLine,
     OrderStatus,
+    Role,
+    User,
     Reservation,
     RoutingStep,
     RoutingStepComponent,
@@ -49,6 +51,29 @@ def client(app):
     client.post(
         "/auth/login",
         data={"username": "superuser", "password": "joshbaldus"},
+        follow_redirects=True,
+    )
+    return client
+
+
+@pytest.fixture
+def limited_client(app):
+    client = app.test_client()
+    with app.app_context():
+        role = Role.query.filter_by(name="orders").first()
+        if role is None:
+            role = Role(name="orders")
+            db.session.add(role)
+            db.session.flush()
+        user = User(username="limited")
+        user.set_password("secret")
+        user.roles = [role]
+        db.session.add(user)
+        db.session.commit()
+
+    client.post(
+        "/auth/login",
+        data={"username": "limited", "password": "secret"},
         follow_redirects=True,
     )
     return client
@@ -138,9 +163,6 @@ def test_order_creation(client, app, items):
         )
         db.session.commit()
 
-    with client.session_transaction() as session:
-        session['is_admin'] = True
-
     today = date.today()
     payload = {
         'order_number': 'ORD001',
@@ -192,8 +214,6 @@ def test_order_creation(client, app, items):
 
 def test_bom_validation(client, app, items):
     finished, _, _ = items
-    with client.session_transaction() as session:
-        session['is_admin'] = True
     resp = client.post('/orders/new', data={
         'order_number': 'ORD002',
         'finished_good_sku': finished.sku,
@@ -229,8 +249,6 @@ def test_reservation_behavior(client, app, items):
         )
         db.session.commit()
 
-    with client.session_transaction() as session:
-        session['is_admin'] = True
 
     today = date.today()
     client.post('/orders/new', data={
@@ -272,8 +290,6 @@ def test_waiting_status_when_inventory_insufficient(client, app, items):
         )
         db.session.commit()
 
-    with client.session_transaction() as session:
-        session['is_admin'] = True
 
     today = date.today()
     client.post('/orders/new', data={
@@ -333,8 +349,6 @@ def test_schedule_view_groups_totals(client, schedule_orders):
 
 def test_component_usage_required(client, app, items):
     finished, component, _ = items
-    with client.session_transaction() as session:
-        session['is_admin'] = True
     resp = client.post('/orders/new', data={
         'order_number': 'ORD004',
         'finished_good_sku': finished.sku,
@@ -370,8 +384,6 @@ def test_routing_status_updates(client, app, items):
         )
         db.session.commit()
 
-    with client.session_transaction() as session:
-        session['is_admin'] = True
 
     today = date.today()
     client.post('/orders/new', data={
@@ -453,8 +465,6 @@ def test_edit_updates_general_notes(client, app, items):
         )
         db.session.commit()
 
-    with client.session_transaction() as session:
-        session['is_admin'] = True
 
     today = date.today()
     client.post('/orders/new', data={
@@ -567,7 +577,7 @@ def test_order_line_schedule_constraints_enforced(app, items):
             db.session.commit()
         db.session.rollback()
 
-def test_fetch_bom_template_requires_admin(client, app, items):
+def test_fetch_bom_template_requires_admin(limited_client, app, items):
     finished, component, _ = items
     with app.app_context():
         template = BillOfMaterial(item_id=finished.id)
@@ -577,7 +587,7 @@ def test_fetch_bom_template_requires_admin(client, app, items):
         )
         db.session.commit()
 
-    resp = client.get(f'/orders/bom-template/{finished.sku}')
+    resp = limited_client.get(f'/orders/bom-template/{finished.sku}')
     assert resp.status_code == 403
 
 
@@ -592,8 +602,6 @@ def test_fetch_bom_template_as_admin(client, app, items):
         )
         db.session.commit()
 
-    with client.session_transaction() as session:
-        session['is_admin'] = True
 
     resp = client.get(f'/orders/bom-template/{finished.sku}')
     assert resp.status_code == 200
@@ -616,8 +624,6 @@ def test_new_order_can_save_bom_template(client, app, items):
         )
         db.session.commit()
 
-    with client.session_transaction() as session:
-        session['is_admin'] = True
 
     today = date.today()
     payload = {
@@ -651,8 +657,6 @@ def test_new_order_can_save_bom_template(client, app, items):
 def test_bom_library_manual_creation(client, app, items):
     finished, component, _ = items
 
-    with client.session_transaction() as session:
-        session['is_admin'] = True
 
     payload = {
         'action': 'create',
@@ -682,8 +686,6 @@ def test_bom_library_csv_import_updates_template(client, app, items):
         )
         db.session.commit()
 
-    with client.session_transaction() as session:
-        session['is_admin'] = True
 
     csv_content = f"component_sku,quantity\n{component.sku},7\n"
     data = {

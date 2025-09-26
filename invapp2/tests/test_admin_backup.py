@@ -28,18 +28,21 @@ def client(app):
 
 
 def _login_admin(client):
-    with client.session_transaction() as session:
-        session["is_admin"] = True
+    client.post(
+        "/auth/login",
+        data={"username": "superuser", "password": "joshbaldus"},
+        follow_redirects=True,
+    )
 
 
 def test_backup_requires_admin(client):
     response = client.get("/admin/data-backup")
     assert response.status_code == 302
-    assert "/admin/login" in response.location
+    assert "/auth/login" in response.location
 
     response = client.post("/admin/data-backup/export")
     assert response.status_code == 302
-    assert "/admin/login" in response.location
+    assert "/auth/login" in response.location
 
 
 def test_export_and_import_round_trip(client, app):

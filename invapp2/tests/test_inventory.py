@@ -160,9 +160,6 @@ def test_edit_item_updates_notes(client, app):
         db.session.commit()
         item_id = item.id
 
-    with client.session_transaction() as session:
-        session["is_admin"] = True
-
     response = client.post(
         f"/inventory/item/{item_id}/edit",
         data={
@@ -210,16 +207,16 @@ def test_edit_item_updates_notes(client, app):
         assert cleared.item_class is None
 
 
-def test_edit_item_requires_admin(client, app):
+def test_edit_item_requires_admin(anon_client, app):
     with app.app_context():
         item = Item(sku="500", name="Admin Only")
         db.session.add(item)
         db.session.commit()
         item_id = item.id
 
-    response = client.get(f"/inventory/item/{item_id}/edit")
+    response = anon_client.get(f"/inventory/item/{item_id}/edit")
     assert response.status_code == 302
-    assert "/admin/login" in response.headers["Location"]
+    assert "/auth/login" in response.headers["Location"]
     assert f"next=%2Finventory%2Fitem%2F{item_id}%2Fedit" in response.headers["Location"]
 
 
@@ -240,9 +237,6 @@ def test_delete_item_blocks_when_referenced(client, app):
         db.session.commit()
         item_id = item.id
 
-    with client.session_transaction() as session:
-        session["is_admin"] = True
-
     response = client.post(f"/inventory/item/{item_id}/delete")
     assert response.status_code == 302
     assert f"/inventory/item/{item_id}/edit" in response.headers["Location"]
@@ -258,9 +252,6 @@ def test_delete_item_succeeds_without_references(client, app):
         db.session.commit()
         item_id = item.id
 
-    with client.session_transaction() as session:
-        session["is_admin"] = True
-
     response = client.post(f"/inventory/item/{item_id}/delete")
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/inventory/items")
@@ -269,7 +260,7 @@ def test_delete_item_succeeds_without_references(client, app):
         assert Item.query.get(item_id) is None
 
 
-def test_delete_all_items_requires_admin(client, app):
+def test_delete_all_items_requires_admin(anon_client, app):
     with app.app_context():
         db.session.add_all([
             Item(sku="BULK-1", name="Bulk Item 1"),
@@ -277,10 +268,9 @@ def test_delete_all_items_requires_admin(client, app):
         ])
         db.session.commit()
 
-    response = client.post("/inventory/items/delete-all")
+    response = anon_client.post("/inventory/items/delete-all")
     assert response.status_code == 302
-    assert "/admin/login" in response.headers["Location"]
-    assert "next=%2Finventory%2Fitems" in response.headers["Location"]
+    assert "/auth/login" in response.headers["Location"]
 
     with app.app_context():
         assert Item.query.count() == 2
@@ -293,9 +283,6 @@ def test_delete_all_items_removes_items(client, app):
             Item(sku="WIPE-2", name="Wipe Item 2"),
         ])
         db.session.commit()
-
-    with client.session_transaction() as session:
-        session["is_admin"] = True
 
     response = client.post("/inventory/items/delete-all")
     assert response.status_code == 302
@@ -320,9 +307,6 @@ def test_delete_all_items_blocks_when_dependencies_exist(client, app):
         )
         db.session.add(movement)
         db.session.commit()
-
-    with client.session_transaction() as session:
-        session["is_admin"] = True
 
     response = client.post("/inventory/items/delete-all")
     assert response.status_code == 302
@@ -361,9 +345,6 @@ def test_delete_all_items_offers_partial_cleanup(client, app):
         db.session.add(movement)
         db.session.commit()
 
-    with client.session_transaction() as flask_session:
-        flask_session["is_admin"] = True
-
     response = client.post("/inventory/items/delete-all")
     assert response.status_code == 302
 
@@ -387,14 +368,14 @@ def test_delete_all_items_offers_partial_cleanup(client, app):
         ]
 
 
-def test_delete_available_items_requires_admin(client, app):
+def test_delete_available_items_requires_admin(anon_client, app):
     with app.app_context():
         db.session.add(Item(sku="SAFE-ONLY", name="Safe Item"))
         db.session.commit()
 
-    response = client.post("/inventory/items/delete-available")
+    response = anon_client.post("/inventory/items/delete-available")
     assert response.status_code == 302
-    assert "/admin/login" in response.headers["Location"]
+    assert "/auth/login" in response.headers["Location"]
 
     with app.app_context():
         assert Item.query.count() == 1
@@ -417,9 +398,6 @@ def test_delete_available_items_removes_unreferenced(client, app):
         db.session.add(movement)
         db.session.commit()
 
-    with client.session_transaction() as flask_session:
-        flask_session["is_admin"] = True
-
     response = client.post("/inventory/items/delete-available")
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/inventory/items")
@@ -432,11 +410,10 @@ def test_delete_available_items_removes_unreferenced(client, app):
     assert "No items can be deleted until the related records are removed." in page
 
 
-def test_delete_all_stock_requires_admin(client):
-    response = client.post("/inventory/stock/delete-all")
+def test_delete_all_stock_requires_admin(anon_client):
+    response = anon_client.post("/inventory/stock/delete-all")
     assert response.status_code == 302
-    assert "/admin/login" in response.headers["Location"]
-    assert "next=%2Finventory%2Fstock" in response.headers["Location"]
+    assert "/auth/login" in response.headers["Location"]
 
 
 def test_delete_all_stock_removes_records(client, app):
@@ -481,9 +458,6 @@ def test_delete_all_stock_removes_records(client, app):
         db.session.add(consumption)
         db.session.commit()
 
-    with client.session_transaction() as session:
-        session["is_admin"] = True
-
     response = client.post("/inventory/stock/delete-all")
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/inventory/stock")
@@ -494,15 +468,14 @@ def test_delete_all_stock_removes_records(client, app):
         assert RoutingStepConsumption.query.count() == 0
 
 
-def test_delete_all_locations_requires_admin(client, app):
+def test_delete_all_locations_requires_admin(anon_client, app):
     with app.app_context():
         db.session.add_all([Location(code="LOC-A"), Location(code="LOC-B")])
         db.session.commit()
 
-    response = client.post("/inventory/locations/delete-all")
+    response = anon_client.post("/inventory/locations/delete-all")
     assert response.status_code == 302
-    assert "/admin/login" in response.headers["Location"]
-    assert "next=%2Finventory%2Flocations" in response.headers["Location"]
+    assert "/auth/login" in response.headers["Location"]
 
     with app.app_context():
         assert Location.query.count() == 2
@@ -524,9 +497,6 @@ def test_delete_all_locations_blocks_with_movements(client, app):
         db.session.add(movement)
         db.session.commit()
 
-    with client.session_transaction() as session:
-        session["is_admin"] = True
-
     response = client.post("/inventory/locations/delete-all")
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/inventory/locations")
@@ -541,9 +511,6 @@ def test_delete_all_locations_removes_all(client, app):
         db.session.add_all([Location(code="DEL-1"), Location(code="DEL-2")])
         db.session.commit()
 
-    with client.session_transaction() as session:
-        session["is_admin"] = True
-
     response = client.post("/inventory/locations/delete-all")
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/inventory/locations")
@@ -552,17 +519,16 @@ def test_delete_all_locations_removes_all(client, app):
         assert Location.query.count() == 0
 
 
-def test_delete_all_history_requires_admin(client, app):
+def test_delete_all_history_requires_admin(anon_client, app):
     with app.app_context():
         item = Item(sku="HIST-ITEM", name="History Item")
         location = Location(code="HIST-LOC")
         db.session.add_all([item, location])
         db.session.commit()
 
-    response = client.post("/inventory/history/delete-all")
+    response = anon_client.post("/inventory/history/delete-all")
     assert response.status_code == 302
-    assert "/admin/login" in response.headers["Location"]
-    assert "next=%2Finventory%2Fhistory" in response.headers["Location"]
+    assert "/auth/login" in response.headers["Location"]
 
 
 def test_delete_all_history_removes_records(client, app):
@@ -583,9 +549,6 @@ def test_delete_all_history_removes_records(client, app):
         db.session.add(movement)
         db.session.commit()
 
-    with client.session_transaction() as session:
-        session["is_admin"] = True
-
     response = client.post("/inventory/history/delete-all")
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/inventory/history")
@@ -594,16 +557,16 @@ def test_delete_all_history_removes_records(client, app):
         assert Movement.query.count() == 0
         assert Batch.query.count() == 0
 
-def test_edit_location_requires_admin(client, app):
+def test_edit_location_requires_admin(anon_client, app):
     with app.app_context():
         location = Location(code="EDIT-LOC", description="Old desc")
         db.session.add(location)
         db.session.commit()
         location_id = location.id
 
-    response = client.get(f"/inventory/location/{location_id}/edit")
+    response = anon_client.get(f"/inventory/location/{location_id}/edit")
     assert response.status_code == 302
-    assert "/admin/login" in response.headers["Location"]
+    assert "/auth/login" in response.headers["Location"]
     assert f"next=%2Finventory%2Flocation%2F{location_id}%2Fedit" in response.headers["Location"]
 
 
@@ -613,9 +576,6 @@ def test_edit_location_updates(client, app):
         db.session.add(location)
         db.session.commit()
         location_id = location.id
-
-    with client.session_transaction() as session:
-        session["is_admin"] = True
 
     response = client.post(
         f"/inventory/location/{location_id}/edit",
@@ -646,9 +606,6 @@ def test_delete_location_blocks_when_movement_exists(client, app):
         db.session.commit()
         location_id = location.id
 
-    with client.session_transaction() as session:
-        session["is_admin"] = True
-
     response = client.post(f"/inventory/location/{location_id}/delete")
     assert response.status_code == 302
     assert f"/inventory/location/{location_id}/edit" in response.headers["Location"]
@@ -663,9 +620,6 @@ def test_delete_location_succeeds_without_movement(client, app):
         db.session.add(location)
         db.session.commit()
         location_id = location.id
-
-    with client.session_transaction() as session:
-        session["is_admin"] = True
 
     response = client.post(f"/inventory/location/{location_id}/delete")
     assert response.status_code == 302

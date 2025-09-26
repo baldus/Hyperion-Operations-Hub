@@ -6,7 +6,7 @@
   <a href="{{ url_for('inventory.add_location') }}" class="bubble-btn">Add Location</a>
   <a href="{{ url_for('inventory.import_locations') }}" class="bubble-btn">Bulk Import Locations (CSV)</a>
   <a href="{{ url_for('inventory.export_locations') }}" class="bubble-btn">Export Locations</a>
-  {% if session.get('is_admin') and locations %}
+  {% if current_user.is_authenticated and current_user.has_role('admin') and locations %}
   <form method="post" action="{{ url_for('inventory.delete_all_locations') }}" class="inline-form" onsubmit="return confirm('Are you sure you want to delete all locations? Any references will need to be recreated.');">
     <button type="submit" class="bubble-btn danger">Delete All Locations</button>
   </form>

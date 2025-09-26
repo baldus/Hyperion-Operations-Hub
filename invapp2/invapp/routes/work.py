@@ -2,18 +2,18 @@ import os
 import uuid
 from flask import (
     Blueprint,
-    abort,
     current_app,
     redirect,
     render_template,
     request,
-    session,
     url_for,
 )
 from invapp.auth import blueprint_page_guard
 from werkzeug.utils import secure_filename
 
+from invapp.login import current_user
 from invapp.models import db, WorkInstruction
+from invapp.security import require_roles
 
 bp = Blueprint("work", __name__, url_prefix="/work")
 
@@ -41,11 +41,12 @@ def list_instructions():
     return render_template(
         "work/home.html",
         instructions=instructions,
-        is_admin=session.get("is_admin", False),
+        is_admin=current_user.is_authenticated and current_user.has_role("admin"),
     )
 
 
 @bp.route("/instructions/upload", methods=["POST"])
+@require_roles("admin")
 def upload_instruction():
     file = request.files.get("file")
     if not file or file.filename == "" or not _allowed_file(file.filename):
@@ -66,10 +67,8 @@ def upload_instruction():
 
 
 @bp.route("/instructions/<int:instruction_id>/delete", methods=["POST"])
+@require_roles("admin")
 def delete_instruction(instruction_id):
-    if not session.get("is_admin"):
-        abort(403)
-
     wi = WorkInstruction.query.get_or_404(instruction_id)
     file_path = os.path.join(
         current_app.config["WORK_INSTRUCTION_UPLOAD_FOLDER"], wi.filename

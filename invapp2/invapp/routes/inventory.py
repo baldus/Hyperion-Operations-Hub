@@ -24,6 +24,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload, load_only
 
 from invapp.auth import blueprint_page_guard
+from invapp.security import require_roles
 from invapp.models import (
     Batch,
     BillOfMaterial,
@@ -727,14 +728,8 @@ def add_item():
 
 
 @bp.route("/item/<int:item_id>/edit", methods=["GET", "POST"])
+@require_roles("admin")
 def edit_item(item_id):
-    if not session.get("is_admin"):
-        next_target = (
-            request.full_path if request.method == "GET" and request.query_string else request.path
-        )
-        flash("Administrator access is required to edit items.", "danger")
-        return redirect(url_for("admin.login", next=next_target))
-
     item = Item.query.get_or_404(item_id)
 
     if request.method == "POST":
@@ -773,12 +768,8 @@ def edit_item(item_id):
 
 
 @bp.route("/item/<int:item_id>/delete", methods=["POST"])
+@require_roles("admin")
 def delete_item(item_id):
-    if not session.get("is_admin"):
-        flash("Administrator access is required to delete items.", "danger")
-        next_target = url_for("inventory.edit_item", item_id=item_id)
-        return redirect(url_for("admin.login", next=next_target))
-
     item = Item.query.get_or_404(item_id)
 
     has_batches = Batch.query.filter_by(item_id=item.id).first() is not None
@@ -873,13 +864,8 @@ def _flash_stock_deletion_summary(consumptions_deleted, movements_deleted, batch
 
 
 @bp.route("/items/delete-all", methods=["POST"])
+@require_roles("admin")
 def delete_all_items():
-    if not session.get("is_admin"):
-        flash("Administrator access is required to delete items.", "danger")
-        next_target = url_for("inventory.list_items")
-        return redirect(url_for("admin.login", next=next_target))
-
-
     blocked_sources, dependent_item_ids = _gather_item_dependency_info()
     if blocked_sources:
         deletable_query = _deletable_items_query(dependent_item_ids)
@@ -910,12 +896,8 @@ def delete_all_items():
 
 
 @bp.route("/items/delete-available", methods=["POST"])
+@require_roles("admin")
 def delete_available_items():
-    if not session.get("is_admin"):
-        flash("Administrator access is required to delete items.", "danger")
-        next_target = url_for("inventory.list_items")
-        return redirect(url_for("admin.login", next=next_target))
-
     blocked_sources, dependent_item_ids = _gather_item_dependency_info()
     deletable_query = _deletable_items_query(dependent_item_ids)
     deletable_count = deletable_query.count()
@@ -1254,12 +1236,8 @@ def list_locations():
 
 
 @bp.route("/locations/delete-all", methods=["POST"])
+@require_roles("admin")
 def delete_all_locations():
-    if not session.get("is_admin"):
-        flash("Administrator access is required to delete locations.", "danger")
-        next_target = url_for("inventory.list_locations")
-        return redirect(url_for("admin.login", next=next_target))
-
     has_movements = db.session.query(Movement.id).limit(1).first() is not None
     if has_movements:
         flash(
@@ -1293,14 +1271,8 @@ def add_location():
 
 
 @bp.route("/location/<int:location_id>/edit", methods=["GET", "POST"])
+@require_roles("admin")
 def edit_location(location_id):
-    if not session.get("is_admin"):
-        next_target = (
-            request.full_path if request.method == "GET" and request.query_string else request.path
-        )
-        flash("Administrator access is required to edit locations.", "danger")
-        return redirect(url_for("admin.login", next=next_target))
-
     location = Location.query.get_or_404(location_id)
 
     if request.method == "POST":
@@ -1340,12 +1312,8 @@ def edit_location(location_id):
 
 
 @bp.route("/location/<int:location_id>/delete", methods=["POST"])
+@require_roles("admin")
 def delete_location(location_id):
-    if not session.get("is_admin"):
-        flash("Administrator access is required to delete locations.", "danger")
-        next_target = url_for("inventory.edit_location", location_id=location_id)
-        return redirect(url_for("admin.login", next=next_target))
-
     location = Location.query.get_or_404(location_id)
     has_movements = Movement.query.filter_by(location_id=location.id).first() is not None
 
@@ -1640,12 +1608,8 @@ def list_stock():
 
 
 @bp.route("/stock/delete-all", methods=["POST"])
+@require_roles("admin")
 def delete_all_stock():
-    if not session.get("is_admin"):
-        flash("Administrator access is required to delete stock records.", "danger")
-        next_target = url_for("inventory.list_stock")
-        return redirect(url_for("admin.login", next=next_target))
-
     consumptions_deleted, movements_deleted, batches_deleted = _delete_stock_records()
     _flash_stock_deletion_summary(consumptions_deleted, movements_deleted, batches_deleted)
 
@@ -2154,12 +2118,8 @@ def history_home():
 
 
 @bp.route("/history/delete-all", methods=["POST"])
+@require_roles("admin")
 def delete_all_history():
-    if not session.get("is_admin"):
-        flash("Administrator access is required to delete transaction history.", "danger")
-        next_target = url_for("inventory.history_home")
-        return redirect(url_for("admin.login", next=next_target))
-
     consumptions_deleted, movements_deleted, batches_deleted = _delete_stock_records()
     _flash_stock_deletion_summary(consumptions_deleted, movements_deleted, batches_deleted)
 

@@ -1,4 +1,3 @@
-import time
 
 import os
 import sys
@@ -132,44 +131,27 @@ def test_password_reset(client, app):
     assert b"Invalid credentials" not in resp.data
 
 
-def test_admin_login_button_route(client):
+def test_admin_login_redirects_to_auth(client):
+    resp = client.get("/admin/login", follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers["Location"].startswith("/auth/login")
+
+    login(client, DEFAULT_SUPERUSER_USERNAME, DEFAULT_SUPERUSER_PASSWORD)
     resp = client.get("/admin/login")
     assert resp.status_code == 200
+    assert b"Administrator Tools" in resp.data
 
-    resp = client.post(
-        "/admin/login",
-        data={
-            "username": DEFAULT_SUPERUSER_USERNAME,
-            "password": DEFAULT_SUPERUSER_PASSWORD,
-        },
-        follow_redirects=False,
-    )
+
+def test_admin_routes_require_admin_role(client, app):
+    create_user(app, "mallory", "pw", role_names=("user",))
+    login(client, "mallory", "pw")
+
+    resp = client.get("/admin/login", follow_redirects=False)
     assert resp.status_code == 302
     assert resp.headers["Location"].endswith("/")
 
-    with client.session_transaction() as session:
-        assert session.get("is_admin") is True
-
-
-def test_admin_session_timeout(client):
-    client.post(
-        "/admin/login",
-        data={
-            "username": DEFAULT_SUPERUSER_USERNAME,
-            "password": DEFAULT_SUPERUSER_PASSWORD,
-        },
-        follow_redirects=False,
-    )
-
-    with client.session_transaction() as session:
-        session["admin_last_active"] = time.time() - 301
-
-    response = client.get("/settings/printers", follow_redirects=False)
-    assert response.status_code == 302
-    assert response.headers["Location"].startswith("/admin/login")
-
-    with client.session_transaction() as session:
-        assert not session.get("is_admin")
+    resp = client.get("/admin/data-backup")
+    assert resp.status_code == 403
 
 
 def test_register_route_restricted(client, app):

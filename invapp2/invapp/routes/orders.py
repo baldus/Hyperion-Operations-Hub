@@ -11,7 +11,6 @@ from flask import (
     redirect,
     render_template,
     request,
-    session,
     url_for,
 )
 from sqlalchemy import func, or_
@@ -19,6 +18,7 @@ from sqlalchemy.orm import joinedload
 
 from invapp.extensions import db
 from invapp.auth import blueprint_page_guard
+from invapp.security import require_roles
 from invapp.models import (
     BillOfMaterial,
     BillOfMaterialComponent,
@@ -358,11 +358,8 @@ def view_closed_orders():
 
 
 @bp.route("/waiting")
+@require_roles("admin")
 def view_waiting_orders():
-    if not session.get("is_admin"):
-        flash("Administrator access is required to view waiting orders.", "danger")
-        return redirect(url_for("orders.view_open_orders"))
-
     orders = (
         Order.query.options(joinedload(Order.order_lines).joinedload(OrderLine.item))
         .filter(Order.status == OrderStatus.WAITING_MATERIAL)
@@ -373,10 +370,8 @@ def view_waiting_orders():
 
 
 @bp.route("/bom-template/<string:sku>")
+@require_roles("admin")
 def fetch_bom_template(sku: str):
-    if not session.get("is_admin"):
-        return jsonify({"error": "Administrator access is required."}), 403
-
     normalized_sku = (sku or "").strip()
     if not normalized_sku:
         return jsonify({"error": "Finished good part number is required."}), 400
@@ -440,12 +435,8 @@ def _parse_date(raw_value, field_label, errors):
 
 
 @bp.route("/bom-library", methods=["GET", "POST"])
+@require_roles("admin")
 def bom_library():
-    if not session.get("is_admin"):
-        next_target = request.full_path if request.query_string else request.path
-        flash("Administrator access is required to manage BOM templates.", "danger")
-        return redirect(url_for("admin.login", next=next_target))
-
     items = Item.query.order_by(Item.sku).all()
     templates = (
         BillOfMaterial.query.options(
@@ -602,12 +593,8 @@ def bom_library():
 
 
 @bp.route("/new", methods=["GET", "POST"])
+@require_roles("admin")
 def new_order():
-    if not session.get("is_admin"):
-        next_target = request.full_path if request.query_string else request.path
-        flash("Administrator access is required to create new orders.", "danger")
-        return redirect(url_for("admin.login", next=next_target))
-
     items = Item.query.order_by(Item.sku).all()
     form_data = {
         "order_number": "",
