@@ -1584,6 +1584,21 @@ body.light .secondary-link {
     box-sizing: border-box;
 }
 
+/* Production History overrides */
+#primary_min,
+#primary_max,
+#primary_step,
+#secondary_min,
+#secondary_max,
+#secondary_step,
+#goal_value {
+    max-width: 180px;
+}
+
+#output_formula {
+    max-width: 480px;
+}
+
 body.light .production-table input[type="number"],
 body.light .production-table input[type="date"] {
     background-color: #fff;
