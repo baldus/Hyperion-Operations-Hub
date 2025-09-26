@@ -1,20 +1,17 @@
 {% extends "base.html" %}
 {% block content %}
-{% if not current_user.is_authenticated %}
-<h2>Welcome to Hyperion Operations Hub</h2>
-<p class="home-lede">
-  Sign in with your assigned account to view production, orders, and inventory insights tailored to your role.
-</p>
-<p>
-  If you do not yet have credentials, please contact a system administrator for access.
-</p>
-<a class="home-summary-link" href="{{ url_for('auth.login') }}">Log in to continue →</a>
-{% else %}
 {% set show_orders = order_summary is not none %}
 {% set show_inventory = inventory_summary is not none %}
 
 <h2>Hyperion Operations Overview</h2>
+{% if not current_user.is_authenticated %}
+<p class="home-lede">
+  You are viewing a read-only snapshot of live production, order, and inventory signals.
+  <a href="{{ url_for('auth.login') }}">Log in</a> to manage data and run operations.
+</p>
+{% else %}
 <p class="home-lede">Stay ahead of production promises and inventory risks with the highlights below.</p>
+{% endif %}
 
 {% if show_orders or show_inventory %}
 <div class="home-summary-grid">
@@ -121,7 +118,10 @@
   {% endif %}
 </div>
 {% else %}
+{% if current_user.is_authenticated %}
 <p class="home-summary-empty">You are signed in, but your account does not have access to the shared order or inventory dashboards. Use the navigation menu to explore the areas available to you.</p>
+{% else %}
+<p class="home-summary-empty">Operational data will appear here once orders and inventory are tracked in the system.</p>
 {% endif %}
 {% endif %}
 {% endblock %}

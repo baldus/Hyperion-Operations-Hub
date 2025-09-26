@@ -258,18 +258,13 @@ def create_app(config_override=None):
 
     @app.route("/")
     def home():
-        if not current_user.is_authenticated:
-            return render_template(
-                "home.html",
-                order_summary=None,
-                inventory_summary=None,
-            )
-
         order_summary = None
         inventory_summary = None
 
+        is_public_view = not current_user.is_authenticated
+
         orders_roles = resolve_allowed_roles("orders")
-        if current_user.has_any_role(orders_roles):
+        if is_public_view or current_user.has_any_role(orders_roles):
             today = date.today()
             due_soon_window = timedelta(days=3)
             soon_cutoff = today + due_soon_window
@@ -323,7 +318,7 @@ def create_app(config_override=None):
             }
 
         inventory_roles = resolve_allowed_roles("inventory")
-        if current_user.has_any_role(inventory_roles):
+        if is_public_view or current_user.has_any_role(inventory_roles):
             movement_totals = (
                 db.session.query(
                     models.Movement.item_id,
