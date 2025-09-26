@@ -18,6 +18,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload
 
 from invapp.extensions import db
+from invapp.auth import blueprint_page_guard
 from invapp.models import (
     BillOfMaterial,
     BillOfMaterialComponent,
@@ -36,6 +37,8 @@ from invapp.models import (
 )
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
+
+bp.before_request(blueprint_page_guard("orders"))
 
 
 def _search_filter(query, search_term):

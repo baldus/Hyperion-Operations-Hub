@@ -40,6 +40,17 @@ def app():
 
 @pytest.fixture
 def client(app):
+    client = app.test_client()
+    client.post(
+        "/auth/login",
+        data={"username": "superuser", "password": "joshbaldus"},
+        follow_redirects=True,
+    )
+    return client
+
+
+@pytest.fixture
+def anon_client(app):
     return app.test_client()
 
 

@@ -10,11 +10,14 @@ from flask import (
     session,
     url_for,
 )
+from invapp.auth import blueprint_page_guard
 from werkzeug.utils import secure_filename
 
 from invapp.models import db, WorkInstruction
 
 bp = Blueprint("work", __name__, url_prefix="/work")
+
+bp.before_request(blueprint_page_guard("work"))
 
 
 def _allowed_file(filename: str) -> bool:

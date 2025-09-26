@@ -1,8 +1,10 @@
 from decimal import Decimal
 from datetime import datetime
 
+from sqlalchemy import inspect
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.orm import synonym
+from sqlalchemy.orm.exc import DetachedInstanceError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from invapp.extensions import db
@@ -234,6 +236,13 @@ user_roles = db.Table(
 )
 
 
+page_access_roles = db.Table(
+    "page_access_role",
+    db.Column("access_rule_id", db.Integer, db.ForeignKey("page_access_rule.id"), primary_key=True),
+    db.Column("role_id", db.Integer, db.ForeignKey("role.id"), primary_key=True),
+)
+
+
 class Role(db.Model):
     __tablename__ = "role"
 
@@ -249,6 +258,26 @@ class Role(db.Model):
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return f"<Role {self.name}>"
+
+
+class PageAccessRule(db.Model):
+    __tablename__ = "page_access_rule"
+
+    id = db.Column(db.Integer, primary_key=True)
+    page_name = db.Column(db.String(128), unique=True, nullable=False)
+    label = db.Column(db.String(255), nullable=False)
+
+    roles = db.relationship(
+        "Role",
+        secondary=page_access_roles,
+        lazy="joined",
+    )
+
+    def assigned_role_names(self) -> list[str]:
+        return sorted({role.name for role in self.roles})
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return f"<PageAccessRule {self.page_name} roles={self.assigned_role_names()}>"
 
 
 class User(UserMixin, db.Model):
@@ -277,6 +306,25 @@ class User(UserMixin, db.Model):
 
     def has_role(self, role_name: str) -> bool:
         return any(role.name == role_name for role in self.roles)
+
+    def has_any_role(self, role_names) -> bool:
+        if not role_names:
+            return False
+
+        try:
+            role_name_set = {role.name for role in self.roles}
+        except DetachedInstanceError:
+            identity = inspect(self).identity
+            if not identity:
+                return False
+            refreshed = db.session.get(User, identity[0])
+            if refreshed is None:
+                return False
+            return refreshed.has_any_role(role_names)
+        except TypeError:
+            return False
+
+        return any(name in role_name_set for name in role_names)
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return f"<User {self.username}>"

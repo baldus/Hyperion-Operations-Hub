@@ -23,7 +23,13 @@ def app():
 
 @pytest.fixture
 def client(app):
-    return app.test_client()
+    client = app.test_client()
+    client.post(
+        "/auth/login",
+        data={"username": "superuser", "password": "joshbaldus"},
+        follow_redirects=True,
+    )
+    return client
 
 
 def ensure_user(app, username='u', password='p'):

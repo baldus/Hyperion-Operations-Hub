@@ -5,6 +5,8 @@ from sqlalchemy import func, inspect, text
 from sqlalchemy.exc import NoSuchTableError, OperationalError
 
 from .extensions import db, login_manager
+from .login import current_user
+from .permissions import resolve_allowed_roles
 from .routes import (
     admin,
     auth,
@@ -230,6 +232,18 @@ def create_app(config_override=None):
             app.config.get("ADMIN_PASSWORD", "joshbaldus"),
         )
 
+    @app.context_processor
+    def inject_permission_helpers():
+        def can_access_page(page_name: str) -> bool:
+            if not current_user.is_authenticated:
+                return False
+            allowed_roles = resolve_allowed_roles(page_name)
+            if not allowed_roles:
+                return False
+            return current_user.has_any_role(allowed_roles)
+
+        return {"can_access_page": can_access_page}
+
     # register blueprints
     app.register_blueprint(auth.bp)
     app.register_blueprint(inventory.bp)
@@ -244,6 +258,13 @@ def create_app(config_override=None):
 
     @app.route("/")
     def home():
+        if not current_user.is_authenticated:
+            return render_template(
+                "home.html",
+                order_summary=None,
+                inventory_summary=None,
+            )
+
         today = date.today()
         due_soon_window = timedelta(days=3)
         soon_cutoff = today + due_soon_window
@@ -358,3 +379,4 @@ def create_app(config_override=None):
         )
 
     return app
+

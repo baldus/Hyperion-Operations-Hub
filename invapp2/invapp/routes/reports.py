@@ -5,16 +5,8 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Iterable, Optional
 
-from flask import (
-    Blueprint,
-    Response,
-    jsonify,
-    redirect,
-    render_template,
-    request,
-    url_for,
-)
-from invapp.login import current_user
+from flask import Blueprint, Response, jsonify, render_template, request
+from invapp.auth import blueprint_page_guard
 from sqlalchemy import case, func
 from sqlalchemy.orm import joinedload
 
@@ -24,10 +16,7 @@ from invapp.models import Batch, Item, Location, Movement
 bp = Blueprint("reports", __name__, url_prefix="/reports")
 
 
-@bp.before_request
-def require_login():
-    if not current_user.is_authenticated:
-        return redirect(url_for("auth.login", next=request.url))
+bp.before_request(blueprint_page_guard("reports"))
 
 
 def _decimal_to_string(value):

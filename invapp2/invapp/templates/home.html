@@ -1,5 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
+{% if not current_user.is_authenticated %}
+<h2>Welcome to Hyperion Operations Hub</h2>
+<p class="home-lede">
+  Sign in with your assigned account to view production, orders, and inventory insights tailored to your role.
+</p>
+<p>
+  If you do not yet have credentials, please contact a system administrator for access.
+</p>
+<a class="home-summary-link" href="{{ url_for('auth.login') }}">Log in to continue →</a>
+{% else %}
 <h2>Hyperion Operations Overview</h2>
 <p class="home-lede">Stay ahead of production promises and inventory risks with the highlights below.</p>
 
@@ -102,4 +112,5 @@
     </div>
   </section>
 </div>
+{% endif %}
 {% endblock %}
