@@ -648,6 +648,7 @@ def history():
 
 
     table_rows = []
+    email_notes_entries: List[Dict[str, str]] = []
     chart_labels: List[str] = []
     stack_datasets: List[Dict[str, object]] = []
     overlay_values: List[float | None] = []
@@ -807,6 +808,15 @@ def history():
             }
         )
 
+        if record.daily_notes:
+            email_notes_entries.append(
+                {
+                    "date": record.entry_date.strftime("%Y-%m-%d"),
+                    "day": record.day_of_week,
+                    "notes": record.daily_notes,
+                }
+            )
+
     line_datasets = []
     for series in LINE_SERIES:
         line_datasets.append(
@@ -899,6 +909,7 @@ def history():
         chart_axis_settings=chart_axis_settings,
         start_date=start_date,
         end_date=end_date,
+        email_notes_data=email_notes_entries,
     )
 
 

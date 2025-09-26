@@ -38,6 +38,9 @@
                 <input type="checkbox" id="collapseWeekendsToggle" name="collapse_weekends">
                 Collapse weekends
             </label>
+            <button type="button" class="chart-action-button" id="emailDataButton">
+                Email Data
+            </button>
         </div>
         <div class="chart-grid">
             <div class="chart-card">
@@ -53,6 +56,22 @@
         <div class="chart-modal-dialog">
             <button type="button" class="chart-modal-close" data-modal-dismiss aria-label="Close expanded chart">&times;</button>
             <canvas id="expandedChart" aria-label="Expanded chart canvas"></canvas>
+        </div>
+    </div>
+
+    <div class="chart-modal is-hidden" id="emailDataModal" role="dialog" aria-modal="true" aria-label="Email-friendly production data preview">
+        <div class="chart-modal-dialog email-data-dialog">
+            <button type="button" class="chart-modal-close" data-email-modal-dismiss aria-label="Close email data preview">&times;</button>
+            <div class="email-modal-content">
+                <h3>Email-Friendly Summary</h3>
+                <p class="email-data-intro">Copy the notes and chart images below into your email.</p>
+                <div class="email-notes" id="emailDataNotes"></div>
+                <div class="email-data-charts" id="emailDataCharts">
+                    <img id="emailDataBarImage" class="email-chart-image" alt="Gates produced chart preview" hidden>
+                    <img id="emailDataLineImage" class="email-chart-image" alt="Cumulative totals chart preview" hidden>
+                    <p id="emailDataChartFallback" class="email-chart-fallback" hidden>Charts will appear here when available.</p>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -172,6 +191,7 @@
     const overlayDatasets = {{ overlay_datasets|tojson }};
     const lineDatasets = {{ line_datasets|tojson }};
     const chartAxisSettings = {{ chart_axis_settings|tojson }};
+    const emailNotesData = {{ email_notes_data|tojson }};
 
     const parseDateLabel = (label) => {
         if (typeof label !== 'string') {
@@ -525,6 +545,8 @@
             if (collapseToggle) {
                 collapseToggle.checked = !includeWeekends;
             }
+
+            document.dispatchEvent(new CustomEvent('productionChartsUpdated'));
         };
 
         if (collapseToggle) {
@@ -599,9 +621,127 @@
             button.addEventListener('click', closeChartModal);
         });
 
+        const emailDataButton = document.getElementById('emailDataButton');
+        const emailDataModal = document.getElementById('emailDataModal');
+        const emailModalDismissButtons = emailDataModal
+            ? emailDataModal.querySelectorAll('[data-email-modal-dismiss]')
+            : [];
+        const emailNotesContainer = document.getElementById('emailDataNotes');
+        const emailBarImage = document.getElementById('emailDataBarImage');
+        const emailLineImage = document.getElementById('emailDataLineImage');
+        const emailChartFallback = document.getElementById('emailDataChartFallback');
+
+        const renderEmailNotes = () => {
+            if (!emailNotesContainer) {
+                return;
+            }
+
+            emailNotesContainer.innerHTML = '';
+
+            const notesEntries = Array.isArray(emailNotesData)
+                ? emailNotesData.filter((entry) => entry && entry.notes)
+                : [];
+
+            if (!notesEntries.length) {
+                const emptyMessage = document.createElement('p');
+                emptyMessage.className = 'email-notes-empty';
+                emptyMessage.textContent = 'No notes were recorded for the selected dates.';
+                emailNotesContainer.appendChild(emptyMessage);
+                return;
+            }
+
+            notesEntries.forEach((entry) => {
+                const wrapper = document.createElement('article');
+                wrapper.className = 'email-note';
+
+                const title = document.createElement('h4');
+                title.className = 'email-note-title';
+                title.textContent = `${entry.date} (${entry.day})`;
+
+                const body = document.createElement('p');
+                body.className = 'email-note-body';
+                body.textContent = entry.notes;
+
+                wrapper.appendChild(title);
+                wrapper.appendChild(body);
+                emailNotesContainer.appendChild(wrapper);
+            });
+        };
+
+        const updateEmailChartImages = () => {
+            const barImageUrl = barChart && typeof barChart.toBase64Image === 'function'
+                ? barChart.toBase64Image()
+                : null;
+            const lineImageUrl = lineChart && typeof lineChart.toBase64Image === 'function'
+                ? lineChart.toBase64Image()
+                : null;
+
+            if (emailBarImage) {
+                if (barImageUrl) {
+                    emailBarImage.src = barImageUrl;
+                    emailBarImage.hidden = false;
+                } else {
+                    emailBarImage.hidden = true;
+                }
+            }
+
+            if (emailLineImage) {
+                if (lineImageUrl) {
+                    emailLineImage.src = lineImageUrl;
+                    emailLineImage.hidden = false;
+                } else {
+                    emailLineImage.hidden = true;
+                }
+            }
+
+            if (emailChartFallback) {
+                const shouldShowFallback = !barImageUrl && !lineImageUrl;
+                emailChartFallback.hidden = !shouldShowFallback;
+            }
+        };
+
+        const openEmailModal = () => {
+            if (!emailDataModal) {
+                return;
+            }
+
+            renderEmailNotes();
+            updateEmailChartImages();
+            emailDataModal.classList.remove('is-hidden');
+            emailDataModal.setAttribute('aria-label', 'Email-friendly production data preview');
+        };
+
+        const closeEmailModal = () => {
+            if (!emailDataModal) {
+                return;
+            }
+            emailDataModal.classList.add('is-hidden');
+        };
+
+        if (emailDataButton) {
+            emailDataButton.addEventListener('click', openEmailModal);
+        }
+
+        if (emailDataModal) {
+            emailDataModal.addEventListener('click', (event) => {
+                if (event.target === emailDataModal) {
+                    closeEmailModal();
+                }
+            });
+        }
+
+        emailModalDismissButtons.forEach((button) => {
+            button.addEventListener('click', closeEmailModal);
+        });
+
         document.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape' && chartModal && !chartModal.classList.contains('is-hidden')) {
-                closeChartModal();
+            if (event.key === 'Escape') {
+                if (chartModal && !chartModal.classList.contains('is-hidden')) {
+                    closeChartModal();
+                }
+                if (emailDataModal && !emailDataModal.classList.contains('is-hidden')) {
+                    closeEmailModal();
+                }
             }
         });
 
@@ -633,6 +773,12 @@
 
         registerChartForExpansion(barContext, barChart);
         registerChartForExpansion(lineContext, lineChart);
+
+        document.addEventListener('productionChartsUpdated', () => {
+            updateEmailChartImages();
+        });
+
+        updateEmailChartImages();
     }
 </script>
 {% endblock %}
