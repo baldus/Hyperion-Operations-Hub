@@ -18,6 +18,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 
 from invapp.extensions import db
+from invapp.auth import blueprint_page_guard
 from invapp.models import (
     ProductionChartSettings,
     ProductionCustomer,
@@ -27,6 +28,8 @@ from invapp.models import (
 )
 
 bp = Blueprint("production", __name__, url_prefix="/production")
+
+bp.before_request(blueprint_page_guard("production"))
 
 DEFAULT_CUSTOMERS: List[tuple[str, str, bool]] = [
     ("AHE", "#1f77b4", False),

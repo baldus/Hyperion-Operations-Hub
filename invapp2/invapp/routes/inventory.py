@@ -23,6 +23,7 @@ from flask import (
 from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload, load_only
 
+from invapp.auth import blueprint_page_guard
 from invapp.models import (
     Batch,
     BillOfMaterial,
@@ -40,6 +41,8 @@ from invapp.models import (
 )
 
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
+
+bp.before_request(blueprint_page_guard("inventory"))
 
 
 UNASSIGNED_LOCATION_CODE = "UNASSIGNED"

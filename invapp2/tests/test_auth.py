@@ -1,6 +1,11 @@
 import time
 
+import os
+import sys
+
 import pytest
+
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from invapp import create_app
 from invapp.extensions import db
@@ -80,7 +85,7 @@ def test_superuser_standard_login(client):
 
 
 def test_login_with_created_user(client, app):
-    create_user(app)
+    create_user(app, role_names=("orders",))
     resp = login(client)
     assert b"Invalid credentials" not in resp.data
     resp = client.get("/orders/", follow_redirects=True)

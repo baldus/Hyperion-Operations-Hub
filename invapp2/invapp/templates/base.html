@@ -12,16 +12,35 @@
                 <a href="{{ url_for('home') }}" class="logo-link" aria-label="Go to home">
                     <img src="{{ url_for('static', filename='logo.png') }}" alt="Hyperion Logo" class="logo">
                 </a>
+                {% if current_user.is_authenticated %}
                 <nav class="navbar" aria-label="Primary">
+                    {% if can_access_page('inventory') %}
                     <a href="{{ url_for('inventory.inventory_home') }}" class="nav-btn">Inventory</a>
+                    {% endif %}
+                    {% if can_access_page('orders') %}
                     <a href="{{ url_for('orders.orders_home') }}" class="nav-btn">Orders</a>
+                    {% endif %}
+                    {% if can_access_page('work') %}
                     <a href="{{ url_for('work.work_home') }}" class="nav-btn">Work Instructions</a>
+                    {% endif %}
+                    {% if can_access_page('production') %}
                     <a href="{{ url_for('production.history') }}" class="nav-btn">Production History</a>
+                    {% endif %}
                 </nav>
+                {% endif %}
             </div>
-            <a href="{{ url_for('settings.operations_menu') }}" class="icon-btn gear-btn" aria-label="Open settings, reports, and admin tools">
-                &#9881;
-            </a>
+            <div class="header-actions">
+                {% if current_user.is_authenticated %}
+                {% if can_access_page('settings') or can_access_page('reports') %}
+                <a href="{{ url_for('settings.operations_menu') }}" class="icon-btn gear-btn" aria-label="Open settings, reports, and admin tools">
+                    &#9881;
+                </a>
+                {% endif %}
+                <a href="{{ url_for('auth.logout') }}" class="nav-btn">Logout</a>
+                {% else %}
+                <a href="{{ url_for('auth.login') }}" class="nav-btn">Login</a>
+                {% endif %}
+            </div>
         </div>
     </header>
 

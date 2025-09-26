@@ -17,7 +17,8 @@ from flask import (
 
 from invapp.extensions import db
 from invapp.login import current_user, login_required
-from invapp.models import Role, User
+from invapp.models import PageAccessRule, Role, User
+from invapp.permissions import get_known_pages, resolve_allowed_roles, update_page_roles
 
 bp = Blueprint("users", __name__, url_prefix="/users")
 
@@ -148,6 +149,29 @@ def create():
     )
 
 
+def _page_role_ids(form, page_name: str) -> list[int]:
+    field_name = f"page_roles-{page_name}"
+    return _extract_role_ids(form.getlist(field_name))
+
+
+def _selected_page_role_ids(page_name: str, default_roles: tuple[str, ...]) -> set[int]:
+    rule = PageAccessRule.query.filter_by(page_name=page_name).first()
+    if rule and rule.roles:
+        return {role.id for role in rule.roles}
+
+    if not default_roles:
+        default_roles = tuple(resolve_allowed_roles(page_name))
+
+    fallback_roles = {role_name for role_name in default_roles if role_name}
+    if not fallback_roles:
+        return set()
+
+    return {
+        role.id
+        for role in Role.query.filter(Role.name.in_(fallback_roles)).all()
+    }
+
+
 @bp.route("/<int:user_id>/edit", methods=["GET", "POST"])
 @superuser_required
 def edit(user_id: int):
@@ -235,6 +259,57 @@ def edit(user_id: int):
         submit_label="Save Changes",
         include_password=False,
     )
+
+
+@bp.route("/page-permissions", methods=["GET", "POST"])
+@superuser_required
+def page_permissions():
+    roles = Role.query.order_by(Role.name).all()
+    pages = get_known_pages()
+
+    if request.method == "POST":
+        for page in pages:
+            page_name = page["page_name"]
+            role_ids = _page_role_ids(request.form, page_name)
+            if request.form.getlist(f"page_roles-{page_name}") and not role_ids:
+                return render_template(
+                    "users/page_permissions.html",
+                    roles=roles,
+                    pages=_build_page_entries(pages, roles),
+                    error_message="Invalid role selection submitted.",
+                )
+            update_page_roles(page_name, role_ids, label=page.get("label"))
+
+        db.session.commit()
+        flash("Page permissions updated.", "success")
+        return redirect(url_for("users.page_permissions"))
+
+    return render_template(
+        "users/page_permissions.html",
+        roles=roles,
+        pages=_build_page_entries(pages, roles),
+        error_message=None,
+    )
+
+
+def _build_page_entries(pages, roles):
+    role_map = {role.id: role for role in roles}
+    entries = []
+    for page in pages:
+        page_name = page["page_name"]
+        default_roles = tuple(page.get("default_roles", ()))
+        selected_ids = _selected_page_role_ids(page_name, default_roles)
+        entries.append(
+            {
+                "page_name": page_name,
+                "label": page.get("label", page_name.title()),
+                "default_roles": default_roles,
+                "selected_role_ids": selected_ids,
+                "selected_roles": [role_map[rid].name for rid in selected_ids if rid in role_map],
+            }
+        )
+    entries.sort(key=lambda entry: entry["label"].lower())
+    return entries
 
 
 @bp.route("/<int:user_id>/reset-password", methods=["GET", "POST"])

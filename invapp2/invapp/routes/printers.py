@@ -1,9 +1,12 @@
 from flask import abort, Blueprint, current_app, render_template, request, session
 
+from invapp.auth import blueprint_page_guard
 from invapp.login import login_required
 from invapp.models import User
 
 bp = Blueprint("printers", __name__, url_prefix="/settings/printers")
+
+bp.before_request(blueprint_page_guard("printers"))
 
 @bp.route("/", methods=["GET", "POST"], strict_slashes=False)
 @login_required

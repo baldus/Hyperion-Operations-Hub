@@ -5,6 +5,7 @@
 <p class="lead">Create, edit, and retire application accounts. Only the designated superuser can access these tools.</p>
 <div class="actions" style="margin-bottom: 16px; display: flex; gap: 12px;">
     <a class="action-btn" href="{{ url_for('users.create') }}">Create User</a>
+    <a class="action-btn" href="{{ url_for('users.page_permissions') }}">Configure Page Permissions</a>
 </div>
 <div class="table-scroll">
     <table class="orders-table">

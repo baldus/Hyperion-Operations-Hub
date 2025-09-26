@@ -1,6 +1,10 @@
 from flask import Blueprint, render_template, redirect, url_for, session
 
+from invapp.auth import blueprint_page_guard
+
 bp = Blueprint("settings", __name__, url_prefix="/settings")
+
+bp.before_request(blueprint_page_guard("settings"))
 
 @bp.route("/")
 def settings_home():
