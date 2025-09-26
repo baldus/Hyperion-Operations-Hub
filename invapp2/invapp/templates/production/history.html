@@ -38,6 +38,9 @@
                 <input type="checkbox" id="collapseWeekendsToggle" name="collapse_weekends">
                 Collapse weekends
             </label>
+            <button type="button" id="emailDataButton" class="email-data-btn" aria-haspopup="dialog">
+                Email Data View
+            </button>
         </div>
         <div class="chart-grid">
             <div class="chart-card">
@@ -53,6 +56,44 @@
         <div class="chart-modal-dialog">
             <button type="button" class="chart-modal-close" data-modal-dismiss aria-label="Close expanded chart">&times;</button>
             <canvas id="expandedChart" aria-label="Expanded chart canvas"></canvas>
+        </div>
+    </div>
+
+    <div class="chart-modal is-hidden" id="emailDataModal" role="dialog" aria-modal="true" aria-hidden="true" aria-label="Email-friendly production snapshot">
+        <div class="chart-modal-dialog email-modal-dialog">
+            <button type="button" class="chart-modal-close" data-modal-dismiss aria-label="Close email-friendly view">&times;</button>
+            <header class="email-modal-header">
+                <div class="email-modal-heading">
+                    <h3>Email-Friendly Production Snapshot</h3>
+                    <p class="email-modal-description">Copy the notes and charts below into an email or chat update.</p>
+                </div>
+                <label for="emailDataDateSelect" class="email-modal-date">
+                    <span>Select notes date</span>
+                    <select id="emailDataDateSelect" name="email_data_date">
+                        {% for label in chart_labels %}
+                            <option value="{{ label }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            </header>
+            <section class="email-notes" aria-live="polite">
+                <h4>Daily Notes</h4>
+                <p id="emailDataNotes" class="email-notes-copy">No notes recorded for this date.</p>
+            </section>
+            <div class="email-chart-grid">
+                <figure class="email-chart-card">
+                    <figcaption>Gates Produced by Customer</figcaption>
+                    <div class="email-chart-canvas">
+                        <canvas id="emailBarChart" role="img" aria-label="Email chart showing gates produced by customer"></canvas>
+                    </div>
+                </figure>
+                <figure class="email-chart-card">
+                    <figcaption>Cumulative Month-to-Date Totals</figcaption>
+                    <div class="email-chart-canvas">
+                        <canvas id="emailLineChart" role="img" aria-label="Email chart showing cumulative month-to-date totals"></canvas>
+                    </div>
+                </figure>
+            </div>
         </div>
     </div>
 
@@ -172,6 +213,7 @@
     const overlayDatasets = {{ overlay_datasets|tojson }};
     const lineDatasets = {{ line_datasets|tojson }};
     const chartAxisSettings = {{ chart_axis_settings|tojson }};
+    const notesByDate = {{ notes_by_date|tojson }};
 
     const parseDateLabel = (label) => {
         if (typeof label !== 'string') {
@@ -374,12 +416,8 @@
             collapseToggle.checked = !currentIncludeWeekends;
         }
 
-        const initialState = buildChartData(currentIncludeWeekends);
-
-        const barContext = document.getElementById('gatesProducedChart');
-        let barChart = null;
-        if (barContext) {
-            const primaryScale = {
+        const createPrimaryScale = () => {
+            const scale = {
                 stacked: true,
                 beginAtZero: chartAxisSettings.primary.min === null,
                 title: {
@@ -389,18 +427,22 @@
             };
 
             if (chartAxisSettings.primary.min !== null) {
-                primaryScale.min = chartAxisSettings.primary.min;
+                scale.min = chartAxisSettings.primary.min;
             }
             if (chartAxisSettings.primary.max !== null) {
-                primaryScale.max = chartAxisSettings.primary.max;
+                scale.max = chartAxisSettings.primary.max;
             }
             if (chartAxisSettings.primary.step !== null) {
-                primaryScale.ticks = Object.assign({}, primaryScale.ticks, {
+                scale.ticks = Object.assign({}, scale.ticks, {
                     stepSize: chartAxisSettings.primary.step,
                 });
             }
 
-            const secondaryScale = {
+            return scale;
+        };
+
+        const createSecondaryScale = () => {
+            const scale = {
                 position: 'right',
                 beginAtZero: chartAxisSettings.secondary.min === null,
                 grid: {
@@ -411,90 +453,207 @@
                     text: 'Output per Labor Hour',
                 },
             };
+
             if (chartAxisSettings.secondary.min !== null) {
-                secondaryScale.min = chartAxisSettings.secondary.min;
+                scale.min = chartAxisSettings.secondary.min;
             }
             if (chartAxisSettings.secondary.max !== null) {
-                secondaryScale.max = chartAxisSettings.secondary.max;
+                scale.max = chartAxisSettings.secondary.max;
             }
             if (chartAxisSettings.secondary.step !== null) {
-                secondaryScale.ticks = Object.assign({}, secondaryScale.ticks, {
+                scale.ticks = Object.assign({}, scale.ticks, {
                     stepSize: chartAxisSettings.secondary.step,
                 });
             }
 
-            barChart = new Chart(barContext, {
+            return scale;
+        };
 
-                type: 'bar',
-                data: {
-                    labels: initialState.labels,
-                    datasets: initialState.combinedDatasets,
+        const createBarChartConfig = (chartState, includeWeekends) => ({
+            type: 'bar',
+            data: {
+                labels: chartState.labels,
+                datasets: chartState.combinedDatasets,
+            },
+            options: {
+                responsive: true,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    weekendBackground: {
+                        enabled: includeWeekends,
+                        color: 'rgba(0, 0, 0, 0.08)',
+                    },
+                    title: {
+                        display: true,
+                        text: 'Gates Produced by Customer',
+                    },
+                    legend: {
+                        position: 'bottom',
+                    },
                 },
-                options: {
-                    responsive: true,
-                    interaction: { mode: 'index', intersect: false },
-                    plugins: {
-                        weekendBackground: {
-                            enabled: currentIncludeWeekends,
-                            color: 'rgba(0, 0, 0, 0.08)',
-                        },
+                scales: {
+                    x: {
+                        stacked: true,
+                    },
+                    y: createPrimaryScale(),
+                    'y-output': createSecondaryScale(),
+                },
+            },
+        });
+
+        const createLineChartConfig = (chartState, includeWeekends) => ({
+            type: 'line',
+            data: {
+                labels: chartState.labels,
+                datasets: chartState.lineDatasets,
+            },
+            options: {
+                responsive: true,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    weekendBackground: {
+                        enabled: includeWeekends,
+                        color: 'rgba(0, 0, 0, 0.08)',
+                    },
+                    title: {
+                        display: true,
+                        text: 'Cumulative Month-to-Date Totals',
+                    },
+                    legend: {
+                        position: 'bottom',
+                    },
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
                         title: {
                             display: true,
-                            text: 'Gates Produced by Customer',
+                            text: 'Units',
                         },
-                        legend: {
-                            position: 'bottom',
-                        },
-                    },
-                    scales: {
-                        x: {
-                            stacked: true,
-                        },
-                        y: primaryScale,
-                        'y-output': secondaryScale,
                     },
                 },
-            });
+            },
+        });
+
+        const initialState = buildChartData(currentIncludeWeekends);
+
+        const barContext = document.getElementById('gatesProducedChart');
+        let barChart = null;
+        if (barContext) {
+            barChart = new Chart(barContext, createBarChartConfig(initialState, currentIncludeWeekends));
         }
 
         const lineContext = document.getElementById('cumulativeChart');
         let lineChart = null;
         if (lineContext) {
-            lineChart = new Chart(lineContext, {
-
-                type: 'line',
-                data: {
-                    labels: initialState.labels,
-                    datasets: initialState.lineDatasets,
-                },
-                options: {
-                    responsive: true,
-                    interaction: { mode: 'index', intersect: false },
-                    plugins: {
-                        weekendBackground: {
-                            enabled: currentIncludeWeekends,
-                            color: 'rgba(0, 0, 0, 0.08)',
-                        },
-                        title: {
-                            display: true,
-                            text: 'Cumulative Month-to-Date Totals',
-                        },
-                        legend: {
-                            position: 'bottom',
-                        },
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            title: {
-                                display: true,
-                                text: 'Units',
-                            },
-                        },
-                    },
-                },
-            });
+            lineChart = new Chart(lineContext, createLineChartConfig(initialState, currentIncludeWeekends));
         }
+
+        const emailModal = document.getElementById('emailDataModal');
+        const emailButton = document.getElementById('emailDataButton');
+        const emailDateSelect = document.getElementById('emailDataDateSelect');
+        const emailNotesElement = document.getElementById('emailDataNotes');
+        const emailBarCanvas = document.getElementById('emailBarChart');
+        const emailLineCanvas = document.getElementById('emailLineChart');
+        const emailDismissButtons = emailModal ? emailModal.querySelectorAll('[data-modal-dismiss]') : [];
+        let emailBarChart = null;
+        let emailLineChart = null;
+
+        const emailModalIsOpen = () => emailModal && !emailModal.classList.contains('is-hidden');
+
+        const updateEmailModalLabel = (dateLabel) => {
+            if (!emailModal) {
+                return;
+            }
+            if (dateLabel) {
+                emailModal.setAttribute('aria-label', `Email-friendly production snapshot for ${dateLabel}`);
+            } else {
+                emailModal.setAttribute('aria-label', 'Email-friendly production snapshot');
+            }
+        };
+
+        const renderEmailNotes = (dateLabel) => {
+            if (!emailNotesElement) {
+                updateEmailModalLabel(dateLabel);
+                return;
+            }
+
+            const normalizedLabel = typeof dateLabel === 'string' ? dateLabel : '';
+            const rawNotes = (notesByDate[normalizedLabel] || '').trim();
+            if (rawNotes) {
+                emailNotesElement.textContent = rawNotes;
+                emailNotesElement.classList.remove('is-empty');
+            } else {
+                emailNotesElement.textContent = 'No notes recorded for this date.';
+                emailNotesElement.classList.add('is-empty');
+            }
+            updateEmailModalLabel(normalizedLabel);
+        };
+
+        const destroyEmailCharts = () => {
+            if (emailBarChart) {
+                emailBarChart.destroy();
+                emailBarChart = null;
+            }
+            if (emailLineChart) {
+                emailLineChart.destroy();
+                emailLineChart = null;
+            }
+        };
+
+        const refreshEmailCharts = () => {
+            if (!emailModalIsOpen()) {
+                return;
+            }
+            const state = buildChartData(currentIncludeWeekends);
+            if (emailBarCanvas) {
+                const config = createBarChartConfig(state, currentIncludeWeekends);
+                config.options = Object.assign({}, config.options, { maintainAspectRatio: false });
+                if (emailBarChart) {
+                    emailBarChart.destroy();
+                }
+                emailBarChart = new Chart(emailBarCanvas, config);
+            }
+            if (emailLineCanvas) {
+                const config = createLineChartConfig(state, currentIncludeWeekends);
+                config.options = Object.assign({}, config.options, { maintainAspectRatio: false });
+                if (emailLineChart) {
+                    emailLineChart.destroy();
+                }
+                emailLineChart = new Chart(emailLineCanvas, config);
+            }
+            if (emailDateSelect) {
+                renderEmailNotes(emailDateSelect.value);
+            }
+        };
+
+        const openEmailModal = () => {
+            if (!emailModal || !chartLabels.length) {
+                return;
+            }
+            emailModal.classList.remove('is-hidden');
+            emailModal.setAttribute('aria-hidden', 'false');
+
+            const latestLabel = chartLabels[chartLabels.length - 1] || '';
+            if (emailDateSelect) {
+                emailDateSelect.value = latestLabel;
+            }
+            renderEmailNotes(emailDateSelect ? emailDateSelect.value : latestLabel);
+
+            window.requestAnimationFrame(() => {
+                refreshEmailCharts();
+            });
+        };
+
+        const closeEmailModal = () => {
+            if (!emailModal) {
+                return;
+            }
+            destroyEmailCharts();
+            emailModal.classList.add('is-hidden');
+            emailModal.setAttribute('aria-hidden', 'true');
+            updateEmailModalLabel('');
+        };
 
         const updateChartsForWeekendState = (includeWeekends) => {
             if (includeWeekends === currentIncludeWeekends) {
@@ -525,6 +684,8 @@
             if (collapseToggle) {
                 collapseToggle.checked = !includeWeekends;
             }
+
+            refreshEmailCharts();
         };
 
         if (collapseToggle) {
@@ -534,9 +695,32 @@
             });
         }
 
+        if (emailButton) {
+            emailButton.addEventListener('click', openEmailModal);
+        }
+
+        if (emailDateSelect) {
+            emailDateSelect.addEventListener('change', (event) => {
+                renderEmailNotes(event.target.value);
+                refreshEmailCharts();
+            });
+        }
+
+        if (emailModal) {
+            emailModal.addEventListener('click', (event) => {
+                if (event.target === emailModal) {
+                    closeEmailModal();
+                }
+            });
+        }
+
+        emailDismissButtons.forEach((button) => {
+            button.addEventListener('click', closeEmailModal);
+        });
+
         const chartModal = document.getElementById('chartModal');
         const modalCanvas = document.getElementById('expandedChart');
-        const dismissButtons = chartModal ? chartModal.querySelectorAll('[data-modal-dismiss]') : [];
+        const chartDismissButtons = chartModal ? chartModal.querySelectorAll('[data-modal-dismiss]') : [];
         let modalChart = null;
 
         const cloneChartConfig = (chartInstance) => {
@@ -595,13 +779,27 @@
             });
         }
 
-        dismissButtons.forEach((button) => {
+        chartDismissButtons.forEach((button) => {
             button.addEventListener('click', closeChartModal);
         });
 
         document.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape' && chartModal && !chartModal.classList.contains('is-hidden')) {
+            if (event.key !== 'Escape') {
+                return;
+            }
+
+            let handled = false;
+            if (chartModal && !chartModal.classList.contains('is-hidden')) {
                 closeChartModal();
+                handled = true;
+            }
+            if (emailModal && !emailModal.classList.contains('is-hidden')) {
+                closeEmailModal();
+                handled = true;
+            }
+
+            if (handled) {
+                event.preventDefault();
             }
         });
 

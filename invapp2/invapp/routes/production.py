@@ -648,6 +648,7 @@ def history():
 
 
     table_rows = []
+    notes_by_date: Dict[str, str] = {}
     chart_labels: List[str] = []
     stack_datasets: List[Dict[str, object]] = []
     overlay_values: List[float | None] = []
@@ -783,6 +784,9 @@ def history():
             cumulative_series[series["key"]].append(running_totals[series["key"]])
 
 
+        formatted_label = record.entry_date.strftime("%Y-%m-%d")
+        notes_by_date[formatted_label] = record.daily_notes or ""
+
         table_rows.append(
             {
                 "record": record,
@@ -899,6 +903,7 @@ def history():
         chart_axis_settings=chart_axis_settings,
         start_date=start_date,
         end_date=end_date,
+        notes_by_date=notes_by_date,
     )
 
 

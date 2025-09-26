@@ -1958,6 +1958,146 @@ body.light .chart-modal-close {
     border-radius: 8px;
 }
 
+.email-data-btn {
+    margin-left: auto;
+}
+
+.email-modal-dialog {
+    gap: 24px;
+    max-width: 1100px;
+    overflow-y: auto;
+}
+
+.email-modal-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: flex-end;
+}
+
+.email-modal-heading {
+    flex: 1 1 280px;
+}
+
+.email-modal-heading h3 {
+    margin: 0;
+}
+
+.email-modal-description {
+    margin: 8px 0 0;
+    font-size: 0.9rem;
+    opacity: 0.75;
+}
+
+.email-modal-date {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-weight: 600;
+    min-width: 200px;
+}
+
+.email-modal-date span {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    opacity: 0.7;
+}
+
+.email-modal-date select {
+    padding: 10px 16px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(15, 23, 42, 0.35);
+    color: inherit;
+    cursor: pointer;
+}
+
+body.light .email-modal-date select {
+    background: #ffffff;
+    border-color: rgba(15, 23, 42, 0.18);
+    color: #0f172a;
+}
+
+.email-notes {
+    width: 100%;
+    padding: 18px 22px;
+    border-radius: 16px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    background: rgba(15, 23, 42, 0.35);
+    box-sizing: border-box;
+}
+
+.email-notes h4 {
+    margin: 0 0 8px;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    opacity: 0.75;
+}
+
+.email-notes-copy {
+    margin: 0;
+    white-space: pre-wrap;
+    line-height: 1.5;
+}
+
+.email-notes-copy.is-empty {
+    opacity: 0.75;
+    font-style: italic;
+}
+
+body.light .email-notes {
+    background: #f3f4f6;
+    border-color: rgba(15, 23, 42, 0.15);
+}
+
+.email-chart-grid {
+    display: grid;
+    gap: 24px;
+    width: 100%;
+}
+
+@media (min-width: 900px) {
+    .email-chart-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.email-chart-card {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.email-chart-card figcaption {
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.email-chart-canvas {
+    flex: 1;
+    min-height: 280px;
+    border-radius: 16px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    background: rgba(15, 23, 42, 0.45);
+    padding: 16px;
+    display: flex;
+    align-items: stretch;
+    box-sizing: border-box;
+}
+
+.email-chart-canvas canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+body.light .email-chart-canvas {
+    background: #ffffff;
+    border-color: rgba(15, 23, 42, 0.12);
+}
+
 .totals-breakdown {
     margin-top: 6px;
     display: grid;
