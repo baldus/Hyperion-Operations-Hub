@@ -21,15 +21,17 @@
                     {% if roles %}
                         <div class="role-checkboxes" style="display:flex; flex-direction:column; gap:6px;">
                             {% for role in roles %}
+                                {% if role.name != 'public' %}
                                 <label>
                                     <input type="checkbox" name="roles" value="{{ role.id }}" {% if role.id|string in selected_roles %}checked{% endif %}>
                                     {{ role.name }}{% if role.description %} — {{ role.description }}{% endif %}
                                 </label>
+                                {% endif %}
                             {% endfor %}
                         </div>
-                        <p class="field-note">Leave all unchecked to assign the default "user" role.</p>
+                        <p class="field-note">Leave all unchecked to assign the default "viewer" role.</p>
                     {% else %}
-                        <p class="field-note">No roles defined yet. The default "user" role will be created automatically.</p>
+                        <p class="field-note">No roles defined yet. The default "viewer" role will be created automatically.</p>
                     {% endif %}
                 </td>
             </tr>

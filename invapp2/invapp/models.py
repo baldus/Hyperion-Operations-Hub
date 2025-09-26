@@ -238,7 +238,24 @@ user_roles = db.Table(
 
 page_access_roles = db.Table(
     "page_access_role",
-    db.Column("access_rule_id", db.Integer, db.ForeignKey("page_access_rule.id"), primary_key=True),
+    db.Column(
+        "access_rule_id",
+        db.Integer,
+        db.ForeignKey("page_access_rule.id"),
+        primary_key=True,
+    ),
+    db.Column("role_id", db.Integer, db.ForeignKey("role.id"), primary_key=True),
+)
+
+
+page_edit_roles = db.Table(
+    "page_edit_role",
+    db.Column(
+        "access_rule_id",
+        db.Integer,
+        db.ForeignKey("page_access_rule.id"),
+        primary_key=True,
+    ),
     db.Column("role_id", db.Integer, db.ForeignKey("role.id"), primary_key=True),
 )
 
@@ -267,17 +284,43 @@ class PageAccessRule(db.Model):
     page_name = db.Column(db.String(128), unique=True, nullable=False)
     label = db.Column(db.String(255), nullable=False)
 
-    roles = db.relationship(
+    view_roles = db.relationship(
         "Role",
         secondary=page_access_roles,
         lazy="joined",
     )
 
+    edit_roles = db.relationship(
+        "Role",
+        secondary=page_edit_roles,
+        lazy="joined",
+    )
+
+    @property
+    def roles(self):
+        """Backward compatible alias for ``view_roles``."""
+
+        return self.view_roles
+
+    @roles.setter
+    def roles(self, roles):
+        self.view_roles = roles
+
     def assigned_role_names(self) -> list[str]:
-        return sorted({role.name for role in self.roles})
+        return sorted({role.name for role in self.view_roles})
+
+    def assigned_view_role_names(self) -> list[str]:
+        return sorted({role.name for role in self.view_roles})
+
+    def assigned_edit_role_names(self) -> list[str]:
+        return sorted({role.name for role in self.edit_roles})
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
-        return f"<PageAccessRule {self.page_name} roles={self.assigned_role_names()}>"
+        return (
+            f"<PageAccessRule {self.page_name} "
+            f"view={self.assigned_view_role_names()} "
+            f"edit={self.assigned_edit_role_names()}>"
+        )
 
 
 class User(UserMixin, db.Model):

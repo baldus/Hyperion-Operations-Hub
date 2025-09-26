@@ -4,7 +4,7 @@ from typing import Sequence
 from flask import abort
 
 from invapp.login import current_user, login_required
-from invapp.permissions import ensure_page_access, resolve_allowed_roles
+from invapp.permissions import ensure_page_access, resolve_view_roles
 from invapp.security import require_roles
 
 
@@ -21,7 +21,7 @@ def page_access_required(page_name: str, *, default_roles: Sequence[str] | None 
         @wraps(f)
         @login_required
         def wrapped(*args, **kwargs):
-            allowed_roles = resolve_allowed_roles(page_name, default_roles=default_roles)
+            allowed_roles = resolve_view_roles(page_name, default_roles=default_roles)
             if allowed_roles and current_user.has_any_role(allowed_roles):
                 return f(*args, **kwargs)
             abort(403)
