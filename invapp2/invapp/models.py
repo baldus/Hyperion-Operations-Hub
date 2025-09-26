@@ -33,6 +33,26 @@ class ProductionChartSettings(db.Model):
             db.session.commit()
         return settings
 
+
+class Printer(db.Model):
+    __tablename__ = "printer"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False, unique=True)
+    printer_type = db.Column(db.String(80), nullable=True)
+    location = db.Column(db.String(120), nullable=True)
+    host = db.Column(db.String(255), nullable=False)
+    port = db.Column(db.Integer, nullable=True)
+    notes = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    def connection_label(self) -> str:
+        port_display = f":{self.port}" if self.port else ""
+        return f"{self.host}{port_display}"
+
 class Item(db.Model):
     __tablename__ = "item"
     id = db.Column(db.Integer, primary_key=True)  # system key

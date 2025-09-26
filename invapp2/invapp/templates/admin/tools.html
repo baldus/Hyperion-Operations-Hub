@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Administrator Tools</h2>
+<p class="page-intro">Monitor the health of the operations console and launch deeper administration utilities.</p>
+
+<section class="card-section">
+    <h3>System Health</h3>
+    <div class="status-grid">
+        {% for card in system_health %}
+        <article class="status-card status-{{ card.level }}">
+            <p class="status-title">{{ card.title }}</p>
+            <p class="status-metric">{{ card.metric }}</p>
+            {% set progress = card.get('progress') %}
+            {% if progress %}
+            <div class="progress-label">
+                <span>{{ progress.left }}</span>
+                <span>{{ progress.right }}</span>
+            </div>
+            <div class="progress-track">
+                <div class="progress-fill" style="width: {{ '%.1f'|format(progress.percent) }}%"></div>
+            </div>
+            {% endif %}
+            {% if card.get('meta') %}
+            <p class="status-meta">{{ card.meta }}</p>
+            {% endif %}
+        </article>
+        {% endfor %}
+    </div>
+</section>
+
+<section class="card-section">
+    <h3>Operations Shortcuts</h3>
+    <p>Jump directly to the tools administrators use most often.</p>
+    <div class="link-list">
+        {% for link in quick_links %}
+        <a href="{{ link.href if link.href else '#' }}" class="link-item{% if link.disabled %} is-disabled{% endif %}" {% if link.disabled %}aria-disabled="true"{% endif %}>
+            {{ link.label }}{% if link.disabled %} (coming soon){% endif %}
+        </a>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

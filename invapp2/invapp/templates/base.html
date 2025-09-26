@@ -23,8 +23,8 @@
                 <span class="access-indicator" role="status" aria-live="polite">Public view</span>
                 {% endif %}
                 {% if current_user.is_authenticated %}
-                {% if can_access_page('settings') or can_access_page('reports') %}
-                <a href="{{ url_for('settings.operations_menu') }}" class="icon-btn gear-btn" aria-label="Open settings, reports, and admin tools">
+                {% if can_access_page('settings') %}
+                <a href="{{ url_for('settings.settings_home') }}" class="icon-btn gear-btn" aria-label="Open settings and administration tools">
                     &#9881;
                 </a>
                 {% endif %}
