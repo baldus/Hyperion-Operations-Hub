@@ -38,7 +38,8 @@
                 {% endif %}
                 <a href="{{ url_for('auth.logout') }}" class="nav-btn">Logout</a>
                 {% else %}
-                <a href="{{ url_for('auth.login') }}" class="nav-btn">Login</a>
+                {% set login_next = request.full_path if request.query_string else request.path %}
+                <a href="{{ url_for('auth.login', next=login_next) }}" class="nav-btn">Log In</a>
                 {% endif %}
             </div>
         </div>

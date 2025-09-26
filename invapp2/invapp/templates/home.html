@@ -1,20 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
-{% if not current_user.is_authenticated %}
-<h2>Welcome to Hyperion Operations Hub</h2>
-<p class="home-lede">
-  Sign in with your assigned account to view production, orders, and inventory insights tailored to your role.
-</p>
-<p>
-  If you do not yet have credentials, please contact a system administrator for access.
-</p>
-<a class="home-summary-link" href="{{ url_for('auth.login') }}">Log in to continue →</a>
-{% else %}
 {% set show_orders = order_summary is not none %}
 {% set show_inventory = inventory_summary is not none %}
 
 <h2>Hyperion Operations Overview</h2>
+{% if not current_user.is_authenticated %}
+<p class="home-lede">You're viewing a live snapshot of production and inventory status. Log in to take action or access your personalized tools.</p>
+<p><a class="home-summary-link" href="{{ url_for('auth.login', next=request.path) }}">Log in to manage operations →</a></p>
+{% else %}
 <p class="home-lede">Stay ahead of production promises and inventory risks with the highlights below.</p>
+{% endif %}
 
 {% if show_orders or show_inventory %}
 <div class="home-summary-grid">
@@ -73,9 +68,11 @@
     {% endif %}
     {% endif %}
 
+    {% if current_user.is_authenticated %}
     <div class="home-summary-footer">
       <a class="home-summary-link" href="{{ url_for('orders.orders_home') }}">Go to Orders →</a>
     </div>
+    {% endif %}
   </section>
   {% endif %}
 
@@ -114,14 +111,15 @@
     <p class="home-summary-note">Showing the {{ inventory_summary.preview_limit }} most urgent items.</p>
     {% endif %}
 
+    {% if current_user.is_authenticated %}
     <div class="home-summary-footer">
       <a class="home-summary-link" href="{{ url_for('inventory.inventory_home') }}">Go to Inventory →</a>
     </div>
+    {% endif %}
   </section>
   {% endif %}
 </div>
 {% else %}
 <p class="home-summary-empty">You are signed in, but your account does not have access to the shared order or inventory dashboards. Use the navigation menu to explore the areas available to you.</p>
-{% endif %}
 {% endif %}
 {% endblock %}
