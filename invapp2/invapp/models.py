@@ -305,7 +305,7 @@ class User(UserMixin, db.Model):
         return check_password_hash(self.password_hash, password)
 
     def has_role(self, role_name: str) -> bool:
-        return any(role.name == role_name for role in self.roles)
+        return self.has_any_role((role_name,))
 
     def has_any_role(self, role_names) -> bool:
         if not role_names:

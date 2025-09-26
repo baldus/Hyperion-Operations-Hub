@@ -3,10 +3,12 @@
 {% block content %}
 <h2>Work Instructions</h2>
 
+{% if is_admin %}
 <form action="{{ url_for('work.upload_instruction') }}" method="post" enctype="multipart/form-data">
     <input type="file" name="file" accept="application/pdf" required>
     <button type="submit">Upload PDF</button>
-    </form>
+</form>
+{% endif %}
 
 {% if instructions %}
 <div class="menu-grid instruction-grid">

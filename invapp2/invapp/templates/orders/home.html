@@ -6,7 +6,7 @@
 
 <div class="orders-toolbar">
     <div class="toolbar-actions">
-        {% if session.get('is_admin') %}
+        {% if current_user.is_authenticated and current_user.has_role('admin') %}
             <a href="{{ url_for('orders.new_order') }}" class="action-btn primary-action">Create New Order</a>
             <a href="{{ url_for('orders.bom_library') }}" class="action-btn subtle-action">BOM Library</a>
             <a href="{{ url_for('orders.view_waiting_orders') }}" class="action-btn subtle-action">Waiting on Material</a>
@@ -26,7 +26,7 @@
 {{ render_orders_table(orders) }}
 {% else %}
     <div class="empty-state">
-        {% if session.get('is_admin') %}
+        {% if current_user.is_authenticated and current_user.has_role('admin') %}
             <p>No open orders yet. Create a new order to get started.</p>
             <a href="{{ url_for('orders.new_order') }}" class="action-btn primary-action">Create New Order</a>
         {% else %}

@@ -6,7 +6,7 @@
 
 <div class="orders-toolbar">
     <div class="toolbar-actions">
-        {% if session.get('is_admin') %}
+        {% if current_user.is_authenticated and current_user.has_role('admin') %}
             <a href="{{ url_for('orders.new_order') }}" class="action-btn primary-action">Create New Order</a>
             <a href="{{ url_for('orders.bom_library') }}" class="action-btn subtle-action">BOM Library</a>
         {% endif %}

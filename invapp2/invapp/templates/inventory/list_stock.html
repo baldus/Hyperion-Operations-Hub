@@ -29,7 +29,7 @@
   <a href="{{ url_for('inventory.adjust_stock') }}" class="bubble-btn">Manual Adjustment</a>
   <a href="{{ url_for('inventory.import_stock') }}" class="bubble-btn">Bulk Import Adjustments (CSV)</a>
   <a href="{{ url_for('inventory.export_stock') }}" class="bubble-btn">Export Stock</a>
-  {% if session.get('is_admin') %}
+  {% if current_user.is_authenticated and current_user.has_role('admin') %}
   <form method="post" action="{{ url_for('inventory.delete_all_stock') }}" class="inline-form" onsubmit="return confirm('Are you sure you want to delete all stock records? This will remove all stock movements and batches.');">
     <button type="submit" class="bubble-btn danger">Delete All Stock Records</button>
   </form>
