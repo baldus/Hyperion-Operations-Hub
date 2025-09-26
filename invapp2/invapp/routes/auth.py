@@ -1,4 +1,15 @@
-from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
+from urllib.parse import urljoin, urlparse
+
+from flask import (
+    Blueprint,
+    abort,
+    current_app,
+    flash,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from invapp.extensions import db
 from invapp.login import current_user, login_required, login_user, logout_user
 from invapp.models import User
@@ -37,12 +48,38 @@ def login():
     return render_template("auth/login.html")
 
 
+def _safe_redirect_target(target: str | None, *, default: str) -> str:
+    if not target:
+        return url_for(default)
+
+    # Allow internal relative URLs directly ("/foo" or "foo")
+    if target.startswith("/"):
+        return target
+
+    app_url = urlparse(request.host_url)
+    parsed_target = urlparse(urljoin(request.host_url, target))
+    if parsed_target.netloc == app_url.netloc:
+        return parsed_target.path + (f"?{parsed_target.query}" if parsed_target.query else "")
+
+    return url_for(default)
+
+
 @bp.route("/logout")
 @login_required
 def logout():
     logout_user()
     flash("Logged out", "success")
-    return redirect(url_for("auth.login"))
+
+    fallback = url_for("home")
+    next_target = request.args.get("next")
+    if not next_target:
+        next_target = request.referrer
+
+    redirect_target = _safe_redirect_target(next_target, default="home")
+    if redirect_target == url_for("home") and fallback:
+        return redirect(fallback)
+
+    return redirect(redirect_target)
 
 
 @bp.route("/reset-password", methods=["GET", "POST"])

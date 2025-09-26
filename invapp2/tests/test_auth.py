@@ -8,7 +8,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from invapp import create_app
 from invapp.extensions import db
-from invapp.models import Role, User
+from invapp.models import Printer, Role, User
 
 
 DEFAULT_SUPERUSER_USERNAME = "superuser"
@@ -91,6 +91,25 @@ def test_login_with_created_user(client, app):
     assert resp.status_code == 200
 
 
+def test_logout_returns_to_same_page(client):
+    login(client, DEFAULT_SUPERUSER_USERNAME, DEFAULT_SUPERUSER_PASSWORD)
+
+    home_response = client.get("/", follow_redirects=True)
+    assert home_response.status_code == 200
+
+    response = client.get(
+        "/auth/logout",
+        follow_redirects=False,
+        headers={"Referer": "http://localhost/"},
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/")
+
+    public_view = client.get(response.headers["Location"], follow_redirects=True)
+    assert b"Login" in public_view.data
+    assert b"Logout" not in public_view.data
+
+
 def test_login_required_redirect(client):
     resp = client.get("/settings/printers", follow_redirects=False)
     assert resp.status_code == 302
@@ -166,3 +185,41 @@ def test_register_route_restricted(client, app):
     response = client.get("/auth/register", follow_redirects=False)
     assert response.status_code == 302
     assert response.headers["Location"].startswith("/users/create")
+
+
+def test_admin_can_add_printer(client, app):
+    login(client, DEFAULT_SUPERUSER_USERNAME, DEFAULT_SUPERUSER_PASSWORD)
+
+    response = client.post(
+        "/settings/printers/",
+        data={
+            "form_id": "add",
+            "name": "Zebra Station 1",
+            "printer_type": "Label",
+            "location": "Shipping",
+            "host": "printer.local",
+            "port": "9100",
+            "notes": "Primary label printer",
+            "make_default": "yes",
+        },
+        follow_redirects=True,
+    )
+
+    assert b"Added printer" in response.data
+
+    with app.app_context():
+        printer = Printer.query.filter_by(name="Zebra Station 1").first()
+        assert printer is not None
+        assert printer.port == 9100
+        assert printer.host == "printer.local"
+
+    assert response.status_code == 200
+
+
+def test_admin_tools_dashboard(client):
+    login(client, DEFAULT_SUPERUSER_USERNAME, DEFAULT_SUPERUSER_PASSWORD)
+
+    response = client.get("/admin/tools")
+    assert response.status_code == 200
+    assert b"System Health" in response.data
+    assert b"Operations Shortcuts" in response.data

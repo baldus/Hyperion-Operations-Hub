@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, redirect, url_for, session
+from flask import Blueprint, redirect, render_template, request, session, url_for
 
 from invapp.auth import blueprint_page_guard
 
@@ -11,13 +11,13 @@ def settings_home():
     return render_template("settings/home.html")
 
 
-@bp.route("/operations")
-def operations_menu():
-    return render_template("settings/operations_menu.html")
-
 # --- Dark/Light Mode Toggle ---
-@bp.route("/toggle-theme")
+@bp.route("/toggle-theme", methods=["POST", "GET"])
 def toggle_theme():
     current = session.get("theme", "dark")
     session["theme"] = "light" if current == "dark" else "dark"
-    return redirect(url_for("settings.settings_home"))
+
+    next_target = request.form.get("next") or request.args.get("next") or request.referrer
+    if not next_target:
+        next_target = url_for("settings.settings_home")
+    return redirect(next_target)

@@ -2,10 +2,35 @@
 
 {% block content %}
 <h2>Settings</h2>
-<div class="button-grid">
-    <a href="{{ url_for('printers.printer_settings') }}" class="action-btn">Printers</a>
-    <a href="{{ url_for('settings.toggle_theme') }}" class="action-btn">
-        Toggle Theme ({{ 'Dark' if session.get('theme', 'dark') == 'dark' else 'Light' }})
-    </a>
+<p class="page-intro">Configure the operations console, manage connected devices, and jump into administrator tools.</p>
+
+<div class="settings-grid">
+    <section class="card-section settings-card">
+        <h3>Personalization</h3>
+        <p>Switch the interface theme to match your environment.</p>
+        <form method="post" action="{{ url_for('settings.toggle_theme') }}" class="stacked-form">
+            <input type="hidden" name="next" value="{{ request.path }}">
+            {% set is_dark = session.get('theme', 'dark') == 'dark' %}
+            <button type="submit" class="action-btn">
+                Switch to {{ 'Light' if is_dark else 'Dark' }} Mode
+            </button>
+        </form>
+    </section>
+
+    <section class="card-section settings-card">
+        <h3>Devices</h3>
+        <p>Manage printer destinations used across the console.</p>
+        <a href="{{ url_for('printers.printer_settings') }}" class="action-btn">Manage Printers</a>
+    </section>
+
+    <section class="card-section settings-card">
+        <h3>Administration</h3>
+        <p>Review platform health and access critical tools.</p>
+        <ul class="link-list">
+            <li><a href="{{ url_for('admin.tools') }}" class="link-item">Admin Tools Overview</a></li>
+            <li><a href="{{ url_for('reports.reports_home') }}" class="link-item">Operational Reports</a></li>
+            <li><a href="{{ url_for('admin.data_backup') }}" class="link-item">Data Backup</a></li>
+        </ul>
+    </section>
 </div>
 {% endblock %}

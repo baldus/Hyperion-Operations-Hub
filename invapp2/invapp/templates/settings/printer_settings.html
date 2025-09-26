@@ -2,26 +2,90 @@
 
 {% block content %}
 <h2>Printer Settings</h2>
+<p class="page-intro">Manage the devices used for labels and reports, choose the active printer, and register new hardware.</p>
 
-<!-- Dark/Light Mode Toggle -->
-<form method="POST">
-    <label for="theme">Theme:</label>
-    <select name="theme" id="theme" onchange="this.form.submit()">
-        <option value="dark" {% if theme == 'dark' %}selected{% endif %}>Dark</option>
-        <option value="light" {% if theme == 'light' %}selected{% endif %}>Light</option>
-    </select>
-</form>
+{% if printers %}
+<section class="card-section">
+    <h3>Active Printer</h3>
+    <form method="post" class="stacked-form">
+        <input type="hidden" name="form_id" value="select">
+        <label for="printer_id">Available printers</label>
+        <div class="form-row">
+            <select id="printer_id" name="printer_id" aria-label="Select printer">
+                <option value="" disabled {% if not selected_printer %}selected{% endif %}>Choose a printer…</option>
+                {% for printer in printers %}
+                <option value="{{ printer.id }}" {% if selected_printer and selected_printer.id == printer.id %}selected{% endif %}>
+                    {{ printer.name }}{% if printer.location %} — {{ printer.location }}{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="action-btn">Use Printer</button>
+        </div>
+    </form>
 
-<hr>
+    {% if selected_printer %}
+    <dl class="definition-list">
+        <div>
+            <dt>Name</dt>
+            <dd>{{ selected_printer.name }}</dd>
+        </div>
+        <div>
+            <dt>Type</dt>
+            <dd>{{ selected_printer.printer_type or 'Not specified' }}</dd>
+        </div>
+        <div>
+            <dt>Location</dt>
+            <dd>{{ selected_printer.location or '—' }}</dd>
+        </div>
+        <div>
+            <dt>Connection</dt>
+            <dd>{{ selected_printer.connection_label() }}</dd>
+        </div>
+        {% if selected_printer.notes %}
+        <div>
+            <dt>Notes</dt>
+            <dd>{{ selected_printer.notes }}</dd>
+        </div>
+        {% endif %}
+    </dl>
+    {% endif %}
+</section>
+{% else %}
+<section class="card-section info-callout">
+    <p>No printers have been configured yet. Add one below to get started.</p>
+</section>
+{% endif %}
 
-{% if message %}<p>{{ message }}</p>{% endif %}
-<form method="POST" class="login-form">
-    <label for="printer_host">Printer Host:</label>
-    <input type="text" name="printer_host" id="printer_host" value="{{ printer_host }}">
-
-    <label for="printer_port">Printer Port:</label>
-    <input type="text" name="printer_port" id="printer_port" value="{{ printer_port }}">
-
-    <button type="submit" class="action-btn">Save</button>
-</form>
+<section class="card-section">
+    <h3>Add Printer</h3>
+    <form method="post" class="stacked-form">
+        <input type="hidden" name="form_id" value="add">
+        <div class="form-grid">
+            <label for="printer-name">Printer name
+                <input id="printer-name" name="name" required>
+            </label>
+            <label for="printer-type">Printer type
+                <input id="printer-type" name="printer_type" placeholder="Label, Laser, Thermal…">
+            </label>
+            <label for="printer-location">Location
+                <input id="printer-location" name="location" placeholder="Production floor, Shipping, …">
+            </label>
+            <label for="printer-host">Host or IP
+                <input id="printer-host" name="host" required placeholder="printer.local">
+            </label>
+            <label for="printer-port">Port
+                <input id="printer-port" name="port" type="number" min="1" step="1" placeholder="9100">
+            </label>
+        </div>
+        <label for="printer-notes">Notes
+            <textarea id="printer-notes" name="notes" rows="3" placeholder="Connection details, access instructions…"></textarea>
+        </label>
+        <label class="checkbox-inline">
+            <input type="checkbox" name="make_default" value="yes" checked> Set as the active printer after saving
+        </label>
+        <div class="form-row">
+            <button type="submit" class="action-btn">Add Printer</button>
+        </div>
+    </form>
+</section>
 {% endblock %}
