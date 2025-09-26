@@ -2,17 +2,25 @@
 {% block content %}
 <h2>Inventory Dashboard</h2>
 
+{% set can_edit_inventory = can_edit_page('inventory') %}
+
 <div class="menu-grid">
   <a href="{{ url_for('inventory.list_items') }}" class="action-btn">Items</a>
   <a href="{{ url_for('inventory.list_locations') }}" class="action-btn">Locations</a>
   <a href="{{ url_for('inventory.list_stock') }}" class="action-btn">Stock</a>
+  <a href="{{ url_for('inventory.history_home') }}" class="action-btn">History</a>
+  {% if can_edit_inventory %}
   <a href="{{ url_for('inventory.receiving') }}" class="action-btn">Receiving</a>
   <a href="{{ url_for('inventory.adjust_stock') }}" class="action-btn">Issue</a>
   <a href="{{ url_for('inventory.move_home') }}" class="action-btn">Move</a>
   <a href="{{ url_for('inventory.scan_inventory') }}" class="action-btn">Scan</a>
   <a href="{{ url_for('inventory.cycle_count_home') }}" class="action-btn">Cycle Count</a>
-  <a href="{{ url_for('inventory.history_home') }}" class="action-btn">History</a>
+  {% endif %}
 </div>
+
+{% if not can_edit_inventory %}
+<p class="field-note">You have read-only access to inventory. Contact an administrator if you need to record adjustments.</p>
+{% endif %}
 
 <div class="dashboard-section">
   <h3>Inventory Insights</h3>

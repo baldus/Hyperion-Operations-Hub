@@ -12,24 +12,16 @@
                 <a href="{{ url_for('home') }}" class="logo-link" aria-label="Go to home">
                     <img src="{{ url_for('static', filename='logo.png') }}" alt="Hyperion Logo" class="logo">
                 </a>
-                {% if current_user.is_authenticated %}
                 <nav class="navbar" aria-label="Primary">
-                    {% if can_access_page('inventory') %}
-                    <a href="{{ url_for('inventory.inventory_home') }}" class="nav-btn">Inventory</a>
-                    {% endif %}
-                    {% if can_access_page('orders') %}
-                    <a href="{{ url_for('orders.orders_home') }}" class="nav-btn">Orders</a>
-                    {% endif %}
-                    {% if can_access_page('work') %}
-                    <a href="{{ url_for('work.work_home') }}" class="nav-btn">Work Instructions</a>
-                    {% endif %}
-                    {% if can_access_page('production') %}
-                    <a href="{{ url_for('production.history') }}" class="nav-btn">Production History</a>
-                    {% endif %}
+                    {% for link in navigation_links() %}
+                    <a href="{{ link.href }}" class="nav-btn">{{ link.label }}</a>
+                    {% endfor %}
                 </nav>
-                {% endif %}
             </div>
             <div class="header-actions">
+                {% if not current_user.is_authenticated %}
+                <span class="access-indicator" role="status" aria-live="polite">Public view</span>
+                {% endif %}
                 {% if current_user.is_authenticated %}
                 {% if can_access_page('settings') or can_access_page('reports') %}
                 <a href="{{ url_for('settings.operations_menu') }}" class="icon-btn gear-btn" aria-label="Open settings, reports, and admin tools">

@@ -1,12 +1,19 @@
 from datetime import date, timedelta
 
-from flask import Flask, render_template
+from flask import Flask, render_template, url_for
 from sqlalchemy import func, inspect, text
 from sqlalchemy.exc import NoSuchTableError, OperationalError
 
 from .extensions import db, login_manager
 from .login import current_user
-from .permissions import resolve_allowed_roles
+from .permissions import (
+    current_principal_roles,
+    ensure_page_access,
+    lookup_page_label,
+    principal_has_any_role,
+    resolve_edit_roles,
+    resolve_view_roles,
+)
 from .routes import (
     admin,
     auth,
@@ -21,6 +28,14 @@ from .routes import (
 )
 from config import Config
 from . import models  # ensure models are registered with SQLAlchemy
+
+
+NAVIGATION_PAGES: tuple[tuple[str, str, str], ...] = (
+    ("inventory", "inventory.inventory_home", "Inventory"),
+    ("orders", "orders.orders_home", "Orders"),
+    ("work", "work.work_home", "Work Instructions"),
+    ("production", "production.history", "Production History"),
+)
 
 
 def _ensure_superuser_account(admin_username: str, admin_password: str) -> None:
@@ -47,6 +62,34 @@ def _ensure_superuser_account(admin_username: str, admin_password: str) -> None:
 
     db.session.commit()
 
+
+def _ensure_core_roles() -> None:
+    """Make sure the built-in platform roles exist for assignment."""
+
+    desired_roles = {
+        "public": "Unauthenticated read-only access",
+        "viewer": "Read-only user",
+        "editor": "Operations editor",
+        "admin": "Administrator",
+    }
+
+    existing_roles = {
+        role.name: role for role in models.Role.query.filter(models.Role.name.in_(desired_roles)).all()
+    }
+
+    created = False
+    for role_name, description in desired_roles.items():
+        if role_name in existing_roles:
+            role = existing_roles[role_name]
+            if role.description != description:
+                role.description = description
+            continue
+
+        db.session.add(models.Role(name=role_name, description=description))
+        created = True
+
+    if created:
+        db.session.commit()
 
 def _ensure_item_columns(engine):
     """Ensure legacy databases include the latest ``item`` columns."""
@@ -231,18 +274,46 @@ def create_app(config_override=None):
             app.config.get("ADMIN_USER", "superuser"),
             app.config.get("ADMIN_PASSWORD", "joshbaldus"),
         )
+        _ensure_core_roles()
 
     @app.context_processor
     def inject_permission_helpers():
         def can_access_page(page_name: str) -> bool:
-            if not current_user.is_authenticated:
+            view_roles = resolve_view_roles(page_name)
+            if not view_roles:
                 return False
-            allowed_roles = resolve_allowed_roles(page_name)
-            if not allowed_roles:
-                return False
-            return current_user.has_any_role(allowed_roles)
+            return principal_has_any_role(view_roles)
 
-        return {"can_access_page": can_access_page}
+        def can_edit_page(page_name: str) -> bool:
+            edit_roles = resolve_edit_roles(page_name)
+            if not edit_roles:
+                return False
+            return principal_has_any_role(edit_roles, require_auth=True)
+
+        def navigation_links():
+            links: list[dict[str, str]] = []
+            for page_name, endpoint, display_label in NAVIGATION_PAGES:
+                if not can_access_page(page_name):
+                    continue
+                try:
+                    href = url_for(endpoint)
+                except Exception:  # pragma: no cover - defensive guard
+                    continue
+                links.append(
+                    {
+                        "page_name": page_name,
+                        "label": display_label,
+                        "href": href,
+                    }
+                )
+            return links
+
+        return {
+            "can_access_page": can_access_page,
+            "can_edit_page": can_edit_page,
+            "navigation_links": navigation_links,
+            "current_principal_roles": current_principal_roles,
+        }
 
     # register blueprints
     app.register_blueprint(auth.bp)
@@ -258,18 +329,17 @@ def create_app(config_override=None):
 
     @app.route("/")
     def home():
-        if not current_user.is_authenticated:
-            return render_template(
-                "home.html",
-                order_summary=None,
-                inventory_summary=None,
-            )
+        guard_response = ensure_page_access("home")
+        if guard_response is not None:
+            return guard_response
 
         order_summary = None
         inventory_summary = None
 
-        orders_roles = resolve_allowed_roles("orders")
-        if current_user.has_any_role(orders_roles):
+        can_view_orders = principal_has_any_role(resolve_view_roles("orders"))
+        can_view_inventory = principal_has_any_role(resolve_view_roles("inventory"))
+
+        if can_view_orders:
             today = date.today()
             due_soon_window = timedelta(days=3)
             soon_cutoff = today + due_soon_window
@@ -322,8 +392,7 @@ def create_app(config_override=None):
                 "preview_limit": 5,
             }
 
-        inventory_roles = resolve_allowed_roles("inventory")
-        if current_user.has_any_role(inventory_roles):
+        if can_view_inventory:
             movement_totals = (
                 db.session.query(
                     models.Movement.item_id,

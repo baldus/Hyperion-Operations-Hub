@@ -6,11 +6,11 @@
 
 <div class="orders-toolbar">
     <div class="toolbar-actions">
-        {% if current_user.is_authenticated and current_user.has_role('admin') %}
+        {% if can_edit_page('orders') %}
             <a href="{{ url_for('orders.new_order') }}" class="action-btn primary-action">Create New Order</a>
             <a href="{{ url_for('orders.bom_library') }}" class="action-btn subtle-action">BOM Library</a>
-            <a href="{{ url_for('orders.view_waiting_orders') }}" class="action-btn subtle-action">Waiting on Material</a>
         {% endif %}
+        <a href="{{ url_for('orders.view_waiting_orders') }}" class="action-btn subtle-action">Waiting on Material</a>
         <a href="{{ url_for('orders.schedule_view') }}" class="action-btn subtle-action">Schedule</a>
         <a href="{{ url_for('orders.view_open_orders') }}" class="action-btn subtle-action">Open Orders</a>
         <a href="{{ url_for('orders.view_closed_orders') }}" class="action-btn subtle-action">Closed Orders</a>
@@ -26,7 +26,7 @@
 {{ render_orders_table(orders) }}
 {% else %}
     <div class="empty-state">
-        {% if current_user.is_authenticated and current_user.has_role('admin') %}
+        {% if can_edit_page('orders') %}
             <p>No open orders yet. Create a new order to get started.</p>
             <a href="{{ url_for('orders.new_order') }}" class="action-btn primary-action">Create New Order</a>
         {% else %}

@@ -1,20 +1,14 @@
 {% extends "base.html" %}
 {% block content %}
+<h2>Hyperion Operations Overview</h2>
 {% if not current_user.is_authenticated %}
-<h2>Welcome to Hyperion Operations Hub</h2>
-<p class="home-lede">
-  Sign in with your assigned account to view production, orders, and inventory insights tailored to your role.
-</p>
-<p>
-  If you do not yet have credentials, please contact a system administrator for access.
-</p>
-<a class="home-summary-link" href="{{ url_for('auth.login') }}">Log in to continue →</a>
+<p class="home-lede">You're viewing the public dashboard. Log in with your assigned account to make updates or see additional pages.</p>
 {% else %}
+<p class="home-lede">Stay ahead of production promises and inventory risks with the highlights below.</p>
+{% endif %}
+
 {% set show_orders = order_summary is not none %}
 {% set show_inventory = inventory_summary is not none %}
-
-<h2>Hyperion Operations Overview</h2>
-<p class="home-lede">Stay ahead of production promises and inventory risks with the highlights below.</p>
 
 {% if show_orders or show_inventory %}
 <div class="home-summary-grid">
@@ -121,7 +115,10 @@
   {% endif %}
 </div>
 {% else %}
-<p class="home-summary-empty">You are signed in, but your account does not have access to the shared order or inventory dashboards. Use the navigation menu to explore the areas available to you.</p>
+<p class="home-summary-empty">No operational summaries are available for your role yet. Use the navigation menu to explore the areas available to you.</p>
 {% endif %}
+
+{% if not current_user.is_authenticated %}
+<p class="home-summary-note">Need to make changes? <a href="{{ url_for('auth.login') }}">Log in</a> with your company credentials.</p>
 {% endif %}
 {% endblock %}
