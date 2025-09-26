@@ -57,6 +57,12 @@
 {% endif %}
 
 <section class="card-section">
+    <h3>Label Designer</h3>
+    <p class="section-intro">Design reusable label layouts with drag-and-drop fields, snapping guides, and live previews.</p>
+    <div id="label-designer-root" class="mt-4"></div>
+</section>
+
+<section class="card-section">
     <h3>Add Printer</h3>
     <form method="post" class="stacked-form">
         <input type="hidden" name="form_id" value="add">
@@ -88,4 +94,12 @@
         </div>
     </form>
 </section>
+{% endblock %}
+
+{% block extra_scripts %}
+{{ super() }}
+<script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script defer src="{{ url_for('static', filename='js/label-designer.js') }}"></script>
 {% endblock %}
