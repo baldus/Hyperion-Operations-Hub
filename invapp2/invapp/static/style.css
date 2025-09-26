@@ -1596,6 +1596,21 @@ body.light .production-table input[type="date"] {
     gap: 24px;
 }
 
+/* Production History input sizing overrides */
+#primary_min,
+#primary_max,
+#primary_step,
+#secondary_min,
+#secondary_max,
+#secondary_step,
+#goal_value {
+    max-width: 180px;
+}
+
+#output_formula {
+    max-width: 520px;
+}
+
 .chart-card {
     padding: 16px;
     border-radius: 16px;
