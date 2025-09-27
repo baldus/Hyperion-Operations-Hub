@@ -53,6 +53,38 @@ class Printer(db.Model):
         port_display = f":{self.port}" if self.port else ""
         return f"{self.host}{port_display}"
 
+
+class LabelTemplate(db.Model):
+    __tablename__ = "label_template"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False, unique=True)
+    description = db.Column(db.String(255), nullable=True)
+    trigger = db.Column(db.String(120), nullable=True)
+    layout = db.Column(db.JSON, nullable=False, default=dict)
+    fields = db.Column(db.JSON, nullable=False, default=dict)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class LabelProcessAssignment(db.Model):
+    __tablename__ = "label_process_assignment"
+
+    id = db.Column(db.Integer, primary_key=True)
+    process = db.Column(db.String(120), nullable=False, unique=True)
+    template_id = db.Column(db.Integer, db.ForeignKey("label_template.id"), nullable=False)
+    template = db.relationship(
+        "LabelTemplate",
+        backref=db.backref("assignments", cascade="all, delete-orphan", lazy="joined"),
+    )
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
 class Item(db.Model):
     __tablename__ = "item"
     id = db.Column(db.Integer, primary_key=True)  # system key

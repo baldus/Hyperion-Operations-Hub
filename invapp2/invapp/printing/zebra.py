@@ -1,10 +1,12 @@
 """Utilities for sending ZPL to Zebra printers."""
 
-from flask import current_app
+from collections.abc import Mapping
 import socket
-
-from .labels import build_receiving_label
 from urllib.request import Request, urlopen
+
+from flask import current_app
+
+from .labels import build_receiving_label, render_label_for_process
 
 
 def send_zpl(
@@ -42,6 +44,17 @@ def print_receiving_label(sku: str, description: str, qty: int) -> bool:
     """Generate and send a receiving label to the configured Zebra printer."""
 
     zpl = build_receiving_label(sku, description, qty)
+    return send_zpl(zpl)
+
+
+def print_label_for_process(process: str, context: Mapping[str, object]) -> bool:
+    """Render the label assigned to ``process`` and send it to the printer."""
+
+    try:
+        zpl = render_label_for_process(process, context)
+    except KeyError as exc:  # pragma: no cover - defensive logging
+        current_app.logger.error("No label template for process '%s': %s", process, exc)
+        return False
     return send_zpl(zpl)
 
 
