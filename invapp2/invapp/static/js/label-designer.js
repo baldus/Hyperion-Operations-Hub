@@ -7,10 +7,21 @@
   const TEMPLATE_MAP = new Map(
     TEMPLATE_CATALOG.filter((template) => template && template.id).map((template) => [template.id, template])
   );
-  const DEFAULT_TEMPLATE_ID =
-    DESIGNER_CONFIG.initialTemplateId && TEMPLATE_MAP.has(DESIGNER_CONFIG.initialTemplateId)
-      ? DESIGNER_CONFIG.initialTemplateId
-      : TEMPLATE_CATALOG[0]?.id || null;
+  const DEFAULT_TEMPLATE_ID = (() => {
+    if (
+      DESIGNER_CONFIG.initialTemplateId &&
+      TEMPLATE_MAP.has(DESIGNER_CONFIG.initialTemplateId)
+    ) {
+      return DESIGNER_CONFIG.initialTemplateId;
+    }
+    if (TEMPLATE_CATALOG.length > 0) {
+      const firstTemplate = TEMPLATE_CATALOG[0];
+      if (firstTemplate && firstTemplate.id) {
+        return firstTemplate.id;
+      }
+    }
+    return null;
+  })();
 
   const uniqueId = () => `element-${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
@@ -86,10 +97,10 @@
             ? 'barcode'
             : 'field';
         const binding = element.fieldKey && fieldIndex ? fieldIndex.get(element.fieldKey) : null;
-        const defaultPreview =
-          binding?.preview || element.text || element.label || element.fieldKey || 'Text';
+        const bindingPreview = binding && binding.preview ? binding.preview : null;
+        const defaultPreview = bindingPreview || element.text || element.label || element.fieldKey || 'Text';
         const bindingDefaultHeight =
-          typeof binding?.defaultHeight === 'number' ? binding.defaultHeight : undefined;
+          binding && typeof binding.defaultHeight === 'number' ? binding.defaultHeight : undefined;
         const defaultHeight =
           bindingDefaultHeight !== undefined
             ? bindingDefaultHeight
@@ -114,7 +125,7 @@
           id: element.id || uniqueId(),
           type,
           fieldKey: element.fieldKey || null,
-          label: element.label || binding?.label || null,
+          label: element.label || (binding && binding.label) || null,
           text: type === 'text' ? element.text || defaultPreview : defaultPreview,
           dataBinding:
             binding && binding.fieldKey
@@ -146,9 +157,9 @@
           base.dataBinding = null;
         }
         if (type === 'barcode') {
-          base.text = binding?.preview || element.text || defaultPreview;
+          base.text = bindingPreview || element.text || defaultPreview;
         }
-        if (type === 'field' && !base.fieldKey && binding?.fieldKey) {
+        if (type === 'field' && !base.fieldKey && binding && binding.fieldKey) {
           base.fieldKey = binding.fieldKey;
         }
         return base;
@@ -216,8 +227,10 @@
   };
 
   const createImageElement = (labelSize, src, naturalSize) => {
-    const baseWidth = Math.min(naturalSize?.width || 220, labelSize.width * 0.6);
-    const aspectRatio = (naturalSize?.height || 120) / (naturalSize?.width || 220);
+    const naturalWidth = naturalSize && naturalSize.width ? naturalSize.width : null;
+    const naturalHeight = naturalSize && naturalSize.height ? naturalSize.height : null;
+    const baseWidth = Math.min(naturalWidth || 220, labelSize.width * 0.6);
+    const aspectRatio = (naturalHeight || 120) / (naturalWidth || 220);
     const height = clamp(baseWidth * aspectRatio, MIN_SIZE, labelSize.height * 0.6);
     return {
       id: uniqueId(),
@@ -327,21 +340,28 @@
     const templates = TEMPLATE_CATALOG;
     const [selectedTemplateId, setSelectedTemplateId] = useState(DEFAULT_TEMPLATE_ID);
     const activeTemplate = useMemo(() => getTemplateById(selectedTemplateId), [selectedTemplateId]);
-    const fieldGroups = useMemo(
-      () => (Array.isArray(activeTemplate?.fieldGroups) ? activeTemplate.fieldGroups : []),
-      [activeTemplate]
-    );
-    const allFields = useMemo(
-      () =>
-        fieldGroups.flatMap((group) =>
-          (Array.isArray(group.fields) ? group.fields : []).map((field) => ({
+    const fieldGroups = useMemo(() => {
+      if (activeTemplate && Array.isArray(activeTemplate.fieldGroups)) {
+        return activeTemplate.fieldGroups;
+      }
+      return [];
+    }, [activeTemplate]);
+    const allFields = useMemo(() => {
+      const collected = [];
+      fieldGroups.forEach((group) => {
+        if (!group || !Array.isArray(group.fields)) {
+          return;
+        }
+        group.fields.forEach((field) => {
+          collected.push({
             ...field,
             groupId: group.id,
             groupLabel: group.label,
-          }))
-        ),
-      [fieldGroups]
-    );
+          });
+        });
+      });
+      return collected;
+    }, [fieldGroups]);
     const fieldIndex = useMemo(() => {
       const entries = allFields
         .filter((field) => field && typeof field.fieldKey === 'string')
@@ -457,7 +477,7 @@
       setElements((prev) => {
         let changed = false;
         const next = prev.map((el) => {
-          const key = el.fieldKey || el.dataBinding?.fieldKey;
+          const key = el.fieldKey || (el.dataBinding && el.dataBinding.fieldKey);
           const match = key ? fieldIndex.get(key) : null;
           if (!match) {
             if (el.fieldKey || el.dataBinding) {
@@ -582,8 +602,9 @@
     useEffect(() => {
       const handleKeyDown = (event) => {
         if (!selectedIds.length) return;
-        const tagName = event.target?.tagName || '';
-        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tagName) || event.target?.isContentEditable) {
+        const target = event.target || {};
+        const tagName = target.tagName || '';
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tagName) || target.isContentEditable) {
           return;
         }
 
@@ -630,7 +651,9 @@
     const selectedBinding = useMemo(() => {
       if (!selectedElement) return null;
       if (selectedElement.dataBinding) return selectedElement.dataBinding;
-      const key = selectedElement.fieldKey || selectedElement.dataBinding?.fieldKey;
+      const key =
+        selectedElement.fieldKey ||
+        (selectedElement.dataBinding && selectedElement.dataBinding.fieldKey);
       if (!key) return null;
       const match = fieldIndex.get(key);
       if (match) {
@@ -779,7 +802,8 @@
       if (kind !== 'field') return;
       const field = allFields.find((f) => f.groupId === groupId && f.id === fieldId);
       if (!field) return;
-      const bounds = canvasRef.current?.getBoundingClientRect();
+      const canvas = canvasRef.current;
+      const bounds = canvas ? canvas.getBoundingClientRect() : null;
       if (!bounds) return;
       const dropPoint = {
         x: (event.clientX - bounds.left) / zoom,
@@ -834,7 +858,8 @@
     const startMove = (event, element, activeIds) => {
       event.preventDefault();
       event.stopPropagation();
-      const bounds = canvasRef.current?.getBoundingClientRect();
+      const canvas = canvasRef.current;
+      const bounds = canvas ? canvas.getBoundingClientRect() : null;
       if (!bounds) return;
 
       const startX = event.clientX;
@@ -919,7 +944,8 @@
       event.preventDefault();
       event.stopPropagation();
       setSelectedIds([element.id]);
-      const bounds = canvasRef.current?.getBoundingClientRect();
+      const canvas = canvasRef.current;
+      const bounds = canvas ? canvas.getBoundingClientRect() : null;
       if (!bounds) return;
       const startX = event.clientX;
       const startY = event.clientY;
@@ -1017,7 +1043,7 @@
 
     const buildLayoutPayload = () => ({
       templateId: selectedTemplateId,
-      templateName: activeTemplate?.templateName || null,
+      templateName: activeTemplate && activeTemplate.templateName ? activeTemplate.templateName : null,
       labelSize: {
         width: activeLabelSize.width,
         height: activeLabelSize.height
@@ -1076,19 +1102,21 @@
         });
         const result = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(result?.message || 'Failed to send the trial print.');
+          const failureMessage = result && result.message ? result.message : 'Failed to send the trial print.';
+          throw new Error(failureMessage);
         }
         setPrintFeedback({
           type: 'success',
           message:
-            result?.message ||
-            `Trial print sent${selectedPrinterName ? ` to ${selectedPrinterName}` : ''}.`
+            (result && result.message
+              ? result.message
+              : `Trial print sent${selectedPrinterName ? ` to ${selectedPrinterName}` : ''}.`)
         });
       } catch (error) {
         console.error(error);
         setPrintFeedback({
           type: 'error',
-          message: error?.message || 'Unable to send a trial print right now.'
+          message: error && error.message ? error.message : 'Unable to send a trial print right now.'
         });
       } finally {
         setIsPrinting(false);
@@ -1654,7 +1682,11 @@
                 'button',
                 {
                   type: 'button',
-                  onClick: () => fileInputRef.current?.click(),
+                  onClick: () => {
+                    if (fileInputRef.current) {
+                      fileInputRef.current.click();
+                    }
+                  },
                   className: 'rounded-md border border-sky-400 px-3 py-1.5 text-xs font-semibold text-sky-600 hover:bg-sky-50'
                 },
                 'Upload image'
@@ -1697,7 +1729,7 @@
                       )
                     : [React.createElement('option', { key: 'none', value: '' }, 'No templates available')]
                 ),
-                activeTemplate?.description &&
+                activeTemplate && activeTemplate.description &&
                   React.createElement(
                     'p',
                     { className: 'text-xs text-slate-500 max-w-xl' },
@@ -2009,7 +2041,11 @@
                     'button',
                     {
                       type: 'button',
-                      onClick: () => navigator.clipboard?.writeText(exportedJSON),
+                      onClick: () => {
+                        if (navigator.clipboard && navigator.clipboard.writeText) {
+                          navigator.clipboard.writeText(exportedJSON);
+                        }
+                      },
                       className: 'rounded-md border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 hover:border-sky-400'
                     },
                     'Copy'
