@@ -1,6 +1,10 @@
 (() => {
-  const { useState, useMemo, useRef, useEffect } = React;
+  const { useState, useMemo, useRef, useEffect, useCallback } = React;
   const DESIGNER_CONFIG = window.labelDesignerConfig || {};
+
+  const GRID_SIZE = 8;
+  const NUDGE_STEP = 1;
+  const FAST_NUDGE_STEP = 8;
 
   const uniqueId = () => `element-${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
@@ -190,9 +194,18 @@
     return Math.min(Math.max(value, min), max);
   };
 
+  const snapToGrid = (value, size = GRID_SIZE) => {
+    if (size <= 0) return value;
+    return Math.round(value / size) * size;
+  };
+
   const createElementFromField = (field, point, labelSize) => {
     const width = field.type === 'barcode' ? 280 : 220;
     const height = field.defaultHeight || (field.type === 'barcode' ? 140 : 64);
+    const maxX = Math.max(labelSize.width - width, 0);
+    const maxY = Math.max(labelSize.height - height, 0);
+    const baseX = clamp(point.x - width / 2, 0, maxX);
+    const baseY = clamp(point.y - height / 2, 0, maxY);
     return {
       id: uniqueId(),
       type: field.type === 'barcode' ? 'barcode' : 'field',
@@ -208,8 +221,8 @@
             groupLabel: field.groupLabel
           }
         : null,
-      x: clamp(point.x - width / 2, 0, Math.max(labelSize.width - width, 0)),
-      y: clamp(point.y - height / 2, 0, Math.max(labelSize.height - height, 0)),
+      x: clamp(snapToGrid(baseX), 0, maxX),
+      y: clamp(snapToGrid(baseY), 0, maxY),
       width,
       height,
       rotation: 0,
@@ -218,21 +231,26 @@
       fontWeight: '600',
       textAlign: 'left',
       color: '#111827',
-      background: field.type === 'barcode' ? '#0f172a' : 'rgba(255,255,255,0.85)'
+      background: field.type === 'barcode' ? '#0f172a' : 'rgba(255,255,255,0.85)',
+      isLocked: false
     };
   };
 
   const createTextElement = (labelSize) => {
     const width = 260;
     const height = 72;
+    const maxX = Math.max(labelSize.width - width, 0);
+    const maxY = Math.max(labelSize.height - height, 0);
+    const baseX = clamp((labelSize.width - width) / 2, 0, maxX);
+    const baseY = clamp((labelSize.height - height) / 2, 0, maxY);
     return {
       id: uniqueId(),
       type: 'text',
       text: 'Custom text',
       dataBinding: null,
       fieldKey: null,
-      x: (labelSize.width - width) / 2,
-      y: (labelSize.height - height) / 2,
+      x: clamp(snapToGrid(baseX), 0, maxX),
+      y: clamp(snapToGrid(baseY), 0, maxY),
       width,
       height,
       rotation: 0,
@@ -241,7 +259,8 @@
       fontWeight: '600',
       textAlign: 'center',
       color: '#0f172a',
-      background: 'rgba(255,255,255,0.85)'
+      background: 'rgba(255,255,255,0.85)',
+      isLocked: false
     };
   };
 
@@ -249,16 +268,19 @@
     const baseWidth = Math.min(naturalSize?.width || 220, labelSize.width * 0.6);
     const aspectRatio = (naturalSize?.height || 120) / (naturalSize?.width || 220);
     const height = clamp(baseWidth * aspectRatio, MIN_SIZE, labelSize.height * 0.6);
+    const maxX = Math.max(labelSize.width - baseWidth, 0);
+    const maxY = Math.max(labelSize.height - height, 0);
     return {
       id: uniqueId(),
       type: 'image',
       src,
       dataBinding: null,
-      x: (labelSize.width - baseWidth) / 2,
-      y: (labelSize.height - height) / 2,
+      x: clamp(snapToGrid((labelSize.width - baseWidth) / 2), 0, maxX),
+      y: clamp(snapToGrid((labelSize.height - height) / 2), 0, maxY),
       width: baseWidth,
       height,
-      rotation: 0
+      rotation: 0,
+      isLocked: false
     };
   };
 
@@ -354,7 +376,7 @@
   };
   const LabelDesigner = () => {
     const [elements, setElements] = useState([]);
-    const [selectedId, setSelectedId] = useState(null);
+    const [selectedIds, setSelectedIds] = useState([]);
     const [labelSize, setLabelSize] = useState(LABEL_SIZES[0]);
     const [zoom, setZoom] = useState(1);
     const [guides, setGuides] = useState({ vertical: null, horizontal: null });
@@ -363,15 +385,21 @@
     const [customSize, setCustomSize] = useState({ width: LABEL_SIZES[3].width, height: LABEL_SIZES[3].height });
     const [isPrinting, setIsPrinting] = useState(false);
     const [printFeedback, setPrintFeedback] = useState(null);
+    const [showPreview, setShowPreview] = useState(false);
     const canvasRef = useRef(null);
     const fileInputRef = useRef(null);
     const elementsRef = useRef(elements);
+    const selectionRef = useRef(selectedIds);
     const { trialPrintUrl, selectedPrinterName } = DESIGNER_CONFIG;
     const canSendTrial = Boolean(trialPrintUrl);
 
     useEffect(() => {
       elementsRef.current = elements;
     }, [elements]);
+
+    useEffect(() => {
+      selectionRef.current = selectedIds;
+    }, [selectedIds]);
 
     const activeLabelSize = useMemo(() => {
       if (labelSize.id !== 'custom') {
@@ -401,6 +429,50 @@
     }, [activeLabelSize.width, activeLabelSize.height]);
 
     useEffect(() => {
+      const handleKeyDown = (event) => {
+        if (!selectedIds.length) return;
+        const target = event.target;
+        const tagName = target?.tagName?.toLowerCase();
+        if (tagName && ['input', 'textarea', 'select'].includes(tagName)) return;
+        if (target?.isContentEditable) return;
+
+        let deltaX = 0;
+        let deltaY = 0;
+        if (event.key === 'ArrowUp') {
+          deltaY = -(event.shiftKey ? FAST_NUDGE_STEP : NUDGE_STEP);
+        } else if (event.key === 'ArrowDown') {
+          deltaY = event.shiftKey ? FAST_NUDGE_STEP : NUDGE_STEP;
+        } else if (event.key === 'ArrowLeft') {
+          deltaX = -(event.shiftKey ? FAST_NUDGE_STEP : NUDGE_STEP);
+        } else if (event.key === 'ArrowRight') {
+          deltaX = event.shiftKey ? FAST_NUDGE_STEP : NUDGE_STEP;
+        } else {
+          return;
+        }
+
+        event.preventDefault();
+        const unlockedIds = selectedIds.filter((id) => {
+          const el = elementsRef.current.find((item) => item.id === id);
+          return el && !el.isLocked;
+        });
+        if (!unlockedIds.length) return;
+
+        updateElementsByIds(unlockedIds, (el) => {
+          const proposed = {
+            ...el,
+            x: snapToGrid(el.x + deltaX),
+            y: snapToGrid(el.y + deltaY)
+          };
+          const bounded = clampElementWithinBounds(proposed, activeLabelSize);
+          return { x: bounded.x, y: bounded.y };
+        });
+      };
+
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [selectedIds, activeLabelSize, updateElementsByIds]);
+
+    useEffect(() => {
       setElements((prev) => {
         let changed = false;
         const next = prev.map((el) => {
@@ -427,16 +499,18 @@
       });
     }, []);
 
-    const selectedElement = useMemo(
-      () => elements.find((el) => el.id === selectedId) || null,
-      [elements, selectedId]
+    const selectedElements = useMemo(
+      () => elements.filter((el) => selectedIds.includes(el.id)),
+      [elements, selectedIds]
     );
 
+    const primarySelection = selectedElements[0] || null;
+
     const selectedBinding = useMemo(() => {
-      if (!selectedElement) return null;
-      if (selectedElement.dataBinding) return selectedElement.dataBinding;
-      if (selectedElement.fieldKey) {
-        const match = ALL_FIELDS.find((field) => field.fieldKey === selectedElement.fieldKey);
+      if (!primarySelection) return null;
+      if (primarySelection.dataBinding) return primarySelection.dataBinding;
+      if (primarySelection.fieldKey) {
+        const match = ALL_FIELDS.find((field) => field.fieldKey === primarySelection.fieldKey);
         if (match) {
           return {
             groupId: match.groupId,
@@ -448,11 +522,24 @@
         }
       }
       return null;
-    }, [selectedElement]);
+    }, [primarySelection]);
 
-    const updateElement = (id, updates) => {
-      setElements((prev) => prev.map((el) => (el.id === id ? { ...el, ...updates } : el)));
-    };
+    const updateElementsByIds = useCallback((ids, updater) => {
+      setElements((prev) =>
+        prev.map((el) => {
+          if (!ids.includes(el.id)) return el;
+          const next = typeof updater === 'function' ? updater(el) : updater;
+          return { ...el, ...next };
+        })
+      );
+    }, []);
+
+    const updateElement = useCallback(
+      (id, updates) => {
+        updateElementsByIds([id], updates);
+      },
+      [updateElementsByIds]
+    );
 
     const clampElementWithinBounds = (el, size) => {
       const maxX = Math.max(size.width - el.width, 0);
@@ -482,41 +569,140 @@
       };
       const element = createElementFromField(field, dropPoint, activeLabelSize);
       setElements((prev) => [...prev, element]);
-      setSelectedId(element.id);
+      setSelectedIds([element.id]);
     };
 
     const handleDragOver = (event) => {
       event.preventDefault();
     };
 
-    const startMove = (event, element) => {
+    const handleElementPointerDown = (event, element) => {
       event.preventDefault();
       event.stopPropagation();
-      setSelectedId(element.id);
+      const isMulti = event.shiftKey || event.metaKey || event.ctrlKey;
+      const currentSelection = selectionRef.current;
+      let nextSelection;
+      if (isMulti) {
+        if (currentSelection.includes(element.id)) {
+          nextSelection = currentSelection.filter((id) => id !== element.id);
+          if (!nextSelection.length) {
+            nextSelection = [element.id];
+          }
+        } else {
+          nextSelection = [...currentSelection, element.id];
+        }
+      } else {
+        nextSelection = [element.id];
+      }
+      setSelectedIds(nextSelection);
+      if (!isMulti && !element.isLocked) {
+        startMove(event, element, nextSelection);
+      }
+    };
+
+    const startMove = (event, element, selection) => {
+      event.preventDefault();
+      event.stopPropagation();
       const bounds = canvasRef.current?.getBoundingClientRect();
       if (!bounds) return;
-      const startX = event.clientX;
-      const startY = event.clientY;
+
+      const pointerStart = {
+        x: (event.clientX - bounds.left) / zoom,
+        y: (event.clientY - bounds.top) / zoom
+      };
+
+      const currentElements = elementsRef.current;
+      const movingIds = (selection && selection.length ? selection : [element.id]).filter((id) => {
+        const target = currentElements.find((item) => item.id === id);
+        return target && !target.isLocked;
+      });
+
+      if (!movingIds.includes(element.id)) {
+        const latest = currentElements.find((item) => item.id === element.id);
+        if (!latest || latest.isLocked) {
+          return;
+        }
+        movingIds.push(element.id);
+      }
+
+      if (!movingIds.length) return;
+
+      const initialPositions = movingIds.map((id) => {
+        const target = currentElements.find((item) => item.id === id) || element;
+        return {
+          id,
+          x: target.x,
+          y: target.y,
+          width: target.width,
+          height: target.height
+        };
+      });
 
       const handlePointerMove = (moveEvent) => {
-        const currentElements = elementsRef.current;
-        const latest = currentElements.find((el) => el.id === element.id) || element;
-        const offsetX = (startX - bounds.left) / zoom - latest.x;
-        const offsetY = (startY - bounds.top) / zoom - latest.y;
-        const rawX = (moveEvent.clientX - bounds.left) / zoom - offsetX;
-        const rawY = (moveEvent.clientY - bounds.top) / zoom - offsetY;
-        const draft = { x: rawX, y: rawY, width: latest.width, height: latest.height };
+        const pointerX = (moveEvent.clientX - bounds.left) / zoom;
+        const pointerY = (moveEvent.clientY - bounds.top) / zoom;
+        const deltaX = pointerX - pointerStart.x;
+        const deltaY = pointerY - pointerStart.y;
+
+        const primaryInitial =
+          initialPositions.find((pos) => pos.id === element.id) || initialPositions[0];
+        if (!primaryInitial) return;
+
+        const draft = {
+          x: primaryInitial.x + deltaX,
+          y: primaryInitial.y + deltaY,
+          width: primaryInitial.width,
+          height: primaryInitial.height
+        };
+
+        const snappedDraft = {
+          ...draft,
+          x: snapToGrid(draft.x),
+          y: snapToGrid(draft.y)
+        };
+
         const { vertical, horizontal, snappedX, snappedY } = computeGuides(
-          latest.id,
-          draft,
-          currentElements,
+          element.id,
+          snappedDraft,
+          elementsRef.current,
           activeLabelSize
         );
-        const finalX = snappedX !== null ? snappedX : draft.x;
-        const finalY = snappedY !== null ? snappedY : draft.y;
-        const bounded = clampElementWithinBounds({ ...latest, x: finalX, y: finalY }, activeLabelSize);
+
+        const maxX = Math.max(activeLabelSize.width - draft.width, 0);
+        const maxY = Math.max(activeLabelSize.height - draft.height, 0);
+        const finalPrimaryX = clamp(
+          snappedX !== null ? snappedX : snappedDraft.x,
+          0,
+          maxX
+        );
+        const finalPrimaryY = clamp(
+          snappedY !== null ? snappedY : snappedDraft.y,
+          0,
+          maxY
+        );
+
+        const appliedDeltaX = finalPrimaryX - primaryInitial.x;
+        const appliedDeltaY = finalPrimaryY - primaryInitial.y;
+
+        updateElementsByIds(movingIds, (current) => {
+          const original =
+            initialPositions.find((pos) => pos.id === current.id) ||
+            ({
+              x: current.x,
+              y: current.y,
+              width: current.width,
+              height: current.height
+            });
+          const proposed = {
+            ...current,
+            x: snapToGrid(original.x + appliedDeltaX),
+            y: snapToGrid(original.y + appliedDeltaY)
+          };
+          const bounded = clampElementWithinBounds(proposed, activeLabelSize);
+          return { x: bounded.x, y: bounded.y };
+        });
+
         setGuides({ vertical, horizontal });
-        updateElement(latest.id, { x: bounded.x, y: bounded.y });
       };
 
       const handlePointerUp = () => {
@@ -532,6 +718,8 @@
     const startResize = (event, element, direction) => {
       event.preventDefault();
       event.stopPropagation();
+      if (element.isLocked) return;
+      setSelectedIds([element.id]);
       const bounds = canvasRef.current?.getBoundingClientRect();
       if (!bounds) return;
       const startX = event.clientX;
@@ -562,19 +750,43 @@
           newY = clamp(latest.y + deltaY, 0, latest.y + latest.height - MIN_SIZE);
         }
 
-        const draft = { x: newX, y: newY, width: newWidth, height: newHeight };
+        const draft = {
+          x: newX,
+          y: newY,
+          width: Math.max(MIN_SIZE, snapToGrid(newWidth)),
+          height: Math.max(MIN_SIZE, snapToGrid(newHeight))
+        };
+
+        const snappedPosition = {
+          ...draft,
+          x: snapToGrid(draft.x),
+          y: snapToGrid(draft.y)
+        };
+
         const { vertical, horizontal, snappedX, snappedY } = computeGuides(
-          latest.id,
-          draft,
-          currentElements,
+          element.id,
+          snappedPosition,
+          elementsRef.current,
           activeLabelSize
         );
+
+        const bounded = clampElementWithinBounds(
+          {
+            ...latest,
+            x: snappedX !== null ? snappedX : snappedPosition.x,
+            y: snappedY !== null ? snappedY : snappedPosition.y,
+            width: snappedPosition.width,
+            height: snappedPosition.height
+          },
+          activeLabelSize
+        );
+
         setGuides({ vertical, horizontal });
         updateElement(latest.id, {
-          x: snappedX !== null ? snappedX : draft.x,
-          y: snappedY !== null ? snappedY : draft.y,
-          width: draft.width,
-          height: draft.height
+          x: bounded.x,
+          y: bounded.y,
+          width: bounded.width,
+          height: bounded.height
         });
       };
 
@@ -594,10 +806,119 @@
       setZoom((prev) => clamp(prev - event.deltaY * 0.0015, 0.3, 3));
     };
 
+    const getSelectionBounds = useCallback((items) => {
+      if (!items.length) return null;
+      const left = Math.min(...items.map((item) => item.x));
+      const top = Math.min(...items.map((item) => item.y));
+      const right = Math.max(...items.map((item) => item.x + item.width));
+      const bottom = Math.max(...items.map((item) => item.y + item.height));
+      return {
+        left,
+        top,
+        right,
+        bottom,
+        centerX: left + (right - left) / 2,
+        centerY: top + (bottom - top) / 2
+      };
+    }, []);
+
+    const alignSelection = useCallback(
+      (mode) => {
+        const selected = elementsRef.current.filter(
+          (el) => selectedIds.includes(el.id) && !el.isLocked
+        );
+        if (selected.length < 2) return;
+        const bounds = getSelectionBounds(selected);
+        if (!bounds) return;
+
+        updateElementsByIds(
+          selected.map((el) => el.id),
+          (el) => {
+            let nextX = el.x;
+            let nextY = el.y;
+            if (mode === 'left') nextX = bounds.left;
+            if (mode === 'right') nextX = bounds.right - el.width;
+            if (mode === 'center') nextX = bounds.centerX - el.width / 2;
+            if (mode === 'top') nextY = bounds.top;
+            if (mode === 'bottom') nextY = bounds.bottom - el.height;
+            if (mode === 'middle') nextY = bounds.centerY - el.height / 2;
+
+            const snapped = {
+              ...el,
+              x: snapToGrid(nextX),
+              y: snapToGrid(nextY)
+            };
+            const bounded = clampElementWithinBounds(snapped, activeLabelSize);
+            return { x: bounded.x, y: bounded.y };
+          }
+        );
+      },
+      [selectedIds, getSelectionBounds, updateElementsByIds, activeLabelSize]
+    );
+
+    const distributeSelection = useCallback(
+      (orientation) => {
+        const selected = elementsRef.current
+          .filter((el) => selectedIds.includes(el.id) && !el.isLocked)
+          .sort((a, b) => (orientation === 'horizontal' ? a.x - b.x : a.y - b.y));
+
+        if (selected.length < 3) return;
+        const bounds = getSelectionBounds(selected);
+        if (!bounds) return;
+
+        if (orientation === 'horizontal') {
+          const totalWidth = selected.reduce((sum, el) => sum + el.width, 0);
+          const available = bounds.right - bounds.left - totalWidth;
+          if (available < 0) return;
+          const gap = available / (selected.length - 1);
+          let cursor = bounds.left;
+          const positions = {};
+          selected.forEach((el, index) => {
+            positions[el.id] = cursor;
+            cursor += el.width;
+            if (index !== selected.length - 1) {
+              cursor += gap;
+            }
+          });
+          updateElementsByIds(selected.map((el) => el.id), (el) => {
+            const proposed = {
+              ...el,
+              x: snapToGrid(positions[el.id])
+            };
+            const bounded = clampElementWithinBounds(proposed, activeLabelSize);
+            return { x: bounded.x };
+          });
+        } else {
+          const totalHeight = selected.reduce((sum, el) => sum + el.height, 0);
+          const available = bounds.bottom - bounds.top - totalHeight;
+          if (available < 0) return;
+          const gap = available / (selected.length - 1);
+          let cursor = bounds.top;
+          const positions = {};
+          selected.forEach((el, index) => {
+            positions[el.id] = cursor;
+            cursor += el.height;
+            if (index !== selected.length - 1) {
+              cursor += gap;
+            }
+          });
+          updateElementsByIds(selected.map((el) => el.id), (el) => {
+            const proposed = {
+              ...el,
+              y: snapToGrid(positions[el.id])
+            };
+            const bounded = clampElementWithinBounds(proposed, activeLabelSize);
+            return { y: bounded.y };
+          });
+        }
+      },
+      [selectedIds, getSelectionBounds, updateElementsByIds, activeLabelSize]
+    );
+
     const addTextBlock = () => {
       const element = createTextElement(activeLabelSize);
       setElements((prev) => [...prev, element]);
-      setSelectedId(element.id);
+      setSelectedIds([element.id]);
     };
 
     const handleUploadLogo = (event) => {
@@ -612,7 +933,7 @@
             height: img.naturalHeight
           });
           setElements((prev) => [...prev, element]);
-          setSelectedId(element.id);
+          setSelectedIds([element.id]);
         };
         img.src = reader.result;
       };
@@ -718,13 +1039,14 @@
               fontWeight: el.fontWeight || '600',
               textAlign: el.textAlign || 'left',
               color: el.color || '#111827',
-              background: el.background || 'rgba(255,255,255,0.85)'
+              background: el.background || 'rgba(255,255,255,0.85)',
+              isLocked: Boolean(el.isLocked)
             },
             { width, height }
           )
         );
         setElements(sanitized);
-        setSelectedId(sanitized[0]?.id || null);
+        setSelectedIds(sanitized[0] ? [sanitized[0].id] : []);
       } catch (error) {
         console.error(error);
         alert('Unable to import layout. Please ensure the JSON is valid.');
@@ -733,9 +1055,7 @@
 
     const handleRemoveElement = (id) => {
       setElements((prev) => prev.filter((el) => el.id !== id));
-      if (selectedId === id) {
-        setSelectedId(null);
-      }
+      setSelectedIds((prev) => prev.filter((selected) => selected !== id));
     };
 
     const previewScale = useMemo(() => {
@@ -749,7 +1069,7 @@
 
     const handleCanvasClick = (event) => {
       event.stopPropagation();
-      setSelectedId(null);
+      setSelectedIds([]);
     };
     const renderElementContent = (element, scale = zoom) => {
       if (element.type === 'image') {
@@ -790,7 +1110,7 @@
     };
 
     const canvasElements = elements.map((element) => {
-      const isSelected = element.id === selectedId;
+      const isSelected = selectedIds.includes(element.id);
       const paddingBase = element.type === 'barcode' ? 14 : element.type === 'image' ? 0 : 10;
       const style = {
         position: 'absolute',
@@ -808,7 +1128,7 @@
         justifyContent: 'center',
         padding: `${Math.max(paddingBase * zoom, 4)}px`,
         boxShadow: isSelected ? '0 0 0 4px rgba(56, 189, 248, 0.2)' : 'none',
-        cursor: 'move'
+        cursor: element.isLocked ? 'default' : 'move'
       };
 
       const handles = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
@@ -830,13 +1150,13 @@
           role: 'presentation',
           className: 'absolute',
           style,
-          onPointerDown: (e) => startMove(e, element),
+          onPointerDown: (e) => handleElementPointerDown(e, element),
           onClick: (e) => {
             e.stopPropagation();
-            setSelectedId(element.id);
+            setSelectedIds([element.id]);
           }
         },
-        isSelected &&
+        isSelected && !element.isLocked &&
           handles.map((dir) =>
             React.createElement('span', {
               key: dir,
@@ -925,16 +1245,16 @@
         )
       )
     );
-    const alignmentButtons = selectedElement
+    const textAlignmentButtons = primarySelection
       ? ALIGN_OPTIONS.map((option) =>
           React.createElement(
             'button',
             {
               key: option.value,
               type: 'button',
-              onClick: () => updateElement(selectedElement.id, { textAlign: option.value }),
+              onClick: () => updateElement(primarySelection.id, { textAlign: option.value }),
               className: `rounded-md border px-2 py-1 text-xs font-semibold transition ${
-                selectedElement.textAlign === option.value
+                primarySelection.textAlign === option.value
                   ? 'border-sky-500 bg-sky-50 text-sky-600'
                   : 'border-slate-300 text-slate-500 hover:border-sky-400'
               }`
@@ -944,233 +1264,255 @@
         )
       : [];
 
-    const customizationContent = selectedElement
-      ? React.createElement(
+    const unlockedSelectedCount = selectedElements.filter((el) => !el.isLocked).length;
+    const canAlignSelection = unlockedSelectedCount >= 2;
+    const canDistributeSelection = unlockedSelectedCount >= 3;
+
+    let customizationContent;
+    if (selectedElements.length === 0) {
+      customizationContent = React.createElement(
+        'p',
+        { className: 'text-sm text-slate-500' },
+        'Select an element on the canvas to customize it.'
+      );
+    } else if (selectedElements.length > 1) {
+      customizationContent = React.createElement(
+        'div',
+        { className: 'space-y-2 text-sm text-slate-600' },
+        React.createElement(
+          'p',
+          { className: 'font-semibold text-slate-700' },
+          `${selectedElements.length} elements selected`
+        ),
+        React.createElement(
+          'p',
+          null,
+          'Use the alignment and distribution controls above the canvas to tidy this group or click any single element to edit its properties.'
+        )
+      );
+    } else if (primarySelection) {
+      customizationContent = React.createElement(
+        'div',
+        { className: 'space-y-4' },
+        React.createElement(
           'div',
-          { className: 'space-y-4' },
+          { className: 'flex items-start justify-between gap-3' },
+          React.createElement('div', null,
+            React.createElement('h4', { className: 'text-sm font-semibold uppercase tracking-wide text-slate-700' }, 'Element settings'),
+            React.createElement('p', { className: 'text-xs text-slate-500' }, primarySelection.type === 'image' ? 'Adjust dimensions, position, and rotation.' : 'Update typography, alignment, and copy.')
+          ),
           React.createElement(
             'div',
-            { className: 'flex items-start justify-between gap-3' },
-            React.createElement('div', null,
-              React.createElement('h4', { className: 'text-sm font-semibold uppercase tracking-wide text-slate-700' }, 'Element settings'),
-              React.createElement('p', { className: 'text-xs text-slate-500' }, selectedElement.type === 'image' ? 'Adjust dimensions, position, and rotation.' : 'Update typography, alignment, and copy.')
+            { className: 'flex items-center gap-2' },
+            React.createElement(
+              'button',
+              {
+                type: 'button',
+                onClick: () => updateElement(primarySelection.id, { isLocked: !primarySelection.isLocked }),
+                className: `rounded-md border px-2 py-1 text-xs font-semibold transition ${
+                  primarySelection.isLocked
+                    ? 'border-amber-400 text-amber-600 hover:bg-amber-50'
+                    : 'border-slate-300 text-slate-500 hover:border-sky-400'
+                }`
+              },
+              primarySelection.isLocked ? 'Unlock' : 'Lock'
             ),
             React.createElement(
               'button',
               {
                 type: 'button',
-                onClick: () => handleRemoveElement(selectedElement.id),
+                onClick: () => handleRemoveElement(primarySelection.id),
                 className: 'rounded-md border border-rose-200 px-2 py-1 text-xs font-semibold text-rose-500 hover:bg-rose-50'
               },
               'Remove'
             )
+          )
+        ),
+        selectedBinding &&
+          React.createElement(
+            'div',
+            { className: 'rounded-lg bg-slate-100 p-2 text-xs text-slate-600' },
+            'Bound field: ',
+            React.createElement(
+              'span',
+              { className: 'font-semibold text-slate-700' },
+              `${selectedBinding.groupLabel || ''}${selectedBinding.groupLabel ? ' • ' : ''}${primarySelection.label || selectedBinding.label}`
+            )
           ),
-          selectedBinding &&
-            React.createElement(
-              'div',
-              { className: 'rounded-lg bg-slate-100 p-2 text-xs text-slate-600' },
-              'Bound field: ',
-              React.createElement(
-                'span',
-                { className: 'font-semibold text-slate-700' },
-                `${selectedBinding.groupLabel || ''}${selectedBinding.groupLabel ? ' • ' : ''}${selectedElement.label || selectedBinding.label}`
-              )
-            ),
-          selectedElement.type !== 'image' &&
-            React.createElement(
-              'label',
-              { className: 'block space-y-1 text-xs font-semibold text-slate-600' },
-              React.createElement('span', null, 'Data binding'),
-              React.createElement(
-                'select',
-                {
-                  value: selectedBinding ? `${selectedBinding.groupId}:${selectedBinding.fieldId}` : '__none__',
-                  onChange: (event) => {
-                    const value = event.target.value;
-                    if (value === '__none__') {
-                      updateElement(selectedElement.id, {
-                        fieldKey: null,
-                        label: selectedElement.type === 'barcode' ? selectedElement.label : null,
-                        dataBinding: null
-                      });
-                      return;
-                    }
-                    const [groupId, fieldId] = value.split(':');
-                    const field = ALL_FIELDS.find((f) => f.groupId === groupId && f.id === fieldId);
-                    if (!field) return;
-                    const updates = {
-                      fieldKey: field.fieldKey,
-                      label: field.label,
-                      dataBinding: {
-                        groupId: field.groupId,
-                        fieldId: field.id,
-                        label: field.label,
-                        fieldKey: field.fieldKey,
-                        groupLabel: field.groupLabel
-                      }
-                    };
-                    if (selectedElement.type !== 'image') {
-                      updates.text = field.preview;
-                    }
-                    updateElement(selectedElement.id, updates);
-                  },
-                  className:
-                    'w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100'
-                },
-                React.createElement('option', { value: '__none__' }, 'Manual content'),
-                ...DATA_FIELD_GROUPS.map((group) =>
-                  React.createElement(
-                    'optgroup',
-                    { key: group.id, label: group.label },
-                    group.fields.map((field) =>
-                      React.createElement(
-                        'option',
-                        { key: `${group.id}:${field.id}`, value: `${group.id}:${field.id}` },
-                        field.label
-                      )
-                    )
-                  )
-                )
-              ),
-              React.createElement(
-                'p',
-                { className: 'text-[11px] font-normal text-slate-500' },
-                'Bind this element to inventory, batch, or order data, or keep it as manual text.'
-              )
-            ),
-          selectedElement.type !== 'image' &&
-            React.createElement(
-              'label',
-              { className: 'block space-y-1 text-xs font-semibold text-slate-600' },
-              React.createElement('span', null, 'Text'),
-              React.createElement('textarea', {
-                value: selectedElement.text || '',
-                onChange: (event) => updateElement(selectedElement.id, { text: event.target.value }),
-                rows: 3,
-                className: 'w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100'
-              })
-            ),
-          selectedElement.type !== 'image' &&
-            React.createElement(
-              'div',
-              { className: 'grid grid-cols-2 gap-2 text-xs font-semibold text-slate-600' },
-              React.createElement(
-                'label',
-                { className: 'space-y-1' },
-                React.createElement('span', null, 'Font'),
-                React.createElement(
-                  'select',
-                  {
-                    value: selectedElement.fontFamily,
-                    onChange: (event) => updateElement(selectedElement.id, { fontFamily: event.target.value }),
-                    className: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100'
-                  },
-                  FONT_FAMILIES.map((font) =>
-                    React.createElement('option', { key: font.value, value: font.value }, font.label)
-                  )
-                )
-              ),
-              React.createElement(
-                'label',
-                { className: 'space-y-1' },
-                React.createElement('span', null, 'Weight'),
-                React.createElement(
-                  'select',
-                  {
-                    value: selectedElement.fontWeight,
-                    onChange: (event) => updateElement(selectedElement.id, { fontWeight: event.target.value }),
-                    className: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100'
-                  },
-                  FONT_WEIGHTS.map((option) =>
-                    React.createElement('option', { key: option.value, value: option.value }, option.label)
-                  )
-                )
-              )
-            ),
-          selectedElement.type !== 'image' &&
-            React.createElement(
-              'div',
-              { className: 'flex flex-wrap gap-2 text-xs font-semibold text-slate-600' },
-              React.createElement('span', { className: 'self-center' }, 'Align'),
-              ...alignmentButtons
-            ),
-          selectedElement.type !== 'image' &&
-            React.createElement(
-              'label',
-              { className: 'block space-y-1 text-xs font-semibold text-slate-600' },
-              React.createElement('span', null, 'Font size (pt)'),
-              React.createElement('input', {
-                type: 'number',
-                min: 6,
-                max: 120,
-                value: round(selectedElement.fontSize, 0),
-                onChange: (event) => {
-                  const value = clamp(Number(event.target.value), 6, 120);
-                  updateElement(selectedElement.id, { fontSize: value });
-                },
-                className: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100'
-              })
-            ),
-          selectedElement.type !== 'image' &&
-            React.createElement(
-              'label',
-              { className: 'flex items-center justify-between gap-2 text-xs font-semibold text-slate-600' },
-              React.createElement('span', null, 'Color'),
-              React.createElement('input', {
-                type: 'color',
-                value: selectedElement.color || '#111827',
-                onChange: (event) => updateElement(selectedElement.id, { color: event.target.value })
-              })
-            ),
+        primarySelection.type !== 'image' &&
           React.createElement(
             'label',
             { className: 'block space-y-1 text-xs font-semibold text-slate-600' },
-            React.createElement('span', null, 'Rotation'),
-            React.createElement('input', {
-              type: 'range',
-              min: -180,
-              max: 180,
-              step: 1,
-              value: selectedElement.rotation,
-              onChange: (event) => updateElement(selectedElement.id, { rotation: Number(event.target.value) }),
-              className: 'w-full accent-sky-500'
-            }),
-            React.createElement('div', { className: 'text-right text-xs text-slate-500' }, `${selectedElement.rotation}\u00B0`)
+            React.createElement('span', null, 'Data binding'),
+            React.createElement(
+              'select',
+              {
+                value: selectedBinding ? `${selectedBinding.groupId}:${selectedBinding.fieldId}` : '__none__',
+                onChange: (event) => {
+                  const value = event.target.value;
+                  if (value === '__none__') {
+                    updateElement(primarySelection.id, {
+                      fieldKey: null,
+                      label: primarySelection.type === 'barcode' ? primarySelection.label : null,
+                      dataBinding: null
+                    });
+                    return;
+                  }
+                  const [groupId, fieldId] = value.split(':');
+                  const field = ALL_FIELDS.find((f) => f.groupId === groupId && f.id === fieldId);
+                  if (!field) return;
+                  const updates = {
+                    fieldKey: field.fieldKey,
+                    label: field.label,
+                    dataBinding: {
+                      groupId: field.groupId,
+                      fieldId: field.id,
+                      label: field.label,
+                      fieldKey: field.fieldKey,
+                      groupLabel: field.groupLabel
+                    }
+                  };
+                  if (primarySelection.type !== 'barcode') {
+                    updates.text = primarySelection.text || field.preview || field.label;
+                  }
+                  updateElement(primarySelection.id, updates);
+                },
+                className: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100'
+              },
+              React.createElement('option', { value: '__none__' }, 'No binding'),
+              ...ALL_FIELDS.map((field) =>
+                React.createElement(
+                  'option',
+                  {
+                    key: `${field.groupId}:${field.id}`,
+                    value: `${field.groupId}:${field.id}`
+                  },
+                  `${field.groupLabel} • ${field.label}`
+                )
+              )
+            )
           ),
+        primarySelection.type !== 'image' &&
           React.createElement(
             'div',
             { className: 'grid grid-cols-2 gap-2 text-xs font-semibold text-slate-600' },
-            ['X', 'Y', 'Width', 'Height'].map((label, index) => {
-              const keys = ['x', 'y', 'width', 'height'];
-              const key = keys[index];
-              return React.createElement(
-                'label',
-                { key: key, className: 'space-y-1' },
-                React.createElement('span', null, label),
-                React.createElement('input', {
-                  type: 'number',
-                  value: round(selectedElement[key], 0),
-                  onChange: (event) => {
-                    const value = Number(event.target.value);
-                    if (Number.isNaN(value)) return;
-                    const bounded = clampElementWithinBounds(
-                      { ...selectedElement, [key]: value },
-                      activeLabelSize
-                    );
-                    updateElement(selectedElement.id, {
-                      x: bounded.x,
-                      y: bounded.y,
-                      width: bounded.width,
-                      height: bounded.height
-                    });
-                  },
+            React.createElement(
+              'label',
+              { className: 'space-y-1' },
+              React.createElement('span', null, 'Font'),
+              React.createElement(
+                'select',
+                {
+                  value: primarySelection.fontFamily,
+                  onChange: (event) => updateElement(primarySelection.id, { fontFamily: event.target.value }),
                   className: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100'
-                })
-              );
+                },
+                FONT_FAMILIES.map((font) =>
+                  React.createElement('option', { key: font.value, value: font.value }, font.label)
+                )
+              )
+            ),
+            React.createElement(
+              'label',
+              { className: 'space-y-1' },
+              React.createElement('span', null, 'Weight'),
+              React.createElement(
+                'select',
+                {
+                  value: primarySelection.fontWeight,
+                  onChange: (event) => updateElement(primarySelection.id, { fontWeight: event.target.value }),
+                  className: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100'
+                },
+                FONT_WEIGHTS.map((option) =>
+                  React.createElement('option', { key: option.value, value: option.value }, option.label)
+                )
+              )
+            )
+          ),
+        primarySelection.type !== 'image' &&
+          React.createElement(
+            'div',
+            { className: 'flex flex-wrap gap-2 text-xs font-semibold text-slate-600' },
+            React.createElement('span', { className: 'self-center' }, 'Align'),
+            ...textAlignmentButtons
+          ),
+        primarySelection.type !== 'image' &&
+          React.createElement(
+            'label',
+            { className: 'block space-y-1 text-xs font-semibold text-slate-600' },
+            React.createElement('span', null, 'Font size (pt)'),
+            React.createElement('input', {
+              type: 'number',
+              min: 6,
+              max: 120,
+              value: round(primarySelection.fontSize, 0),
+              onChange: (event) => {
+                const value = clamp(Number(event.target.value), 6, 120);
+                updateElement(primarySelection.id, { fontSize: value });
+              },
+              className: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100'
             })
-          )
+          ),
+        primarySelection.type !== 'image' &&
+          React.createElement(
+            'label',
+            { className: 'flex items-center justify-between gap-2 text-xs font-semibold text-slate-600' },
+            React.createElement('span', null, 'Color'),
+            React.createElement('input', {
+              type: 'color',
+              value: primarySelection.color || '#111827',
+              onChange: (event) => updateElement(primarySelection.id, { color: event.target.value })
+            })
+          ),
+        React.createElement(
+          'label',
+          { className: 'block space-y-1 text-xs font-semibold text-slate-600' },
+          React.createElement('span', null, 'Rotation'),
+          React.createElement('input', {
+            type: 'range',
+            min: -180,
+            max: 180,
+            step: 1,
+            value: primarySelection.rotation,
+            onChange: (event) => updateElement(primarySelection.id, { rotation: Number(event.target.value) }),
+            className: 'w-full accent-sky-500'
+          }),
+          React.createElement('div', { className: 'text-right text-xs text-slate-500' }, `${primarySelection.rotation}\u00B0`)
+        ),
+        React.createElement(
+          'div',
+          { className: 'grid grid-cols-2 gap-2 text-xs font-semibold text-slate-600' },
+          ['X', 'Y', 'Width', 'Height'].map((label, index) => {
+            const keys = ['x', 'y', 'width', 'height'];
+            const key = keys[index];
+            return React.createElement(
+              'label',
+              { key: key, className: 'space-y-1' },
+              React.createElement('span', null, label),
+              React.createElement('input', {
+                type: 'number',
+                value: round(primarySelection[key], 0),
+                onChange: (event) => {
+                  const value = Number(event.target.value);
+                  if (Number.isNaN(value)) return;
+                  const bounded = clampElementWithinBounds(
+                    { ...primarySelection, [key]: value },
+                    activeLabelSize
+                  );
+                  updateElement(primarySelection.id, {
+                    x: bounded.x,
+                    y: bounded.y,
+                    width: bounded.width,
+                    height: bounded.height
+                  });
+                },
+                className: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100'
+              })
+            );
+          })
         )
-      : React.createElement('p', { className: 'text-sm text-slate-500' }, 'Select an element on the canvas to customize it.');
+      );
+    }
     return React.createElement(
       'div',
       { className: 'flex w-full flex-col gap-6 text-slate-900' },
@@ -1227,11 +1569,11 @@
           'div',
           { className: 'flex-1 space-y-4' },
           React.createElement(
+          'div',
+          { className: 'flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/70 p-4 backdrop-blur' },
+          React.createElement(
             'div',
-            { className: 'flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/70 p-4 backdrop-blur' },
-            React.createElement(
-              'div',
-              { className: 'flex flex-wrap items-center gap-3 text-sm text-slate-700' },
+            { className: 'flex flex-wrap items-center gap-3 text-sm text-slate-700' },
               React.createElement('label', { className: 'font-semibold' }, 'Label size'),
               React.createElement(
                 'select',
@@ -1278,13 +1620,102 @@
                       className: 'w-20 rounded border border-slate-300 px-2 py-1 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100'
                     })
                   )
-                )
-            ),
+            )
+          ),
+          (canAlignSelection || canDistributeSelection)
+            ? React.createElement(
+                'div',
+                { className: 'flex flex-wrap items-center gap-2 text-xs text-slate-600' },
+                React.createElement('span', { className: 'font-semibold uppercase text-slate-700' }, 'Arrange'),
+                canAlignSelection &&
+                  React.createElement(
+                    React.Fragment,
+                    null,
+                    React.createElement(
+                      'button',
+                      {
+                        type: 'button',
+                        onClick: () => alignSelection('left'),
+                        className: 'rounded-md border border-slate-300 px-2 py-1 font-semibold hover:border-sky-400'
+                      },
+                      'Align left'
+                    ),
+                    React.createElement(
+                      'button',
+                      {
+                        type: 'button',
+                        onClick: () => alignSelection('center'),
+                        className: 'rounded-md border border-slate-300 px-2 py-1 font-semibold hover:border-sky-400'
+                      },
+                      'Align center'
+                    ),
+                    React.createElement(
+                      'button',
+                      {
+                        type: 'button',
+                        onClick: () => alignSelection('right'),
+                        className: 'rounded-md border border-slate-300 px-2 py-1 font-semibold hover:border-sky-400'
+                      },
+                      'Align right'
+                    ),
+                    React.createElement(
+                      'button',
+                      {
+                        type: 'button',
+                        onClick: () => alignSelection('top'),
+                        className: 'rounded-md border border-slate-300 px-2 py-1 font-semibold hover:border-sky-400'
+                      },
+                      'Align top'
+                    ),
+                    React.createElement(
+                      'button',
+                      {
+                        type: 'button',
+                        onClick: () => alignSelection('middle'),
+                        className: 'rounded-md border border-slate-300 px-2 py-1 font-semibold hover:border-sky-400'
+                      },
+                      'Align middle'
+                    ),
+                    React.createElement(
+                      'button',
+                      {
+                        type: 'button',
+                        onClick: () => alignSelection('bottom'),
+                        className: 'rounded-md border border-slate-300 px-2 py-1 font-semibold hover:border-sky-400'
+                      },
+                      'Align bottom'
+                    )
+                  ),
+                canDistributeSelection &&
+                  React.createElement(
+                    React.Fragment,
+                    null,
+                    React.createElement(
+                      'button',
+                      {
+                        type: 'button',
+                        onClick: () => distributeSelection('horizontal'),
+                        className: 'rounded-md border border-slate-300 px-2 py-1 font-semibold hover:border-sky-400'
+                      },
+                      'Distribute horizontal'
+                    ),
+                    React.createElement(
+                      'button',
+                      {
+                        type: 'button',
+                        onClick: () => distributeSelection('vertical'),
+                        className: 'rounded-md border border-slate-300 px-2 py-1 font-semibold hover:border-sky-400'
+                      },
+                      'Distribute vertical'
+                    )
+                  )
+              )
+            : null,
+          React.createElement(
+            'div',
+            { className: 'flex items-center gap-2 text-sm text-slate-700' },
+            React.createElement('span', null, 'Zoom'),
             React.createElement(
-              'div',
-              { className: 'flex items-center gap-2 text-sm text-slate-700' },
-              React.createElement('span', null, 'Zoom'),
-              React.createElement(
                 'button',
                 {
                   type: 'button',
@@ -1294,18 +1725,27 @@
                 '–'
               ),
               React.createElement('span', { className: 'w-12 text-center text-xs font-semibold text-slate-600' }, `${Math.round(zoom * 100)}%`),
-              React.createElement(
-                'button',
-                {
-                  type: 'button',
-                  onClick: () => changeZoom(0.1),
-                  className: 'rounded-md border border-slate-300 px-2 py-1 text-xs hover:border-sky-400 hover:text-sky-600'
-                },
-                '+'
-              ),
-              React.createElement('span', { className: 'text-xs text-slate-500' }, 'Ctrl + scroll to zoom quicker')
+            React.createElement(
+              'button',
+              {
+                type: 'button',
+                onClick: () => changeZoom(0.1),
+                className: 'rounded-md border border-slate-300 px-2 py-1 text-xs hover:border-sky-400 hover:text-sky-600'
+              },
+              '+'
+            ),
+            React.createElement('span', { className: 'text-xs text-slate-500' }, 'Ctrl + scroll to zoom quicker'),
+            React.createElement(
+              'button',
+              {
+                type: 'button',
+                onClick: () => setShowPreview((prev) => !prev),
+                className: 'rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-600 hover:border-sky-400'
+              },
+              showPreview ? 'Hide preview' : 'Show preview'
             )
-          ),
+          )
+        ),
           React.createElement(
             'div',
             { className: 'grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]' },
@@ -1329,7 +1769,14 @@
                   {
                     ref: canvasRef,
                     className: 'relative rounded-lg bg-white shadow-inner',
-                    style: { width: activeLabelSize.width * zoom, height: activeLabelSize.height * zoom },
+                    style: {
+                      width: activeLabelSize.width * zoom,
+                      height: activeLabelSize.height * zoom,
+                      backgroundSize: `${GRID_SIZE * zoom}px ${GRID_SIZE * zoom}px`,
+                      backgroundImage:
+                        'linear-gradient(to right, rgba(226,232,240,0.6) 1px, transparent 1px), ' +
+                        'linear-gradient(to bottom, rgba(226,232,240,0.6) 1px, transparent 1px)'
+                    },
                     onDrop: handleDrop,
                     onDragOver: handleDragOver,
                     onClick: handleCanvasClick
@@ -1340,27 +1787,29 @@
                 )
               )
             ),
-            React.createElement(
-              'div',
-              { className: 'rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm backdrop-blur' },
-              React.createElement('h4', { className: 'text-sm font-semibold text-slate-700' }, 'Preview'),
-              React.createElement('p', { className: 'text-xs text-slate-500' }, 'Scaled preview for quick checks.'),
-              React.createElement(
+          showPreview
+            ? React.createElement(
                 'div',
-                { className: 'mt-4 flex justify-center' },
+                { className: 'rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm backdrop-blur' },
+                React.createElement('h4', { className: 'text-sm font-semibold text-slate-700' }, 'Preview'),
+                React.createElement('p', { className: 'text-xs text-slate-500' }, 'Scaled preview for quick checks.'),
                 React.createElement(
                   'div',
-                  {
-                    className: 'relative rounded-lg border border-slate-200 bg-white shadow-inner',
-                    style: {
-                      width: activeLabelSize.width * previewScale,
-                      height: activeLabelSize.height * previewScale
-                    }
-                  },
-                  ...previewElements
+                  { className: 'mt-4 flex justify-center' },
+                  React.createElement(
+                    'div',
+                    {
+                      className: 'relative rounded-lg border border-slate-200 bg-white shadow-inner',
+                      style: {
+                        width: activeLabelSize.width * previewScale,
+                        height: activeLabelSize.height * previewScale
+                      }
+                    },
+                    ...previewElements
+                  )
                 )
               )
-            )
+            : null,
           ),
           React.createElement(
             'div',

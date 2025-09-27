@@ -1,10 +1,15 @@
 """Utilities for sending ZPL to Zebra printers."""
 
-from flask import current_app
-import socket
+from __future__ import annotations
 
-from .labels import build_receiving_label
+from typing import Mapping
+
+import socket
 from urllib.request import Request, urlopen
+
+from flask import current_app
+
+from .labels import build_receiving_label, render_label_for_process
 
 
 def send_zpl(
@@ -45,11 +50,39 @@ def print_receiving_label(sku: str, description: str, qty: int) -> bool:
     return send_zpl(zpl)
 
 
+def print_label_for_process(process: str, context: Mapping[str, object]) -> bool:
+    """Render and send the label configured for a specific process."""
+
+    zpl = render_label_for_process(process, context)
+    return send_zpl(zpl)
+
+
 def render_receiving_label_png(sku: str, description: str, qty: int) -> bytes:
     """Render a receiving label as a PNG using the Labelary API."""
 
-    zpl = build_receiving_label(sku, description, qty)
-    url = "http://api.labelary.com/v1/printers/8dpmm/labels/4x6/0/"
+    return render_label_png_for_process(
+        "BatchCreated",
+        {
+            "Batch": {
+                "Quantity": qty,
+                "Item": {"SKU": sku, "Description": description},
+            }
+        },
+    )
+
+
+def render_label_png_for_process(
+    process: str,
+    context: Mapping[str, object],
+    *,
+    dpi: str = "8dpmm",
+    size: str = "4x6",
+    index: int = 0,
+) -> bytes:
+    """Render the configured process label as PNG using the Labelary API."""
+
+    zpl = render_label_for_process(process, context)
+    url = f"http://api.labelary.com/v1/printers/{dpi}/labels/{size}/{index}/"
     request = Request(url, data=zpl.encode("utf-8"), headers={"Accept": "image/png"})
     with urlopen(request) as response:
         return response.read()
