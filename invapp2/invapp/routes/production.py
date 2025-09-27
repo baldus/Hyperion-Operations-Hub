@@ -885,6 +885,24 @@ def history():
         },
     }
 
+    preview_record = None
+    if records:
+        preview_record = next(
+            (record for record in records if record.entry_date == end_date),
+            records[-1],
+        )
+
+    email_preview = None
+    if preview_record:
+        preview_date = preview_record.entry_date
+        email_preview = {
+            "date_iso": preview_date.isoformat(),
+            "date_display": preview_date.strftime("%B %d, %Y"),
+            "day_of_week": preview_record.day_of_week
+            or preview_date.strftime("%A"),
+            "notes": preview_record.daily_notes or "",
+        }
+
     return render_template(
         "production/history.html",
         customers=table_customers,
@@ -899,6 +917,7 @@ def history():
         chart_axis_settings=chart_axis_settings,
         start_date=start_date,
         end_date=end_date,
+        email_preview=email_preview,
     )
 
 

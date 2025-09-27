@@ -38,6 +38,9 @@
                 <input type="checkbox" id="collapseWeekendsToggle" name="collapse_weekends">
                 Collapse weekends
             </label>
+            <button type="button" class="action-btn chart-export-button" id="emailDataButton" {% if not chart_labels %}disabled{% endif %}>
+                Email Data
+            </button>
         </div>
         <div class="chart-grid">
             <div class="chart-card">
@@ -53,6 +56,31 @@
         <div class="chart-modal-dialog">
             <button type="button" class="chart-modal-close" data-modal-dismiss aria-label="Close expanded chart">&times;</button>
             <canvas id="expandedChart" aria-label="Expanded chart canvas"></canvas>
+        </div>
+    </div>
+
+    <div class="email-modal is-hidden" id="emailDataModal" role="dialog" aria-modal="true" aria-labelledby="emailDataTitle">
+        <div class="email-modal-dialog" tabindex="-1">
+            <button type="button" class="email-modal-close" data-email-dismiss aria-label="Close email data preview">&times;</button>
+            <div class="email-modal-header">
+                <h3 id="emailDataTitle">Email Data Preview</h3>
+                <p id="emailDataSubtitle" class="email-modal-subtitle"></p>
+            </div>
+            <div class="email-modal-note" id="emailDataNote"></div>
+            <div class="email-modal-actions">
+                <button type="button" class="action-btn email-modal-copy-button" id="copyEmailNoteButton">Copy Notes</button>
+            </div>
+            <div class="email-modal-gallery">
+                <figure>
+                    <img id="emailDataBarImage" alt="Gates produced chart preview">
+                    <figcaption>Gates Produced by Customer</figcaption>
+                </figure>
+                <figure>
+                    <img id="emailDataLineImage" alt="Cumulative production chart preview">
+                    <figcaption>Cumulative Production Totals</figcaption>
+                </figure>
+            </div>
+            <p class="email-modal-hint">Right-click an image to copy it into your email message.</p>
         </div>
     </div>
 
@@ -172,6 +200,7 @@
     const overlayDatasets = {{ overlay_datasets|tojson }};
     const lineDatasets = {{ line_datasets|tojson }};
     const chartAxisSettings = {{ chart_axis_settings|tojson }};
+    const emailPreview = {{ email_preview|tojson }};
 
     const parseDateLabel = (label) => {
         if (typeof label !== 'string') {
@@ -600,8 +629,14 @@
         });
 
         document.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape' && chartModal && !chartModal.classList.contains('is-hidden')) {
+            if (event.key !== 'Escape') {
+                return;
+            }
+            if (chartModal && !chartModal.classList.contains('is-hidden')) {
                 closeChartModal();
+            }
+            if (emailModal && !emailModal.classList.contains('is-hidden')) {
+                closeEmailModal();
             }
         });
 
@@ -633,6 +668,225 @@
 
         registerChartForExpansion(barContext, barChart);
         registerChartForExpansion(lineContext, lineChart);
+
+        const emailButton = document.getElementById('emailDataButton');
+        const emailModal = document.getElementById('emailDataModal');
+        const emailModalDialog = emailModal ? emailModal.querySelector('.email-modal-dialog') : null;
+        const emailCloseButtons = emailModal ? emailModal.querySelectorAll('[data-email-dismiss]') : [];
+        const emailBarImage = document.getElementById('emailDataBarImage');
+        const emailLineImage = document.getElementById('emailDataLineImage');
+        const emailNoteContainer = document.getElementById('emailDataNote');
+        const emailSubtitle = document.getElementById('emailDataSubtitle');
+        const copyEmailNoteButton = document.getElementById('copyEmailNoteButton');
+
+        const renderEmailNote = () => {
+            if (!emailNoteContainer) {
+                return;
+            }
+
+            emailNoteContainer.innerHTML = '';
+
+            if (!emailPreview) {
+                const emptyMessage = document.createElement('p');
+                emptyMessage.classList.add('email-modal-note-empty');
+                emptyMessage.textContent = 'No notes are available for the selected date range.';
+                emailNoteContainer.appendChild(emptyMessage);
+                if (emailSubtitle) {
+                    emailSubtitle.textContent = '';
+                }
+                return;
+            }
+
+            const noteText = (emailPreview.notes || '').trim();
+            const noteDateParts = [emailPreview.day_of_week, emailPreview.date_display]
+                .filter(Boolean)
+                .join(', ');
+            if (emailSubtitle) {
+                emailSubtitle.textContent = noteDateParts || '';
+            }
+
+            if (!noteText) {
+                const placeholder = document.createElement('p');
+                placeholder.classList.add('email-modal-note-empty');
+                placeholder.textContent = 'No notes were recorded for this day.';
+                emailNoteContainer.appendChild(placeholder);
+                return;
+            }
+
+            noteText.split('\n').forEach((line) => {
+                const paragraph = document.createElement('p');
+                paragraph.textContent = line;
+                emailNoteContainer.appendChild(paragraph);
+            });
+        };
+
+        const closeEmailModal = () => {
+            if (!emailModal) {
+                return;
+            }
+            emailModal.classList.add('is-hidden');
+            emailModal.removeAttribute('aria-label');
+        };
+
+        const openEmailModal = () => {
+            if (!emailModal || !emailButton || emailButton.disabled) {
+                return;
+            }
+
+            if (emailBarImage && barChart) {
+                try {
+                    emailBarImage.src = barChart.toBase64Image();
+                } catch (error) {
+                    emailBarImage.removeAttribute('src');
+                }
+            }
+            if (emailLineImage && lineChart) {
+                try {
+                    emailLineImage.src = lineChart.toBase64Image();
+                } catch (error) {
+                    emailLineImage.removeAttribute('src');
+                }
+            }
+
+            renderEmailNote();
+
+            if (emailPreview) {
+                const labelParts = [
+                    'Email data preview',
+                    emailPreview.day_of_week,
+                    emailPreview.date_display,
+                ].filter(Boolean);
+                emailModal.setAttribute('aria-label', labelParts.join(': '));
+            }
+
+            emailModal.classList.remove('is-hidden');
+            window.requestAnimationFrame(() => {
+                if (emailModalDialog) {
+                    emailModalDialog.focus();
+                }
+            });
+        };
+
+        if (emailButton && emailModal) {
+            emailButton.addEventListener('click', openEmailModal);
+        }
+
+        if (emailModal) {
+            emailModal.addEventListener('click', (event) => {
+                if (event.target === emailModal) {
+                    closeEmailModal();
+                }
+            });
+        }
+
+        emailCloseButtons.forEach((button) => {
+            button.addEventListener('click', closeEmailModal);
+        });
+
+        const selectEmailNoteText = () => {
+            if (!emailNoteContainer || !window.getSelection || !document.createRange) {
+                return;
+            }
+
+            const selection = window.getSelection();
+            if (!selection) {
+                return;
+            }
+
+            selection.removeAllRanges();
+            const range = document.createRange();
+            range.selectNodeContents(emailNoteContainer);
+            selection.addRange(range);
+        };
+
+        const fallbackCopyToClipboard = (text) => {
+            if (!document.body || typeof document.execCommand !== 'function') {
+                return false;
+            }
+
+            const hiddenField = document.createElement('textarea');
+            hiddenField.value = text;
+            hiddenField.setAttribute('readonly', '');
+            hiddenField.setAttribute('aria-hidden', 'true');
+            hiddenField.style.position = 'fixed';
+            hiddenField.style.top = '-1000px';
+            hiddenField.style.left = '-1000px';
+            hiddenField.style.opacity = '0';
+            hiddenField.style.pointerEvents = 'none';
+
+            document.body.appendChild(hiddenField);
+
+            try {
+                hiddenField.focus({ preventScroll: true });
+            } catch (error) {
+                hiddenField.focus();
+            }
+            hiddenField.select();
+
+            let succeeded = false;
+            try {
+                succeeded = document.execCommand('copy');
+            } catch (error) {
+                succeeded = false;
+            }
+
+            hiddenField.remove();
+
+            if (window.getSelection) {
+                const selection = window.getSelection();
+                if (selection && selection.removeAllRanges) {
+                    selection.removeAllRanges();
+                }
+            }
+
+            return succeeded;
+        };
+
+        const copyNoteToClipboard = async (text) => {
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                try {
+                    await navigator.clipboard.writeText(text);
+                    return true;
+                } catch (error) {
+                    // Continue to the fallback below when direct clipboard access fails.
+                }
+            }
+
+            return fallbackCopyToClipboard(text);
+        };
+
+        const withTemporaryLabel = (button, label) => {
+            if (!button) {
+                return;
+            }
+
+            if (!button.dataset.originalLabel) {
+                button.dataset.originalLabel = button.textContent;
+            }
+
+            button.textContent = label;
+            window.setTimeout(() => {
+                button.textContent = button.dataset.originalLabel;
+            }, 2000);
+        };
+
+        if (copyEmailNoteButton) {
+            copyEmailNoteButton.addEventListener('click', async () => {
+                const noteText = emailPreview && emailPreview.notes
+                    ? emailPreview.notes.trim()
+                    : 'No notes were recorded for this day.';
+
+                const copied = await copyNoteToClipboard(noteText);
+
+                if (copied) {
+                    withTemporaryLabel(copyEmailNoteButton, 'Notes copied!');
+                    return;
+                }
+
+                selectEmailNoteText();
+                withTemporaryLabel(copyEmailNoteButton, 'Copy failed');
+            });
+        }
     }
 </script>
 {% endblock %}
