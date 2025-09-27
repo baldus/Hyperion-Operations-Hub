@@ -1060,7 +1060,7 @@
     };
 
     const canvasElements = elements.map((element) => {
-      const isSelected = element.id === selectedId;
+      const isSelected = selectedElement && element.id === selectedElement.id;
       const paddingBase = element.type === 'barcode' ? 14 : element.type === 'image' ? 0 : 10;
       const style = {
         position: 'absolute',
