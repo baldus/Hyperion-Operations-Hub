@@ -1,5 +1,5 @@
 (() => {
-  const { useState, useMemo, useRef, useEffect } = React;
+  const { useState, useMemo, useRef, useEffect, useCallback } = React;
   const DESIGNER_CONFIG = window.labelDesignerConfig || {};
 
   const uniqueId = () => `element-${Math.random().toString(36).slice(2)}-${Date.now()}`;
@@ -12,6 +12,17 @@
     { id: '3x2', name: '3" x 2" (Shelf)', width: 720, height: 480 },
     { id: 'custom', name: 'Custom', width: 700, height: 400 }
   ];
+
+  const CUSTOM_TEMPLATE = {
+    name: '__custom__',
+    display_name: 'Custom Layout',
+    description: 'Start from a blank canvas with all available inventory fields.',
+    layout: { width: LABEL_SIZES[0].width, height: LABEL_SIZES[0].height, elements: [] },
+    fields: {},
+    field_keys: [],
+    triggers: [],
+    source: 'custom'
+  };
 
   const DATA_FIELD_GROUPS = [
     {
@@ -150,6 +161,13 @@
           description: 'Customer receiving the labeled goods.'
         },
         {
+          id: 'order-item-number',
+          label: 'Order Item Number',
+          fieldKey: 'orders.item.number',
+          preview: 'Item: 100-445-AX',
+          description: 'Primary item identifier associated with the order.'
+        },
+        {
           id: 'ship-date',
           label: 'Ship Date',
           fieldKey: 'orders.shipment.date',
@@ -163,6 +181,153 @@
   const ALL_FIELDS = DATA_FIELD_GROUPS.flatMap((group) =>
     group.fields.map((field) => ({ ...field, groupId: group.id, groupLabel: group.label }))
   );
+
+  const RAW_TEMPLATES = Array.isArray(DESIGNER_CONFIG.labelTemplates)
+    ? DESIGNER_CONFIG.labelTemplates.filter((entry) => entry && typeof entry === 'object')
+    : [];
+  const LABEL_TEMPLATES = [
+    CUSTOM_TEMPLATE,
+    ...RAW_TEMPLATES.filter((template) => template.name && template.name !== CUSTOM_TEMPLATE.name),
+  ];
+  const TEMPLATE_LOOKUP = LABEL_TEMPLATES.reduce((accumulator, template) => {
+    accumulator[template.name] = template;
+    return accumulator;
+  }, {});
+  const DEFAULT_LABEL_NAME = (() => {
+    const configured = DESIGNER_CONFIG.defaultLabelName;
+    if (configured && TEMPLATE_LOOKUP[configured]) {
+      return configured;
+    }
+    const firstReal = LABEL_TEMPLATES.find((template) => template.name !== CUSTOM_TEMPLATE.name);
+    return firstReal ? firstReal.name : CUSTOM_TEMPLATE.name;
+  })();
+
+  const FIELD_LOOKUP = new Map(ALL_FIELDS.map((field) => [field.fieldKey, field]));
+
+  const ensureNumber = (value, fallback) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const deriveAllowedFieldKeys = (template) => {
+    if (!template || template.name === CUSTOM_TEMPLATE.name) {
+      return null;
+    }
+    const keys = new Set(Array.isArray(template.field_keys) ? template.field_keys : []);
+    if (template.fields && typeof template.fields === 'object') {
+      Object.keys(template.fields).forEach((key) => keys.add(key));
+    }
+    const layoutElements = (template.layout && Array.isArray(template.layout.elements))
+      ? template.layout.elements
+      : template.layout?.elements || [];
+    layoutElements.forEach((element) => {
+      if (element && typeof element === 'object' && element.fieldKey) {
+        keys.add(element.fieldKey);
+      }
+    });
+    const normalized = [...keys].filter((key) => FIELD_LOOKUP.has(key));
+    return normalized.length ? new Set(normalized) : null;
+  };
+
+  const filterFieldGroups = (allowedKeys) => {
+    const allowAll = !allowedKeys || !(allowedKeys instanceof Set) || allowedKeys.size === 0;
+    return DATA_FIELD_GROUPS.map((group) => {
+      const filteredFields = group.fields
+        .filter((field) => allowAll || allowedKeys.has(field.fieldKey))
+        .map((field) => ({ ...field, groupId: group.id, groupLabel: group.label }));
+      if (!filteredFields.length) {
+        return null;
+      }
+      return { ...group, fields: filteredFields };
+    }).filter(Boolean);
+  };
+
+  const flattenFieldGroups = (groups) => groups.flatMap((group) => group.fields);
+
+  const resolveLabelSizeOption = (width, height) => {
+    const numericWidth = ensureNumber(width, LABEL_SIZES[0].width);
+    const numericHeight = ensureNumber(height, LABEL_SIZES[0].height);
+    const match = LABEL_SIZES.find(
+      (size) => size.id !== 'custom' && size.width === numericWidth && size.height === numericHeight,
+    );
+    const customSize = { width: numericWidth, height: numericHeight };
+    return {
+      size: match || LABEL_SIZES.find((entry) => entry.id === 'custom') || LABEL_SIZES[LABEL_SIZES.length - 1],
+      custom: customSize,
+    };
+  };
+
+  const normalizeLayoutElement = (element) => {
+    if (!element || typeof element !== 'object') {
+      return null;
+    }
+    const typeRaw = typeof element.type === 'string' ? element.type.toLowerCase() : 'field';
+    const type = ['text', 'image', 'barcode', 'box'].includes(typeRaw) ? typeRaw : 'field';
+    const fieldKey = element.fieldKey || null;
+    const fieldMeta = fieldKey ? FIELD_LOOKUP.get(fieldKey) : null;
+    const baseWidth = ensureNumber(
+      element.width,
+      type === 'barcode' ? 280 : type === 'image' ? 220 : fieldMeta?.defaultWidth || 220,
+    );
+    const baseHeight = ensureNumber(
+      element.height,
+      element.defaultHeight || (type === 'barcode' ? 140 : type === 'image' ? 120 : fieldMeta?.defaultHeight || 64),
+    );
+    const normalized = {
+      id: element.id || uniqueId(),
+      type,
+      fieldKey,
+      label: element.label || element.text || fieldMeta?.label || null,
+      text: element.text || fieldMeta?.preview || '',
+      dataBinding: element.dataBinding || null,
+      x: ensureNumber(element.x, 0),
+      y: ensureNumber(element.y, 0),
+      width: Math.max(baseWidth, MIN_SIZE),
+      height: Math.max(baseHeight, MIN_SIZE),
+      rotation: ensureNumber(element.rotation, 0),
+      fontFamily: element.fontFamily || 'Inter, sans-serif',
+      fontSize: ensureNumber(element.fontSize, type === 'barcode' ? 32 : 18),
+      fontWeight: element.fontWeight || '600',
+      textAlign: element.textAlign || (type === 'text' ? 'center' : 'left'),
+      color: element.color || '#111827',
+      background:
+        element.background !== undefined
+          ? element.background
+          : type === 'barcode'
+            ? '#0f172a'
+            : 'rgba(255,255,255,0.85)',
+      locked: Boolean(element.locked),
+    };
+
+    if (typeof element.prefix === 'string') {
+      normalized.prefix = element.prefix;
+    }
+    if (typeof element.suffix === 'string') {
+      normalized.suffix = element.suffix;
+    }
+    if (element.uppercase) {
+      normalized.uppercase = Boolean(element.uppercase);
+    }
+
+    if (type === 'image') {
+      normalized.src = element.src || '';
+      normalized.background = 'transparent';
+      delete normalized.fontFamily;
+      delete normalized.fontSize;
+      delete normalized.fontWeight;
+      delete normalized.textAlign;
+      delete normalized.color;
+    } else if (type === 'barcode') {
+      normalized.printValue = element.printValue !== undefined ? Boolean(element.printValue) : true;
+      normalized.checkDigit = element.checkDigit !== undefined ? Boolean(element.checkDigit) : false;
+      normalized.orientation = element.orientation || 'N';
+    } else if (type === 'box') {
+      normalized.thickness = ensureNumber(element.thickness, 2);
+      normalized.background = element.background || 'transparent';
+    }
+
+    return normalized;
+  };
 
   const FONT_FAMILIES = [
     { value: 'Inter, sans-serif', label: 'Inter' },
@@ -361,26 +526,61 @@
     return Math.round(value * factor) / factor;
   };
   const LabelDesigner = () => {
+    const defaultTemplate = TEMPLATE_LOOKUP[DEFAULT_LABEL_NAME] || CUSTOM_TEMPLATE;
+    const defaultLayout = (defaultTemplate && defaultTemplate.layout) || {};
+    const defaultDimensions = resolveLabelSizeOption(defaultLayout.width, defaultLayout.height);
+    const [activeTemplateName, setActiveTemplateName] = useState(DEFAULT_LABEL_NAME);
     const [elements, setElements] = useState([]);
     const [selectedIds, setSelectedIds] = useState([]);
-    const [labelSize, setLabelSize] = useState(LABEL_SIZES[0]);
+    const [labelSize, setLabelSize] = useState(defaultDimensions.size);
     const [zoom, setZoom] = useState(1);
     const [guides, setGuides] = useState({ vertical: null, horizontal: null });
     const [exportedJSON, setExportedJSON] = useState('');
     const [importValue, setImportValue] = useState('');
-    const [customSize, setCustomSize] = useState({ width: LABEL_SIZES[3].width, height: LABEL_SIZES[3].height });
+    const [customSize, setCustomSize] = useState(defaultDimensions.custom);
     const [isPrinting, setIsPrinting] = useState(false);
     const [printFeedback, setPrintFeedback] = useState(null);
     const [showPreview, setShowPreview] = useState(false);
     const canvasRef = useRef(null);
     const fileInputRef = useRef(null);
     const elementsRef = useRef(elements);
+    const skipTemplateLoadRef = useRef(false);
     const { trialPrintUrl, selectedPrinterName } = DESIGNER_CONFIG;
     const canSendTrial = Boolean(trialPrintUrl);
+
+    const activeTemplate = useMemo(
+      () => TEMPLATE_LOOKUP[activeTemplateName] || CUSTOM_TEMPLATE,
+      [activeTemplateName],
+    );
+    const allowedFieldKeys = useMemo(() => deriveAllowedFieldKeys(activeTemplate), [activeTemplate]);
+    const filteredFieldGroups = useMemo(
+      () => filterFieldGroups(allowedFieldKeys),
+      [allowedFieldKeys],
+    );
+    const availableFields = useMemo(() => flattenFieldGroups(filteredFieldGroups), [filteredFieldGroups]);
+    const templateSourceLabel =
+      activeTemplate?.source === 'database'
+        ? 'Database template'
+        : activeTemplate?.source === 'builtin'
+          ? 'Built-in template'
+          : activeTemplate?.source === 'custom'
+            ? 'Custom layout'
+            : null;
 
     useEffect(() => {
       elementsRef.current = elements;
     }, [elements]);
+
+    useEffect(() => {
+      if (!activeTemplate) {
+        return;
+      }
+      if (skipTemplateLoadRef.current) {
+        skipTemplateLoadRef.current = false;
+        return;
+      }
+      loadLayout(activeTemplate.layout || {});
+    }, [activeTemplate, loadLayout]);
 
     const activeLabelSize = useMemo(() => {
       if (labelSize.id !== 'custom') {
@@ -414,7 +614,7 @@
         let changed = false;
         const next = prev.map((el) => {
           if (el.fieldKey && !el.dataBinding) {
-            const match = ALL_FIELDS.find((field) => field.fieldKey === el.fieldKey);
+            const match = FIELD_LOOKUP.get(el.fieldKey);
             if (match) {
               changed = true;
               return {
@@ -499,7 +699,7 @@
       if (!selectedElement) return null;
       if (selectedElement.dataBinding) return selectedElement.dataBinding;
       if (selectedElement.fieldKey) {
-        const match = ALL_FIELDS.find((field) => field.fieldKey === selectedElement.fieldKey);
+        const match = FIELD_LOOKUP.get(selectedElement.fieldKey);
         if (match) {
           return {
             groupId: match.groupId,
@@ -512,6 +712,35 @@
       }
       return null;
     }, [selectedElement]);
+
+    const bindingFieldGroups = useMemo(() => {
+      const baseGroups = filteredFieldGroups.map((group) => ({
+        id: group.id,
+        label: group.label,
+        fields: group.fields,
+      }));
+      if (selectedBinding && selectedBinding.fieldKey) {
+        const exists = baseGroups.some((group) =>
+          group.fields.some((field) => field.fieldKey === selectedBinding.fieldKey),
+        );
+        if (!exists) {
+          const fallback = FIELD_LOOKUP.get(selectedBinding.fieldKey);
+          if (fallback) {
+            baseGroups.unshift({
+              id: fallback.groupId || `extra-${fallback.id}`,
+              label: fallback.groupLabel || 'Additional fields',
+              fields: [{ ...fallback }],
+            });
+          }
+        }
+      }
+      return baseGroups;
+    }, [filteredFieldGroups, selectedBinding]);
+
+    const bindingFields = useMemo(
+      () => flattenFieldGroups(bindingFieldGroups),
+      [bindingFieldGroups],
+    );
 
     const updateElement = (id, updates) => {
       setElements((prev) => prev.map((el) => (el.id === id ? { ...el, ...updates } : el)));
@@ -629,15 +858,37 @@
       let x = clamp(el.x, 0, Math.max(size.width - width, 0));
       let y = clamp(el.y, 0, Math.max(size.height - height, 0));
 
-      if (snap) {
-        width = clamp(snapSize(width), MIN_SIZE, size.width);
-        height = clamp(snapSize(height), MIN_SIZE, size.height);
-        x = clamp(snapPosition(x), 0, Math.max(size.width - width, 0));
-        y = clamp(snapPosition(y), 0, Math.max(size.height - height, 0));
-      }
+    if (snap) {
+      width = clamp(snapSize(width), MIN_SIZE, size.width);
+      height = clamp(snapSize(height), MIN_SIZE, size.height);
+      x = clamp(snapPosition(x), 0, Math.max(size.width - width, 0));
+      y = clamp(snapPosition(y), 0, Math.max(size.height - height, 0));
+    }
 
-      return { ...el, x, y, width, height };
+    return { ...el, x, y, width, height };
     };
+
+    const loadLayout = useCallback(
+      (layout, options = {}) => {
+        const { selectFirst = true } = options;
+        const layoutConfig = layout && typeof layout === 'object' ? layout : {};
+        const dimensions = resolveLabelSizeOption(layoutConfig.width, layoutConfig.height);
+        setLabelSize(dimensions.size);
+        setCustomSize(dimensions.custom);
+        const targetSize =
+          dimensions.size.id === 'custom'
+            ? { width: dimensions.custom.width, height: dimensions.custom.height }
+            : { width: dimensions.size.width, height: dimensions.size.height };
+        const rawElements = Array.isArray(layoutConfig.elements) ? layoutConfig.elements : [];
+        const normalized = rawElements
+          .map((element) => normalizeLayoutElement(element))
+          .filter(Boolean)
+          .map((element) => clampElementWithinBounds(element, targetSize, { snap: false }));
+        setElements(normalized);
+        setSelectedIds(selectFirst && normalized[0] ? [normalized[0].id] : []);
+      },
+      [setCustomSize, setElements, setLabelSize, setSelectedIds],
+    );
 
     const handleDrop = (event) => {
       event.preventDefault();
@@ -645,7 +896,7 @@
       if (!data) return;
       const [kind, groupId, fieldId] = data.split(':');
       if (kind !== 'field') return;
-      const field = ALL_FIELDS.find((f) => f.groupId === groupId && f.id === fieldId);
+      const field = availableFields.find((f) => f.groupId === groupId && f.id === fieldId);
       if (!field) return;
       const bounds = canvasRef.current?.getBoundingClientRect();
       if (!bounds) return;
@@ -883,12 +1134,19 @@
       event.target.value = '';
     };
 
-    const buildLayoutPayload = () => ({
-      labelSize: {
+    const handleTemplateReset = () => {
+      if (!activeTemplate) {
+        return;
+      }
+      loadLayout(activeTemplate.layout || {}, { selectFirst: true });
+    };
+
+    const buildLayoutPayload = () => {
+      const targetSize = {
         width: activeLabelSize.width,
-        height: activeLabelSize.height
-      },
-      elements: elements.map((el) => {
+        height: activeLabelSize.height,
+      };
+      const layoutElements = elements.map((el) => {
         const base = {
           id: el.id,
           type: el.type,
@@ -897,8 +1155,15 @@
           width: el.width,
           height: el.height,
           rotation: el.rotation,
-          locked: Boolean(el.locked)
+          locked: Boolean(el.locked),
         };
+        if (el.fieldKey) {
+          base.fieldKey = el.fieldKey;
+          base.label = el.label;
+        }
+        if (el.dataBinding) {
+          base.dataBinding = el.dataBinding;
+        }
         if (el.type === 'image') {
           base.src = el.src;
         } else {
@@ -909,17 +1174,34 @@
           base.textAlign = el.textAlign;
           base.color = el.color;
           base.background = el.background;
+          if (el.prefix) {
+            base.prefix = el.prefix;
+          }
+          if (el.suffix) {
+            base.suffix = el.suffix;
+          }
+          if (el.uppercase) {
+            base.uppercase = Boolean(el.uppercase);
+          }
         }
-        if (el.fieldKey) {
-          base.fieldKey = el.fieldKey;
-          base.label = el.label;
+        if (el.type === 'barcode') {
+          base.printValue = el.printValue !== undefined ? Boolean(el.printValue) : true;
+          base.checkDigit = el.checkDigit !== undefined ? Boolean(el.checkDigit) : false;
+          base.orientation = el.orientation || 'N';
         }
-        if (el.dataBinding) {
-          base.dataBinding = el.dataBinding;
+        if (el.type === 'box') {
+          base.thickness = ensureNumber(el.thickness, 2);
         }
         return base;
-      })
-    });
+      });
+      const templateLabel = activeTemplate?.display_name || activeTemplate?.description || activeTemplate?.name;
+      return {
+        templateName: activeTemplateName,
+        templateDisplayName: templateLabel,
+        labelSize: targetSize,
+        elements: layoutElements,
+      };
+    };
 
     const handleExport = () => {
       const payload = buildLayoutPayload();
@@ -965,31 +1247,30 @@
       if (!importValue.trim()) return;
       try {
         const parsed = JSON.parse(importValue);
-        if (!parsed.elements || !Array.isArray(parsed.elements)) {
+        const payload = parsed && typeof parsed === 'object' ? parsed : {};
+        const importedLayout =
+          payload.layout && typeof payload.layout === 'object' ? payload.layout : payload;
+        const importedSize = payload.labelSize && typeof payload.labelSize === 'object'
+          ? payload.labelSize
+          : {};
+        const layout = {
+          ...importedLayout,
+          width: importedLayout.width || importedSize.width,
+          height: importedLayout.height || importedSize.height,
+        };
+        if (!layout.elements || !Array.isArray(layout.elements)) {
           throw new Error('Invalid layout format');
         }
-        const importedSize = parsed.labelSize || {};
-        const width = importedSize.width || activeLabelSize.width;
-        const height = importedSize.height || activeLabelSize.height;
-        setLabelSize({ id: 'custom', name: 'Custom', width, height });
-        setCustomSize({ width, height });
-        const sanitized = parsed.elements.map((el) =>
-          clampElementWithinBounds(
-            {
-              ...el,
-              fontFamily: el.fontFamily || 'Inter, sans-serif',
-              fontSize: el.fontSize || 18,
-              fontWeight: el.fontWeight || '600',
-              textAlign: el.textAlign || 'left',
-              color: el.color || '#111827',
-              background: el.background || 'rgba(255,255,255,0.85)',
-              locked: Boolean(el.locked)
-            },
-            { width, height }
-          )
-        );
-        setElements(sanitized);
-        setSelectedIds(sanitized[0] ? [sanitized[0].id] : []);
+        if (
+          payload.templateName &&
+          payload.templateName !== activeTemplateName &&
+          TEMPLATE_LOOKUP[payload.templateName]
+        ) {
+          skipTemplateLoadRef.current = true;
+          setActiveTemplateName(payload.templateName);
+        }
+        loadLayout(layout);
+        setImportValue('');
       } catch (error) {
         console.error(error);
         alert('Unable to import layout. Please ensure the JSON is valid.');
@@ -1167,39 +1448,75 @@
         renderElementContent(element, previewScale)
       );
     });
-    const fieldCards = DATA_FIELD_GROUPS.map((group) =>
-      React.createElement(
-        'div',
-        { key: group.id, className: 'space-y-2' },
+    const templateMetaDetails = [];
+    if (activeTemplate?.triggers && activeTemplate.triggers.length) {
+      templateMetaDetails.push(
         React.createElement(
-          'div',
-          { className: 'space-y-1' },
-          React.createElement(
-            'h4',
-            { className: 'text-xs font-semibold uppercase tracking-wide text-slate-500' },
-            group.label
-          ),
-          React.createElement('p', { className: 'text-xs text-slate-500' }, group.description)
+          'span',
+          { key: 'triggers', className: 'text-xs text-slate-500' },
+          `Mapped processes: ${activeTemplate.triggers.join(', ')}`,
         ),
-        ...group.fields.map((field) =>
+      );
+    }
+    if (templateSourceLabel) {
+      templateMetaDetails.push(
+        React.createElement(
+          'span',
+          {
+            key: 'source',
+            className:
+              'inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-[2px] text-xs font-semibold text-slate-600',
+          },
+          templateSourceLabel,
+        ),
+      );
+    }
+
+    const fieldCards = filteredFieldGroups.length
+      ? filteredFieldGroups.map((group) =>
+          React.createElement(
+            'div',
+            { key: group.id, className: 'space-y-2' },
+            React.createElement(
+              'div',
+              { className: 'space-y-1' },
+              React.createElement(
+                'h4',
+                { className: 'text-xs font-semibold uppercase tracking-wide text-slate-500' },
+                group.label
+              ),
+              React.createElement('p', { className: 'text-xs text-slate-500' }, group.description)
+            ),
+            ...group.fields.map((field) =>
+              React.createElement(
+                'div',
+                {
+                  key: field.id,
+                  draggable: true,
+                  onDragStart: (event) => {
+                    event.dataTransfer.setData('text/plain', `field:${group.id}:${field.id}`);
+                    event.dataTransfer.effectAllowed = 'copy';
+                  },
+                  className:
+                    'cursor-grab rounded-lg border border-slate-200 bg-white p-3 text-sm shadow-sm transition hover:border-sky-400 hover:shadow'
+                },
+                React.createElement('div', { className: 'font-medium text-slate-800' }, field.label),
+                React.createElement('p', { className: 'mt-1 text-xs text-slate-500' }, field.description)
+              )
+            )
+          )
+        )
+      : [
           React.createElement(
             'div',
             {
-              key: field.id,
-              draggable: true,
-              onDragStart: (event) => {
-                event.dataTransfer.setData('text/plain', `field:${group.id}:${field.id}`);
-                event.dataTransfer.effectAllowed = 'copy';
-              },
+              key: 'no-fields',
               className:
-                'cursor-grab rounded-lg border border-slate-200 bg-white p-3 text-sm shadow-sm transition hover:border-sky-400 hover:shadow'
+                'rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-medium text-amber-700 shadow-sm'
             },
-            React.createElement('div', { className: 'font-medium text-slate-800' }, field.label),
-            React.createElement('p', { className: 'mt-1 text-xs text-slate-500' }, field.description)
-          )
-        )
-      )
-    );
+            'No database fields are mapped to this label yet. Add custom text blocks or images while a data model is prepared.'
+          ),
+        ];
     const arrangeButtons = [
       { key: 'left', label: 'Align left', action: () => alignSelection('left') },
       { key: 'center', label: 'Align center', action: () => alignSelection('center') },
@@ -1302,7 +1619,7 @@
                       return;
                     }
                     const [groupId, fieldId] = value.split(':');
-                    const field = ALL_FIELDS.find((f) => f.groupId === groupId && f.id === fieldId);
+                    const field = bindingFields.find((f) => f.groupId === groupId && f.id === fieldId);
                     if (!field) return;
                     const updates = {
                       fieldKey: field.fieldKey,
@@ -1324,7 +1641,7 @@
                     'w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100'
                 },
                 React.createElement('option', { value: '__none__' }, 'Manual content'),
-                ...DATA_FIELD_GROUPS.map((group) =>
+                ...bindingFieldGroups.map((group) =>
                   React.createElement(
                     'optgroup',
                     { key: group.id, label: group.label },
@@ -1532,6 +1849,76 @@
         React.createElement(
           'div',
           { className: 'flex-1 space-y-4' },
+          React.createElement(
+            'div',
+            {
+              className:
+                'space-y-3 rounded-xl border border-slate-200 bg-white/70 p-4 shadow-sm backdrop-blur',
+            },
+            React.createElement(
+              'div',
+              { className: 'flex flex-wrap items-start justify-between gap-3' },
+              React.createElement(
+                'div',
+                { className: 'space-y-1 text-sm text-slate-700 max-w-xl' },
+                React.createElement(
+                  'h4',
+                  { className: 'font-semibold text-slate-700' },
+                  'Label template',
+                ),
+                React.createElement(
+                  'p',
+                  { className: 'text-xs text-slate-500' },
+                  activeTemplate?.description
+                    ? activeTemplate.description
+                    : 'Choose a label to edit or start from a blank canvas.',
+                ),
+              ),
+              React.createElement(
+                'div',
+                { className: 'flex flex-wrap items-center gap-2' },
+                React.createElement(
+                  'select',
+                  {
+                    value: activeTemplateName,
+                    onChange: (event) => {
+                      const nextName = event.target.value;
+                      if (nextName === activeTemplateName) {
+                        return;
+                      }
+                      setActiveTemplateName(nextName);
+                    },
+                    className:
+                      'rounded-md border border-slate-300 bg-white px-3 py-1 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100',
+                  },
+                  LABEL_TEMPLATES.map((template) =>
+                    React.createElement(
+                      'option',
+                      { key: template.name, value: template.name },
+                      template.display_name || template.name,
+                    ),
+                  ),
+                ),
+                React.createElement(
+                  'button',
+                  {
+                    type: 'button',
+                    onClick: handleTemplateReset,
+                    className:
+                      'rounded-md border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-sky-400 hover:text-sky-600',
+                  },
+                  'Reset layout',
+                ),
+              ),
+            ),
+            templateMetaDetails.length
+              ? React.createElement(
+                  'div',
+                  { className: 'flex flex-wrap items-center gap-3' },
+                  ...templateMetaDetails,
+                )
+              : null,
+          ),
           React.createElement(
             'div',
             { className: 'flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/70 p-4 backdrop-blur' },

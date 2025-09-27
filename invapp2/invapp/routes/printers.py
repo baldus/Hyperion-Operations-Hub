@@ -1,3 +1,5 @@
+import re
+
 from flask import (
     Blueprint,
     current_app,
@@ -14,7 +16,8 @@ from sqlalchemy.exc import IntegrityError
 from invapp.auth import blueprint_page_guard
 from invapp.extensions import db
 from invapp.login import current_user, login_required
-from invapp.models import Printer
+from invapp.models import LabelProcessAssignment, LabelTemplate, Printer
+from invapp.printing import labels as label_defs
 from invapp.security import require_roles
 
 bp = Blueprint("printers", __name__, url_prefix="/settings/printers")
@@ -155,10 +158,68 @@ def label_designer():
     if selected_printer:
         _apply_printer_configuration(selected_printer)
 
+    db_templates = {
+        template.name: template
+        for template in LabelTemplate.query.order_by(LabelTemplate.name.asc()).all()
+    }
+    assignment_map: dict[str, set[str]] = {}
+    for assignment in LabelProcessAssignment.query.join(LabelTemplate).all():
+        assignment_map.setdefault(assignment.template.name, set()).add(assignment.process)
+
+    def _friendly_name(name: str, description: str | None = None) -> str:
+        if description:
+            summary = description.split(".")[0].strip()
+            if summary:
+                return summary
+        cleaned = name
+        if cleaned.endswith("LabelTemplate"):
+            cleaned = cleaned[: -len("LabelTemplate")]
+        return " ".join(filter(None, re.sub(r"(?<!^)(?=[A-Z])", " ", cleaned).split())) or name
+
+    def _serialize_template(definition: label_defs.LabelDefinition) -> dict[str, object]:
+        related = db_templates.get(definition.name)
+        triggers: set[str] = set(definition.triggers)
+        if related and related.trigger:
+            triggers.add(related.trigger)
+        triggers.update(assignment_map.get(definition.name, set()))
+
+        layout = definition.layout or {}
+        layout_elements = layout.get("elements") or []
+        field_keys: set[str] = set(definition.fields.keys())
+        for element in layout_elements:
+            field_key = element.get("fieldKey") if isinstance(element, dict) else None
+            if field_key:
+                field_keys.add(str(field_key))
+
+        return {
+            "name": definition.name,
+            "display_name": _friendly_name(definition.name, definition.description),
+            "description": definition.description,
+            "layout": layout,
+            "fields": definition.fields,
+            "field_keys": sorted(field_keys),
+            "triggers": sorted(triggers),
+            "source": "database" if related else "builtin",
+        }
+
+    template_names: set[str] = set(label_defs.LABEL_DEFINITIONS.keys())
+    template_names.update(db_templates.keys())
+    template_names.update(assignment_map.keys())
+
+    available_templates = []
+    for name in sorted(template_names):
+        definition = label_defs.get_template_by_name(name)
+        if definition is None:
+            continue
+        available_templates.append(_serialize_template(definition))
+    default_template = next((entry["name"] for entry in available_templates), None)
+
     return render_template(
         "settings/label_designer.html",
         selected_printer=selected_printer,
         printers=printers,
+        label_templates=available_templates,
+        default_label_name=default_template,
     )
 
 
