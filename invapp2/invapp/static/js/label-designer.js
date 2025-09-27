@@ -4,6 +4,8 @@
 
   const uniqueId = () => `element-${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
+  const GRID_SIZE = 8;
+
   const LABEL_SIZES = [
     { id: '2x1', name: '2" x 1" (Shipping)', width: 600, height: 300 },
     { id: '4x6', name: '4" x 6" (Parcel)', width: 900, height: 1350 },
@@ -185,6 +187,9 @@
 
   const MIN_SIZE = 30;
 
+  const snapPosition = (value) => Math.round(value / GRID_SIZE) * GRID_SIZE;
+  const snapSize = (value) => Math.max(MIN_SIZE, Math.round(value / GRID_SIZE) * GRID_SIZE);
+
   const clamp = (value, min, max) => {
     if (Number.isNaN(value)) return min;
     return Math.min(Math.max(value, min), max);
@@ -218,7 +223,8 @@
       fontWeight: '600',
       textAlign: 'left',
       color: '#111827',
-      background: field.type === 'barcode' ? '#0f172a' : 'rgba(255,255,255,0.85)'
+      background: field.type === 'barcode' ? '#0f172a' : 'rgba(255,255,255,0.85)',
+      locked: false
     };
   };
 
@@ -241,7 +247,8 @@
       fontWeight: '600',
       textAlign: 'center',
       color: '#0f172a',
-      background: 'rgba(255,255,255,0.85)'
+      background: 'rgba(255,255,255,0.85)',
+      locked: false
     };
   };
 
@@ -258,7 +265,8 @@
       y: (labelSize.height - height) / 2,
       width: baseWidth,
       height,
-      rotation: 0
+      rotation: 0,
+      locked: false
     };
   };
 
@@ -354,7 +362,7 @@
   };
   const LabelDesigner = () => {
     const [elements, setElements] = useState([]);
-    const [selectedId, setSelectedId] = useState(null);
+    const [selectedIds, setSelectedIds] = useState([]);
     const [labelSize, setLabelSize] = useState(LABEL_SIZES[0]);
     const [zoom, setZoom] = useState(1);
     const [guides, setGuides] = useState({ vertical: null, horizontal: null });
@@ -363,6 +371,7 @@
     const [customSize, setCustomSize] = useState({ width: LABEL_SIZES[3].width, height: LABEL_SIZES[3].height });
     const [isPrinting, setIsPrinting] = useState(false);
     const [printFeedback, setPrintFeedback] = useState(null);
+    const [showPreview, setShowPreview] = useState(false);
     const canvasRef = useRef(null);
     const fileInputRef = useRef(null);
     const elementsRef = useRef(elements);
@@ -427,10 +436,64 @@
       });
     }, []);
 
-    const selectedElement = useMemo(
-      () => elements.find((el) => el.id === selectedId) || null,
-      [elements, selectedId]
+    const selectedElement = useMemo(() => {
+      if (!selectedIds.length) return null;
+      const activeId = selectedIds[selectedIds.length - 1];
+      return elements.find((el) => el.id === activeId) || null;
+    }, [elements, selectedIds]);
+
+    const selectedElements = useMemo(
+      () => elements.filter((el) => selectedIds.includes(el.id)),
+      [elements, selectedIds]
     );
+
+    useEffect(() => {
+      const handleKeyDown = (event) => {
+        if (!selectedIds.length) return;
+        const tagName = event.target?.tagName || '';
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tagName) || event.target?.isContentEditable) {
+          return;
+        }
+
+        let deltaX = 0;
+        let deltaY = 0;
+        if (event.key === 'ArrowLeft') deltaX = -1;
+        if (event.key === 'ArrowRight') deltaX = 1;
+        if (event.key === 'ArrowUp') deltaY = -1;
+        if (event.key === 'ArrowDown') deltaY = 1;
+
+        if (deltaX === 0 && deltaY === 0) return;
+
+        event.preventDefault();
+        const increment = event.shiftKey ? GRID_SIZE : 1;
+
+        setElements((prev) => {
+          const selectedSet = new Set(selectedIds);
+          let changed = false;
+          const next = prev.map((el) => {
+            if (!selectedSet.has(el.id) || el.locked) {
+              return el;
+            }
+            const updated = clampElementWithinBounds(
+              {
+                ...el,
+                x: el.x + deltaX * increment,
+                y: el.y + deltaY * increment
+              },
+              activeLabelSize
+            );
+            if (updated.x !== el.x || updated.y !== el.y) {
+              changed = true;
+            }
+            return updated;
+          });
+          return changed ? next : prev;
+        });
+      };
+
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [selectedIds, activeLabelSize]);
 
     const selectedBinding = useMemo(() => {
       if (!selectedElement) return null;
@@ -454,16 +517,126 @@
       setElements((prev) => prev.map((el) => (el.id === id ? { ...el, ...updates } : el)));
     };
 
-    const clampElementWithinBounds = (el, size) => {
-      const maxX = Math.max(size.width - el.width, 0);
-      const maxY = Math.max(size.height - el.height, 0);
-      return {
-        ...el,
-        x: clamp(el.x, 0, maxX),
-        y: clamp(el.y, 0, maxY),
-        width: clamp(el.width, MIN_SIZE, size.width),
-        height: clamp(el.height, MIN_SIZE, size.height)
-      };
+    const updateElements = (updates) => {
+      setElements((prev) => {
+        let changed = false;
+        const next = prev.map((el) => {
+          if (!updates[el.id]) return el;
+          changed = true;
+          return { ...el, ...updates[el.id] };
+        });
+        return changed ? next : prev;
+      });
+    };
+
+    const toggleLockSelection = (forceState) => {
+      if (!selectedIds.length) return;
+      const shouldLock =
+        typeof forceState === 'boolean'
+          ? forceState
+          : selectedElements.some((el) => !el.locked);
+      const updates = {};
+      selectedIds.forEach((id) => {
+        updates[id] = { locked: shouldLock };
+      });
+      updateElements(updates);
+    };
+
+    const alignSelection = (mode) => {
+      if (selectedElements.length < 2) return;
+      const movable = selectedElements.filter((el) => !el.locked);
+      if (!movable.length) return;
+
+      const left = Math.min(...movable.map((el) => el.x));
+      const right = Math.max(...movable.map((el) => el.x + el.width));
+      const top = Math.min(...movable.map((el) => el.y));
+      const bottom = Math.max(...movable.map((el) => el.y + el.height));
+      const centerX = (left + right) / 2;
+      const centerY = (top + bottom) / 2;
+
+      const updates = {};
+      movable.forEach((el) => {
+        let nextX = el.x;
+        let nextY = el.y;
+        if (mode === 'left') nextX = left;
+        if (mode === 'right') nextX = right - el.width;
+        if (mode === 'center') nextX = centerX - el.width / 2;
+        if (mode === 'top') nextY = top;
+        if (mode === 'bottom') nextY = bottom - el.height;
+        if (mode === 'middle') nextY = centerY - el.height / 2;
+        updates[el.id] = clampElementWithinBounds(
+          { ...el, x: nextX, y: nextY },
+          activeLabelSize,
+          { snap: true }
+        );
+      });
+      updateElements(updates);
+    };
+
+    const distributeSelection = (axis) => {
+      if (selectedElements.length < 3) return;
+      const movable = selectedElements.filter((el) => !el.locked);
+      if (movable.length < 3) return;
+
+      const updates = {};
+      if (axis === 'horizontal') {
+        const sorted = [...movable].sort((a, b) => a.x - b.x);
+        const first = sorted[0];
+        const last = sorted[sorted.length - 1];
+        const start = first.x + first.width / 2;
+        const end = last.x + last.width / 2;
+        if (Math.abs(end - start) < 1) return;
+        const step = (end - start) / (sorted.length - 1);
+        sorted.forEach((el, index) => {
+          if (index === 0 || index === sorted.length - 1) return;
+          const center = start + step * index;
+          const nextX = center - el.width / 2;
+          updates[el.id] = clampElementWithinBounds(
+            { ...el, x: nextX },
+            activeLabelSize,
+            { snap: true }
+          );
+        });
+      } else {
+        const sorted = [...movable].sort((a, b) => a.y - b.y);
+        const first = sorted[0];
+        const last = sorted[sorted.length - 1];
+        const start = first.y + first.height / 2;
+        const end = last.y + last.height / 2;
+        if (Math.abs(end - start) < 1) return;
+        const step = (end - start) / (sorted.length - 1);
+        sorted.forEach((el, index) => {
+          if (index === 0 || index === sorted.length - 1) return;
+          const center = start + step * index;
+          const nextY = center - el.height / 2;
+          updates[el.id] = clampElementWithinBounds(
+            { ...el, y: nextY },
+            activeLabelSize,
+            { snap: true }
+          );
+        });
+      }
+
+      if (Object.keys(updates).length) {
+        updateElements(updates);
+      }
+    };
+
+    const clampElementWithinBounds = (el, size, options = {}) => {
+      const { snap = false } = options;
+      let width = clamp(el.width, MIN_SIZE, size.width);
+      let height = clamp(el.height, MIN_SIZE, size.height);
+      let x = clamp(el.x, 0, Math.max(size.width - width, 0));
+      let y = clamp(el.y, 0, Math.max(size.height - height, 0));
+
+      if (snap) {
+        width = clamp(snapSize(width), MIN_SIZE, size.width);
+        height = clamp(snapSize(height), MIN_SIZE, size.height);
+        x = clamp(snapPosition(x), 0, Math.max(size.width - width, 0));
+        y = clamp(snapPosition(y), 0, Math.max(size.height - height, 0));
+      }
+
+      return { ...el, x, y, width, height };
     };
 
     const handleDrop = (event) => {
@@ -480,43 +653,123 @@
         x: (event.clientX - bounds.left) / zoom,
         y: (event.clientY - bounds.top) / zoom
       };
-      const element = createElementFromField(field, dropPoint, activeLabelSize);
+      let element = createElementFromField(field, dropPoint, activeLabelSize);
+      element = clampElementWithinBounds(element, activeLabelSize, { snap: true });
       setElements((prev) => [...prev, element]);
-      setSelectedId(element.id);
+      setSelectedIds([element.id]);
     };
 
     const handleDragOver = (event) => {
       event.preventDefault();
     };
 
-    const startMove = (event, element) => {
+    const handleElementPointerDown = (event, element) => {
       event.preventDefault();
       event.stopPropagation();
-      setSelectedId(element.id);
+      const multi = event.shiftKey || event.metaKey || event.ctrlKey;
+
+      let nextSelection;
+      if (multi) {
+        if (selectedIds.includes(element.id)) {
+          nextSelection = selectedIds.filter((id) => id !== element.id);
+        } else {
+          nextSelection = [...selectedIds, element.id];
+        }
+      } else if (selectedIds.length === 1 && selectedIds[0] === element.id) {
+        nextSelection = selectedIds;
+      } else {
+        nextSelection = [element.id];
+      }
+
+      setSelectedIds(nextSelection);
+
+      if (!nextSelection.includes(element.id)) {
+        return;
+      }
+
+      const movableIds = nextSelection.filter((id) => {
+        const target = elementsRef.current.find((item) => item.id === id);
+        return target && !target.locked;
+      });
+
+      if (!movableIds.includes(element.id) || movableIds.length === 0) {
+        return;
+      }
+
+      startMove(event, element, movableIds);
+    };
+
+    const startMove = (event, element, activeIds) => {
+      event.preventDefault();
+      event.stopPropagation();
       const bounds = canvasRef.current?.getBoundingClientRect();
       if (!bounds) return;
+
       const startX = event.clientX;
       const startY = event.clientY;
+      const initialElements = activeIds
+        .map((id) => {
+          const current = elementsRef.current.find((el) => el.id === id);
+          if (!current) return null;
+          return {
+            id: current.id,
+            x: current.x,
+            y: current.y,
+            width: current.width,
+            height: current.height
+          };
+        })
+        .filter(Boolean);
+
+      if (!initialElements.length) return;
+
+      const primary = initialElements.find((item) => item.id === element.id) || initialElements[0];
 
       const handlePointerMove = (moveEvent) => {
-        const currentElements = elementsRef.current;
-        const latest = currentElements.find((el) => el.id === element.id) || element;
-        const offsetX = (startX - bounds.left) / zoom - latest.x;
-        const offsetY = (startY - bounds.top) / zoom - latest.y;
-        const rawX = (moveEvent.clientX - bounds.left) / zoom - offsetX;
-        const rawY = (moveEvent.clientY - bounds.top) / zoom - offsetY;
-        const draft = { x: rawX, y: rawY, width: latest.width, height: latest.height };
+        const deltaX = (moveEvent.clientX - startX) / zoom;
+        const deltaY = (moveEvent.clientY - startY) / zoom;
+
+        const draftPrimary = {
+          x: primary.x + deltaX,
+          y: primary.y + deltaY,
+          width: primary.width,
+          height: primary.height
+        };
+
         const { vertical, horizontal, snappedX, snappedY } = computeGuides(
-          latest.id,
-          draft,
-          currentElements,
+          primary.id,
+          draftPrimary,
+          elementsRef.current,
           activeLabelSize
         );
-        const finalX = snappedX !== null ? snappedX : draft.x;
-        const finalY = snappedY !== null ? snappedY : draft.y;
-        const bounded = clampElementWithinBounds({ ...latest, x: finalX, y: finalY }, activeLabelSize);
+
+        let finalX = snappedX !== null ? snappedX : snapPosition(draftPrimary.x);
+        let finalY = snappedY !== null ? snappedY : snapPosition(draftPrimary.y);
+
+        const boundedPrimary = clampElementWithinBounds(
+          { ...primary, x: finalX, y: finalY },
+          activeLabelSize,
+          { snap: false }
+        );
+
+        finalX = boundedPrimary.x;
+        finalY = boundedPrimary.y;
+
+        const appliedDeltaX = finalX - primary.x;
+        const appliedDeltaY = finalY - primary.y;
+
+        const updates = {};
+        initialElements.forEach((item) => {
+          const draft = {
+            ...item,
+            x: item.x + appliedDeltaX,
+            y: item.y + appliedDeltaY
+          };
+          updates[item.id] = clampElementWithinBounds(draft, activeLabelSize, { snap: true });
+        });
+
         setGuides({ vertical, horizontal });
-        updateElement(latest.id, { x: bounded.x, y: bounded.y });
+        updateElements(updates);
       };
 
       const handlePointerUp = () => {
@@ -530,52 +783,60 @@
     };
 
     const startResize = (event, element, direction) => {
+      if (element.locked) return;
       event.preventDefault();
       event.stopPropagation();
+      setSelectedIds([element.id]);
       const bounds = canvasRef.current?.getBoundingClientRect();
       if (!bounds) return;
       const startX = event.clientX;
       const startY = event.clientY;
+      const initial = {
+        x: element.x,
+        y: element.y,
+        width: element.width,
+        height: element.height
+      };
 
       const handlePointerMove = (moveEvent) => {
-        const currentElements = elementsRef.current;
-        const latest = currentElements.find((el) => el.id === element.id) || element;
         const deltaX = (moveEvent.clientX - startX) / zoom;
         const deltaY = (moveEvent.clientY - startY) / zoom;
-        let newWidth = latest.width;
-        let newHeight = latest.height;
-        let newX = latest.x;
-        let newY = latest.y;
+
+        let newWidth = initial.width;
+        let newHeight = initial.height;
+        let newX = initial.x;
+        let newY = initial.y;
 
         if (direction.includes('e')) {
-          newWidth = clamp(latest.width + deltaX, MIN_SIZE, activeLabelSize.width - latest.x);
+          newWidth = clamp(initial.width + deltaX, MIN_SIZE, activeLabelSize.width - initial.x);
         }
         if (direction.includes('s')) {
-          newHeight = clamp(latest.height + deltaY, MIN_SIZE, activeLabelSize.height - latest.y);
+          newHeight = clamp(initial.height + deltaY, MIN_SIZE, activeLabelSize.height - initial.y);
         }
         if (direction.includes('w')) {
-          newWidth = clamp(latest.width - deltaX, MIN_SIZE, activeLabelSize.width);
-          newX = clamp(latest.x + deltaX, 0, latest.x + latest.width - MIN_SIZE);
+          newWidth = clamp(initial.width - deltaX, MIN_SIZE, activeLabelSize.width);
+          newX = clamp(initial.x + deltaX, 0, initial.x + initial.width - MIN_SIZE);
         }
         if (direction.includes('n')) {
-          newHeight = clamp(latest.height - deltaY, MIN_SIZE, activeLabelSize.height);
-          newY = clamp(latest.y + deltaY, 0, latest.y + latest.height - MIN_SIZE);
+          newHeight = clamp(initial.height - deltaY, MIN_SIZE, activeLabelSize.height);
+          newY = clamp(initial.y + deltaY, 0, initial.y + initial.height - MIN_SIZE);
         }
 
         const draft = { x: newX, y: newY, width: newWidth, height: newHeight };
         const { vertical, horizontal, snappedX, snappedY } = computeGuides(
-          latest.id,
+          element.id,
           draft,
-          currentElements,
+          elementsRef.current,
           activeLabelSize
         );
         setGuides({ vertical, horizontal });
-        updateElement(latest.id, {
+        const snappedDraft = {
+          ...draft,
           x: snappedX !== null ? snappedX : draft.x,
-          y: snappedY !== null ? snappedY : draft.y,
-          width: draft.width,
-          height: draft.height
-        });
+          y: snappedY !== null ? snappedY : draft.y
+        };
+        const bounded = clampElementWithinBounds(snappedDraft, activeLabelSize, { snap: true });
+        updateElement(element.id, bounded);
       };
 
       const handlePointerUp = () => {
@@ -595,9 +856,10 @@
     };
 
     const addTextBlock = () => {
-      const element = createTextElement(activeLabelSize);
+      let element = createTextElement(activeLabelSize);
+      element = clampElementWithinBounds(element, activeLabelSize, { snap: true });
       setElements((prev) => [...prev, element]);
-      setSelectedId(element.id);
+      setSelectedIds([element.id]);
     };
 
     const handleUploadLogo = (event) => {
@@ -607,12 +869,13 @@
       reader.onload = () => {
         const img = new Image();
         img.onload = () => {
-          const element = createImageElement(activeLabelSize, reader.result, {
+          let element = createImageElement(activeLabelSize, reader.result, {
             width: img.naturalWidth,
             height: img.naturalHeight
           });
+          element = clampElementWithinBounds(element, activeLabelSize, { snap: true });
           setElements((prev) => [...prev, element]);
-          setSelectedId(element.id);
+          setSelectedIds([element.id]);
         };
         img.src = reader.result;
       };
@@ -633,7 +896,8 @@
           y: el.y,
           width: el.width,
           height: el.height,
-          rotation: el.rotation
+          rotation: el.rotation,
+          locked: Boolean(el.locked)
         };
         if (el.type === 'image') {
           base.src = el.src;
@@ -718,13 +982,14 @@
               fontWeight: el.fontWeight || '600',
               textAlign: el.textAlign || 'left',
               color: el.color || '#111827',
-              background: el.background || 'rgba(255,255,255,0.85)'
+              background: el.background || 'rgba(255,255,255,0.85)',
+              locked: Boolean(el.locked)
             },
             { width, height }
           )
         );
         setElements(sanitized);
-        setSelectedId(sanitized[0]?.id || null);
+        setSelectedIds(sanitized[0] ? [sanitized[0].id] : []);
       } catch (error) {
         console.error(error);
         alert('Unable to import layout. Please ensure the JSON is valid.');
@@ -733,9 +998,7 @@
 
     const handleRemoveElement = (id) => {
       setElements((prev) => prev.filter((el) => el.id !== id));
-      if (selectedId === id) {
-        setSelectedId(null);
-      }
+      setSelectedIds((prev) => prev.filter((selectedId) => selectedId !== id));
     };
 
     const previewScale = useMemo(() => {
@@ -743,13 +1006,20 @@
       return 260 / maxDimension;
     }, [activeLabelSize]);
 
+    const lockToggleLabel = selectedElements.some((el) => !el.locked)
+      ? 'Lock selection'
+      : 'Unlock selection';
+    const movableSelectionCount = selectedElements.filter((el) => !el.locked).length;
+    const allowAlign = movableSelectionCount >= 2;
+    const allowDistribute = movableSelectionCount >= 3;
+
     const changeZoom = (delta) => {
       setZoom((prev) => clamp(prev + delta, 0.3, 3));
     };
 
     const handleCanvasClick = (event) => {
       event.stopPropagation();
-      setSelectedId(null);
+      setSelectedIds([]);
     };
     const renderElementContent = (element, scale = zoom) => {
       if (element.type === 'image') {
@@ -808,7 +1078,7 @@
         justifyContent: 'center',
         padding: `${Math.max(paddingBase * zoom, 4)}px`,
         boxShadow: isSelected ? '0 0 0 4px rgba(56, 189, 248, 0.2)' : 'none',
-        cursor: 'move'
+        cursor: element.locked ? 'default' : 'move'
       };
 
       const handles = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
@@ -830,13 +1100,18 @@
           role: 'presentation',
           className: 'absolute',
           style,
-          onPointerDown: (e) => startMove(e, element),
-          onClick: (e) => {
-            e.stopPropagation();
-            setSelectedId(element.id);
-          }
+          onPointerDown: (e) => handleElementPointerDown(e, element)
         },
-        isSelected &&
+        element.locked &&
+          React.createElement(
+            'span',
+            {
+              className:
+                'pointer-events-none absolute top-1 right-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-900/80 text-[10px] font-bold text-white shadow'
+            },
+            '🔒'
+          ),
+        isSelected && !element.locked &&
           handles.map((dir) =>
             React.createElement('span', {
               key: dir,
@@ -925,6 +1200,20 @@
         )
       )
     );
+    const arrangeButtons = [
+      { key: 'left', label: 'Align left', action: () => alignSelection('left') },
+      { key: 'center', label: 'Align center', action: () => alignSelection('center') },
+      { key: 'right', label: 'Align right', action: () => alignSelection('right') },
+      { key: 'top', label: 'Align top', action: () => alignSelection('top') },
+      { key: 'middle', label: 'Align middle', action: () => alignSelection('middle') },
+      { key: 'bottom', label: 'Align bottom', action: () => alignSelection('bottom') }
+    ];
+
+    const distributeButtons = [
+      { key: 'horizontal', label: 'Distribute horizontal', action: () => distributeSelection('horizontal') },
+      { key: 'vertical', label: 'Distribute vertical', action: () => distributeSelection('vertical') }
+    ];
+
     const alignmentButtons = selectedElement
       ? ALIGN_OPTIONS.map((option) =>
           React.createElement(
@@ -956,13 +1245,30 @@
               React.createElement('p', { className: 'text-xs text-slate-500' }, selectedElement.type === 'image' ? 'Adjust dimensions, position, and rotation.' : 'Update typography, alignment, and copy.')
             ),
             React.createElement(
-              'button',
-              {
-                type: 'button',
-                onClick: () => handleRemoveElement(selectedElement.id),
-                className: 'rounded-md border border-rose-200 px-2 py-1 text-xs font-semibold text-rose-500 hover:bg-rose-50'
-              },
-              'Remove'
+              'div',
+              { className: 'flex items-center gap-2' },
+              React.createElement(
+                'button',
+                {
+                  type: 'button',
+                  onClick: () => updateElement(selectedElement.id, { locked: !selectedElement.locked }),
+                  className: `rounded-md border px-2 py-1 text-xs font-semibold transition ${
+                    selectedElement.locked
+                      ? 'border-emerald-400 text-emerald-600 hover:bg-emerald-50'
+                      : 'border-slate-300 text-slate-600 hover:border-sky-400'
+                  }`
+                },
+                selectedElement.locked ? 'Unlock element' : 'Lock element'
+              ),
+              React.createElement(
+                'button',
+                {
+                  type: 'button',
+                  onClick: () => handleRemoveElement(selectedElement.id),
+                  className: 'rounded-md border border-rose-200 px-2 py-1 text-xs font-semibold text-rose-500 hover:bg-rose-50'
+                },
+                'Remove'
+              )
             )
           ),
           selectedBinding &&
@@ -1303,48 +1609,145 @@
                 },
                 '+'
               ),
-              React.createElement('span', { className: 'text-xs text-slate-500' }, 'Ctrl + scroll to zoom quicker')
+              React.createElement('span', { className: 'text-xs text-slate-500' }, 'Ctrl + scroll to zoom quicker'),
+              React.createElement(
+                'button',
+                {
+                  type: 'button',
+                  onClick: () => setShowPreview((prev) => !prev),
+                  className: `rounded-md border px-3 py-1 text-xs font-semibold transition ${
+                    showPreview
+                      ? 'border-sky-400 text-sky-600'
+                      : 'border-slate-300 text-slate-600 hover:border-sky-400 hover:text-sky-600'
+                  }`
+                },
+                showPreview ? 'Hide preview' : 'Show preview'
+              )
             )
           ),
-          React.createElement(
-            'div',
-            { className: 'grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]' },
+          selectedElements.length > 0 &&
             React.createElement(
               'div',
-              { className: 'rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm backdrop-blur' },
+              {
+                className:
+                  'rounded-xl border border-dashed border-slate-300 bg-white/60 p-4 text-xs text-slate-600 shadow-sm backdrop-blur'
+              },
               React.createElement(
                 'div',
-                { className: 'flex items-center justify-between text-sm text-slate-700' },
-                React.createElement('h4', { className: 'font-semibold' }, 'Label canvas'),
-                React.createElement('span', { className: 'text-xs text-slate-500' }, 'Drag, resize, and rotate elements. Hold Ctrl while scrolling to zoom.')
+                { className: 'flex flex-wrap items-center gap-2' },
+                React.createElement(
+                  'span',
+                  { className: 'font-semibold uppercase tracking-wide text-slate-500' },
+                  `Selection (${selectedElements.length})`
+                ),
+                React.createElement(
+                  'button',
+                  {
+                    type: 'button',
+                    onClick: () => toggleLockSelection(),
+                    className: `rounded-md border px-2 py-1 font-semibold transition ${
+                      selectedElements.some((el) => !el.locked)
+                        ? 'border-slate-300 text-slate-600 hover:border-sky-400'
+                        : 'border-amber-400 text-amber-600 hover:bg-amber-50'
+                    }`
+                  },
+                  lockToggleLabel
+                )
               ),
               React.createElement(
                 'div',
-                {
-                  className: 'mt-4 flex justify-center overflow-auto rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6',
-                  onWheel: handleWheel
-                },
+                { className: 'mt-3 flex flex-wrap gap-3' },
                 React.createElement(
                   'div',
-                  {
-                    ref: canvasRef,
-                    className: 'relative rounded-lg bg-white shadow-inner',
-                    style: { width: activeLabelSize.width * zoom, height: activeLabelSize.height * zoom },
-                    onDrop: handleDrop,
-                    onDragOver: handleDragOver,
-                    onClick: handleCanvasClick
-                  },
-                  React.createElement('div', { className: 'absolute inset-0 rounded-lg border border-slate-200' }),
-                  ...guideElements,
-                  ...canvasElements
+                  { className: 'flex flex-wrap items-center gap-1' },
+                  React.createElement('span', { className: 'font-semibold text-slate-500' }, 'Align'),
+                  ...arrangeButtons.map((btn) =>
+                    React.createElement(
+                      'button',
+                      {
+                        key: btn.key,
+                        type: 'button',
+                        onClick: btn.action,
+                        disabled: !allowAlign,
+                        className: `rounded-md border px-2 py-1 text-xs font-semibold transition ${
+                          allowAlign
+                            ? 'border-slate-300 text-slate-600 hover:border-sky-400 hover:text-sky-600'
+                            : 'cursor-not-allowed border-slate-200 text-slate-400'
+                        }`
+                      },
+                      btn.label
+                    )
+                  )
+                ),
+                React.createElement(
+                  'div',
+                  { className: 'flex flex-wrap items-center gap-1' },
+                  React.createElement('span', { className: 'font-semibold text-slate-500' }, 'Distribute'),
+                  ...distributeButtons.map((btn) =>
+                    React.createElement(
+                      'button',
+                      {
+                        key: btn.key,
+                        type: 'button',
+                        onClick: btn.action,
+                        disabled: !allowDistribute,
+                        className: `rounded-md border px-2 py-1 text-xs font-semibold transition ${
+                          allowDistribute
+                            ? 'border-slate-300 text-slate-600 hover:border-sky-400 hover:text-sky-600'
+                            : 'cursor-not-allowed border-slate-200 text-slate-400'
+                        }`
+                      },
+                      btn.label
+                    )
+                  )
                 )
+              )
+            ),
+          React.createElement(
+            'div',
+            { className: 'rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm backdrop-blur' },
+            React.createElement(
+              'div',
+              { className: 'flex items-center justify-between text-sm text-slate-700' },
+              React.createElement('h4', { className: 'font-semibold' }, 'Label canvas'),
+              React.createElement(
+                'span',
+                { className: 'text-xs text-slate-500' },
+                'Drag, resize, and rotate elements. Hold Ctrl while scrolling to zoom.'
               )
             ),
             React.createElement(
               'div',
+              {
+                className: 'mt-4 flex justify-center overflow-auto rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6',
+                onWheel: handleWheel
+              },
+              React.createElement(
+                'div',
+                {
+                  ref: canvasRef,
+                  className: 'relative rounded-lg bg-white shadow-inner',
+                  style: { width: activeLabelSize.width * zoom, height: activeLabelSize.height * zoom },
+                  onDrop: handleDrop,
+                  onDragOver: handleDragOver,
+                  onClick: handleCanvasClick
+                },
+                React.createElement('div', { className: 'absolute inset-0 rounded-lg border border-slate-200' }),
+                ...guideElements,
+                ...canvasElements
+              )
+            )
+          ),
+          showPreview &&
+            React.createElement(
+              'div',
               { className: 'rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm backdrop-blur' },
               React.createElement('h4', { className: 'text-sm font-semibold text-slate-700' }, 'Preview'),
-              React.createElement('p', { className: 'text-xs text-slate-500' }, 'Scaled preview for quick checks.'),
+              React.createElement(
+                'p',
+                { className: 'text-xs text-slate-500' },
+                'Toggle preview to review the label at print scale.'
+              ),
               React.createElement(
                 'div',
                 { className: 'mt-4 flex justify-center' },
@@ -1360,8 +1763,7 @@
                   ...previewElements
                 )
               )
-            )
-          ),
+            ),
           React.createElement(
             'div',
             { className: 'rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm backdrop-blur' },

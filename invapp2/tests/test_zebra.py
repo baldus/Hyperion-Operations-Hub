@@ -11,6 +11,7 @@ class Flask:
     def __init__(self, name):
         self.config = {}
         self.logger = types.SimpleNamespace(error=lambda *a, **k: None)
+        self.extensions = {}
 
     class _AppCtx:
         def __init__(self, app):
@@ -29,6 +30,7 @@ class Flask:
 
 flask_stub.Flask = Flask
 flask_stub.current_app = None
+flask_stub.has_app_context = lambda: flask_stub.current_app is not None
 sys.modules["flask"] = flask_stub
 
 from flask import Flask
@@ -58,8 +60,8 @@ def test_print_receiving_label_sends_zpl(monkeypatch):
             "invapp.printing.labels", labels_path
         )
         labels_module = importlib.util.module_from_spec(labels_spec)
+        sys.modules.setdefault("invapp.printing.labels", labels_module)
         labels_spec.loader.exec_module(labels_module)
-        sys.modules["invapp.printing.labels"] = labels_module
 
         zebra.__package__ = "invapp.printing"
         spec.loader.exec_module(zebra)
