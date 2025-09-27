@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Label Designer</h2>
+<p class="page-intro">Drag, drop, and bind inventory data fields to craft reusable label layouts. Trial prints are sent to your active printer.</p>
+
+<section class="card-section">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+            {% if selected_printer %}
+            <p class="section-intro">Trial prints will send to <strong>{{ selected_printer.name }}</strong> ({{ selected_printer.connection_label() }}).</p>
+            {% else %}
+            <p class="section-intro">No active printer selected. Choose one on the printer settings page before printing a trial.</p>
+            {% endif %}
+        </div>
+        <a href="{{ url_for('printers.printer_settings') }}" class="action-btn">Back to Printer Settings</a>
+    </div>
+    <div id="label-designer-root" class="mt-4"></div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+{{ super() }}
+<script>
+  window.labelDesignerConfig = {
+    trialPrintUrl: {{ url_for('printers.label_designer_print_trial')|tojson }},
+    selectedPrinterName: {{ selected_printer.name|tojson if selected_printer else 'null' }}
+  };
+</script>
+<script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script defer src="{{ url_for('static', filename='js/label-designer.js') }}"></script>
+{% endblock %}

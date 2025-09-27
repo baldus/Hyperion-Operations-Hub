@@ -1,5 +1,6 @@
 (() => {
   const { useState, useMemo, useRef, useEffect } = React;
+  const DESIGNER_CONFIG = window.labelDesignerConfig || {};
 
   const uniqueId = () => `element-${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
@@ -10,39 +11,156 @@
     { id: 'custom', name: 'Custom', width: 700, height: 400 }
   ];
 
-  const DEFAULT_FIELDS = [
+  const DATA_FIELD_GROUPS = [
     {
-      id: 'recipientName',
-      label: 'Recipient Name',
-      fieldKey: 'recipient_name',
-      preview: 'Recipient Name',
-      description: 'Customer or contact full name.'
+      id: 'item',
+      label: 'Item Details',
+      description: 'Core item master data for inventory pieces.',
+      fields: [
+        {
+          id: 'item-name',
+          label: 'Item Name',
+          fieldKey: 'inventory.item.name',
+          preview: 'Aluminum Gate Panel',
+          description: 'Primary description of the inventory item.'
+        },
+        {
+          id: 'item-sku',
+          label: 'Item SKU',
+          fieldKey: 'inventory.item.sku',
+          preview: 'SKU: GATE-AL-42',
+          description: 'Stock keeping unit or part number for the item.'
+        },
+        {
+          id: 'item-description',
+          label: 'Item Description',
+          fieldKey: 'inventory.item.description',
+          preview: '42" powder coated aluminum gate panel',
+          description: 'Extended item description or notes.',
+          defaultHeight: 96
+        },
+        {
+          id: 'item-type',
+          label: 'Item Type',
+          fieldKey: 'inventory.item.type',
+          preview: 'Type: Assembly',
+          description: 'Item type or classification value.'
+        },
+        {
+          id: 'item-unit',
+          label: 'Unit of Measure',
+          fieldKey: 'inventory.item.unit',
+          preview: 'Unit: ea',
+          description: 'Selling or stocking unit of measure.'
+        },
+        {
+          id: 'item-class',
+          label: 'Item Class',
+          fieldKey: 'inventory.item.item_class',
+          preview: 'Class: Finished Goods',
+          description: 'Inventory class or reporting bucket.'
+        }
+      ]
     },
     {
-      id: 'address',
-      label: 'Address',
-      fieldKey: 'address',
-      preview: '1234 Elm St.\nSpringfield, IL 62704',
-      description: 'Destination street and city.',
-      defaultHeight: 90
+      id: 'stock',
+      label: 'Stock & Batch',
+      description: 'Details about quantities, batches, and tracking.',
+      fields: [
+        {
+          id: 'quantity',
+          label: 'Quantity',
+          fieldKey: 'inventory.stock.quantity',
+          preview: 'Qty: 24',
+          description: 'Quantity represented by the label.'
+        },
+        {
+          id: 'min-stock',
+          label: 'Min Stock',
+          fieldKey: 'inventory.item.min_stock',
+          preview: 'Min: 12',
+          description: 'Minimum stocking level for the item.'
+        },
+        {
+          id: 'lot-number',
+          label: 'Lot Number',
+          fieldKey: 'inventory.batch.lot_number',
+          preview: 'Lot #A1-2048',
+          description: 'Supplier or production lot identifier.'
+        },
+        {
+          id: 'received-date',
+          label: 'Received Date',
+          fieldKey: 'inventory.batch.received_date',
+          preview: 'Received: 2024-03-12',
+          description: 'Date the batch was received or produced.'
+        },
+        {
+          id: 'barcode',
+          label: 'Item Barcode',
+          fieldKey: 'inventory.item.barcode',
+          preview: '|| ITEM BARCODE ||',
+          description: 'Scannable barcode tied to the SKU or barcode value.',
+          type: 'barcode',
+          defaultHeight: 120
+        }
+      ]
     },
     {
-      id: 'orderNumber',
-      label: 'Order Number',
-      fieldKey: 'order_number',
-      preview: 'Order #102938',
-      description: 'Order reference identifier.'
+      id: 'location',
+      label: 'Location',
+      description: 'Storage and fulfillment locations for the item.',
+      fields: [
+        {
+          id: 'location-code',
+          label: 'Location Code',
+          fieldKey: 'inventory.location.code',
+          preview: 'LOC: RACK-3B',
+          description: 'Warehouse or storage location identifier.'
+        },
+        {
+          id: 'location-description',
+          label: 'Location Description',
+          fieldKey: 'inventory.location.description',
+          preview: 'North warehouse - Rack aisle 3, bay B',
+          description: 'Human-friendly description of the storage location.',
+          defaultHeight: 90
+        }
+      ]
     },
     {
-      id: 'barcode',
-      label: 'Barcode',
-      fieldKey: 'barcode',
-      preview: '|| BARCODE ||',
-      description: 'Auto-generated barcode placeholder.',
-      type: 'barcode',
-      defaultHeight: 120
+      id: 'order',
+      label: 'Work & Order Tracking',
+      description: 'Downstream fulfillment, customer, and order values.',
+      fields: [
+        {
+          id: 'order-number',
+          label: 'Order Number',
+          fieldKey: 'orders.order.number',
+          preview: 'WO-5843',
+          description: 'Work or sales order identifier for the label.'
+        },
+        {
+          id: 'customer-name',
+          label: 'Customer Name',
+          fieldKey: 'orders.customer.name',
+          preview: 'Customer: Horizon Builders',
+          description: 'Customer receiving the labeled goods.'
+        },
+        {
+          id: 'ship-date',
+          label: 'Ship Date',
+          fieldKey: 'orders.shipment.date',
+          preview: 'Ship: 2024-03-15',
+          description: 'Target shipment or due date for the order.'
+        }
+      ]
     }
   ];
+
+  const ALL_FIELDS = DATA_FIELD_GROUPS.flatMap((group) =>
+    group.fields.map((field) => ({ ...field, groupId: group.id, groupLabel: group.label }))
+  );
 
   const FONT_FAMILIES = [
     { value: 'Inter, sans-serif', label: 'Inter' },
@@ -81,6 +199,15 @@
       fieldKey: field.fieldKey,
       label: field.label,
       text: field.preview,
+      dataBinding: field.groupId
+        ? {
+            groupId: field.groupId,
+            fieldId: field.id,
+            label: field.label,
+            fieldKey: field.fieldKey,
+            groupLabel: field.groupLabel
+          }
+        : null,
       x: clamp(point.x - width / 2, 0, Math.max(labelSize.width - width, 0)),
       y: clamp(point.y - height / 2, 0, Math.max(labelSize.height - height, 0)),
       width,
@@ -102,6 +229,8 @@
       id: uniqueId(),
       type: 'text',
       text: 'Custom text',
+      dataBinding: null,
+      fieldKey: null,
       x: (labelSize.width - width) / 2,
       y: (labelSize.height - height) / 2,
       width,
@@ -124,6 +253,7 @@
       id: uniqueId(),
       type: 'image',
       src,
+      dataBinding: null,
       x: (labelSize.width - baseWidth) / 2,
       y: (labelSize.height - height) / 2,
       width: baseWidth,
@@ -231,9 +361,13 @@
     const [exportedJSON, setExportedJSON] = useState('');
     const [importValue, setImportValue] = useState('');
     const [customSize, setCustomSize] = useState({ width: LABEL_SIZES[3].width, height: LABEL_SIZES[3].height });
+    const [isPrinting, setIsPrinting] = useState(false);
+    const [printFeedback, setPrintFeedback] = useState(null);
     const canvasRef = useRef(null);
     const fileInputRef = useRef(null);
     const elementsRef = useRef(elements);
+    const { trialPrintUrl, selectedPrinterName } = DESIGNER_CONFIG;
+    const canSendTrial = Boolean(trialPrintUrl);
 
     useEffect(() => {
       elementsRef.current = elements;
@@ -266,10 +400,55 @@
       });
     }, [activeLabelSize.width, activeLabelSize.height]);
 
+    useEffect(() => {
+      setElements((prev) => {
+        let changed = false;
+        const next = prev.map((el) => {
+          if (el.fieldKey && !el.dataBinding) {
+            const match = ALL_FIELDS.find((field) => field.fieldKey === el.fieldKey);
+            if (match) {
+              changed = true;
+              return {
+                ...el,
+                label: el.label || match.label,
+                dataBinding: {
+                  groupId: match.groupId,
+                  fieldId: match.id,
+                  label: match.label,
+                  fieldKey: match.fieldKey,
+                  groupLabel: match.groupLabel
+                }
+              };
+            }
+          }
+          return el;
+        });
+        return changed ? next : prev;
+      });
+    }, []);
+
     const selectedElement = useMemo(
       () => elements.find((el) => el.id === selectedId) || null,
       [elements, selectedId]
     );
+
+    const selectedBinding = useMemo(() => {
+      if (!selectedElement) return null;
+      if (selectedElement.dataBinding) return selectedElement.dataBinding;
+      if (selectedElement.fieldKey) {
+        const match = ALL_FIELDS.find((field) => field.fieldKey === selectedElement.fieldKey);
+        if (match) {
+          return {
+            groupId: match.groupId,
+            fieldId: match.id,
+            label: match.label,
+            fieldKey: match.fieldKey,
+            groupLabel: match.groupLabel
+          };
+        }
+      }
+      return null;
+    }, [selectedElement]);
 
     const updateElement = (id, updates) => {
       setElements((prev) => prev.map((el) => (el.id === id ? { ...el, ...updates } : el)));
@@ -291,9 +470,9 @@
       event.preventDefault();
       const data = event.dataTransfer.getData('text/plain');
       if (!data) return;
-      const [kind, key] = data.split(':');
+      const [kind, groupId, fieldId] = data.split(':');
       if (kind !== 'field') return;
-      const field = DEFAULT_FIELDS.find((f) => f.id === key);
+      const field = ALL_FIELDS.find((f) => f.groupId === groupId && f.id === fieldId);
       if (!field) return;
       const bounds = canvasRef.current?.getBoundingClientRect();
       if (!bounds) return;
@@ -441,41 +620,81 @@
       event.target.value = '';
     };
 
+    const buildLayoutPayload = () => ({
+      labelSize: {
+        width: activeLabelSize.width,
+        height: activeLabelSize.height
+      },
+      elements: elements.map((el) => {
+        const base = {
+          id: el.id,
+          type: el.type,
+          x: el.x,
+          y: el.y,
+          width: el.width,
+          height: el.height,
+          rotation: el.rotation
+        };
+        if (el.type === 'image') {
+          base.src = el.src;
+        } else {
+          base.text = el.text;
+          base.fontFamily = el.fontFamily;
+          base.fontSize = el.fontSize;
+          base.fontWeight = el.fontWeight;
+          base.textAlign = el.textAlign;
+          base.color = el.color;
+          base.background = el.background;
+        }
+        if (el.fieldKey) {
+          base.fieldKey = el.fieldKey;
+          base.label = el.label;
+        }
+        if (el.dataBinding) {
+          base.dataBinding = el.dataBinding;
+        }
+        return base;
+      })
+    });
+
     const handleExport = () => {
-      const payload = {
-        labelSize: {
-          width: activeLabelSize.width,
-          height: activeLabelSize.height
-        },
-        elements: elements.map((el) => {
-          const base = {
-            id: el.id,
-            type: el.type,
-            x: el.x,
-            y: el.y,
-            width: el.width,
-            height: el.height,
-            rotation: el.rotation
-          };
-          if (el.type === 'image') {
-            base.src = el.src;
-          } else {
-            base.text = el.text;
-            base.fontFamily = el.fontFamily;
-            base.fontSize = el.fontSize;
-            base.fontWeight = el.fontWeight;
-            base.textAlign = el.textAlign;
-            base.color = el.color;
-            base.background = el.background;
-          }
-          if (el.fieldKey) {
-            base.fieldKey = el.fieldKey;
-            base.label = el.label;
-          }
-          return base;
-        })
-      };
+      const payload = buildLayoutPayload();
       setExportedJSON(JSON.stringify(payload, null, 2));
+    };
+
+    const handleTrialPrint = async () => {
+      setPrintFeedback(null);
+      if (!trialPrintUrl) {
+        setPrintFeedback({ type: 'error', message: 'Trial print endpoint is not configured.' });
+        return;
+      }
+      setIsPrinting(true);
+      try {
+        const payload = buildLayoutPayload();
+        const response = await fetch(trialPrintUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ layout: payload })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(result?.message || 'Failed to send the trial print.');
+        }
+        setPrintFeedback({
+          type: 'success',
+          message:
+            result?.message ||
+            `Trial print sent${selectedPrinterName ? ` to ${selectedPrinterName}` : ''}.`
+        });
+      } catch (error) {
+        console.error(error);
+        setPrintFeedback({
+          type: 'error',
+          message: error?.message || 'Unable to send a trial print right now.'
+        });
+      } finally {
+        setIsPrinting(false);
+      }
     };
 
     const handleImport = () => {
@@ -673,20 +892,37 @@
         renderElementContent(element, previewScale)
       );
     });
-    const fieldCards = DEFAULT_FIELDS.map((field) =>
+    const fieldCards = DATA_FIELD_GROUPS.map((group) =>
       React.createElement(
         'div',
-        {
-          key: field.id,
-          draggable: true,
-          onDragStart: (event) => {
-            event.dataTransfer.setData('text/plain', `field:${field.id}`);
-            event.dataTransfer.effectAllowed = 'copy';
-          },
-          className: 'cursor-grab rounded-lg border border-slate-200 bg-white p-3 text-sm shadow-sm transition hover:border-sky-400 hover:shadow'
-        },
-        React.createElement('div', { className: 'font-medium text-slate-800' }, field.label),
-        React.createElement('p', { className: 'mt-1 text-xs text-slate-500' }, field.description)
+        { key: group.id, className: 'space-y-2' },
+        React.createElement(
+          'div',
+          { className: 'space-y-1' },
+          React.createElement(
+            'h4',
+            { className: 'text-xs font-semibold uppercase tracking-wide text-slate-500' },
+            group.label
+          ),
+          React.createElement('p', { className: 'text-xs text-slate-500' }, group.description)
+        ),
+        ...group.fields.map((field) =>
+          React.createElement(
+            'div',
+            {
+              key: field.id,
+              draggable: true,
+              onDragStart: (event) => {
+                event.dataTransfer.setData('text/plain', `field:${group.id}:${field.id}`);
+                event.dataTransfer.effectAllowed = 'copy';
+              },
+              className:
+                'cursor-grab rounded-lg border border-slate-200 bg-white p-3 text-sm shadow-sm transition hover:border-sky-400 hover:shadow'
+            },
+            React.createElement('div', { className: 'font-medium text-slate-800' }, field.label),
+            React.createElement('p', { className: 'mt-1 text-xs text-slate-500' }, field.description)
+          )
+        )
       )
     );
     const alignmentButtons = selectedElement
@@ -729,12 +965,78 @@
               'Remove'
             )
           ),
-          selectedElement.fieldKey &&
+          selectedBinding &&
             React.createElement(
               'div',
               { className: 'rounded-lg bg-slate-100 p-2 text-xs text-slate-600' },
               'Bound field: ',
-              React.createElement('span', { className: 'font-semibold text-slate-700' }, selectedElement.label || selectedElement.fieldKey)
+              React.createElement(
+                'span',
+                { className: 'font-semibold text-slate-700' },
+                `${selectedBinding.groupLabel || ''}${selectedBinding.groupLabel ? ' • ' : ''}${selectedElement.label || selectedBinding.label}`
+              )
+            ),
+          selectedElement.type !== 'image' &&
+            React.createElement(
+              'label',
+              { className: 'block space-y-1 text-xs font-semibold text-slate-600' },
+              React.createElement('span', null, 'Data binding'),
+              React.createElement(
+                'select',
+                {
+                  value: selectedBinding ? `${selectedBinding.groupId}:${selectedBinding.fieldId}` : '__none__',
+                  onChange: (event) => {
+                    const value = event.target.value;
+                    if (value === '__none__') {
+                      updateElement(selectedElement.id, {
+                        fieldKey: null,
+                        label: selectedElement.type === 'barcode' ? selectedElement.label : null,
+                        dataBinding: null
+                      });
+                      return;
+                    }
+                    const [groupId, fieldId] = value.split(':');
+                    const field = ALL_FIELDS.find((f) => f.groupId === groupId && f.id === fieldId);
+                    if (!field) return;
+                    const updates = {
+                      fieldKey: field.fieldKey,
+                      label: field.label,
+                      dataBinding: {
+                        groupId: field.groupId,
+                        fieldId: field.id,
+                        label: field.label,
+                        fieldKey: field.fieldKey,
+                        groupLabel: field.groupLabel
+                      }
+                    };
+                    if (selectedElement.type !== 'image') {
+                      updates.text = field.preview;
+                    }
+                    updateElement(selectedElement.id, updates);
+                  },
+                  className:
+                    'w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100'
+                },
+                React.createElement('option', { value: '__none__' }, 'Manual content'),
+                ...DATA_FIELD_GROUPS.map((group) =>
+                  React.createElement(
+                    'optgroup',
+                    { key: group.id, label: group.label },
+                    group.fields.map((field) =>
+                      React.createElement(
+                        'option',
+                        { key: `${group.id}:${field.id}`, value: `${group.id}:${field.id}` },
+                        field.label
+                      )
+                    )
+                  )
+                )
+              ),
+              React.createElement(
+                'p',
+                { className: 'text-[11px] font-normal text-slate-500' },
+                'Bind this element to inventory, batch, or order data, or keep it as manual text.'
+              )
             ),
           selectedElement.type !== 'image' &&
             React.createElement(
@@ -1068,6 +1370,46 @@
             React.createElement(
               'div',
               { className: 'mt-3 flex flex-col gap-3 text-sm' },
+              React.createElement(
+                'div',
+                { className: 'flex flex-wrap items-center gap-3' },
+                React.createElement(
+                  'button',
+                  {
+                    type: 'button',
+                    onClick: handleTrialPrint,
+                    disabled: isPrinting || !canSendTrial,
+                    className: `rounded-md px-3 py-2 text-xs font-semibold text-white shadow ${
+                      isPrinting || !canSendTrial
+                        ? 'cursor-not-allowed bg-amber-400/70'
+                        : 'bg-amber-500 hover:bg-amber-600'
+                    }`
+                  },
+                  isPrinting ? 'Sending trial…' : 'Print trial'
+                ),
+                selectedPrinterName &&
+                  React.createElement(
+                    'span',
+                    { className: 'text-xs text-slate-500' },
+                    `Active printer: ${selectedPrinterName}`
+                  ),
+                !canSendTrial &&
+                  React.createElement(
+                    'span',
+                    { className: 'text-xs font-semibold text-amber-600' },
+                    'Select a printer on the settings page to enable trial prints.'
+                  ),
+                printFeedback &&
+                  React.createElement(
+                    'span',
+                    {
+                      className: `text-xs font-semibold ${
+                        printFeedback.type === 'success' ? 'text-emerald-600' : 'text-rose-600'
+                      }`
+                    },
+                    printFeedback.message
+                  )
+              ),
               React.createElement(
                 'div',
                 { className: 'flex items-center gap-2' },

@@ -58,8 +58,8 @@
 
 <section class="card-section">
     <h3>Label Designer</h3>
-    <p class="section-intro">Design reusable label layouts with drag-and-drop fields, snapping guides, and live previews.</p>
-    <div id="label-designer-root" class="mt-4"></div>
+    <p class="section-intro">Open the dedicated designer to build reusable inventory and shipping labels with drag-and-drop fields and live previews.</p>
+    <a href="{{ url_for('printers.label_designer') }}" class="action-btn">Open Label Designer</a>
 </section>
 
 <section class="card-section">
@@ -98,8 +98,4 @@
 
 {% block extra_scripts %}
 {{ super() }}
-<script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
-<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script defer src="{{ url_for('static', filename='js/label-designer.js') }}"></script>
 {% endblock %}
