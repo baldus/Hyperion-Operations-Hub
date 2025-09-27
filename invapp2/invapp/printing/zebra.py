@@ -11,8 +11,8 @@ from .labels import build_receiving_label, render_label_for_process
 
 def send_zpl(
     zpl: str,
-    host: str = current_app.config["ZEBRA_PRINTER_HOST"],
-    port: int = current_app.config["ZEBRA_PRINTER_PORT"],
+    host: str | None = None,
+    port: int | None = None,
 ) -> bool:
     """Send raw ZPL to a networked Zebra printer.
 
@@ -31,12 +31,22 @@ def send_zpl(
         ``True`` if the data was sent successfully, ``False`` otherwise.
     """
 
+    app = current_app
+    if host is None:
+        host = app.config.get("ZEBRA_PRINTER_HOST")
+    if port is None:
+        port = app.config.get("ZEBRA_PRINTER_PORT")
+
+    if not host or port is None:
+        app.logger.error("Zebra printer host/port not configured.")
+        return False
+
     try:
         with socket.create_connection((host, port)) as sock:
             sock.sendall(zpl.encode("utf-8"))
         return True
     except OSError as exc:
-        current_app.logger.error("Failed to send ZPL to printer: %s", exc)
+        app.logger.error("Failed to send ZPL to printer: %s", exc)
         return False
 
 

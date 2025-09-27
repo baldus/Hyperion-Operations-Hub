@@ -24,7 +24,9 @@
 <script>
   window.labelDesignerConfig = {
     trialPrintUrl: {{ url_for('printers.label_designer_print_trial')|tojson }},
-    selectedPrinterName: {{ selected_printer.name|tojson if selected_printer else 'null' }}
+    selectedPrinterName: {{ selected_printer.name|tojson if selected_printer else 'null' }},
+    templates: {{ designer_templates|tojson }},
+    initialTemplateId: {{ initial_template_id|tojson }}
   };
 </script>
 <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
