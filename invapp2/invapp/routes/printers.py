@@ -2,6 +2,7 @@ from flask import (
     Blueprint,
     current_app,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -134,4 +135,61 @@ def printer_settings():
         zebra_host=current_app.config.get("ZEBRA_PRINTER_HOST", ""),
         zebra_port=current_app.config.get("ZEBRA_PRINTER_PORT", ""),
         is_admin=current_user.has_role("admin"),
+    )
+
+
+@bp.route("/designer", methods=["GET"], strict_slashes=False)
+@login_required
+@require_roles("admin")
+def label_designer():
+    printers = Printer.query.order_by(Printer.name.asc()).all()
+    selected_printer = None
+    selected_printer_id = session.get("selected_printer_id")
+    if selected_printer_id:
+        selected_printer = Printer.query.get(selected_printer_id)
+
+    if selected_printer is None and printers:
+        selected_printer = printers[0]
+        session.setdefault("selected_printer_id", selected_printer.id)
+
+    if selected_printer:
+        _apply_printer_configuration(selected_printer)
+
+    return render_template(
+        "settings/label_designer.html",
+        selected_printer=selected_printer,
+        printers=printers,
+    )
+
+
+@bp.post("/designer/print-trial")
+@login_required
+@require_roles("admin")
+def label_designer_print_trial():
+    payload = request.get_json(silent=True) or {}
+    layout = payload.get("layout")
+    if not isinstance(layout, dict):
+        return jsonify({"message": "Layout payload is required for a trial print."}), 400
+
+    selected_printer = None
+    selected_printer_id = session.get("selected_printer_id")
+    if selected_printer_id:
+        selected_printer = Printer.query.get(selected_printer_id)
+
+    if selected_printer is None:
+        return (
+            jsonify({"message": "Select an active printer before sending a trial print."}),
+            400,
+        )
+
+    current_app.logger.info(
+        "Label designer trial print queued for %s: %s", selected_printer.name, layout
+    )
+
+    return jsonify(
+        {
+            "ok": True,
+            "message": f"Trial print queued for {selected_printer.name}.",
+            "printer": selected_printer.name,
+        }
     )

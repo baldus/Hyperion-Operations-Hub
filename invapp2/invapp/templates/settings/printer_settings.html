@@ -57,6 +57,12 @@
 {% endif %}
 
 <section class="card-section">
+    <h3>Label Designer</h3>
+    <p class="section-intro">Open the dedicated designer to build reusable inventory and shipping labels with drag-and-drop fields and live previews.</p>
+    <a href="{{ url_for('printers.label_designer') }}" class="action-btn">Open Label Designer</a>
+</section>
+
+<section class="card-section">
     <h3>Add Printer</h3>
     <form method="post" class="stacked-form">
         <input type="hidden" name="form_id" value="add">
@@ -88,4 +94,8 @@
         </div>
     </form>
 </section>
+{% endblock %}
+
+{% block extra_scripts %}
+{{ super() }}
 {% endblock %}
