@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 from flask import (
     Blueprint,
     current_app,
@@ -15,6 +17,8 @@ from invapp.auth import blueprint_page_guard
 from invapp.extensions import db
 from invapp.login import current_user, login_required
 from invapp.models import Printer
+from invapp.printing.designer_data import get_label_designer_templates
+from invapp.printing.labels import get_template_by_name
 from invapp.security import require_roles
 
 bp = Blueprint("printers", __name__, url_prefix="/settings/printers")
@@ -155,10 +159,38 @@ def label_designer():
     if selected_printer:
         _apply_printer_configuration(selected_printer)
 
+    catalog = get_label_designer_templates()
+    designer_templates: list[dict[str, object]] = []
+    for spec in catalog:
+        template_name = spec.get("template_name")
+        layout: dict[str, object] = {}
+        if template_name:
+            definition = get_template_by_name(template_name)
+            if definition is not None:
+                layout = deepcopy(definition.layout or {})
+        designer_templates.append(
+            {
+                "id": spec.get("id"),
+                "name": spec.get("name"),
+                "description": spec.get("description"),
+                "templateName": template_name,
+                "defaultSize": spec.get("default_size"),
+                "fieldGroups": spec.get("field_groups", []),
+                "sampleData": spec.get("sample_data"),
+                "layout": layout,
+            }
+        )
+
+    initial_template_id = next(
+        (entry["id"] for entry in designer_templates if entry.get("id")), None
+    )
+
     return render_template(
         "settings/label_designer.html",
         selected_printer=selected_printer,
         printers=printers,
+        designer_templates=designer_templates,
+        initial_template_id=initial_template_id,
     )
 
 

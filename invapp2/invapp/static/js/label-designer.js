@@ -1,6 +1,16 @@
 (() => {
   const { useState, useMemo, useRef, useEffect } = React;
   const DESIGNER_CONFIG = window.labelDesignerConfig || {};
+  const TEMPLATE_CATALOG = Array.isArray(DESIGNER_CONFIG.templates)
+    ? DESIGNER_CONFIG.templates
+    : [];
+  const TEMPLATE_MAP = new Map(
+    TEMPLATE_CATALOG.filter((template) => template && template.id).map((template) => [template.id, template])
+  );
+  const DEFAULT_TEMPLATE_ID =
+    DESIGNER_CONFIG.initialTemplateId && TEMPLATE_MAP.has(DESIGNER_CONFIG.initialTemplateId)
+      ? DESIGNER_CONFIG.initialTemplateId
+      : TEMPLATE_CATALOG[0]?.id || null;
 
   const uniqueId = () => `element-${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
@@ -13,156 +23,9 @@
     { id: 'custom', name: 'Custom', width: 700, height: 400 }
   ];
 
-  const DATA_FIELD_GROUPS = [
-    {
-      id: 'item',
-      label: 'Item Details',
-      description: 'Core item master data for inventory pieces.',
-      fields: [
-        {
-          id: 'item-name',
-          label: 'Item Name',
-          fieldKey: 'inventory.item.name',
-          preview: 'Aluminum Gate Panel',
-          description: 'Primary description of the inventory item.'
-        },
-        {
-          id: 'item-sku',
-          label: 'Item SKU',
-          fieldKey: 'inventory.item.sku',
-          preview: 'SKU: GATE-AL-42',
-          description: 'Stock keeping unit or part number for the item.'
-        },
-        {
-          id: 'item-description',
-          label: 'Item Description',
-          fieldKey: 'inventory.item.description',
-          preview: '42" powder coated aluminum gate panel',
-          description: 'Extended item description or notes.',
-          defaultHeight: 96
-        },
-        {
-          id: 'item-type',
-          label: 'Item Type',
-          fieldKey: 'inventory.item.type',
-          preview: 'Type: Assembly',
-          description: 'Item type or classification value.'
-        },
-        {
-          id: 'item-unit',
-          label: 'Unit of Measure',
-          fieldKey: 'inventory.item.unit',
-          preview: 'Unit: ea',
-          description: 'Selling or stocking unit of measure.'
-        },
-        {
-          id: 'item-class',
-          label: 'Item Class',
-          fieldKey: 'inventory.item.item_class',
-          preview: 'Class: Finished Goods',
-          description: 'Inventory class or reporting bucket.'
-        }
-      ]
-    },
-    {
-      id: 'stock',
-      label: 'Stock & Batch',
-      description: 'Details about quantities, batches, and tracking.',
-      fields: [
-        {
-          id: 'quantity',
-          label: 'Quantity',
-          fieldKey: 'inventory.stock.quantity',
-          preview: 'Qty: 24',
-          description: 'Quantity represented by the label.'
-        },
-        {
-          id: 'min-stock',
-          label: 'Min Stock',
-          fieldKey: 'inventory.item.min_stock',
-          preview: 'Min: 12',
-          description: 'Minimum stocking level for the item.'
-        },
-        {
-          id: 'lot-number',
-          label: 'Lot Number',
-          fieldKey: 'inventory.batch.lot_number',
-          preview: 'Lot #A1-2048',
-          description: 'Supplier or production lot identifier.'
-        },
-        {
-          id: 'received-date',
-          label: 'Received Date',
-          fieldKey: 'inventory.batch.received_date',
-          preview: 'Received: 2024-03-12',
-          description: 'Date the batch was received or produced.'
-        },
-        {
-          id: 'barcode',
-          label: 'Item Barcode',
-          fieldKey: 'inventory.item.barcode',
-          preview: '|| ITEM BARCODE ||',
-          description: 'Scannable barcode tied to the SKU or barcode value.',
-          type: 'barcode',
-          defaultHeight: 120
-        }
-      ]
-    },
-    {
-      id: 'location',
-      label: 'Location',
-      description: 'Storage and fulfillment locations for the item.',
-      fields: [
-        {
-          id: 'location-code',
-          label: 'Location Code',
-          fieldKey: 'inventory.location.code',
-          preview: 'LOC: RACK-3B',
-          description: 'Warehouse or storage location identifier.'
-        },
-        {
-          id: 'location-description',
-          label: 'Location Description',
-          fieldKey: 'inventory.location.description',
-          preview: 'North warehouse - Rack aisle 3, bay B',
-          description: 'Human-friendly description of the storage location.',
-          defaultHeight: 90
-        }
-      ]
-    },
-    {
-      id: 'order',
-      label: 'Work & Order Tracking',
-      description: 'Downstream fulfillment, customer, and order values.',
-      fields: [
-        {
-          id: 'order-number',
-          label: 'Order Number',
-          fieldKey: 'orders.order.number',
-          preview: 'WO-5843',
-          description: 'Work or sales order identifier for the label.'
-        },
-        {
-          id: 'customer-name',
-          label: 'Customer Name',
-          fieldKey: 'orders.customer.name',
-          preview: 'Customer: Horizon Builders',
-          description: 'Customer receiving the labeled goods.'
-        },
-        {
-          id: 'ship-date',
-          label: 'Ship Date',
-          fieldKey: 'orders.shipment.date',
-          preview: 'Ship: 2024-03-15',
-          description: 'Target shipment or due date for the order.'
-        }
-      ]
-    }
-  ];
+  const LABEL_SIZE_MAP = new Map(LABEL_SIZES.map((size) => [size.id, size]));
 
-  const ALL_FIELDS = DATA_FIELD_GROUPS.flatMap((group) =>
-    group.fields.map((field) => ({ ...field, groupId: group.id, groupLabel: group.label }))
-  );
+  const getTemplateById = (id) => (id && TEMPLATE_MAP.get(id)) || null;
 
   const FONT_FAMILIES = [
     { value: 'Inter, sans-serif', label: 'Inter' },
@@ -193,6 +56,106 @@
   const clamp = (value, min, max) => {
     if (Number.isNaN(value)) return min;
     return Math.min(Math.max(value, min), max);
+  };
+
+  const parseNumber = (value, fallback) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  };
+
+  const normalizeLayoutFromServer = (layout, fieldIndex) => {
+    if (!layout || typeof layout !== 'object') {
+      return null;
+    }
+    const fallbackSize = LABEL_SIZE_MAP.get('4x6') || LABEL_SIZES[0];
+    const width = Math.max(parseNumber(layout.width, fallbackSize.width), MIN_SIZE);
+    const height = Math.max(parseNumber(layout.height, fallbackSize.height), MIN_SIZE);
+    const rawElements = Array.isArray(layout.elements) ? layout.elements : [];
+    const normalizedElements = rawElements
+      .map((element) => {
+        if (!element || typeof element !== 'object') {
+          return null;
+        }
+        const rawType = String(element.type || 'field').toLowerCase();
+        const type =
+          rawType === 'image'
+            ? 'image'
+            : rawType === 'text'
+            ? 'text'
+            : rawType === 'barcode'
+            ? 'barcode'
+            : 'field';
+        const binding = element.fieldKey && fieldIndex ? fieldIndex.get(element.fieldKey) : null;
+        const defaultPreview =
+          binding?.preview || element.text || element.label || element.fieldKey || 'Text';
+        const bindingDefaultHeight =
+          typeof binding?.defaultHeight === 'number' ? binding.defaultHeight : undefined;
+        const defaultHeight =
+          bindingDefaultHeight !== undefined
+            ? bindingDefaultHeight
+            : type === 'barcode'
+            ? parseNumber(element.barHeight, 140)
+            : type === 'image'
+            ? 120
+            : 64;
+        const computedWidth =
+          type === 'barcode'
+            ? parseNumber(element.width, 280)
+            : type === 'image'
+            ? parseNumber(element.width, 220)
+            : parseNumber(element.width, 240);
+        const computedHeight =
+          type === 'barcode'
+            ? parseNumber(element.height || element.barHeight, defaultHeight)
+            : type === 'image'
+            ? parseNumber(element.height, defaultHeight)
+            : parseNumber(element.height, defaultHeight);
+        const base = {
+          id: element.id || uniqueId(),
+          type,
+          fieldKey: element.fieldKey || null,
+          label: element.label || binding?.label || null,
+          text: type === 'text' ? element.text || defaultPreview : defaultPreview,
+          dataBinding:
+            binding && binding.fieldKey
+              ? {
+                  groupId: binding.groupId,
+                  fieldId: binding.id,
+                  label: binding.label,
+                  fieldKey: binding.fieldKey,
+                  groupLabel: binding.groupLabel,
+                }
+              : null,
+          x: clamp(parseNumber(element.x, 0), 0, width),
+          y: clamp(parseNumber(element.y, 0), 0, height),
+          width: clamp(parseNumber(computedWidth, 220), MIN_SIZE, width),
+          height: clamp(parseNumber(computedHeight, defaultHeight), MIN_SIZE, height),
+          rotation: parseNumber(element.rotation, 0),
+          fontFamily: element.fontFamily || 'Inter, sans-serif',
+          fontSize: parseNumber(element.fontSize, type === 'barcode' ? 32 : 18),
+          fontWeight: `${element.fontWeight || '600'}`,
+          textAlign: element.textAlign || (type === 'text' ? 'center' : 'left'),
+          color: element.color || '#111827',
+          background: element.background || (type === 'barcode' ? '#0f172a' : 'rgba(255,255,255,0.85)'),
+          locked: Boolean(element.locked),
+        };
+        if (type === 'image') {
+          base.src = element.src || '';
+          base.text = '';
+          base.fieldKey = null;
+          base.dataBinding = null;
+        }
+        if (type === 'barcode') {
+          base.text = binding?.preview || element.text || defaultPreview;
+        }
+        if (type === 'field' && !base.fieldKey && binding?.fieldKey) {
+          base.fieldKey = binding.fieldKey;
+        }
+        return base;
+      })
+      .filter(Boolean);
+
+    return { width, height, elements: normalizedElements };
   };
 
   const createElementFromField = (field, point, labelSize) => {
@@ -361,22 +324,54 @@
     return Math.round(value * factor) / factor;
   };
   const LabelDesigner = () => {
+    const templates = TEMPLATE_CATALOG;
+    const [selectedTemplateId, setSelectedTemplateId] = useState(DEFAULT_TEMPLATE_ID);
+    const activeTemplate = useMemo(() => getTemplateById(selectedTemplateId), [selectedTemplateId]);
+    const fieldGroups = useMemo(
+      () => (Array.isArray(activeTemplate?.fieldGroups) ? activeTemplate.fieldGroups : []),
+      [activeTemplate]
+    );
+    const allFields = useMemo(
+      () =>
+        fieldGroups.flatMap((group) =>
+          (Array.isArray(group.fields) ? group.fields : []).map((field) => ({
+            ...field,
+            groupId: group.id,
+            groupLabel: group.label,
+          }))
+        ),
+      [fieldGroups]
+    );
+    const fieldIndex = useMemo(() => {
+      const entries = allFields
+        .filter((field) => field && typeof field.fieldKey === 'string')
+        .map((field) => [field.fieldKey, field]);
+      return new Map(entries);
+    }, [allFields]);
+    const defaultPreset = LABEL_SIZE_MAP.get('4x6') || LABEL_SIZES[0];
     const [elements, setElements] = useState([]);
     const [selectedIds, setSelectedIds] = useState([]);
-    const [labelSize, setLabelSize] = useState(LABEL_SIZES[0]);
+    const [labelSize, setLabelSize] = useState(defaultPreset);
     const [zoom, setZoom] = useState(1);
     const [guides, setGuides] = useState({ vertical: null, horizontal: null });
     const [exportedJSON, setExportedJSON] = useState('');
     const [importValue, setImportValue] = useState('');
-    const [customSize, setCustomSize] = useState({ width: LABEL_SIZES[3].width, height: LABEL_SIZES[3].height });
+    const [customSize, setCustomSize] = useState({ width: defaultPreset.width, height: defaultPreset.height });
     const [isPrinting, setIsPrinting] = useState(false);
     const [printFeedback, setPrintFeedback] = useState(null);
     const [showPreview, setShowPreview] = useState(false);
     const canvasRef = useRef(null);
     const fileInputRef = useRef(null);
     const elementsRef = useRef(elements);
+    const pendingImportRef = useRef(null);
     const { trialPrintUrl, selectedPrinterName } = DESIGNER_CONFIG;
     const canSendTrial = Boolean(trialPrintUrl);
+
+    useEffect(() => {
+      if (!selectedTemplateId && templates.length) {
+        setSelectedTemplateId(templates[0].id);
+      }
+    }, [selectedTemplateId, templates]);
 
     useEffect(() => {
       elementsRef.current = elements;
@@ -388,6 +383,55 @@
       }
       return { ...labelSize, width: customSize.width, height: customSize.height };
     }, [labelSize, customSize]);
+
+    const applyLayoutFromPayload = (payload) => {
+      if (!payload || !Array.isArray(payload.elements)) {
+        setElements([]);
+        setSelectedIds([]);
+        return;
+      }
+      const size = payload.labelSize || {};
+      const width = Math.max(parseNumber(size.width, activeLabelSize.width), MIN_SIZE);
+      const height = Math.max(parseNumber(size.height, activeLabelSize.height), MIN_SIZE);
+      setLabelSize({ id: 'custom', name: 'Custom', width, height });
+      setCustomSize({ width, height });
+      const sanitized = payload.elements.map((el) =>
+        clampElementWithinBounds(
+          {
+            id: el.id || uniqueId(),
+            type: el.type || 'field',
+            fieldKey: el.fieldKey || null,
+            label: el.label || null,
+            text: el.text || '',
+            dataBinding: el.dataBinding || null,
+            x: parseNumber(el.x, 0),
+            y: parseNumber(el.y, 0),
+            width: Math.max(parseNumber(el.width, 220), MIN_SIZE),
+            height: Math.max(parseNumber(el.height, 64), MIN_SIZE),
+            rotation: parseNumber(el.rotation, 0),
+            fontFamily: el.fontFamily || 'Inter, sans-serif',
+            fontSize: parseNumber(el.fontSize, el.type === 'barcode' ? 32 : 18),
+            fontWeight: `${el.fontWeight || '600'}`,
+            textAlign: el.textAlign || (el.type === 'text' ? 'center' : 'left'),
+            color: el.color || '#111827',
+            background:
+              el.background || (el.type === 'barcode' ? '#0f172a' : 'rgba(255,255,255,0.85)'),
+            locked: Boolean(el.locked),
+            src: el.src || undefined,
+          },
+          { width, height },
+          { snap: false }
+        )
+      );
+      setElements(sanitized);
+      setSelectedIds(sanitized[0] ? [sanitized[0].id] : []);
+    };
+
+    const handleTemplateChange = (event) => {
+      const value = event.target.value;
+      pendingImportRef.current = null;
+      setSelectedTemplateId(value || null);
+    };
 
     useEffect(() => {
       setElements((prev) => {
@@ -413,28 +457,116 @@
       setElements((prev) => {
         let changed = false;
         const next = prev.map((el) => {
-          if (el.fieldKey && !el.dataBinding) {
-            const match = ALL_FIELDS.find((field) => field.fieldKey === el.fieldKey);
-            if (match) {
+          const key = el.fieldKey || el.dataBinding?.fieldKey;
+          const match = key ? fieldIndex.get(key) : null;
+          if (!match) {
+            if (el.fieldKey || el.dataBinding) {
               changed = true;
-              return {
-                ...el,
-                label: el.label || match.label,
-                dataBinding: {
-                  groupId: match.groupId,
-                  fieldId: match.id,
-                  label: match.label,
-                  fieldKey: match.fieldKey,
-                  groupLabel: match.groupLabel
-                }
-              };
+              return { ...el, fieldKey: null, dataBinding: null };
             }
+            return el;
           }
-          return el;
+          const needsUpdate =
+            !el.dataBinding ||
+            el.dataBinding.fieldKey !== match.fieldKey ||
+            el.dataBinding.fieldId !== match.id;
+          if (!needsUpdate) {
+            return el;
+          }
+          changed = true;
+          const updates = {
+            ...el,
+            fieldKey: match.fieldKey,
+            label: el.label || match.label,
+            dataBinding: {
+              groupId: match.groupId,
+              fieldId: match.id,
+              label: match.label,
+              fieldKey: match.fieldKey,
+              groupLabel: match.groupLabel,
+            },
+          };
+          if (el.type === 'field' || el.type === 'barcode') {
+            updates.text = match.preview;
+          }
+          return updates;
         });
         return changed ? next : prev;
       });
-    }, []);
+    }, [fieldIndex, allFields]);
+
+    useEffect(() => {
+      if (!activeTemplate) {
+        setElements([]);
+        setSelectedIds([]);
+        return;
+      }
+      const pending = pendingImportRef.current;
+      if (pending && (!pending.templateId || pending.templateId === selectedTemplateId)) {
+        pendingImportRef.current = null;
+        applyLayoutFromPayload(pending);
+        setExportedJSON('');
+        setImportValue('');
+        setPrintFeedback(null);
+        return;
+      }
+      const normalized = normalizeLayoutFromServer(activeTemplate.layout, fieldIndex);
+      const defaultSize = activeTemplate.defaultSize || {};
+      const preset = defaultSize.preset && LABEL_SIZE_MAP.get(defaultSize.preset);
+      let canvasWidth;
+      let canvasHeight;
+      if (preset) {
+        canvasWidth = preset.width;
+        canvasHeight = preset.height;
+        setLabelSize(preset);
+        setCustomSize({ width: preset.width, height: preset.height });
+      } else if (
+        typeof defaultSize.width === 'number' && typeof defaultSize.height === 'number'
+      ) {
+        canvasWidth = Math.max(defaultSize.width, MIN_SIZE);
+        canvasHeight = Math.max(defaultSize.height, MIN_SIZE);
+        setLabelSize({ id: 'custom', name: 'Custom', width: canvasWidth, height: canvasHeight });
+        setCustomSize({ width: canvasWidth, height: canvasHeight });
+      } else if (normalized) {
+        canvasWidth = normalized.width;
+        canvasHeight = normalized.height;
+        setLabelSize({ id: 'custom', name: 'Custom', width: canvasWidth, height: canvasHeight });
+        setCustomSize({ width: canvasWidth, height: canvasHeight });
+      } else {
+        const fallback = LABEL_SIZE_MAP.get('4x6') || LABEL_SIZES[0];
+        canvasWidth = fallback.width;
+        canvasHeight = fallback.height;
+        setLabelSize(fallback);
+        setCustomSize({ width: fallback.width, height: fallback.height });
+      }
+      if (normalized) {
+        const sanitized = normalized.elements.map((el) =>
+          clampElementWithinBounds(
+            {
+              ...el,
+              fontFamily: el.fontFamily || 'Inter, sans-serif',
+              fontSize: el.fontSize || (el.type === 'barcode' ? 32 : 18),
+              fontWeight: el.fontWeight || '600',
+              textAlign: el.textAlign || (el.type === 'text' ? 'center' : 'left'),
+              color: el.color || '#111827',
+              background:
+                el.background || (el.type === 'barcode' ? '#0f172a' : 'rgba(255,255,255,0.85)'),
+              locked: Boolean(el.locked),
+            },
+            { width: canvasWidth, height: canvasHeight },
+            { snap: false }
+          )
+        );
+        setElements(sanitized);
+        setSelectedIds(sanitized[0] ? [sanitized[0].id] : []);
+      } else {
+        setElements([]);
+        setSelectedIds([]);
+      }
+      setExportedJSON('');
+      setImportValue('');
+      setPrintFeedback(null);
+    }, [selectedTemplateId, activeTemplate, fieldIndex]);
 
     const selectedElement = useMemo(() => {
       if (!selectedIds.length) return null;
@@ -498,20 +630,20 @@
     const selectedBinding = useMemo(() => {
       if (!selectedElement) return null;
       if (selectedElement.dataBinding) return selectedElement.dataBinding;
-      if (selectedElement.fieldKey) {
-        const match = ALL_FIELDS.find((field) => field.fieldKey === selectedElement.fieldKey);
-        if (match) {
-          return {
-            groupId: match.groupId,
-            fieldId: match.id,
-            label: match.label,
-            fieldKey: match.fieldKey,
-            groupLabel: match.groupLabel
-          };
-        }
+      const key = selectedElement.fieldKey || selectedElement.dataBinding?.fieldKey;
+      if (!key) return null;
+      const match = fieldIndex.get(key);
+      if (match) {
+        return {
+          groupId: match.groupId,
+          fieldId: match.id,
+          label: match.label,
+          fieldKey: match.fieldKey,
+          groupLabel: match.groupLabel,
+        };
       }
       return null;
-    }, [selectedElement]);
+    }, [selectedElement, fieldIndex]);
 
     const updateElement = (id, updates) => {
       setElements((prev) => prev.map((el) => (el.id === id ? { ...el, ...updates } : el)));
@@ -645,7 +777,7 @@
       if (!data) return;
       const [kind, groupId, fieldId] = data.split(':');
       if (kind !== 'field') return;
-      const field = ALL_FIELDS.find((f) => f.groupId === groupId && f.id === fieldId);
+      const field = allFields.find((f) => f.groupId === groupId && f.id === fieldId);
       if (!field) return;
       const bounds = canvasRef.current?.getBoundingClientRect();
       if (!bounds) return;
@@ -884,6 +1016,8 @@
     };
 
     const buildLayoutPayload = () => ({
+      templateId: selectedTemplateId,
+      templateName: activeTemplate?.templateName || null,
       labelSize: {
         width: activeLabelSize.width,
         height: activeLabelSize.height
@@ -968,28 +1102,24 @@
         if (!parsed.elements || !Array.isArray(parsed.elements)) {
           throw new Error('Invalid layout format');
         }
-        const importedSize = parsed.labelSize || {};
-        const width = importedSize.width || activeLabelSize.width;
-        const height = importedSize.height || activeLabelSize.height;
-        setLabelSize({ id: 'custom', name: 'Custom', width, height });
-        setCustomSize({ width, height });
-        const sanitized = parsed.elements.map((el) =>
-          clampElementWithinBounds(
-            {
-              ...el,
-              fontFamily: el.fontFamily || 'Inter, sans-serif',
-              fontSize: el.fontSize || 18,
-              fontWeight: el.fontWeight || '600',
-              textAlign: el.textAlign || 'left',
-              color: el.color || '#111827',
-              background: el.background || 'rgba(255,255,255,0.85)',
-              locked: Boolean(el.locked)
-            },
-            { width, height }
-          )
-        );
-        setElements(sanitized);
-        setSelectedIds(sanitized[0] ? [sanitized[0].id] : []);
+        const targetTemplateId = parsed.templateId || selectedTemplateId;
+        const payload = {
+          templateId: targetTemplateId,
+          labelSize: parsed.labelSize,
+          elements: parsed.elements,
+        };
+        const targetTemplate = targetTemplateId ? getTemplateById(targetTemplateId) : null;
+        if (
+          targetTemplateId &&
+          targetTemplateId !== selectedTemplateId &&
+          (targetTemplate || targetTemplateId === selectedTemplateId)
+        ) {
+          pendingImportRef.current = payload;
+          setSelectedTemplateId(targetTemplateId);
+        } else {
+          pendingImportRef.current = null;
+          applyLayoutFromPayload(payload);
+        }
       } catch (error) {
         console.error(error);
         alert('Unable to import layout. Please ensure the JSON is valid.');
@@ -1167,39 +1297,49 @@
         renderElementContent(element, previewScale)
       );
     });
-    const fieldCards = DATA_FIELD_GROUPS.map((group) =>
-      React.createElement(
-        'div',
-        { key: group.id, className: 'space-y-2' },
-        React.createElement(
-          'div',
-          { className: 'space-y-1' },
-          React.createElement(
-            'h4',
-            { className: 'text-xs font-semibold uppercase tracking-wide text-slate-500' },
-            group.label
-          ),
-          React.createElement('p', { className: 'text-xs text-slate-500' }, group.description)
-        ),
-        ...group.fields.map((field) =>
+    const fieldCards = fieldGroups.length
+      ? fieldGroups.map((group) =>
           React.createElement(
             'div',
-            {
-              key: field.id,
-              draggable: true,
-              onDragStart: (event) => {
-                event.dataTransfer.setData('text/plain', `field:${group.id}:${field.id}`);
-                event.dataTransfer.effectAllowed = 'copy';
-              },
-              className:
-                'cursor-grab rounded-lg border border-slate-200 bg-white p-3 text-sm shadow-sm transition hover:border-sky-400 hover:shadow'
-            },
-            React.createElement('div', { className: 'font-medium text-slate-800' }, field.label),
-            React.createElement('p', { className: 'mt-1 text-xs text-slate-500' }, field.description)
+            { key: group.id, className: 'space-y-2' },
+            React.createElement(
+              'div',
+              { className: 'space-y-1' },
+              React.createElement(
+                'h4',
+                { className: 'text-xs font-semibold uppercase tracking-wide text-slate-500' },
+                group.label
+              ),
+              React.createElement('p', { className: 'text-xs text-slate-500' }, group.description)
+            ),
+            ...(Array.isArray(group.fields)
+              ? group.fields.map((field) =>
+                  React.createElement(
+                    'div',
+                    {
+                      key: field.id,
+                      draggable: true,
+                      onDragStart: (event) => {
+                        event.dataTransfer.setData('text/plain', `field:${group.id}:${field.id}`);
+                        event.dataTransfer.effectAllowed = 'copy';
+                      },
+                      className:
+                        'cursor-grab rounded-lg border border-slate-200 bg-white p-3 text-sm shadow-sm transition hover:border-sky-400 hover:shadow',
+                    },
+                    React.createElement('div', { className: 'font-medium text-slate-800' }, field.label),
+                    React.createElement('p', { className: 'mt-1 text-xs text-slate-500' }, field.description)
+                  )
+                )
+              : [])
           )
         )
-      )
-    );
+      : [
+          React.createElement(
+            'p',
+            { key: 'no-fields', className: 'text-xs text-slate-500' },
+            'No data bindings are configured for this label yet.'
+          ),
+        ];
     const arrangeButtons = [
       { key: 'left', label: 'Align left', action: () => alignSelection('left') },
       { key: 'center', label: 'Align center', action: () => alignSelection('center') },
@@ -1537,54 +1677,94 @@
             { className: 'flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/70 p-4 backdrop-blur' },
             React.createElement(
               'div',
-              { className: 'flex flex-wrap items-center gap-3 text-sm text-slate-700' },
-              React.createElement('label', { className: 'font-semibold' }, 'Label size'),
+              { className: 'flex flex-col gap-3 text-sm text-slate-700' },
               React.createElement(
-                'select',
-                {
-                  value: labelSize.id,
-                  onChange: (event) => {
-                    const next = LABEL_SIZES.find((size) => size.id === event.target.value) || LABEL_SIZES[0];
-                    setLabelSize(next);
-                    if (next.id !== 'custom') {
-                      setCustomSize({ width: next.width, height: next.height });
-                    }
-                  },
-                  className: 'rounded-md border border-slate-300 bg-white px-3 py-1 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100'
-                },
-                LABEL_SIZES.map((size) => React.createElement('option', { key: size.id, value: size.id }, size.name))
-              ),
-              labelSize.id === 'custom' &&
+                'div',
+                { className: 'flex flex-col gap-2' },
+                React.createElement('label', { className: 'font-semibold' }, 'Label template'),
                 React.createElement(
-                  'div',
-                  { className: 'flex items-center gap-2 text-xs text-slate-600' },
-                  React.createElement('label', { className: 'flex items-center gap-1' },
-                    'Width',
-                    React.createElement('input', {
-                      type: 'number',
-                      min: 100,
-                      value: round(customSize.width, 0),
-                      onChange: (event) => {
-                        const value = Math.max(Number(event.target.value) || customSize.width, 50);
-                        setCustomSize((prev) => ({ ...prev, width: value }));
-                      },
-                      className: 'w-20 rounded border border-slate-300 px-2 py-1 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100'
-                    })
+                  'select',
+                  {
+                    value: selectedTemplateId || '',
+                    onChange: handleTemplateChange,
+                    disabled: templates.length === 0,
+                    className:
+                      'max-w-xs rounded-md border border-slate-300 bg-white px-3 py-1 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100',
+                  },
+                  templates.length
+                    ? templates.map((template) =>
+                        React.createElement('option', { key: template.id, value: template.id }, template.name)
+                      )
+                    : [React.createElement('option', { key: 'none', value: '' }, 'No templates available')]
+                ),
+                activeTemplate?.description &&
+                  React.createElement(
+                    'p',
+                    { className: 'text-xs text-slate-500 max-w-xl' },
+                    activeTemplate.description
                   ),
-                  React.createElement('label', { className: 'flex items-center gap-1' },
-                    'Height',
-                    React.createElement('input', {
-                      type: 'number',
-                      min: 100,
-                      value: round(customSize.height, 0),
-                      onChange: (event) => {
-                        const value = Math.max(Number(event.target.value) || customSize.height, 50);
-                        setCustomSize((prev) => ({ ...prev, height: value }));
-                      },
-                      className: 'w-20 rounded border border-slate-300 px-2 py-1 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100'
-                    })
+                !activeTemplate &&
+                  templates.length > 0 &&
+                  React.createElement(
+                    'p',
+                    { className: 'text-xs text-slate-500' },
+                    'Select a label template to start designing.'
                   )
-                )
+              ),
+              React.createElement(
+                'div',
+                { className: 'flex flex-wrap items-center gap-3' },
+                React.createElement('label', { className: 'font-semibold' }, 'Label size'),
+                React.createElement(
+                  'select',
+                  {
+                    value: labelSize.id,
+                    onChange: (event) => {
+                      const next = LABEL_SIZES.find((size) => size.id === event.target.value) || LABEL_SIZES[0];
+                      setLabelSize(next);
+                      if (next.id !== 'custom') {
+                        setCustomSize({ width: next.width, height: next.height });
+                      }
+                    },
+                    className:
+                      'rounded-md border border-slate-300 bg-white px-3 py-1 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100',
+                  },
+                  LABEL_SIZES.map((size) => React.createElement('option', { key: size.id, value: size.id }, size.name))
+                ),
+                labelSize.id === 'custom' &&
+                  React.createElement(
+                    'div',
+                    { className: 'flex items-center gap-2 text-xs text-slate-600' },
+                    React.createElement('label', { className: 'flex items-center gap-1' },
+                      'Width',
+                      React.createElement('input', {
+                        type: 'number',
+                        min: 100,
+                        value: round(customSize.width, 0),
+                        onChange: (event) => {
+                          const value = Math.max(Number(event.target.value) || customSize.width, 50);
+                          setCustomSize((prev) => ({ ...prev, width: value }));
+                        },
+                        className:
+                          'w-20 rounded border border-slate-300 px-2 py-1 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100',
+                      })
+                    ),
+                    React.createElement('label', { className: 'flex items-center gap-1' },
+                      'Height',
+                      React.createElement('input', {
+                        type: 'number',
+                        min: 100,
+                        value: round(customSize.height, 0),
+                        onChange: (event) => {
+                          const value = Math.max(Number(event.target.value) || customSize.height, 50);
+                          setCustomSize((prev) => ({ ...prev, height: value }));
+                        },
+                        className:
+                          'w-20 rounded border border-slate-300 px-2 py-1 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100',
+                      })
+                    )
+                  )
+              )
             ),
             React.createElement(
               'div',
