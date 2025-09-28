@@ -24,6 +24,7 @@
 <script>
   window.labelDesignerConfig = {
     trialPrintUrl: {{ url_for('printers.label_designer_print_trial')|tojson }},
+    saveLayoutUrl: {{ url_for('printers.label_designer_save_layout')|tojson }},
     selectedPrinterName: {{ selected_printer.name|tojson if selected_printer else 'null' }}
   };
 </script>
