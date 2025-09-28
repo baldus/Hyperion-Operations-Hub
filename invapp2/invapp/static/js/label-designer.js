@@ -245,6 +245,66 @@ function cloneLabel(label) {
   };
 }
 
+function toSerializableLayout(label) {
+  if (!label) {
+    return null;
+  }
+  return {
+    id: label.id,
+    name: label.name,
+    description: label.description,
+    size: { ...label.size },
+    dataFields: label.dataFields.map((field) => ({ ...field })),
+    fields: label.fields.map((field) => ({
+      id: field.id,
+      label: field.label,
+      bindingKey: field.bindingKey,
+      type: field.type,
+      x: Math.round(field.x),
+      y: Math.round(field.y),
+      width: Math.round(field.width),
+      height: Math.round(field.height),
+      rotation: Math.round(field.rotation || 0),
+      fontSize: field.fontSize,
+      align: field.align
+    }))
+  };
+}
+
+async function postJson(url, payload) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json'
+    },
+    credentials: 'same-origin',
+    body: JSON.stringify(payload)
+  });
+
+  const raw = await response.text();
+  let data = null;
+  if (raw) {
+    try {
+      data = JSON.parse(raw);
+    } catch (error) {
+      data = raw;
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      data && typeof data === 'object' && data !== null && 'message' in data
+        ? data.message
+        : typeof data === 'string' && data
+        ? data
+        : 'Request failed.';
+    throw new Error(message);
+  }
+
+  return data;
+}
+
 function roundToGrid(value) {
   return Math.round(value / GRID_SIZE) * GRID_SIZE;
 }
@@ -276,6 +336,97 @@ const SectionHeading = ({ title, subtitle }) =>
     h('h3', { className: 'text-lg font-semibold text-slate-900' }, title),
     subtitle ? h('p', { className: 'text-sm text-slate-500' }, subtitle) : null
   );
+
+const FeedbackMessage = ({ feedback }) => {
+  if (!feedback) {
+    return null;
+  }
+  const isError = feedback.type === 'error';
+  const style = isError
+    ? 'border-red-200 bg-red-50 text-red-700'
+    : 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  return h(
+    'div',
+    { className: `rounded-md border px-3 py-2 text-sm font-medium ${style}` },
+    feedback.message
+  );
+};
+
+const ActionPanel = ({
+  label,
+  saveUrl,
+  trialPrintUrl,
+  printerName,
+  onSave,
+  onTrialPrint,
+  saving,
+  printing,
+  feedback
+}) => {
+  const hasLabel = Boolean(label);
+  const canSave = Boolean(hasLabel && saveUrl);
+  const canTrialPrint = Boolean(hasLabel && trialPrintUrl && printerName);
+  const infoText = !hasLabel
+    ? 'Select a label to enable saving or printing actions.'
+    : printerName
+    ? `Trial prints will send to ${printerName}.`
+    : 'Select an active printer to enable trial prints.';
+
+  return h(
+    'div',
+    { className: 'space-y-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm' },
+    SectionHeading({ title: 'Label Actions', subtitle: 'Save changes or send a trial print.' }),
+    h('p', { className: 'text-sm text-slate-600' }, infoText),
+    h(
+      'div',
+      { className: 'grid gap-3 sm:grid-cols-2' },
+      h(
+        'button',
+        {
+          type: 'button',
+          onClick: canSave ? onSave : undefined,
+          disabled: !canSave || saving,
+          className:
+            'inline-flex items-center justify-center rounded-md border border-indigo-200 bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200 disabled:text-slate-500'
+        },
+        saving ? 'Saving…' : 'Save Label'
+      ),
+      h(
+        'button',
+        {
+          type: 'button',
+          onClick: canTrialPrint ? onTrialPrint : undefined,
+          disabled: !canTrialPrint || printing,
+          className:
+            'inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-indigo-300 hover:text-indigo-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400'
+        },
+        printing ? 'Printing…' : 'Trial Print'
+      )
+    ),
+    !saveUrl
+      ? h(
+          'p',
+          { className: 'text-xs font-medium text-amber-700' },
+          'Saving is currently disabled because no save endpoint is configured.'
+        )
+      : null,
+    hasLabel && !printerName
+      ? h(
+          'p',
+          { className: 'text-xs font-medium text-amber-700' },
+          'Choose an active printer from printer settings to enable trial prints.'
+        )
+      : null,
+    !trialPrintUrl
+      ? h(
+          'p',
+          { className: 'text-xs font-medium text-amber-700' },
+          'Trial printing is unavailable because no endpoint is configured.'
+        )
+      : null,
+    FeedbackMessage({ feedback })
+  );
+};
 
 const LabelList = ({ labels, selectedId, onSelect }) =>
   h(
@@ -920,6 +1071,13 @@ const LabelDesignerApp = ({ config }) => {
   const [labels, setLabels] = useState(() => PLACEHOLDER_LABELS.map((label) => cloneLabel(label)));
   const [selectedLabelId, setSelectedLabelId] = useState(() => labels[0]?.id || null);
   const [selectedFieldId, setSelectedFieldId] = useState(null);
+  const [actionFeedback, setActionFeedback] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
+
+  const saveLayoutUrl = config?.saveLayoutUrl || null;
+  const trialPrintUrl = config?.trialPrintUrl || null;
+  const selectedPrinterName = config?.selectedPrinterName || null;
 
   const selectedLabel = useMemo(
     () => labels.find((label) => label.id === selectedLabelId) || null,
@@ -929,6 +1087,18 @@ const LabelDesignerApp = ({ config }) => {
   useEffect(() => {
     setSelectedFieldId(null);
   }, [selectedLabelId]);
+
+  useEffect(() => {
+    if (!actionFeedback) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      setActionFeedback(null);
+    }, 4500);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [actionFeedback]);
 
   const updateLabel = useCallback((labelId, updater) => {
     setLabels((current) =>
@@ -988,6 +1158,66 @@ const LabelDesignerApp = ({ config }) => {
     return selectedLabel.fields.find((field) => field.id === selectedFieldId) || null;
   }, [selectedLabel, selectedFieldId]);
 
+  const handleSaveLayout = useCallback(async () => {
+    if (!selectedLabel) {
+      setActionFeedback({ type: 'error', message: 'Select a label before saving.' });
+      return;
+    }
+    if (!saveLayoutUrl) {
+      setActionFeedback({ type: 'error', message: 'Saving is not configured for this environment.' });
+      return;
+    }
+    const layout = toSerializableLayout(selectedLabel);
+    setIsSaving(true);
+    try {
+      const response = await postJson(saveLayoutUrl, { label_id: layout.id, layout });
+      const message =
+        response && typeof response === 'object' && response !== null && response.message
+          ? response.message
+          : 'Label layout saved.';
+      setActionFeedback({ type: 'success', message });
+    } catch (error) {
+      setActionFeedback({
+        type: 'error',
+        message: error.message || 'Failed to save label layout.'
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [saveLayoutUrl, selectedLabel]);
+
+  const handleTrialPrint = useCallback(async () => {
+    if (!selectedLabel) {
+      setActionFeedback({ type: 'error', message: 'Select a label before requesting a trial print.' });
+      return;
+    }
+    if (!trialPrintUrl) {
+      setActionFeedback({ type: 'error', message: 'Trial printing is not configured for this environment.' });
+      return;
+    }
+    if (!selectedPrinterName) {
+      setActionFeedback({ type: 'error', message: 'Choose an active printer before sending a trial print.' });
+      return;
+    }
+    const layout = toSerializableLayout(selectedLabel);
+    setIsPrinting(true);
+    try {
+      const response = await postJson(trialPrintUrl, { label_id: layout.id, layout });
+      const message =
+        response && typeof response === 'object' && response !== null && response.message
+          ? response.message
+          : `Trial print queued for ${selectedPrinterName}.`;
+      setActionFeedback({ type: 'success', message });
+    } catch (error) {
+      setActionFeedback({
+        type: 'error',
+        message: error.message || 'Failed to queue a trial print.'
+      });
+    } finally {
+      setIsPrinting(false);
+    }
+  }, [selectedLabel, selectedPrinterName, trialPrintUrl]);
+
   return h(
     'div',
     { className: 'grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)_320px]' },
@@ -1015,18 +1245,17 @@ const LabelDesignerApp = ({ config }) => {
     h(
       'div',
       { className: 'space-y-4' },
-      config?.selectedPrinterName
-        ? h(
-            'div',
-            { className: 'rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600' },
-            h('p', null, 'Trial prints will send to:'),
-            h('p', { className: 'font-medium text-slate-900' }, config.selectedPrinterName)
-          )
-        : h(
-            'div',
-            { className: 'rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800' },
-            'Select an active printer in printer settings to enable trial prints.'
-          ),
+      ActionPanel({
+        label: selectedLabel,
+        saveUrl: saveLayoutUrl,
+        trialPrintUrl,
+        printerName: selectedPrinterName,
+        onSave: handleSaveLayout,
+        onTrialPrint: handleTrialPrint,
+        saving: isSaving,
+        printing: isPrinting,
+        feedback: actionFeedback
+      }),
       PropertyInspector({
         label: selectedLabel,
         selectedField,

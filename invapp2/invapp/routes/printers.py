@@ -193,3 +193,41 @@ def label_designer_print_trial():
             "printer": selected_printer.name,
         }
     )
+
+
+@bp.post("/designer/save")
+@login_required
+@require_roles("admin")
+def label_designer_save_layout():
+    payload = request.get_json(silent=True) or {}
+    layout = payload.get("layout")
+    if not isinstance(layout, dict):
+        return (
+            jsonify({"message": "Layout payload is required to save a label."}),
+            400,
+        )
+
+    label_id = payload.get("label_id") or layout.get("id")
+    if not label_id:
+        return (
+            jsonify({"message": "Label identifier is required to save a layout."}),
+            400,
+        )
+
+    saved_layouts = dict(session.get("label_designer_layouts") or {})
+    saved_layouts[label_id] = layout
+    session["label_designer_layouts"] = saved_layouts
+
+    current_app.logger.info(
+        "Label designer layout saved for %s: %s",
+        label_id,
+        layout,
+    )
+
+    return jsonify(
+        {
+            "ok": True,
+            "message": f"Layout saved for {label_id}.",
+            "label_id": label_id,
+        }
+    )
