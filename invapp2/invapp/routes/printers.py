@@ -16,6 +16,21 @@ from invapp.extensions import db
 from invapp.login import current_user, login_required
 from invapp.models import Printer
 from invapp.security import require_roles
+from invapp.labeling.placeholder_library import get_placeholder_payload
+
+
+def _serialize_printer(printer: Printer | None) -> dict[str, str | int | None] | None:
+    if printer is None:
+        return None
+    return {
+        "id": printer.id,
+        "name": printer.name,
+        "connection_label": printer.connection_label(),
+        "host": printer.host,
+        "port": printer.port,
+        "printer_type": printer.printer_type,
+        "location": printer.location,
+    }
 
 bp = Blueprint("printers", __name__, url_prefix="/settings/printers")
 
@@ -155,10 +170,16 @@ def label_designer():
     if selected_printer:
         _apply_printer_configuration(selected_printer)
 
+    designer_config = {
+        "labels": get_placeholder_payload(),
+        "trialPrintUrl": url_for("printers.label_designer_print_trial"),
+        "printers": [p for p in (_serialize_printer(printer) for printer in printers) if p],
+        "selectedPrinter": _serialize_printer(selected_printer),
+    }
+
     return render_template(
         "settings/label_designer.html",
-        selected_printer=selected_printer,
-        printers=printers,
+        designer_config=designer_config,
     )
 
 
