@@ -6,13 +6,18 @@ const h = React.createElement;
 const GRID_SIZE = 5;
 const SNAP_TOLERANCE = 6;
 const ROTATION_SNAP = 5;
+const DEFAULT_LABEL_SIZE = Object.freeze({
+  // Approximate 4in x 6.86in label at 96 DPI (standard FedEx shipping label)
+  width: 658,
+  height: 384
+});
 
 const PLACEHOLDER_LABELS = [
   {
     id: 'receiving-label',
     name: 'Receiving Label',
     description: 'Standard receiving label with SKU, description, and lot data.',
-    size: { width: 400, height: 250 },
+    size: { ...DEFAULT_LABEL_SIZE },
     dataFields: [
       { key: 'sku', label: 'SKU' },
       { key: 'description', label: 'Description' },
@@ -86,7 +91,7 @@ const PLACEHOLDER_LABELS = [
     id: 'order-label',
     name: 'Order Completion Label',
     description: 'Label used when orders are fulfilled with destination information.',
-    size: { width: 420, height: 300 },
+    size: { ...DEFAULT_LABEL_SIZE },
     dataFields: [
       { key: 'order_number', label: 'Order Number' },
       { key: 'customer_name', label: 'Customer Name' },
@@ -173,7 +178,7 @@ const PLACEHOLDER_LABELS = [
     id: 'inventory-label',
     name: 'Inventory Bin Label',
     description: 'High-contrast bin location label with optional rotation.',
-    size: { width: 320, height: 160 },
+    size: { ...DEFAULT_LABEL_SIZE },
     dataFields: [
       { key: 'bin_code', label: 'Bin Code' },
       { key: 'zone', label: 'Zone' },
