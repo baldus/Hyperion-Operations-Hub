@@ -473,8 +473,133 @@
         },
     };
 
+    const stackedTotalsPlugin = {
+        id: 'stackedTotals',
+        defaults: {
+            enabled: true,
+            color: '#111827',
+            font: {
+                weight: '600',
+            },
+            yOffset: -6,
+            formatter: (value) => value.toLocaleString(),
+        },
+        afterDatasetsDraw(chart, _args, pluginOptions) {
+            const options = pluginOptions || {};
+            const enabled = options.enabled ?? stackedTotalsPlugin.defaults.enabled;
+            if (!enabled) {
+                return;
+            }
+
+            const labels = chart.data?.labels || [];
+            if (!labels.length) {
+                return;
+            }
+
+            const datasets = chart.data?.datasets || [];
+            const stackedMetas = datasets.reduce((accumulator, dataset, index) => {
+                if (!dataset || dataset.type === 'line') {
+                    return accumulator;
+                }
+
+                const meta = chart.getDatasetMeta(index);
+                if (!meta || meta.type !== 'bar') {
+                    return accumulator;
+                }
+
+                if (dataset.stack !== 'gates-produced') {
+                    return accumulator;
+                }
+
+                if (typeof chart.isDatasetVisible === 'function' && !chart.isDatasetVisible(index)) {
+                    return accumulator;
+                }
+
+                accumulator.push({ dataset, meta });
+                return accumulator;
+            }, []);
+
+            if (!stackedMetas.length) {
+                return;
+            }
+
+            const ctx = chart.ctx;
+            const globalFont = (Chart.defaults && Chart.defaults.font) || {};
+            const fontOptions = Object.assign({}, globalFont, options.font || {});
+            const fontSize = fontOptions.size || 12;
+            const fontFamily = fontOptions.family || globalFont.family || 'sans-serif';
+            const fontStyle = fontOptions.style || globalFont.style || 'normal';
+            const fontWeight = fontOptions.weight || 'bold';
+            const yOffset = typeof options.yOffset === 'number'
+                ? options.yOffset
+                : stackedTotalsPlugin.defaults.yOffset;
+
+            const formatter = typeof options.formatter === 'function'
+                ? options.formatter
+                : stackedTotalsPlugin.defaults.formatter;
+
+            const color = options.color || stackedTotalsPlugin.defaults.color;
+
+            ctx.save();
+            ctx.fillStyle = color;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+
+            const fontParts = [];
+            if (fontStyle) {
+                fontParts.push(fontStyle);
+            }
+            if (fontWeight) {
+                fontParts.push(fontWeight);
+            }
+            fontParts.push(`${fontSize}px`);
+            fontParts.push(fontFamily);
+            ctx.font = fontParts.join(' ');
+
+            labels.forEach((_, dataIndex) => {
+                let total = 0;
+                let hasValue = false;
+                let topY = Number.POSITIVE_INFINITY;
+
+                stackedMetas.forEach(({ dataset, meta }) => {
+                    const value = Array.isArray(dataset.data)
+                        ? dataset.data[dataIndex]
+                        : undefined;
+                    if (typeof value === 'number' && Number.isFinite(value)) {
+                        total += value;
+                        hasValue = true;
+                    }
+
+                    const element = meta.data && meta.data[dataIndex];
+                    if (element && Number.isFinite(element.y)) {
+                        topY = Math.min(topY, element.y);
+                    }
+                });
+
+                if (!hasValue || !Number.isFinite(topY)) {
+                    return;
+                }
+
+                const formatted = formatter(total);
+                if (formatted === null || formatted === undefined) {
+                    return;
+                }
+
+                const xPosition = stackedMetas[0].meta.data?.[dataIndex]?.x;
+                if (!Number.isFinite(xPosition)) {
+                    return;
+                }
+
+                ctx.fillText(String(formatted), xPosition, topY + yOffset);
+            });
+
+            ctx.restore();
+        },
+    };
+
     if (typeof Chart !== 'undefined') {
         Chart.register(weekendBackgroundPlugin);
+        Chart.register(stackedTotalsPlugin);
     }
 
     if (chartLabels.length) {
@@ -598,6 +723,14 @@
                         weekendBackground: {
                             enabled: currentIncludeWeekends,
                             color: 'rgba(0, 0, 0, 0.08)',
+                        },
+                        stackedTotals: {
+                            enabled: true,
+                            color: '#0f172a',
+                            font: {
+                                weight: '600',
+                            },
+                            yOffset: -8,
                         },
                         title: {
                             display: true,
