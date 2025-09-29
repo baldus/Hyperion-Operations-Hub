@@ -1933,6 +1933,8 @@ def receiving():
         db.session.flush()
         batch_id = batch.id
         batch.quantity = (batch.quantity or 0) + qty
+        if po_number:
+            batch.purchase_order = po_number
 
         # Record movement
         mv = Movement(
@@ -1950,7 +1952,14 @@ def receiving():
         try:
             from invapp.printing.zebra import print_receiving_label
 
-            if not print_receiving_label(item.sku, item.name, qty):
+            location = Location.query.get(location_id)
+            if not print_receiving_label(
+                batch,
+                qty=qty,
+                item=item,
+                location=location,
+                po_number=po_number,
+            ):
                 flash("Failed to print receiving label.", "warning")
         except Exception:
             flash("Failed to print receiving label.", "warning")
@@ -1982,18 +1991,30 @@ def receiving():
 def reprint_receiving_label(receipt_id: int):
     """Reprint a previously generated receiving label."""
     rec = (
-        Movement.query.options(joinedload(Movement.item).load_only(Item.sku, Item.name))
+        Movement.query.options(
+            joinedload(Movement.item).load_only(Item.sku, Item.name, Item.unit),
+            joinedload(Movement.location).load_only(Location.code),
+            joinedload(Movement.batch),
+        )
         .filter_by(id=receipt_id, movement_type="RECEIPT")
         .first_or_404()
     )
 
     item = rec.item
     qty = rec.quantity
+    batch = rec.batch
+    location = rec.location
 
     try:
         from invapp.printing.zebra import print_receiving_label
 
-        if not print_receiving_label(item.sku, item.name, qty):
+        if not print_receiving_label(
+            batch or item.sku,
+            qty=qty,
+            item=item,
+            location=location,
+            po_number=rec.po_number,
+        ):
             flash("Failed to print receiving label.", "warning")
         else:
             flash("Label reprinted.", "success")
