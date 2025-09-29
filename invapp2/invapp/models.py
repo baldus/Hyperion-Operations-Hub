@@ -114,6 +114,11 @@ class Batch(db.Model):
     lot_number = db.Column(db.String, nullable=True)  # supplier batch/lot reference
     quantity = db.Column(db.Integer, default=0)
     received_date = db.Column(db.DateTime, default=datetime.utcnow)
+    expiration_date = db.Column(db.Date, nullable=True)
+    supplier_name = db.Column(db.String, nullable=True)
+    supplier_code = db.Column(db.String, nullable=True)
+    purchase_order = db.Column(db.String, nullable=True)
+    notes = db.Column(db.Text, nullable=True)
 
     item = db.relationship("Item", backref="batches")
 

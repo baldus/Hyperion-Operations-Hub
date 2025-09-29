@@ -7,231 +7,219 @@ const GRID_SIZE = 5;
 const SNAP_TOLERANCE = 6;
 const ROTATION_SNAP = 5;
 const DEFAULT_LABEL_SIZE = Object.freeze({
-  // Approximate 4in x 6.86in label at 96 DPI (standard FedEx shipping label)
-  width: 658,
-  height: 384
+  // 4in x 6in label expressed in printer dots (203 DPI)
+  width: 812,
+  height: 1218
 });
 
 const PLACEHOLDER_LABELS = [
   {
-    id: 'receiving-label',
-    name: 'Receiving Label',
-    description: 'Standard receiving label with SKU, description, and lot data.',
+    id: 'batch-label',
+    name: 'Batch Label',
+    description: 'Detailed batch label with full traceability data and scan-ready barcode.',
     size: { ...DEFAULT_LABEL_SIZE },
     dataFields: [
+      { key: 'lot_number', label: 'Lot Number' },
+      { key: 'product_name', label: 'Product Name' },
       { key: 'sku', label: 'SKU' },
-      { key: 'description', label: 'Description' },
-      { key: 'lot', label: 'Lot Number' },
-      { key: 'received_at', label: 'Received Date' },
-      { key: 'quantity', label: 'Quantity' }
+      { key: 'quantity', label: 'Quantity' },
+      { key: 'unit', label: 'Unit' },
+      { key: 'expiration_date', label: 'Expiration Date' },
+      { key: 'received_date', label: 'Received Date' },
+      { key: 'supplier_name', label: 'Supplier Name' },
+      { key: 'supplier_code', label: 'Supplier Code' },
+      { key: 'po_number', label: 'Purchase Order' },
+      { key: 'location', label: 'Storage Location' },
+      { key: 'notes', label: 'Notes' }
     ],
     sampleData: {
+      lot_number: 'LOT-00977-A',
+      product_name: 'Widget Prime - Stainless',
       sku: 'SKU-12345',
-      description: 'Widget Prime - Stainless',
-      lot: 'LOT-00977',
-      received_at: '2024-05-21',
-      quantity: '12'
+      quantity: '120',
+      unit: 'ea',
+      expiration_date: '2025-03-31',
+      received_date: '2024-05-21',
+      supplier_name: 'Atlas Components',
+      supplier_code: 'ATLAS-001',
+      po_number: 'PO-44210',
+      location: 'RCV-01',
+      notes: 'Keep refrigerated'
     },
     fields: [
       {
-        id: 'field-1',
-        label: 'SKU',
-        bindingKey: 'sku',
+        id: 'field-title',
+        label: 'Batch Label',
+        bindingKey: null,
         type: 'text',
-        x: 24,
-        y: 24,
-        width: 220,
-        height: 42,
+        x: 60,
+        y: 40,
+        width: 692,
+        height: 72,
         rotation: 0,
-        fontSize: 22,
-        align: 'left'
-      },
-      {
-        id: 'field-2',
-        label: 'Description',
-        bindingKey: 'description',
-        type: 'text',
-        x: 24,
-        y: 78,
-        width: 320,
-        height: 56,
-        rotation: 0,
-        fontSize: 18,
-        align: 'left'
-      },
-      {
-        id: 'field-3',
-        label: 'Lot Number',
-        bindingKey: 'lot',
-        type: 'text',
-        x: 24,
-        y: 146,
-        width: 200,
-        height: 36,
-        rotation: 0,
-        fontSize: 16,
-        align: 'left'
-      },
-      {
-        id: 'field-4',
-        label: 'Quantity',
-        bindingKey: 'quantity',
-        type: 'text',
-        x: 248,
-        y: 146,
-        width: 120,
-        height: 36,
-        rotation: 0,
-        fontSize: 18,
-        align: 'right'
-      }
-    ]
-  },
-  {
-    id: 'order-label',
-    name: 'Order Completion Label',
-    description: 'Label used when orders are fulfilled with destination information.',
-    size: { ...DEFAULT_LABEL_SIZE },
-    dataFields: [
-      { key: 'order_number', label: 'Order Number' },
-      { key: 'customer_name', label: 'Customer Name' },
-      { key: 'address_line', label: 'Address' },
-      { key: 'city_state', label: 'City / State' },
-      { key: 'due_date', label: 'Due Date' }
-    ],
-    sampleData: {
-      order_number: 'PO-8821',
-      customer_name: 'Hyperion Labs',
-      address_line: '991 Market Street',
-      city_state: 'San Francisco, CA',
-      due_date: 'Due 06/01'
-    },
-    fields: [
-      {
-        id: 'field-5',
-        label: 'Order Number',
-        bindingKey: 'order_number',
-        type: 'text',
-        x: 32,
-        y: 32,
-        width: 280,
-        height: 48,
-        rotation: 0,
-        fontSize: 24,
-        align: 'left'
-      },
-      {
-        id: 'field-6',
-        label: 'Customer Name',
-        bindingKey: 'customer_name',
-        type: 'text',
-        x: 32,
-        y: 92,
-        width: 320,
-        height: 44,
-        rotation: 0,
-        fontSize: 20,
-        align: 'left'
-      },
-      {
-        id: 'field-7',
-        label: 'Address',
-        bindingKey: 'address_line',
-        type: 'text',
-        x: 32,
-        y: 148,
-        width: 320,
-        height: 40,
-        rotation: 0,
-        fontSize: 16,
-        align: 'left'
-      },
-      {
-        id: 'field-8',
-        label: 'City / State',
-        bindingKey: 'city_state',
-        type: 'text',
-        x: 32,
-        y: 196,
-        width: 320,
-        height: 36,
-        rotation: 0,
-        fontSize: 16,
-        align: 'left'
-      },
-      {
-        id: 'field-9',
-        label: 'Due Date',
-        bindingKey: 'due_date',
-        type: 'text',
-        x: 32,
-        y: 244,
-        width: 160,
-        height: 36,
-        rotation: 0,
-        fontSize: 18,
-        align: 'left'
-      }
-    ]
-  },
-  {
-    id: 'inventory-label',
-    name: 'Inventory Bin Label',
-    description: 'High-contrast bin location label with optional rotation.',
-    size: { ...DEFAULT_LABEL_SIZE },
-    dataFields: [
-      { key: 'bin_code', label: 'Bin Code' },
-      { key: 'zone', label: 'Zone' },
-      { key: 'category', label: 'Category' }
-    ],
-    sampleData: {
-      bin_code: 'A-15-04',
-      zone: 'Zone A',
-      category: 'Fast Movers'
-    },
-    fields: [
-      {
-        id: 'field-10',
-        label: 'Bin Code',
-        bindingKey: 'bin_code',
-        type: 'text',
-        x: 20,
-        y: 20,
-        width: 280,
-        height: 60,
-        rotation: 0,
-        fontSize: 28,
+        fontSize: 64,
         align: 'center'
       },
       {
-        id: 'field-11',
-        label: 'Zone',
-        bindingKey: 'zone',
+        id: 'field-lot-number',
+        label: 'Lot Number',
+        bindingKey: 'lot_number',
         type: 'text',
-        x: 20,
-        y: 92,
-        width: 140,
-        height: 44,
+        x: 60,
+        y: 140,
+        width: 692,
+        height: 60,
         rotation: 0,
-        fontSize: 20,
+        fontSize: 52,
         align: 'left'
       },
       {
-        id: 'field-12',
-        label: 'Category',
-        bindingKey: 'category',
+        id: 'field-product-name',
+        label: 'Product Name',
+        bindingKey: 'product_name',
         type: 'text',
-        x: 160,
-        y: 92,
-        width: 140,
+        x: 60,
+        y: 220,
+        width: 692,
+        height: 52,
+        rotation: 0,
+        fontSize: 40,
+        align: 'left'
+      },
+      {
+        id: 'field-sku',
+        label: 'SKU',
+        bindingKey: 'sku',
+        type: 'text',
+        x: 60,
+        y: 290,
+        width: 320,
         height: 44,
         rotation: 0,
-        fontSize: 18,
-        align: 'right'
+        fontSize: 34,
+        align: 'left'
+      },
+      {
+        id: 'field-quantity',
+        label: 'Qty',
+        bindingKey: 'quantity',
+        type: 'text',
+        x: 400,
+        y: 290,
+        width: 160,
+        height: 44,
+        rotation: 0,
+        fontSize: 34,
+        align: 'left'
+      },
+      {
+        id: 'field-unit',
+        label: 'Unit',
+        bindingKey: 'unit',
+        type: 'text',
+        x: 580,
+        y: 290,
+        width: 172,
+        height: 44,
+        rotation: 0,
+        fontSize: 34,
+        align: 'left'
+      },
+      {
+        id: 'field-supplier',
+        label: 'Supplier',
+        bindingKey: 'supplier_name',
+        type: 'text',
+        x: 60,
+        y: 360,
+        width: 512,
+        height: 44,
+        rotation: 0,
+        fontSize: 32,
+        align: 'left'
+      },
+      {
+        id: 'field-po',
+        label: 'PO Number',
+        bindingKey: 'po_number',
+        type: 'text',
+        x: 60,
+        y: 420,
+        width: 320,
+        height: 40,
+        rotation: 0,
+        fontSize: 30,
+        align: 'left'
+      },
+      {
+        id: 'field-expiration',
+        label: 'Expires',
+        bindingKey: 'expiration_date',
+        type: 'text',
+        x: 400,
+        y: 420,
+        width: 352,
+        height: 40,
+        rotation: 0,
+        fontSize: 30,
+        align: 'left'
+      },
+      {
+        id: 'field-received',
+        label: 'Received',
+        bindingKey: 'received_date',
+        type: 'text',
+        x: 60,
+        y: 480,
+        width: 320,
+        height: 40,
+        rotation: 0,
+        fontSize: 28,
+        align: 'left'
+      },
+      {
+        id: 'field-location',
+        label: 'Location',
+        bindingKey: 'location',
+        type: 'text',
+        x: 400,
+        y: 480,
+        width: 352,
+        height: 40,
+        rotation: 0,
+        fontSize: 28,
+        align: 'left'
+      },
+      {
+        id: 'field-notes',
+        label: 'Notes',
+        bindingKey: 'notes',
+        type: 'text',
+        x: 60,
+        y: 540,
+        width: 692,
+        height: 60,
+        rotation: 0,
+        fontSize: 26,
+        align: 'left'
+      },
+      {
+        id: 'field-lot-barcode',
+        label: 'Lot Barcode',
+        bindingKey: 'lot_number',
+        type: 'barcode',
+        x: 60,
+        y: 640,
+        width: 692,
+        height: 220,
+        rotation: 0,
+        fontSize: 20,
+        align: 'center',
+        showValue: true
       }
     ]
   }
-];
+];;
 
 let fieldIdCounter = 1000;
 
@@ -244,9 +232,14 @@ function cloneLabel(label) {
   return {
     ...label,
     size: { ...label.size },
-    dataFields: label.dataFields.map((field) => ({ ...field })),
-    sampleData: { ...label.sampleData },
-    fields: label.fields.map((field) => ({ ...field }))
+    dataFields: Array.isArray(label.dataFields)
+      ? label.dataFields.map((field) => ({ ...field }))
+      : [],
+    sampleData: { ...(label.sampleData || {}) },
+    fields: (label.fields || []).map((field) => ({
+      ...field,
+      showValue: field.type === 'barcode' ? field.showValue !== false : field.showValue
+    }))
   };
 }
 
@@ -259,8 +252,8 @@ function toSerializableLayout(label) {
     name: label.name,
     description: label.description,
     size: { ...label.size },
-    dataFields: label.dataFields.map((field) => ({ ...field })),
-    fields: label.fields.map((field) => ({
+    dataFields: (label.dataFields || []).map((field) => ({ ...field })),
+    fields: (label.fields || []).map((field) => ({
       id: field.id,
       label: field.label,
       bindingKey: field.bindingKey,
@@ -271,7 +264,13 @@ function toSerializableLayout(label) {
       height: Math.round(field.height),
       rotation: Math.round(field.rotation || 0),
       fontSize: field.fontSize,
-      align: field.align
+      align: field.align,
+      showValue:
+        field.type === 'barcode'
+          ? field.showValue !== false
+          : typeof field.showValue === 'boolean'
+          ? field.showValue
+          : undefined
     }))
   };
 }
@@ -323,14 +322,20 @@ function formatZoom(zoom) {
 }
 
 function getFieldDisplayValue(field, label) {
-  if (field.bindingKey) {
-    const sample = label.sampleData?.[field.bindingKey];
-    if (sample) {
-      return sample;
-    }
-    const bindingLabel = label.dataFields.find((item) => item.key === field.bindingKey)?.label;
-    return bindingLabel ? `{{ ${bindingLabel} }}` : `{{ ${field.bindingKey} }}`;
+  const bindingLabel = field.bindingKey
+    ? label.dataFields.find((item) => item.key === field.bindingKey)?.label
+    : null;
+  const sample = field.bindingKey ? label.sampleData?.[field.bindingKey] : null;
+  const placeholder = bindingLabel ? `{{ ${bindingLabel} }}` : field.bindingKey ? `{{ ${field.bindingKey} }}` : null;
+
+  if (field.type === 'barcode') {
+    return sample || placeholder || field.label || 'Barcode';
   }
+
+  if (field.bindingKey) {
+    return sample || placeholder || field.label || 'Field';
+  }
+
   return field.label || 'Text';
 }
 
@@ -564,11 +569,26 @@ const PropertyInspector = ({ label, selectedField, onFieldChange, onFieldDelete 
     onFieldChange({ [key]: value });
   };
 
+  const handleTypeChange = (value) => {
+    const next = { type: value };
+    if (value === 'barcode') {
+      next.showValue = selectedField.showValue !== false;
+      if (!selectedField.bindingKey && label.dataFields.length) {
+        next.bindingKey = label.dataFields[0].key;
+      }
+    }
+    onFieldChange(next);
+  };
+
   const handleNumberChange = (key, value) => {
     if (value === '' || Number.isNaN(Number(value))) {
       return;
     }
     onFieldChange({ [key]: Number(value) });
+  };
+
+  const handleCheckboxChange = (key) => (event) => {
+    onFieldChange({ [key]: event.target.checked });
   };
 
   return h(
@@ -581,6 +601,22 @@ const PropertyInspector = ({ label, selectedField, onFieldChange, onFieldDelete 
     h(
       'div',
       { className: 'space-y-3 text-sm' },
+      h(
+        'label',
+        { className: 'block text-xs font-semibold uppercase tracking-wide text-slate-500' },
+        'Field Type',
+        h(
+          'select',
+          {
+            value: selectedField.type || 'text',
+            className:
+              'mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500',
+            onChange: (event) => handleTypeChange(event.target.value)
+          },
+          h('option', { value: 'text' }, 'Text'),
+          h('option', { value: 'barcode' }, 'Barcode')
+        )
+      ),
       h(
         'label',
         { className: 'block text-xs font-semibold uppercase tracking-wide text-slate-500' },
@@ -606,7 +642,7 @@ const PropertyInspector = ({ label, selectedField, onFieldChange, onFieldDelete 
             onChange: (event) =>
               handleInputChange('bindingKey', event.target.value || null)
           },
-          h('option', { value: '' }, 'None (static)'),
+          h('option', { value: '', disabled: selectedField.type === 'barcode' }, 'None (static)'),
           ...label.dataFields.map((binding) =>
             h('option', { key: binding.key, value: binding.key }, binding.label)
           )
@@ -685,6 +721,7 @@ const PropertyInspector = ({ label, selectedField, onFieldChange, onFieldDelete 
           value: Math.round(selectedField.fontSize || 16),
           className:
             'mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500',
+          disabled: selectedField.type === 'barcode',
           onChange: (event) => handleNumberChange('fontSize', event.target.value)
         })
       ),
@@ -704,7 +741,23 @@ const PropertyInspector = ({ label, selectedField, onFieldChange, onFieldDelete 
           h('option', { value: 'center' }, 'Center'),
           h('option', { value: 'right' }, 'Right')
         )
-      )
+      ),
+      selectedField.type === 'barcode'
+        ? h(
+            'label',
+            {
+              className:
+                'flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500'
+            },
+            h('input', {
+              type: 'checkbox',
+              checked: selectedField.showValue !== false,
+              className: 'h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500',
+              onChange: handleCheckboxChange('showValue')
+            }),
+            'Print value beneath barcode'
+          )
+        : null
     ),
     h(
       'button',
@@ -761,14 +814,40 @@ const FieldElement = ({ field, label, zoom, isSelected, onPointerAction }) => {
       style,
       onPointerDown: handleCanvasPointerDown
     },
-    h(
-      'div',
-      {
-        className: `flex h-full w-full items-center justify-center px-2 ${alignmentClass}`,
-        style: contentStyle
-      },
-      getFieldDisplayValue(field, label)
-    ),
+    field.type === 'barcode'
+      ? h(
+          'div',
+          {
+            className: 'flex h-full w-full flex-col items-center justify-center px-2 py-3',
+            style: { gap: '0.35rem' }
+          },
+          h('div', {
+            className: 'w-full rounded border border-slate-400 bg-slate-900/80',
+            style: {
+              height: `${Math.max(field.height - 40, 40)}px`,
+              backgroundImage:
+                'repeating-linear-gradient(90deg, rgba(255,255,255,0.85) 0, rgba(255,255,255,0.85) 4px, transparent 4px, transparent 8px)'
+            }
+          }),
+          field.showValue !== false
+            ? h(
+                'div',
+                {
+                  className: 'text-xs font-semibold tracking-widest text-slate-700',
+                  style: { fontFamily: 'monospace' }
+                },
+                getFieldDisplayValue(field, label)
+              )
+            : null
+        )
+      : h(
+          'div',
+          {
+            className: `flex h-full w-full items-center justify-center px-2 ${alignmentClass}`,
+            style: contentStyle
+          },
+          getFieldDisplayValue(field, label)
+        ),
     isSelected
       ? h(
           React.Fragment,
@@ -1073,8 +1152,15 @@ const LabelPreview = ({
 };
 
 const LabelDesignerApp = ({ config }) => {
-  const [labels, setLabels] = useState(() => PLACEHOLDER_LABELS.map((label) => cloneLabel(label)));
-  const [selectedLabelId, setSelectedLabelId] = useState(() => labels[0]?.id || null);
+  const normalizedLabels = useMemo(() => {
+    if (Array.isArray(config?.labels) && config.labels.length) {
+      return config.labels;
+    }
+    return PLACEHOLDER_LABELS;
+  }, [config]);
+
+  const [labels, setLabels] = useState(() => normalizedLabels.map((label) => cloneLabel(label)));
+  const [selectedLabelId, setSelectedLabelId] = useState(() => normalizedLabels[0]?.id || null);
   const [selectedFieldId, setSelectedFieldId] = useState(null);
   const [actionFeedback, setActionFeedback] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -1083,6 +1169,16 @@ const LabelDesignerApp = ({ config }) => {
   const saveLayoutUrl = config?.saveLayoutUrl || null;
   const trialPrintUrl = config?.trialPrintUrl || null;
   const selectedPrinterName = config?.selectedPrinterName || null;
+
+  useEffect(() => {
+    setLabels(normalizedLabels.map((label) => cloneLabel(label)));
+    setSelectedLabelId((current) => {
+      if (current && normalizedLabels.some((label) => label.id === current)) {
+        return current;
+      }
+      return normalizedLabels[0]?.id || null;
+    });
+  }, [normalizedLabels]);
 
   const selectedLabel = useMemo(
     () => labels.find((label) => label.id === selectedLabelId) || null,

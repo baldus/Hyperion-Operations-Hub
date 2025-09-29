@@ -11,8 +11,8 @@ from .labels import build_receiving_label, render_label_for_process
 
 def send_zpl(
     zpl: str,
-    host: str = current_app.config["ZEBRA_PRINTER_HOST"],
-    port: int = current_app.config["ZEBRA_PRINTER_PORT"],
+    host: str | None = None,
+    port: int | None = None,
 ) -> bool:
     """Send raw ZPL to a networked Zebra printer.
 
@@ -31,8 +31,11 @@ def send_zpl(
         ``True`` if the data was sent successfully, ``False`` otherwise.
     """
 
+    resolved_host = host or current_app.config["ZEBRA_PRINTER_HOST"]
+    resolved_port = port or current_app.config["ZEBRA_PRINTER_PORT"]
+
     try:
-        with socket.create_connection((host, port)) as sock:
+        with socket.create_connection((resolved_host, resolved_port)) as sock:
             sock.sendall(zpl.encode("utf-8"))
         return True
     except OSError as exc:
@@ -40,10 +43,27 @@ def send_zpl(
         return False
 
 
-def print_receiving_label(sku: str, description: str, qty: int) -> bool:
-    """Generate and send a receiving label to the configured Zebra printer."""
+def print_receiving_label(
+    batch_or_sku,
+    description: str | None = None,
+    qty: int | None = None,
+    *,
+    item: object | None = None,
+    location: object | None = None,
+    po_number: str | None = None,
+    lot_number: str | None = None,
+) -> bool:
+    """Generate and send a receiving (batch) label to the configured Zebra printer."""
 
-    zpl = build_receiving_label(sku, description, qty)
+    zpl = build_receiving_label(
+        batch_or_sku,
+        description,
+        qty,
+        item=item,
+        location=location,
+        po_number=po_number,
+        lot_number=lot_number,
+    )
     return send_zpl(zpl)
 
 
@@ -58,10 +78,15 @@ def print_label_for_process(process: str, context: Mapping[str, object]) -> bool
     return send_zpl(zpl)
 
 
-def render_receiving_label_png(sku: str, description: str, qty: int) -> bytes:
+def render_receiving_label_png(
+    batch_or_sku,
+    description: str | None = None,
+    qty: int | None = None,
+    **kwargs,
+) -> bytes:
     """Render a receiving label as a PNG using the Labelary API."""
 
-    zpl = build_receiving_label(sku, description, qty)
+    zpl = build_receiving_label(batch_or_sku, description, qty, **kwargs)
     url = "http://api.labelary.com/v1/printers/8dpmm/labels/4x6/0/"
     request = Request(url, data=zpl.encode("utf-8"), headers={"Accept": "image/png"})
     with urlopen(request) as response:

@@ -14,8 +14,16 @@ from sqlalchemy.exc import IntegrityError
 from invapp.auth import blueprint_page_guard
 from invapp.extensions import db
 from invapp.login import current_user, login_required
-from invapp.models import Printer
+from invapp.models import LabelProcessAssignment, LabelTemplate, Printer
 from invapp.security import require_roles
+from invapp.printing.labels import (
+    build_designer_state,
+    get_designer_label_config,
+    get_designer_sample_context,
+    iter_designer_labels,
+    serialize_designer_layout,
+)
+from invapp.printing.zebra import print_label_for_process
 
 bp = Blueprint("printers", __name__, url_prefix="/settings/printers")
 
@@ -155,10 +163,27 @@ def label_designer():
     if selected_printer:
         _apply_printer_configuration(selected_printer)
 
+    designer_labels: list[dict[str, object]] = []
+    for config in iter_designer_labels():
+        template = LabelTemplate.query.filter_by(name=config.template_name).first()
+        if template is None:
+            assignment = LabelProcessAssignment.query.filter_by(process=config.process).first()
+            template = assignment.template if assignment is not None else None
+        if template is not None:
+            state = build_designer_state(
+                config.id,
+                template_layout=template.layout or {},
+                template_fields=template.fields or {},
+            )
+        else:
+            state = build_designer_state(config.id)
+        designer_labels.append(state)
+
     return render_template(
         "settings/label_designer.html",
         selected_printer=selected_printer,
         printers=printers,
+        designer_labels=designer_labels,
     )
 
 
@@ -167,9 +192,10 @@ def label_designer():
 @require_roles("admin")
 def label_designer_print_trial():
     payload = request.get_json(silent=True) or {}
-    layout = payload.get("layout")
-    if not isinstance(layout, dict):
-        return jsonify({"message": "Layout payload is required for a trial print."}), 400
+    layout = payload.get("layout") if isinstance(payload.get("layout"), dict) else None
+    label_id = payload.get("label_id") or (layout.get("id") if layout else None)
+    if not label_id:
+        return jsonify({"message": "Label identifier is required for a trial print."}), 400
 
     selected_printer = None
     selected_printer_id = session.get("selected_printer_id")
@@ -182,8 +208,28 @@ def label_designer_print_trial():
             400,
         )
 
+    config = get_designer_label_config(label_id)
+    if config is None:
+        return jsonify({"message": f"Unknown label '{label_id}'."}), 404
+
+    template = LabelTemplate.query.filter_by(name=config.template_name).first()
+    if template is None:
+        return (
+            jsonify({"message": "Save the label layout before printing a trial copy."}),
+            400,
+        )
+
+    context = get_designer_sample_context(label_id)
+    if not print_label_for_process(config.process, context):
+        return (
+            jsonify({"message": "Failed to queue the trial print with the active printer."}),
+            500,
+        )
+
     current_app.logger.info(
-        "Label designer trial print queued for %s: %s", selected_printer.name, layout
+        "Label designer trial print queued for %s using template %s.",
+        selected_printer.name,
+        config.template_name,
     )
 
     return jsonify(
@@ -193,7 +239,6 @@ def label_designer_print_trial():
             "printer": selected_printer.name,
         }
     )
-
 
 @bp.post("/designer/save")
 @login_required
@@ -214,20 +259,41 @@ def label_designer_save_layout():
             400,
         )
 
-    saved_layouts = dict(session.get("label_designer_layouts") or {})
-    saved_layouts[label_id] = layout
-    session["label_designer_layouts"] = saved_layouts
+    config = get_designer_label_config(label_id)
+    if config is None:
+        return jsonify({"message": f"Unknown label '{label_id}'."}), 404
+
+    serialized = serialize_designer_layout(label_id, layout)
+
+    template = LabelTemplate.query.filter_by(name=config.template_name).first()
+    if template is None:
+        template = LabelTemplate(name=config.template_name)
+        db.session.add(template)
+
+    template.description = config.description
+    template.layout = serialized["layout"]
+    template.fields = serialized["fields"]
+    template.trigger = config.process
+
+    assignment = LabelProcessAssignment.query.filter_by(process=config.process).first()
+    if assignment is None:
+        assignment = LabelProcessAssignment(process=config.process, template=template)
+        db.session.add(assignment)
+    else:
+        assignment.template = template
+
+    db.session.commit()
 
     current_app.logger.info(
-        "Label designer layout saved for %s: %s",
+        "Label designer layout saved for %s using template %s.",
         label_id,
-        layout,
+        config.template_name,
     )
 
     return jsonify(
         {
             "ok": True,
-            "message": f"Layout saved for {label_id}.",
+            "message": f"Layout saved for {config.name}.",
             "label_id": label_id,
         }
     )

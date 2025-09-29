@@ -5,9 +5,11 @@ import pytest
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
+import pytest
+
 from invapp import create_app
 from invapp.extensions import db
-from invapp.models import Printer, Role, User
+from invapp.models import LabelProcessAssignment, LabelTemplate, Printer, Role, User
 
 
 @pytest.fixture
@@ -58,25 +60,39 @@ def login_admin(client):
 
 def build_layout_payload():
     return {
-        "label_id": "receiving-label",
+        "label_id": "batch-label",
         "layout": {
-            "id": "receiving-label",
-            "name": "Receiving Label",
-            "size": {"width": 400, "height": 250},
+            "id": "batch-label",
+            "name": "Batch Label",
+            "size": {"width": 812, "height": 1218},
             "fields": [
                 {
                     "id": "field-1",
-                    "label": "SKU",
-                    "bindingKey": "sku",
+                    "label": "Lot Number",
+                    "bindingKey": "lot_number",
                     "type": "text",
-                    "x": 24,
-                    "y": 24,
-                    "width": 220,
-                    "height": 42,
+                    "x": 60,
+                    "y": 80,
+                    "width": 640,
+                    "height": 64,
                     "rotation": 0,
-                    "fontSize": 22,
+                    "fontSize": 48,
                     "align": "left",
-                }
+                },
+                {
+                    "id": "field-2",
+                    "label": "Lot Barcode",
+                    "bindingKey": "lot_number",
+                    "type": "barcode",
+                    "x": 60,
+                    "y": 200,
+                    "width": 640,
+                    "height": 220,
+                    "rotation": 0,
+                    "fontSize": 18,
+                    "align": "center",
+                    "showValue": True,
+                },
             ],
         },
     }
@@ -100,7 +116,7 @@ def test_save_layout_validates_payload(client):
     assert data["message"] == "Layout payload is required to save a label."
 
 
-def test_save_layout_success_persists_to_session(client, app):
+def test_save_layout_success_persists_to_database(client, app):
     login_admin(client)
     payload = build_layout_payload()
     response = client.post("/settings/printers/designer/save", json=payload)
@@ -109,11 +125,15 @@ def test_save_layout_success_persists_to_session(client, app):
     assert data["ok"] is True
     assert data["label_id"] == payload["label_id"]
 
-    with client.session_transaction() as sess:
-        stored = sess.get("label_designer_layouts")
-        assert stored is not None
-        assert payload["label_id"] in stored
-        assert stored[payload["label_id"]]["fields"][0]["label"] == "SKU"
+    with app.app_context():
+        template = LabelTemplate.query.filter_by(name="LotBatchLabelTemplate").first()
+        assert template is not None
+        assert template.layout["elements"][0]["type"] == "field"
+        assert template.fields["lot_number"] == "{{Batch.LotNumber}}"
+
+        assignment = LabelProcessAssignment.query.filter_by(process="BatchCreated").first()
+        assert assignment is not None
+        assert assignment.template_id == template.id
 
 
 def test_trial_print_requires_selected_printer(client):
@@ -125,17 +145,32 @@ def test_trial_print_requires_selected_printer(client):
     assert data["message"].startswith("Select an active printer")
 
 
-def test_trial_print_succeeds_with_selected_printer(client, app):
+def test_trial_print_succeeds_with_selected_printer(client, app, monkeypatch):
     login_admin(client)
+
+    # Persist a template to drive the trial print
+    save_payload = build_layout_payload()
+    client.post("/settings/printers/designer/save", json=save_payload)
+
+    printed = {}
+
+    def fake_print_label(process, context):
+        printed["process"] = process
+        printed["context"] = context
+        return True
+
+    monkeypatch.setattr("invapp.routes.printers.print_label_for_process", fake_print_label)
+
     with app.app_context():
         printer = Printer.query.filter_by(name="Test Printer").first()
 
     with client.session_transaction() as sess:
         sess["selected_printer_id"] = printer.id
 
-    payload = build_layout_payload()
-    response = client.post("/settings/printers/designer/print-trial", json=payload)
+    response = client.post("/settings/printers/designer/print-trial", json=save_payload)
     assert response.status_code == 200
     data = response.get_json()
     assert data["ok"] is True
     assert data["printer"] == printer.name
+    assert printed["process"] == "BatchCreated"
+    assert printed["context"]["Batch"]["LotNumber"]
