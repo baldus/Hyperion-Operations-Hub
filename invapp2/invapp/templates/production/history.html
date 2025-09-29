@@ -85,33 +85,38 @@
     </div>
 
     <section class="dashboard-section">
-        <h3>Daily Detail</h3>
+        <div class="section-header">
+            <h3>Daily Detail</h3>
+            <button type="button" class="action-btn" id="dailyDetailToggle" data-show-text="Show Daily Detail" data-hide-text="Hide Daily Detail" aria-expanded="false" aria-controls="dailyDetailContainer">
+                Show Daily Detail
+            </button>
+        </div>
         <p class="section-help">Labor hours assume an 8-hour base shift per employee plus the overtime entered for each section.</p>
-        <div class="table-scroll">
+        <div class="table-scroll" id="dailyDetailContainer" hidden>
             <table class="inventory-table production-history-table">
                 <thead>
                     <tr>
-                        <th scope="col">Date</th>
-                        <th scope="col">Day</th>
-                        <th scope="col">Gates Produced</th>
-                        <th scope="col">Gates Packaged</th>
-                        <th scope="col">Gates Labor<br><small>Employees / OT / Hours</small></th>
-                        <th scope="col">Output per Labor Hour<br><small>Gates Combined</small></th>
-                        <th scope="col">Controllers<br><small>4 Stop / 6 Stop</small></th>
-                        <th scope="col">Door Locks<br><small>LH / RH</small></th>
-                        <th scope="col">Operators</th>
-                        <th scope="col">COPs</th>
-                        <th scope="col">Additional Labor<br><small>Employees / OT / Hours</small></th>
-                        <th scope="col">Additional Output<br><small>Units per Labor Hour</small></th>
-                        <th scope="col">Notes</th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Date</th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Day</th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Gates Produced</th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Gates Packaged</th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Gates Labor<br><small>Employees / OT / Hours</small></th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Output per Labor Hour<br><small>Gates Combined</small></th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Controllers<br><small>4 Stop / 6 Stop</small></th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Door Locks<br><small>LH / RH</small></th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Operators</th>
+                        <th scope="col" class="sortable-header" aria-sort="none">COPs</th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Additional Labor<br><small>Employees / OT / Hours</small></th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Additional Output<br><small>Units per Labor Hour</small></th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Notes</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for row in table_rows %}
                         <tr>
-                            <td>{{ row.record.entry_date.strftime('%Y-%m-%d') }}</td>
-                            <td>{{ row.record.day_of_week }}</td>
-                            <td>
+                            <td data-sort-value="{{ row.record.entry_date.strftime('%Y-%m-%d') }}">{{ row.record.entry_date.strftime('%Y-%m-%d') }}</td>
+                            <td data-sort-value="{{ row.record.day_of_week }}">{{ row.record.day_of_week }}</td>
+                            <td data-sort-value="{{ row.produced_sum }}">
                                 <strong>{{ row.produced_sum }}</strong>
                                 <div class="totals-breakdown">
                                     {% for customer in customers %}
@@ -120,7 +125,7 @@
                                     {% endfor %}
                                 </div>
                             </td>
-                            <td>
+                            <td data-sort-value="{{ row.packaged_sum }}">
                                 <strong>{{ row.packaged_sum }}</strong>
                                 <div class="totals-breakdown">
                                     {% for customer in customers %}
@@ -129,14 +134,14 @@
                                     {% endfor %}
                                 </div>
                             </td>
-                            <td>
+                            <td data-sort-value="{{ row.gates_total_hours_value }}">
                                 <div class="totals-breakdown">
                                     <span>Employees: {{ row.gates_employees }}</span>
                                     <span>OT Hours: {{ row.gates_hours_ot }}</span>
                                     <span>Total Hours: {{ row.gates_total_hours }}</span>
                                 </div>
                             </td>
-                            <td>
+                            <td data-sort-value="{{ row.output_per_hour_value if row.output_per_hour_value is not none else 0 }}">
                                 {% if row.gates_output_per_hour %}
                                     <strong>{{ row.gates_output_per_hour }}</strong>
                                 {% endif %}
@@ -150,28 +155,28 @@
                                     —
                                 {% endif %}
                             </td>
-                            <td>
+                            <td data-sort-value="{{ row.controllers_total }}">
                                 <div class="metric-pair">
                                     <span>{{ row.record.controllers_4_stop }}</span>
                                     <span>{{ row.record.controllers_6_stop }}</span>
                                 </div>
                             </td>
-                            <td>
+                            <td data-sort-value="{{ row.door_locks_total }}">
                                 <div class="metric-pair">
                                     <span>{{ row.record.door_locks_lh }}</span>
                                     <span>{{ row.record.door_locks_rh }}</span>
                                 </div>
                             </td>
-                            <td>{{ row.operators_total }}</td>
-                            <td>{{ row.cops_total }}</td>
-                            <td>
+                            <td data-sort-value="{{ row.operators_total }}">{{ row.operators_total }}</td>
+                            <td data-sort-value="{{ row.cops_total }}">{{ row.cops_total }}</td>
+                            <td data-sort-value="{{ row.additional_total_hours_value }}">
                                 <div class="totals-breakdown">
                                     <span>Employees: {{ row.additional_employees }}</span>
                                     <span>OT Hours: {{ row.additional_hours_ot }}</span>
                                     <span>Total Hours: {{ row.additional_total_hours }}</span>
                                 </div>
                             </td>
-                            <td>
+                            <td data-sort-value="{{ row.additional_output_total_value }}">
                                 {% if row.additional_per_hour %}
                                     <div class="totals-breakdown">
                                         {% for metric in row.additional_per_hour %}
@@ -182,7 +187,7 @@
                                     —
                                 {% endif %}
                             </td>
-                            <td>{{ row.record.daily_notes or '—' }}</td>
+                            <td data-sort-value="{{ row.record.daily_notes or '' }}">{{ row.record.daily_notes or '—' }}</td>
                         </tr>
                     {% endfor %}
                 </tbody>
@@ -222,6 +227,131 @@
         const dayOfWeek = parsedDate.getUTCDay();
         return dayOfWeek === 0 || dayOfWeek === 6;
     };
+
+    const dailyDetailToggle = document.getElementById('dailyDetailToggle');
+    const dailyDetailContainer = document.getElementById('dailyDetailContainer');
+
+    if (dailyDetailToggle && dailyDetailContainer) {
+        const showText = dailyDetailToggle.getAttribute('data-show-text') || 'Show Daily Detail';
+        const hideText = dailyDetailToggle.getAttribute('data-hide-text') || 'Hide Daily Detail';
+
+        const updateToggleState = (expanded) => {
+            dailyDetailToggle.setAttribute('aria-expanded', String(expanded));
+            dailyDetailToggle.textContent = expanded ? hideText : showText;
+            dailyDetailContainer.hidden = !expanded;
+        };
+
+        dailyDetailToggle.addEventListener('click', () => {
+            const expanded = dailyDetailToggle.getAttribute('aria-expanded') === 'true';
+            updateToggleState(!expanded);
+        });
+    }
+
+    const initializeSortableTable = (tableElement) => {
+        const headerCells = Array.from(tableElement.querySelectorAll('thead th'));
+        const tableBody = tableElement.querySelector('tbody');
+        if (!tableBody || !headerCells.length) {
+            return;
+        }
+
+        const allRows = Array.from(tableBody.querySelectorAll('tr'));
+        allRows.forEach((row, index) => {
+            row.dataset.originalOrder = String(index);
+        });
+
+        const getSortValue = (row, columnIndex) => {
+            const cell = row.children[columnIndex];
+            if (!cell) {
+                return '';
+            }
+            const value = cell.getAttribute('data-sort-value');
+            return value !== null ? value : cell.textContent.trim();
+        };
+
+        const compareValues = (valueA, valueB) => {
+            const numericA = Number(valueA);
+            const numericB = Number(valueB);
+            const aIsNumber = Number.isFinite(numericA);
+            const bIsNumber = Number.isFinite(numericB);
+
+            if (aIsNumber && bIsNumber) {
+                return numericA - numericB;
+            }
+
+            const stringA = String(valueA).toLowerCase();
+            const stringB = String(valueB).toLowerCase();
+            if (stringA < stringB) {
+                return -1;
+            }
+            if (stringA > stringB) {
+                return 1;
+            }
+            return 0;
+        };
+
+        const sortByColumn = (columnIndex) => {
+            const activeHeader = headerCells[columnIndex];
+            if (!activeHeader) {
+                return;
+            }
+
+            const currentDirection = activeHeader.getAttribute('data-sort-direction') || 'none';
+            let nextDirection = 'asc';
+            if (currentDirection === 'asc') {
+                nextDirection = 'desc';
+            } else if (currentDirection === 'desc') {
+                nextDirection = 'none';
+            }
+
+            headerCells.forEach((header, headerIndex) => {
+                if (headerIndex === columnIndex) {
+                    header.setAttribute('data-sort-direction', nextDirection);
+                    header.setAttribute('aria-sort', nextDirection === 'none' ? 'none' : nextDirection);
+                } else {
+                    header.removeAttribute('data-sort-direction');
+                    header.setAttribute('aria-sort', 'none');
+                }
+            });
+
+            let sortedRows = Array.from(allRows);
+            if (nextDirection === 'none') {
+                sortedRows.sort((rowA, rowB) => {
+                    const indexA = Number.parseInt(rowA.dataset.originalOrder || '0', 10);
+                    const indexB = Number.parseInt(rowB.dataset.originalOrder || '0', 10);
+                    return indexA - indexB;
+                });
+            } else {
+                sortedRows.sort((rowA, rowB) => {
+                    const valueA = getSortValue(rowA, columnIndex);
+                    const valueB = getSortValue(rowB, columnIndex);
+                    const comparison = compareValues(valueA, valueB);
+                    return nextDirection === 'asc' ? comparison : -comparison;
+                });
+            }
+
+            sortedRows.forEach((row) => {
+                tableBody.appendChild(row);
+            });
+        };
+
+        headerCells.forEach((header, index) => {
+            header.setAttribute('role', 'button');
+            header.setAttribute('tabindex', '0');
+            header.setAttribute('aria-sort', 'none');
+            header.addEventListener('click', () => sortByColumn(index));
+            header.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    sortByColumn(index);
+                }
+            });
+        });
+    };
+
+    const historyTable = document.querySelector('.production-history-table');
+    if (historyTable) {
+        initializeSortableTable(historyTable);
+    }
 
     const weekendBackgroundPlugin = {
         id: 'weekendBackground',
@@ -356,7 +486,8 @@
         const deepCloneDatasets = (datasets) => datasets.map((dataset) => deepCloneDataset(dataset));
 
         const originalLabels = chartLabels.slice();
-        const originalCombinedDatasets = deepCloneDatasets(stackedDatasetList.concat(overlayDatasetList));
+        const originalStackedDatasets = deepCloneDatasets(stackedDatasetList);
+        const originalOverlayDatasets = deepCloneDatasets(overlayDatasetList);
         const originalLineDatasets = deepCloneDatasets(lineDatasetList);
         const weekendMask = originalLabels.map((label) => isWeekendLabel(label));
 
@@ -387,12 +518,13 @@
                 ? originalLabels.slice()
                 : originalLabels.filter((_, index) => !weekendMask[index]);
 
-            const combined = originalCombinedDatasets.map((dataset) => cloneAndFilterDataset(dataset, includeWeekends));
+            const stacked = originalStackedDatasets.map((dataset) => cloneAndFilterDataset(dataset, includeWeekends));
+            const overlays = originalOverlayDatasets.map((dataset) => cloneAndFilterDataset(dataset, includeWeekends));
             const line = originalLineDatasets.map((dataset) => cloneAndFilterDataset(dataset, includeWeekends));
 
             return {
                 labels,
-                combinedDatasets: combined,
+                combinedDatasets: stacked.concat(overlays),
                 lineDatasets: line,
             };
         };
@@ -678,6 +810,7 @@
         const emailNoteContainer = document.getElementById('emailDataNote');
         const emailSubtitle = document.getElementById('emailDataSubtitle');
         const copyEmailNoteButton = document.getElementById('copyEmailNoteButton');
+        let latestBarChartImageDataUrl = null;
 
         const renderEmailNote = () => {
             if (!emailNoteContainer) {
@@ -733,9 +866,13 @@
                 return;
             }
 
+            latestBarChartImageDataUrl = null;
+
             if (emailBarImage && barChart) {
                 try {
-                    emailBarImage.src = barChart.toBase64Image();
+                    const chartImage = barChart.toBase64Image('image/png', 1);
+                    emailBarImage.src = chartImage;
+                    latestBarChartImageDataUrl = chartImage;
                 } catch (error) {
                     emailBarImage.removeAttribute('src');
                 }
@@ -799,6 +936,19 @@
             selection.addRange(range);
         };
 
+        const dataUrlToBlob = async (dataUrl) => {
+            if (!dataUrl || typeof dataUrl !== 'string') {
+                return null;
+            }
+
+            try {
+                const response = await fetch(dataUrl);
+                return await response.blob();
+            } catch (error) {
+                return null;
+            }
+        };
+
         const fallbackCopyToClipboard = (text) => {
             if (!document.body || typeof document.execCommand !== 'function') {
                 return false;
@@ -855,6 +1005,33 @@
             return fallbackCopyToClipboard(text);
         };
 
+        const copyChartAndNotesToClipboard = async (text) => {
+            if (!latestBarChartImageDataUrl) {
+                return false;
+            }
+
+            if (!navigator.clipboard || typeof navigator.clipboard.write !== 'function' || typeof ClipboardItem === 'undefined') {
+                return false;
+            }
+
+            const imageBlob = await dataUrlToBlob(latestBarChartImageDataUrl);
+            if (!imageBlob) {
+                return false;
+            }
+
+            const clipboardContents = {
+                'text/plain': new Blob([text], { type: 'text/plain' }),
+            };
+            clipboardContents[imageBlob.type || 'image/png'] = imageBlob;
+
+            try {
+                await navigator.clipboard.write([new ClipboardItem(clipboardContents)]);
+                return true;
+            } catch (error) {
+                return false;
+            }
+        };
+
         const withTemporaryLabel = (button, label) => {
             if (!button) {
                 return;
@@ -876,10 +1053,19 @@
                     ? emailPreview.notes.trim()
                     : 'No notes were recorded for this day.';
 
-                const copied = await copyNoteToClipboard(noteText);
+                const copiedChartAndNotes = await copyChartAndNotesToClipboard(noteText);
+                if (copiedChartAndNotes) {
+                    withTemporaryLabel(copyEmailNoteButton, 'Notes & chart copied!');
+                    return;
+                }
 
-                if (copied) {
-                    withTemporaryLabel(copyEmailNoteButton, 'Notes copied!');
+                const copiedNotes = await copyNoteToClipboard(noteText);
+
+                if (copiedNotes) {
+                    const fallbackLabel = latestBarChartImageDataUrl
+                        ? 'Notes copied (chart unavailable)'
+                        : 'Notes copied!';
+                    withTemporaryLabel(copyEmailNoteButton, fallbackLabel);
                     return;
                 }
 

@@ -2208,3 +2208,28 @@ body.light .email-modal-hint {
 .production-history-table td {
     vertical-align: top;
 }
+
+.production-history-table th.sortable-header {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+}
+
+.production-history-table th.sortable-header:focus {
+    outline: 2px solid #7aa2ff;
+    outline-offset: 2px;
+}
+
+.production-history-table th.sortable-header::after {
+    content: '';
+    margin-left: 6px;
+    font-size: 0.7rem;
+}
+
+.production-history-table th.sortable-header[aria-sort='asc']::after {
+    content: '▲';
+}
+
+.production-history-table th.sortable-header[aria-sort='desc']::after {
+    content: '▼';
+}
