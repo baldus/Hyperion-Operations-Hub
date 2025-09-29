@@ -8,7 +8,7 @@ import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from typing import Mapping
+from typing import Mapping, Optional, Union
 
 from flask import (
     Blueprint,
@@ -2022,11 +2022,11 @@ def reprint_receiving_label(receipt_id: int):
 
 
 def _print_batch_receipt_label(
-    batch: Batch | Mapping[str, object] | None,
+    batch: Union[Batch, Mapping[str, object], None],
     item: Item,
     qty: int,
-    location: Location | None,
-    po_number: str | None,
+    location: Optional[Location],
+    po_number: Optional[str],
 ) -> bool:
     """Render and queue the Batch Label for a receiving transaction.
 
@@ -2046,7 +2046,7 @@ def _print_batch_receipt_label(
         else None
     ) or getattr(item, "sku", "")
 
-    batch_source: Mapping[str, object] | Batch
+    batch_source: Union[Batch, Mapping[str, object]]
     if batch is None:
         batch_source = {
             "lot_number": lot_number,
