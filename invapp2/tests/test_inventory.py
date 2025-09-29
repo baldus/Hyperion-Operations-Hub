@@ -7,6 +7,7 @@ import sys
 from decimal import Decimal
 
 import pytest
+from flask import current_app
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -21,6 +22,7 @@ from invapp.models import (
     OrderComponent,
     OrderLine,
     OrderStatus,
+    Printer,
     RoutingStep,
     RoutingStepComponent,
     RoutingStepConsumption,
@@ -926,3 +928,50 @@ def test_import_stock_mapping_flow(client, app):
         placeholder = Location.query.filter_by(code=UNASSIGNED_LOCATION_CODE).one()
         assert placeholder.description == "Unassigned staging location"
 
+
+
+def test_receiving_prints_batch_label_with_active_printer(client, app, monkeypatch):
+    with app.app_context():
+        printer = Printer(name="Dock Printer", host="10.0.0.25", port=9105)
+        location = Location(code="RCV-01", description="Receiving Dock")
+        item = Item(sku="RCV-100", name="Receive Widget", unit="ea")
+        db.session.add_all([printer, location, item])
+        db.session.commit()
+        location_id = location.id
+        sku = item.sku
+
+    printed: dict[str, object] = {}
+
+    def fake_print(batch_or_sku, **kwargs):
+        printed["batch_or_sku"] = batch_or_sku
+        printed["kwargs"] = kwargs
+        return True
+
+    monkeypatch.setattr("invapp.printing.zebra.print_receiving_label", fake_print)
+
+    response = client.post(
+        "/inventory/receiving",
+        data={
+            "sku": sku,
+            "qty": "7",
+            "person": "Tester",
+            "po_number": "PO-88",
+            "location_id": location_id,
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "batch_or_sku" in printed
+
+    batch = printed["batch_or_sku"]
+    assert hasattr(batch, "lot_number")
+    assert batch.lot_number.startswith(sku)
+
+    kwargs = printed["kwargs"]
+    assert kwargs["qty"] == 7
+    assert kwargs["po_number"] == "PO-88"
+    assert kwargs["location"].code == "RCV-01"
+
+    with app.app_context():
+        assert current_app.config["ZEBRA_PRINTER_HOST"] == "10.0.0.25"
+        assert current_app.config["ZEBRA_PRINTER_PORT"] == 9105

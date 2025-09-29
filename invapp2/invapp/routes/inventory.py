@@ -40,6 +40,7 @@ from invapp.models import (
     RoutingStepConsumption,
     db,
 )
+from invapp.printing.printer_config import ensure_printer_configuration
 
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
 
@@ -1950,6 +1951,7 @@ def receiving():
         db.session.add(mv)
         db.session.commit()
         try:
+            ensure_printer_configuration()
             from invapp.printing.zebra import print_receiving_label
 
             location = Location.query.get(location_id)
@@ -2006,6 +2008,7 @@ def reprint_receiving_label(receipt_id: int):
     location = rec.location
 
     try:
+        ensure_printer_configuration()
         from invapp.printing.zebra import print_receiving_label
 
         if not print_receiving_label(

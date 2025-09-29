@@ -10,6 +10,7 @@ from flask import (
 )
 from invapp.extensions import db
 from invapp.models import Receiving, Item, Stock, Location
+from invapp.printing.printer_config import ensure_printer_configuration
 from invapp.printing.zebra import (
     print_receiving_label,
     render_receiving_label_png,
@@ -115,6 +116,7 @@ def print_label():
 
     success = True
     for _ in range(copies):
+        ensure_printer_configuration()
         success = print_receiving_label(sku, description, qty) and success
 
     return jsonify({"printed": success})
