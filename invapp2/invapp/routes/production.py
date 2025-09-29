@@ -651,6 +651,7 @@ def history():
     chart_labels: List[str] = []
     stack_datasets: List[Dict[str, object]] = []
     overlay_values: List[float | None] = []
+    total_produced_values: List[int] = []
     cumulative_series: Dict[str, List[int]] = {
         series["key"]: [] for series in LINE_SERIES
     }
@@ -750,6 +751,7 @@ def history():
             ]
 
         overlay_values.append(float(output_value) if output_value is not None else None)
+        total_produced_values.append(produced_sum)
 
 
         additional_total_hours_value = record.additional_total_labor_hours
@@ -758,12 +760,14 @@ def history():
         )
         additional_hours_ot_display = _format_decimal(record.additional_hours_ot)
         additional_per_hour: List[Dict[str, str]] = []
+        additional_output_total_value = DECIMAL_ZERO
         if additional_total_hours_value and additional_total_hours_value > DECIMAL_ZERO:
             for metric in ADDITIONAL_METRICS:
                 total_value = getattr(record, metric["key"]) or 0
                 per_hour_value = (
                     Decimal(total_value) / additional_total_hours_value
                 ).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
+                additional_output_total_value += per_hour_value
                 additional_per_hour.append(
                     {
                         "key": metric["key"],
@@ -798,11 +802,23 @@ def history():
                 "gates_employees": record.gates_employees or 0,
                 "gates_hours_ot": gates_hours_ot_display,
                 "gates_total_hours": gates_total_hours_display,
+                "gates_total_hours_value": float(gates_total_hours_value)
+                if gates_total_hours_value is not None
+                else 0.0,
                 "gates_output_per_hour": gates_output_per_hour_display,
+                "output_per_hour_value": float(output_value)
+                if output_value is not None
+                else None,
                 "output_variables": output_variables_display,
                 "additional_employees": record.additional_employees or 0,
                 "additional_hours_ot": additional_hours_ot_display,
                 "additional_total_hours": additional_total_hours_display,
+                "additional_total_hours_value": float(additional_total_hours_value)
+                if additional_total_hours_value is not None
+                else 0.0,
+                "additional_output_total_value": float(additional_output_total_value)
+                if additional_per_hour
+                else 0.0,
                 "additional_per_hour": additional_per_hour,
             }
         )
@@ -822,7 +838,36 @@ def history():
 
     grouped_names = [customer.name for customer in grouped_customers]
 
+    trendline_values: List[float] = []
+    if len(total_produced_values) >= 2:
+        x_values = list(range(len(total_produced_values)))
+        sum_x = sum(x_values)
+        sum_y = sum(total_produced_values)
+        sum_xx = sum(x * x for x in x_values)
+        sum_xy = sum(x * y for x, y in zip(x_values, total_produced_values))
+        denominator = (len(total_produced_values) * sum_xx) - (sum_x ** 2)
+        if denominator != 0:
+            slope = ((len(total_produced_values) * sum_xy) - (sum_x * sum_y)) / denominator
+            intercept = (sum_y - (slope * sum_x)) / len(total_produced_values)
+            trendline_values = [slope * x + intercept for x in x_values]
+
     overlay_datasets: List[Dict[str, object]] = []
+    if trendline_values:
+        overlay_datasets.append(
+            {
+                "label": "Gates Produced Trend",
+                "data": trendline_values,
+                "type": "line",
+                "yAxisID": "y",
+                "borderColor": "#6366f1",
+                "backgroundColor": "#6366f1",
+                "tension": 0.2,
+                "fill": False,
+                "pointRadius": 0,
+                "borderWidth": 2,
+                "order": 1,
+            }
+        )
     if any(value is not None for value in overlay_values):
         overlay_datasets.append(
             {
