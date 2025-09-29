@@ -121,6 +121,103 @@ def test_list_stock_all_filter(client, stock_items):
     assert stock_items["ok"] in page
 
 
+def test_receiving_prints_batch_label(client, app, monkeypatch):
+    with app.app_context():
+        item = Item(sku="WIDGET-1", name="Widget", unit="ea")
+        location = Location(code="RCV-01", description="Receiving Dock")
+        db.session.add_all([item, location])
+        db.session.commit()
+        location_id = location.id
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_print_label(process, context):
+        calls.append((process, context))
+        return True
+
+    monkeypatch.setattr(
+        "invapp.printing.zebra.print_label_for_process", fake_print_label
+    )
+
+    response = client.post(
+        "/inventory/receiving",
+        data={
+            "sku": "WIDGET-1",
+            "qty": "5",
+            "location_id": str(location_id),
+            "person": "Dana",
+            "po_number": "PO-777",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert calls, "Expected the receiving workflow to attempt label printing"
+
+    process, context = calls[-1]
+    assert process == "BatchCreated"
+    assert context["Item"]["SKU"] == "WIDGET-1"
+    assert context["Location"]["Code"] == "RCV-01"
+    assert context["Batch"]["Quantity"] == 5
+    assert context["Batch"]["LotNumber"].startswith("WIDGET-1-")
+    assert context["Batch"]["PurchaseOrder"] == "PO-777"
+
+
+def test_reprint_receiving_label_uses_batch_label(client, app, monkeypatch):
+    with app.app_context():
+        item = Item(sku="REPRINT-1", name="Reprint Widget", unit="ea")
+        location = Location(code="RCV-02", description="Secondary Dock")
+        db.session.add_all([item, location])
+        db.session.commit()
+        location_id = location.id
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_print_label(process, context):
+        calls.append((process, context))
+        return True
+
+    monkeypatch.setattr(
+        "invapp.printing.zebra.print_label_for_process", fake_print_label
+    )
+
+    client.post(
+        "/inventory/receiving",
+        data={
+            "sku": "REPRINT-1",
+            "qty": "3",
+            "location_id": str(location_id),
+            "person": "Casey",
+            "po_number": "PO-888",
+        },
+        follow_redirects=True,
+    )
+
+    with app.app_context():
+        receipt = Movement.query.filter_by(movement_type="RECEIPT").first()
+        assert receipt is not None
+        receipt_id = receipt.id
+        lot_number = receipt.batch.lot_number
+        location_code = receipt.location.code
+        quantity = receipt.quantity
+
+    calls.clear()
+
+    response = client.post(
+        f"/inventory/receiving/{receipt_id}/reprint",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert len(calls) == 1
+
+    process, context = calls[0]
+    assert process == "BatchCreated"
+    assert context["Batch"]["LotNumber"] == lot_number
+    assert context["Batch"]["Quantity"] == quantity
+    assert context["Location"]["Code"] == location_code
+
+
 def test_add_item_with_notes(client, app):
     response = client.post(
         "/inventory/item/add",

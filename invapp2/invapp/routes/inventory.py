@@ -8,6 +8,7 @@ import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from typing import Mapping, Optional, Union
 
 from flask import (
     Blueprint,
@@ -1950,15 +1951,13 @@ def receiving():
         db.session.add(mv)
         db.session.commit()
         try:
-            from invapp.printing.zebra import print_receiving_label
-
             location = Location.query.get(location_id)
-            if not print_receiving_label(
+            if not _print_batch_receipt_label(
                 batch,
-                qty=qty,
-                item=item,
-                location=location,
-                po_number=po_number,
+                item,
+                qty,
+                location,
+                po_number,
             ):
                 flash("Failed to print receiving label.", "warning")
         except Exception:
@@ -2006,14 +2005,12 @@ def reprint_receiving_label(receipt_id: int):
     location = rec.location
 
     try:
-        from invapp.printing.zebra import print_receiving_label
-
-        if not print_receiving_label(
-            batch or item.sku,
-            qty=qty,
-            item=item,
-            location=location,
-            po_number=rec.po_number,
+        if not _print_batch_receipt_label(
+            batch,
+            item,
+            qty,
+            location,
+            rec.po_number,
         ):
             flash("Failed to print receiving label.", "warning")
         else:
@@ -2022,6 +2019,51 @@ def reprint_receiving_label(receipt_id: int):
         flash("Failed to print receiving label.", "warning")
 
     return redirect(url_for("inventory.receiving"))
+
+
+def _print_batch_receipt_label(
+    batch: Union[Batch, Mapping[str, object], None],
+    item: Item,
+    qty: int,
+    location: Optional[Location],
+    po_number: Optional[str],
+) -> bool:
+    """Render and queue the Batch Label for a receiving transaction.
+
+    Both the receiving workflow and the reprint action should emit the
+    "BatchCreated" process label so operators receive the same output each time.
+    This helper normalises the context that is passed into the label renderer so
+    that lot, quantity, and location details are always available even when the
+    movement record is missing a fully-populated ``Batch`` relationship.
+    """
+
+    from invapp.printing.labels import build_batch_label_context
+    from invapp.printing.zebra import print_label_for_process
+
+    lot_number = (
+        getattr(batch, "lot_number", None)
+        if batch is not None
+        else None
+    ) or getattr(item, "sku", "")
+
+    batch_source: Union[Batch, Mapping[str, object]]
+    if batch is None:
+        batch_source = {
+            "lot_number": lot_number,
+            "quantity": qty,
+        }
+    else:
+        batch_source = batch
+
+    context = build_batch_label_context(
+        batch_source,
+        item=item,
+        quantity=qty,
+        location=location,
+        po_number=po_number,
+    )
+
+    return print_label_for_process("BatchCreated", context)
 
 ############################
 # MOVE / TRANSFER ROUTES
