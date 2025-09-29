@@ -486,7 +486,8 @@
         const deepCloneDatasets = (datasets) => datasets.map((dataset) => deepCloneDataset(dataset));
 
         const originalLabels = chartLabels.slice();
-        const originalCombinedDatasets = deepCloneDatasets(stackedDatasetList.concat(overlayDatasetList));
+        const originalStackedDatasets = deepCloneDatasets(stackedDatasetList);
+        const originalOverlayDatasets = deepCloneDatasets(overlayDatasetList);
         const originalLineDatasets = deepCloneDatasets(lineDatasetList);
         const weekendMask = originalLabels.map((label) => isWeekendLabel(label));
 
@@ -517,12 +518,13 @@
                 ? originalLabels.slice()
                 : originalLabels.filter((_, index) => !weekendMask[index]);
 
-            const combined = originalCombinedDatasets.map((dataset) => cloneAndFilterDataset(dataset, includeWeekends));
+            const stacked = originalStackedDatasets.map((dataset) => cloneAndFilterDataset(dataset, includeWeekends));
+            const overlays = originalOverlayDatasets.map((dataset) => cloneAndFilterDataset(dataset, includeWeekends));
             const line = originalLineDatasets.map((dataset) => cloneAndFilterDataset(dataset, includeWeekends));
 
             return {
                 labels,
-                combinedDatasets: combined,
+                combinedDatasets: stacked.concat(overlays),
                 lineDatasets: line,
             };
         };
@@ -808,6 +810,7 @@
         const emailNoteContainer = document.getElementById('emailDataNote');
         const emailSubtitle = document.getElementById('emailDataSubtitle');
         const copyEmailNoteButton = document.getElementById('copyEmailNoteButton');
+        let latestBarChartImageDataUrl = null;
 
         const renderEmailNote = () => {
             if (!emailNoteContainer) {
@@ -863,9 +866,13 @@
                 return;
             }
 
+            latestBarChartImageDataUrl = null;
+
             if (emailBarImage && barChart) {
                 try {
-                    emailBarImage.src = barChart.toBase64Image();
+                    const chartImage = barChart.toBase64Image('image/png', 1);
+                    emailBarImage.src = chartImage;
+                    latestBarChartImageDataUrl = chartImage;
                 } catch (error) {
                     emailBarImage.removeAttribute('src');
                 }
@@ -929,6 +936,19 @@
             selection.addRange(range);
         };
 
+        const dataUrlToBlob = async (dataUrl) => {
+            if (!dataUrl || typeof dataUrl !== 'string') {
+                return null;
+            }
+
+            try {
+                const response = await fetch(dataUrl);
+                return await response.blob();
+            } catch (error) {
+                return null;
+            }
+        };
+
         const fallbackCopyToClipboard = (text) => {
             if (!document.body || typeof document.execCommand !== 'function') {
                 return false;
@@ -985,6 +1005,33 @@
             return fallbackCopyToClipboard(text);
         };
 
+        const copyChartAndNotesToClipboard = async (text) => {
+            if (!latestBarChartImageDataUrl) {
+                return false;
+            }
+
+            if (!navigator.clipboard || typeof navigator.clipboard.write !== 'function' || typeof ClipboardItem === 'undefined') {
+                return false;
+            }
+
+            const imageBlob = await dataUrlToBlob(latestBarChartImageDataUrl);
+            if (!imageBlob) {
+                return false;
+            }
+
+            const clipboardContents = {
+                'text/plain': new Blob([text], { type: 'text/plain' }),
+            };
+            clipboardContents[imageBlob.type || 'image/png'] = imageBlob;
+
+            try {
+                await navigator.clipboard.write([new ClipboardItem(clipboardContents)]);
+                return true;
+            } catch (error) {
+                return false;
+            }
+        };
+
         const withTemporaryLabel = (button, label) => {
             if (!button) {
                 return;
@@ -1006,10 +1053,19 @@
                     ? emailPreview.notes.trim()
                     : 'No notes were recorded for this day.';
 
-                const copied = await copyNoteToClipboard(noteText);
+                const copiedChartAndNotes = await copyChartAndNotesToClipboard(noteText);
+                if (copiedChartAndNotes) {
+                    withTemporaryLabel(copyEmailNoteButton, 'Notes & chart copied!');
+                    return;
+                }
 
-                if (copied) {
-                    withTemporaryLabel(copyEmailNoteButton, 'Notes copied!');
+                const copiedNotes = await copyNoteToClipboard(noteText);
+
+                if (copiedNotes) {
+                    const fallbackLabel = latestBarChartImageDataUrl
+                        ? 'Notes copied (chart unavailable)'
+                        : 'Notes copied!';
+                    withTemporaryLabel(copyEmailNoteButton, fallbackLabel);
                     return;
                 }
 

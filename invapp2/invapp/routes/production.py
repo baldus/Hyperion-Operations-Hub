@@ -649,6 +649,7 @@ def history():
 
     table_rows = []
     chart_labels: List[str] = []
+    chart_entry_dates: List[date] = []
     stack_datasets: List[Dict[str, object]] = []
     overlay_values: List[float | None] = []
     total_produced_values: List[int] = []
@@ -677,6 +678,7 @@ def history():
 
     for record in records:
         chart_labels.append(record.entry_date.strftime("%Y-%m-%d"))
+        chart_entry_dates.append(record.entry_date)
         month_key = (record.entry_date.year, record.entry_date.month)
         if month_key != current_month:
             current_month = month_key
@@ -839,17 +841,24 @@ def history():
     grouped_names = [customer.name for customer in grouped_customers]
 
     trendline_values: List[float] = []
-    if len(total_produced_values) >= 2:
-        x_values = list(range(len(total_produced_values)))
+    weekday_points = [
+        (index, total_produced_values[index])
+        for index, entry_date in enumerate(chart_entry_dates)
+        if entry_date.weekday() < 5
+    ]
+    if len(weekday_points) >= 2:
+        x_values = [point[0] for point in weekday_points]
+        y_values = [point[1] for point in weekday_points]
         sum_x = sum(x_values)
-        sum_y = sum(total_produced_values)
+        sum_y = sum(y_values)
         sum_xx = sum(x * x for x in x_values)
-        sum_xy = sum(x * y for x, y in zip(x_values, total_produced_values))
-        denominator = (len(total_produced_values) * sum_xx) - (sum_x ** 2)
+        sum_xy = sum(x * y for x, y in zip(x_values, y_values))
+        count = len(weekday_points)
+        denominator = (count * sum_xx) - (sum_x ** 2)
         if denominator != 0:
-            slope = ((len(total_produced_values) * sum_xy) - (sum_x * sum_y)) / denominator
-            intercept = (sum_y - (slope * sum_x)) / len(total_produced_values)
-            trendline_values = [slope * x + intercept for x in x_values]
+            slope = ((count * sum_xy) - (sum_x * sum_y)) / denominator
+            intercept = (sum_y - (slope * sum_x)) / count
+            trendline_values = [slope * x + intercept for x in range(len(total_produced_values))]
 
     overlay_datasets: List[Dict[str, object]] = []
     if trendline_values:
