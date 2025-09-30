@@ -166,77 +166,110 @@ def _ensure_production_schema(engine):
     """Align legacy production tables with the current model definitions."""
 
     inspector = inspect(engine)
-    try:
-        columns = inspector.get_columns("production_daily_record")
-    except (NoSuchTableError, OperationalError):
-        return
-
-    desired_length = 32
-    needs_day_of_week_alter = False
-    numeric_columns_missing_default: list[str] = []
-    existing_column_names = {column["name"] for column in columns}
-    columns_to_add: list[str] = []
-
-    for column in columns:
-        column_name = column["name"]
-        if column_name == "day_of_week":
-            current_type = column.get("type")
-            current_length = getattr(current_type, "length", None)
-            if current_length is not None and current_length < desired_length:
-                needs_day_of_week_alter = True
-
-        if (
-            column_name.startswith(("gates_produced_", "gates_packaged_"))
-            and not column.get("nullable", True)
-            and column.get("default") is None
-        ):
-            numeric_columns_missing_default.append(column_name)
-
-    def _queue_column_add(column_name: str, column_type: str, default: str) -> None:
-        if column_name in existing_column_names:
-            return
-
-        add_clause = (
-            "ALTER TABLE production_daily_record "
-            f"ADD COLUMN {column_name} {column_type} DEFAULT {default} NOT NULL"
-        )
-        columns_to_add.append(add_clause)
-
-    _queue_column_add("gates_employees", "INTEGER", "0")
-    _queue_column_add("gates_hours_ot", "NUMERIC(7, 2)", "0")
-    _queue_column_add("additional_employees", "INTEGER", "0")
-    _queue_column_add("additional_hours_ot", "NUMERIC(7, 2)", "0")
-
-    # SQLite cannot alter column types easily, but new databases will pick up the
-    # updated length and defaults from ``db.create_all()``.
     is_sqlite = engine.dialect.name == "sqlite"
 
-    if columns_to_add:
-        with engine.begin() as conn:
-            for statement in columns_to_add:
-                conn.execute(text(statement))
+    try:
+        production_daily_columns = inspector.get_columns("production_daily_record")
+    except (NoSuchTableError, OperationalError):
+        production_daily_columns = None
 
-    if is_sqlite:
-        return
+    if production_daily_columns is not None:
+        desired_length = 32
+        needs_day_of_week_alter = False
+        numeric_columns_missing_default: list[str] = []
+        existing_column_names = {column["name"] for column in production_daily_columns}
+        columns_to_add: list[str] = []
 
-    if needs_day_of_week_alter:
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    "ALTER TABLE production_daily_record "
-                    f"ALTER COLUMN day_of_week TYPE VARCHAR({desired_length})"
-                )
+        for column in production_daily_columns:
+            column_name = column["name"]
+            if column_name == "day_of_week":
+                current_type = column.get("type")
+                current_length = getattr(current_type, "length", None)
+                if current_length is not None and current_length < desired_length:
+                    needs_day_of_week_alter = True
+
+            if (
+                column_name.startswith(("gates_produced_", "gates_packaged_"))
+                and not column.get("nullable", True)
+                and column.get("default") is None
+            ):
+                numeric_columns_missing_default.append(column_name)
+
+        def _queue_column_add(column_name: str, column_type: str, default: str) -> None:
+            if column_name in existing_column_names:
+                return
+
+            add_clause = (
+                "ALTER TABLE production_daily_record "
+                f"ADD COLUMN {column_name} {column_type} DEFAULT {default} NOT NULL"
+            )
+            columns_to_add.append(add_clause)
+
+        _queue_column_add("gates_employees", "INTEGER", "0")
+        _queue_column_add("gates_hours_ot", "NUMERIC(7, 2)", "0")
+        _queue_column_add("additional_employees", "INTEGER", "0")
+        _queue_column_add("additional_hours_ot", "NUMERIC(7, 2)", "0")
+
+        if columns_to_add:
+            with engine.begin() as conn:
+                for statement in columns_to_add:
+                    conn.execute(text(statement))
+
+        # SQLite cannot alter existing column types or defaults easily. New
+        # databases created via ``db.create_all()`` already include the desired
+        # schema, so we only attempt these migrations on engines that support it.
+        if not is_sqlite:
+            if needs_day_of_week_alter:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE production_daily_record "
+                            f"ALTER COLUMN day_of_week TYPE VARCHAR({desired_length})"
+                        )
+                    )
+
+            if numeric_columns_missing_default:
+                with engine.begin() as conn:
+                    for column_name in numeric_columns_missing_default:
+                        conn.execute(
+                            text(
+                                "ALTER TABLE production_daily_record "
+                                f"ALTER COLUMN {column_name} SET DEFAULT 0"
+                            )
+                        )
+
+    try:
+        chart_columns = inspector.get_columns("production_chart_settings")
+    except (NoSuchTableError, OperationalError):
+        chart_columns = None
+
+    if chart_columns is not None:
+        existing_chart_columns = {column["name"] for column in chart_columns}
+        boolean_defaults = {
+            "show_trendline": False,
+            "show_output_per_hour": False,
+        }
+
+        default_literals = {True: ("TRUE", "1"), False: ("FALSE", "0")}
+        column_statements: list[str] = []
+
+        for column_name, default_value in boolean_defaults.items():
+            if column_name in existing_chart_columns:
+                continue
+
+            default_clause = default_literals[default_value][0]
+            if is_sqlite:
+                default_clause = default_literals[default_value][1]
+
+            column_statements.append(
+                "ALTER TABLE production_chart_settings "
+                f"ADD COLUMN {column_name} BOOLEAN NOT NULL DEFAULT {default_clause}"
             )
 
-    if numeric_columns_missing_default:
-        with engine.begin() as conn:
-            for column_name in numeric_columns_missing_default:
-                conn.execute(
-                    text(
-                        "ALTER TABLE production_daily_record "
-                        f"ALTER COLUMN {column_name} SET DEFAULT 0"
-                    )
-                )
+        if column_statements:
+            with engine.begin() as conn:
+                for statement in column_statements:
+                    conn.execute(text(statement))
 
 
 def create_app(config_override=None):
