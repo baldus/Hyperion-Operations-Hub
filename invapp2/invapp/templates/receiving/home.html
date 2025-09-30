@@ -5,23 +5,38 @@
 
 <table>
   <tr>
+    <th>Date</th>
     <th>SKU</th>
+    <th>Item</th>
+    <th>Lot Number</th>
     <th>Qty</th>
     <th>Person</th>
     <th>PO Number</th>
     <th>Location</th>
-    <th>Date</th>
+    <th>Actions</th>
   </tr>
   {% for r in records %}
   <tr>
-    <td>{{ r.item.sku }}</td>
+    <td>{{ r.date.strftime('%Y-%m-%d %H:%M') }}</td>
+    <td>{{ r.item.sku if r.item else '???' }}</td>
+    <td>{{ r.item.name if r.item else 'Unknown Item' }}</td>
+    <td>{{ r.batch.lot_number if r.batch else '-' }}</td>
     <td>{{ r.quantity }}</td>
-    <td>{{ r.person }}</td>
-    <td>{{ r.po_number or "-" }}</td>
-    <td>{{ r.location.code }}</td>
-    <td>{{ r.date_received.strftime('%Y-%m-%d %H:%M') }}</td>
+    <td>{{ r.person or '-' }}</td>
+    <td>{{ r.po_number or '-' }}</td>
+    <td>{{ r.location.code if r.location else '-' }}</td>
+    <td>
+      <form method="post" action="{{ url_for('receiving.reprint_receipt', receipt_id=r.id) }}">
+        <button type="submit" class="bubble-btn">Reprint Label</button>
+      </form>
+    </td>
   </tr>
   {% endfor %}
+  {% if records|length == 0 %}
+  <tr>
+    <td colspan="9">No receiving records found.</td>
+  </tr>
+  {% endif %}
 </table>
 <div class="pagination">
   {% if page > 1 %}

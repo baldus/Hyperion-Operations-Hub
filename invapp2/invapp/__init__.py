@@ -21,6 +21,7 @@ from .routes import (
     orders,
     printers,
     production,
+    receiving,
     reports,
     settings,
     users,
@@ -323,6 +324,7 @@ def create_app(config_override=None):
     app.register_blueprint(work.bp)
     app.register_blueprint(settings.bp)
     app.register_blueprint(printers.bp)
+    app.register_blueprint(receiving.bp)
     app.register_blueprint(production.bp)
     app.register_blueprint(admin.bp)
     app.register_blueprint(users.bp)

@@ -27,6 +27,7 @@
 
 <div id="printModal" class="modal">
   <div class="modal-content">
+    <p id="lotInfo"></p>
     <img id="labelImage" src="" alt="Label Preview">
     <div>
       <label for="printQty">Quantity to print:</label>
@@ -40,6 +41,10 @@
 </div>
 
 <script>
+function hideModal() {
+  document.getElementById('printModal').style.display = 'none';
+}
+
 document.getElementById('receivingForm').addEventListener('submit', function(e) {
   e.preventDefault();
   const formData = new FormData(this);
@@ -53,35 +58,58 @@ document.getElementById('receivingForm').addEventListener('submit', function(e) 
       if (data.success) {
         window.receivingData = data;
         document.getElementById('labelImage').src = data.label_url;
+        document.getElementById('lotInfo').textContent = data.lot_number ? `Lot Number: ${data.lot_number}` : '';
         document.getElementById('printModal').style.display = 'block';
       } else {
         alert(data.error || 'Error saving receiving');
       }
-    });
+    })
+    .catch(() => alert('Error saving receiving'));
 });
 
-document.getElementById('printBtn').addEventListener('click', function() {
-  const copies = document.getElementById('printQty').value;
-  const payload = {
-    sku: window.receivingData.sku,
-    description: window.receivingData.description,
-    qty: window.receivingData.qty,
-    copies: copies
-  };
+function handlePrintResponse(resp) {
+  if (!resp.ok) {
+    return resp.json().catch(() => ({})).then(data => {
+      const message = data.error || 'Failed to print label';
+      alert(message);
+    });
+  }
+  return resp.json().then(data => {
+    alert(data.printed ? 'Label printed successfully' : 'Failed to print label');
+    window.location.href = '{{ url_for("receiving.receiving_home") }}';
+  });
+}
+
+function submitPrintRequest(copies) {
+  if (!window.receivingData || !window.receivingData.receipt_id) {
+    alert('Receipt information not available for printing.');
+    return;
+  }
+
   fetch('{{ url_for("receiving.print_label") }}', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  })
-    .then(resp => resp.json())
-    .then(data => {
-      alert(data.printed ? 'Label printed successfully' : 'Failed to print label');
-      window.location.href = '{{ url_for("receiving.receiving_home") }}';
-    });
+    body: JSON.stringify({
+      receipt_id: window.receivingData.receipt_id,
+      copies: copies
+    })
+  }).then(handlePrintResponse)
+    .catch(() => alert('Failed to send print request'));
+}
+
+document.getElementById('printBtn').addEventListener('click', function() {
+  const copies = parseInt(document.getElementById('printQty').value, 10) || 1;
+  submitPrintRequest(copies);
 });
 
 document.getElementById('skipPrintBtn').addEventListener('click', function() {
   window.location.href = '{{ url_for("receiving.receiving_home") }}';
+});
+
+window.addEventListener('click', function(event) {
+  if (event.target === document.getElementById('printModal')) {
+    hideModal();
+  }
 });
 </script>
 {% endblock %}
