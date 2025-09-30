@@ -292,6 +292,41 @@ def _ensure_production_schema(engine):
                     conn.execute(text(statement))
 
 
+def check_schema(app: Flask) -> None:
+    """Compare the DB schema for production chart settings with the model."""
+
+    with app.app_context():
+        engine = db.engine
+        inspector = inspect(engine)
+        table_name = models.ProductionChartSettings.__tablename__
+
+        try:
+            actual_columns = {
+                column["name"] for column in inspector.get_columns(table_name)
+            }
+        except (NoSuchTableError, OperationalError):
+            app.logger.warning(
+                "Schema check skipped: table '%s' does not exist.",
+                table_name,
+            )
+            return
+
+        model_columns = {
+            column.name for column in models.ProductionChartSettings.__table__.columns
+        }
+
+        missing_columns = sorted(model_columns - actual_columns)
+        extra_columns = sorted(actual_columns - model_columns)
+
+        if missing_columns or extra_columns:
+            app.logger.warning(
+                "Schema mismatch detected for '%s'. Missing columns: %s; Extra columns: %s",
+                table_name,
+                missing_columns or [],
+                extra_columns or [],
+            )
+
+
 def create_app(config_override=None):
     app = Flask(__name__)
 
@@ -328,6 +363,8 @@ def create_app(config_override=None):
             app.config.get("ADMIN_PASSWORD", "joshbaldus"),
         )
         _ensure_core_roles()
+
+    check_schema(app)
 
     @app.context_processor
     def inject_permission_helpers():
