@@ -258,39 +258,6 @@ def _ensure_production_schema(engine):
                             )
                         )
 
-    try:
-        chart_columns = inspector.get_columns("production_chart_settings")
-    except (NoSuchTableError, OperationalError):
-        chart_columns = None
-
-    if chart_columns is not None:
-        existing_chart_columns = {column["name"] for column in chart_columns}
-        boolean_defaults = {
-            "show_trendline": False,
-            "show_output_per_hour": False,
-        }
-
-        default_literals = {True: ("TRUE", "1"), False: ("FALSE", "0")}
-        column_statements: list[str] = []
-
-        for column_name, default_value in boolean_defaults.items():
-            if column_name in existing_chart_columns:
-                continue
-
-            default_clause = default_literals[default_value][0]
-            if is_sqlite:
-                default_clause = default_literals[default_value][1]
-
-            column_statements.append(
-                "ALTER TABLE production_chart_settings "
-                f"ADD COLUMN {column_name} BOOLEAN NOT NULL DEFAULT {default_clause}"
-            )
-
-        if column_statements:
-            with engine.begin() as conn:
-                for statement in column_statements:
-                    conn.execute(text(statement))
-
 
 def create_app(config_override=None):
     app = Flask(__name__)
