@@ -54,6 +54,21 @@ LINE_SERIES: List[Dict[str, str]] = [
     {"label": "COPs", "key": "cops", "color": "#0ea5e9"},
 ]
 
+DOWNTIME_KEYWORDS: List[tuple[str, str]] = [
+    ("maint", "Maintenance"),
+    ("mechan", "Mechanical"),
+    ("electric", "Electrical"),
+    ("material", "Material"),
+    ("staff", "Staffing"),
+    ("operator", "Staffing"),
+    ("quality", "Quality"),
+    ("scrap", "Quality"),
+    ("setup", "Setup"),
+    ("changeover", "Changeover"),
+    ("power", "Utilities"),
+    ("weather", "Weather"),
+]
+
 
 def _parse_optional_decimal(value: str | None) -> Decimal | None:
     if value is None or value == "":
@@ -198,6 +213,23 @@ def _ensure_default_customers() -> None:
 
     if needs_commit:
         db.session.commit()
+
+
+def _decimal_to_float(value: Decimal | None) -> float:
+    if value is None:
+        return 0.0
+    return float(value)
+
+
+def _infer_downtime_cause(notes: str | None) -> str:
+    if not notes:
+        return "Unspecified"
+
+    normalized = notes.lower()
+    for keyword, label in DOWNTIME_KEYWORDS:
+        if keyword in normalized:
+            return label
+    return "Other"
 
 
 
@@ -610,6 +642,11 @@ def history():
         start_date, end_date = end_date, start_date
 
     chart_settings = ProductionChartSettings.get_or_create()
+    goal_value = (
+        float(chart_settings.goal_value)
+        if chart_settings.goal_value is not None
+        else None
+    )
 
     records = (
         ProductionDailyRecord.query.options(
@@ -656,6 +693,11 @@ def history():
     cumulative_series: Dict[str, List[int]] = {
         series["key"]: [] for series in LINE_SERIES
     }
+    product_totals: Dict[str, float] = {}
+    shift_totals: Dict[str, float] = {"Day Shift": 0.0, "Night Shift": 0.0}
+    scrap_series: List[Dict[str, float]] = []
+    downtime_totals: Dict[str, float] = {}
+    custom_builder_rows: List[Dict[str, object]] = []
 
     for customer in stack_customers:
         stack_datasets.append(
@@ -666,6 +708,7 @@ def history():
                 "stack": "gates-produced",
             }
         )
+        product_totals.setdefault(customer.name, 0.0)
 
     running_totals = {series["key"]: 0 for series in LINE_SERIES}
     current_month: tuple[int, int] | None = None
@@ -702,14 +745,29 @@ def history():
             produced_sum += produced_value
             packaged_sum += packaged_value
 
+        display_totals: List[Dict[str, object]] = []
         for dataset, customer in zip(stack_datasets, stack_customers):
             produced_value = per_customer_produced.get(customer.id, 0)
+            packaged_value = per_customer_packaged.get(customer.id, 0)
             if customer.is_other_bucket:
                 produced_value += sum(
                     per_customer_produced.get(grouped.id, 0)
                     for grouped in grouped_customers
                 )
+                packaged_value += sum(
+                    per_customer_packaged.get(grouped.id, 0)
+                    for grouped in grouped_customers
+                )
+
             dataset["data"].append(produced_value)
+            product_totals[customer.name] = product_totals.get(customer.name, 0.0) + float(produced_value)
+            display_totals.append(
+                {
+                    "customer": customer,
+                    "produced": float(produced_value),
+                    "packaged": float(packaged_value),
+                }
+            )
 
 
         controllers_total = (record.controllers_4_stop or 0) + (
@@ -754,6 +812,100 @@ def history():
 
         overlay_values.append(float(output_value) if output_value is not None else None)
         total_produced_values.append(produced_sum)
+
+        base_hours = float((record.gates_employees or 0) * ProductionDailyRecord.LABOR_SHIFT_HOURS)
+        overtime_hours = _decimal_to_float(record.gates_hours_ot)
+        total_hours = _decimal_to_float(gates_total_hours_value)
+        if total_hours <= 0:
+            day_ratio = 1.0
+        else:
+            day_ratio = base_hours / total_hours if total_hours else 1.0
+            day_ratio = max(0.0, min(day_ratio, 1.0))
+        night_ratio = max(0.0, 1.0 - day_ratio)
+
+        day_produced = produced_sum * day_ratio
+        night_produced = produced_sum - day_produced
+        shift_totals["Day Shift"] += day_produced
+        if night_produced > 0:
+            shift_totals["Night Shift"] += night_produced
+
+        scrap_total = 0.0
+        for totals in display_totals:
+            scrap_value = max(totals["produced"] - totals["packaged"], 0.0)
+            scrap_total += scrap_value
+        scrap_series.append(
+            {
+                "date": record.entry_date.strftime("%Y-%m-%d"),
+                "produced": float(produced_sum),
+                "scrap": scrap_total,
+            }
+        )
+
+        downtime_cause = _infer_downtime_cause(record.daily_notes)
+        if goal_value is not None:
+            downtime_impact = max(goal_value - produced_sum, 0.0)
+        else:
+            downtime_impact = _decimal_to_float(record.additional_hours_ot)
+        downtime_totals[downtime_cause] = (
+            downtime_totals.get(downtime_cause, 0.0) + float(downtime_impact)
+        )
+
+        shift_entries: List[tuple[str, float, float]] = []
+        if day_ratio > 0:
+            shift_entries.append(("Day Shift", day_ratio, base_hours))
+        if night_ratio > 0:
+            shift_entries.append(("Night Shift", night_ratio, overtime_hours))
+        if not shift_entries:
+            shift_entries.append(("Day Shift", 1.0, base_hours))
+
+        efficiency_value = float(output_value) if output_value is not None else None
+        goal_for_day = goal_value
+        day_of_week = record.day_of_week or record.entry_date.strftime("%A")
+        for totals in display_totals:
+            scrap_value = max(totals["produced"] - totals["packaged"], 0.0)
+            for shift_name, ratio, shift_hours in shift_entries:
+                metrics: Dict[str, float | None] = {
+                    "gates_produced": totals["produced"] * ratio,
+                    "gates_packaged": totals["packaged"] * ratio,
+                    "scrap": scrap_value * ratio,
+                    "runtime_hours": shift_hours,
+                    "total_hours": total_hours * ratio if total_hours else 0.0,
+                    "overtime_hours": overtime_hours if shift_name == "Night Shift" else 0.0,
+                }
+                if efficiency_value is not None:
+                    metrics["efficiency"] = efficiency_value
+                    metrics["produced_per_hour"] = (
+                        totals["produced"] * ratio / shift_hours
+                        if shift_hours
+                        else None
+                    )
+                else:
+                    metrics["efficiency"] = None
+                    metrics["produced_per_hour"] = (
+                        totals["produced"] * ratio / shift_hours
+                        if shift_hours
+                        else None
+                    )
+                if goal_for_day is not None:
+                    metrics["goal"] = goal_for_day * ratio
+                    metrics["goal_gap"] = goal_for_day * ratio - totals["produced"] * ratio
+                custom_builder_rows.append(
+                    {
+                        "date": record.entry_date.isoformat(),
+                        "date_display": record.entry_date.strftime("%b %d, %Y"),
+                        "day_of_week": day_of_week,
+                        "month": record.entry_date.strftime("%Y-%m"),
+                        "week": record.entry_date.strftime("%G-W%V"),
+                        "customer": totals["customer"].name,
+                        "customer_bucket": "Other"
+                        if totals["customer"].is_other_bucket
+                        else "Primary",
+                        "product_type": totals["customer"].name,
+                        "shift": shift_name,
+                        "downtime_cause": downtime_cause,
+                        "metrics": metrics,
+                    }
+                )
 
 
         additional_total_hours_value = record.additional_total_labor_hours
@@ -861,7 +1013,7 @@ def history():
             trendline_values = [slope * x + intercept for x in range(len(total_produced_values))]
 
     overlay_datasets: List[Dict[str, object]] = []
-    if trendline_values:
+    if chart_settings.show_trend and trendline_values:
         overlay_datasets.append(
             {
                 "label": "Gates Produced Trend",
@@ -894,11 +1046,6 @@ def history():
             }
         )
 
-    goal_value = (
-        float(chart_settings.goal_value)
-        if chart_settings.goal_value is not None
-        else None
-    )
     if chart_labels and chart_settings.show_goal and goal_value is not None:
         overlay_datasets.append(
             {
@@ -909,10 +1056,109 @@ def history():
                 "borderColor": "#f97316",
                 "borderDash": [6, 6],
                 "pointRadius": 0,
+                "tension": 0,
+                "spanGaps": True,
                 "fill": False,
                 "order": 3,
             }
         )
+
+    shift_palette = {
+        "Day Shift": "#0ea5e9",
+        "Night Shift": "#6366f1",
+    }
+    shift_labels = []
+    shift_values = []
+    shift_colors = []
+    for label, value in shift_totals.items():
+        if value <= 0:
+            continue
+        shift_labels.append(label)
+        shift_values.append(round(value, 2))
+        shift_colors.append(shift_palette.get(label, "#3b82f6"))
+    shift_chart_data = {
+        "labels": shift_labels,
+        "datasets": [
+            {
+                "label": "Gates Produced",
+                "data": shift_values,
+                "backgroundColor": shift_colors,
+            }
+        ],
+    }
+
+    product_items = sorted(
+        ((label, total) for label, total in product_totals.items() if total > 0),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    color_lookup = {
+        customer.name: customer.color or "#3b82f6" for customer in stack_customers
+    }
+    product_type_chart_data = {
+        "labels": [item[0] for item in product_items],
+        "data": [round(item[1], 2) for item in product_items],
+        "backgroundColor": [
+            color_lookup.get(item[0], "#3b82f6") for item in product_items
+        ],
+    }
+
+    scrap_chart_data = {
+        "labels": [point["date"] for point in scrap_series],
+        "produced": [round(point["produced"], 2) for point in scrap_series],
+        "scrap": [round(point["scrap"], 2) for point in scrap_series],
+    }
+
+    downtime_items = sorted(
+        ((label, total) for label, total in downtime_totals.items() if total > 0),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    downtime_total_value = sum(item[1] for item in downtime_items)
+    downtime_running = 0.0
+    downtime_cumulative: List[float] = []
+    for _, impact in downtime_items:
+        downtime_running += impact
+        if downtime_total_value:
+            downtime_cumulative.append(
+                round(downtime_running / downtime_total_value * 100, 2)
+            )
+        else:
+            downtime_cumulative.append(0.0)
+    downtime_chart_data = {
+        "labels": [item[0] for item in downtime_items],
+        "impact": [round(item[1], 2) for item in downtime_items],
+        "cumulative": downtime_cumulative,
+    }
+
+    cumulative_produced = []
+    running_produced_total = 0
+    for value in total_produced_values:
+        running_produced_total += value
+        cumulative_produced.append(running_produced_total)
+
+    cumulative_goal_values: List[float] = []
+    if goal_value is not None:
+        running_goal_total = 0.0
+        for _ in chart_labels:
+            running_goal_total += goal_value
+            cumulative_goal_values.append(round(running_goal_total, 2))
+
+    cumulative_goal_chart_data = {
+        "labels": chart_labels,
+        "produced": cumulative_produced,
+        "goal": cumulative_goal_values,
+    }
+
+    chart_visibility = {
+        "show_trend": chart_settings.show_trend,
+        "show_goal": chart_settings.show_goal and goal_value is not None,
+        "show_shift_chart": chart_settings.show_shift_chart,
+        "show_product_type_chart": chart_settings.show_product_type_chart,
+        "show_scrap_chart": chart_settings.show_scrap_chart,
+        "show_downtime_chart": chart_settings.show_downtime_chart,
+        "show_cumulative_goal_chart": chart_settings.show_cumulative_goal_chart,
+    }
 
     chart_axis_settings = {
         "primary": {
@@ -969,6 +1215,14 @@ def history():
         line_datasets=line_datasets,
         overlay_datasets=overlay_datasets,
         chart_axis_settings=chart_axis_settings,
+        chart_visibility=chart_visibility,
+        shift_chart_data=shift_chart_data,
+        product_type_chart_data=product_type_chart_data,
+        scrap_chart_data=scrap_chart_data,
+        downtime_chart_data=downtime_chart_data,
+        cumulative_goal_chart_data=cumulative_goal_chart_data,
+        custom_builder_rows=custom_builder_rows,
+        custom_builder_defaults=chart_settings.custom_builder_state or {},
         start_date=start_date,
         end_date=end_date,
         email_preview=email_preview,
@@ -999,6 +1253,13 @@ def production_settings():
         "secondary_step": _format_optional_decimal(chart_settings.secondary_step),
         "goal_value": _format_optional_decimal(chart_settings.goal_value),
         "show_goal": chart_settings.show_goal,
+        "show_trend": chart_settings.show_trend,
+        "show_shift_chart": chart_settings.show_shift_chart,
+        "show_product_type_chart": chart_settings.show_product_type_chart,
+        "show_scrap_chart": chart_settings.show_scrap_chart,
+        "show_downtime_chart": chart_settings.show_downtime_chart,
+        "show_cumulative_goal_chart": chart_settings.show_cumulative_goal_chart,
+        "custom_builder": chart_settings.custom_builder_state or {},
     }
 
 
@@ -1116,6 +1377,30 @@ def production_settings():
                 parsed_values[field] = parsed
 
             show_goal_value = request.form.get("show_goal") is not None
+            show_trend_value = request.form.get("show_trend") is not None
+            show_shift_chart_value = request.form.get("show_shift_chart") is not None
+            show_product_type_chart_value = (
+                request.form.get("show_product_type_chart") is not None
+            )
+            show_scrap_chart_value = (
+                request.form.get("show_scrap_chart") is not None
+            )
+            show_downtime_chart_value = (
+                request.form.get("show_downtime_chart") is not None
+            )
+            show_cumulative_goal_chart_value = (
+                request.form.get("show_cumulative_goal_chart") is not None
+            )
+
+            builder_state = {
+                "dimension": (request.form.get("builder_dimension") or "").strip() or None,
+                "series": (request.form.get("builder_series") or "").strip() or None,
+                "metric": (request.form.get("builder_metric") or "").strip() or None,
+                "aggregation": (request.form.get("builder_aggregation") or "").strip()
+                or None,
+                "chart_type": (request.form.get("builder_chart_type") or "").strip()
+                or None,
+            }
 
             if has_errors:
                 chart_settings_form_values = {
@@ -1127,11 +1412,31 @@ def production_settings():
                     "secondary_step": request.form.get("secondary_step", ""),
                     "goal_value": request.form.get("goal_value", ""),
                     "show_goal": show_goal_value,
+                    "show_trend": show_trend_value,
+                    "show_shift_chart": show_shift_chart_value,
+                    "show_product_type_chart": show_product_type_chart_value,
+                    "show_scrap_chart": show_scrap_chart_value,
+                    "show_downtime_chart": show_downtime_chart_value,
+                    "show_cumulative_goal_chart": show_cumulative_goal_chart_value,
+                    "custom_builder": {
+                        key: value for key, value in builder_state.items() if value
+                    },
                 }
             else:
                 for field in field_labels:
                     setattr(chart_settings, field, parsed_values[field])
                 chart_settings.show_goal = show_goal_value
+                chart_settings.show_trend = show_trend_value
+                chart_settings.show_shift_chart = show_shift_chart_value
+                chart_settings.show_product_type_chart = show_product_type_chart_value
+                chart_settings.show_scrap_chart = show_scrap_chart_value
+                chart_settings.show_downtime_chart = show_downtime_chart_value
+                chart_settings.show_cumulative_goal_chart = (
+                    show_cumulative_goal_chart_value
+                )
+                chart_settings.custom_builder_state = {
+                    key: value for key, value in builder_state.items() if value
+                }
                 db.session.commit()
                 flash("Chart settings updated.", "success")
                 return redirect(url_for("production.production_settings"))

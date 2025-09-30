@@ -49,7 +49,110 @@
             <div class="chart-card">
                 <canvas id="cumulativeChart" aria-label="Line chart showing cumulative month-to-date production totals"></canvas>
             </div>
+            {% if chart_visibility.show_shift_chart %}
+            <div class="chart-card">
+                <canvas id="shiftChart" aria-label="Bar chart showing production by shift" hidden></canvas>
+                <p class="chart-empty" data-chart-empty-for="shiftChart">No shift production data available for the selected range.</p>
+            </div>
+            {% endif %}
+            {% if chart_visibility.show_product_type_chart %}
+            <div class="chart-card">
+                <canvas id="productTypeChart" aria-label="Horizontal bar chart showing production by product type" hidden></canvas>
+                <p class="chart-empty" data-chart-empty-for="productTypeChart">No production by product type data available for the selected range.</p>
+            </div>
+            {% endif %}
+            {% if chart_visibility.show_scrap_chart %}
+            <div class="chart-card">
+                <canvas id="scrapChart" aria-label="Line chart showing scrap and rejects over time" hidden></canvas>
+                <p class="chart-empty" data-chart-empty-for="scrapChart">No scrap or reject data available for the selected range.</p>
+            </div>
+            {% endif %}
+            {% if chart_visibility.show_downtime_chart %}
+            <div class="chart-card">
+                <canvas id="downtimeChart" aria-label="Pareto chart of downtime causes" hidden></canvas>
+                <p class="chart-empty" data-chart-empty-for="downtimeChart">No downtime information recorded for the selected range.</p>
+            </div>
+            {% endif %}
+            {% if chart_visibility.show_cumulative_goal_chart %}
+            <div class="chart-card">
+                <canvas id="cumulativeGoalChart" aria-label="Line chart comparing cumulative production against goal" hidden></canvas>
+                <p class="chart-empty" data-chart-empty-for="cumulativeGoalChart">No goal comparison data available for the selected range.</p>
+            </div>
+            {% endif %}
         </div>
+    </section>
+
+    <section class="dashboard-section">
+        <div class="section-header">
+            <h3>Custom Graph Builder</h3>
+        </div>
+        <p class="section-help">Use the configurable controls to build ad-hoc production charts by combining dimensions and metrics of interest.</p>
+        <form class="form-grid custom-builder-controls" id="customBuilderControls" aria-label="Custom graph builder controls">
+            <div class="form-field">
+                <label for="builderDimensionSelect" class="field-label">Primary Dimension</label>
+                <select id="builderDimensionSelect" name="builder_dimension">
+                    <option value="" {% if not custom_builder_defaults.get('dimension') %}selected{% endif %}>Date</option>
+                    <option value="customer" {% if custom_builder_defaults.get('dimension') == 'customer' %}selected{% endif %}>Customer</option>
+                    <option value="product_type" {% if custom_builder_defaults.get('dimension') == 'product_type' %}selected{% endif %}>Product Type</option>
+                    <option value="shift" {% if custom_builder_defaults.get('dimension') == 'shift' %}selected{% endif %}>Shift</option>
+                    <option value="downtime_cause" {% if custom_builder_defaults.get('dimension') == 'downtime_cause' %}selected{% endif %}>Downtime Cause</option>
+                    <option value="day_of_week" {% if custom_builder_defaults.get('dimension') == 'day_of_week' %}selected{% endif %}>Day of Week</option>
+                    <option value="month" {% if custom_builder_defaults.get('dimension') == 'month' %}selected{% endif %}>Month</option>
+                    <option value="week" {% if custom_builder_defaults.get('dimension') == 'week' %}selected{% endif %}>Week</option>
+                </select>
+            </div>
+            <div class="form-field">
+                <label for="builderSeriesSelect" class="field-label">Breakdown Series</label>
+                <select id="builderSeriesSelect" name="builder_series">
+                    <option value="" {% if not custom_builder_defaults.get('series') %}selected{% endif %}>None</option>
+                    <option value="customer" {% if custom_builder_defaults.get('series') == 'customer' %}selected{% endif %}>Customer</option>
+                    <option value="product_type" {% if custom_builder_defaults.get('series') == 'product_type' %}selected{% endif %}>Product Type</option>
+                    <option value="shift" {% if custom_builder_defaults.get('series') == 'shift' %}selected{% endif %}>Shift</option>
+                    <option value="downtime_cause" {% if custom_builder_defaults.get('series') == 'downtime_cause' %}selected{% endif %}>Downtime Cause</option>
+                    <option value="day_of_week" {% if custom_builder_defaults.get('series') == 'day_of_week' %}selected{% endif %}>Day of Week</option>
+                    <option value="month" {% if custom_builder_defaults.get('series') == 'month' %}selected{% endif %}>Month</option>
+                    <option value="week" {% if custom_builder_defaults.get('series') == 'week' %}selected{% endif %}>Week</option>
+                </select>
+            </div>
+            <div class="form-field">
+                <label for="builderMetricSelect" class="field-label">Metric</label>
+                <select id="builderMetricSelect" name="builder_metric">
+                    <option value="gates_produced" {% if custom_builder_defaults.get('metric') == 'gates_produced' or not custom_builder_defaults.get('metric') %}selected{% endif %}>Gates Produced</option>
+                    <option value="gates_packaged" {% if custom_builder_defaults.get('metric') == 'gates_packaged' %}selected{% endif %}>Gates Packaged</option>
+                    <option value="scrap" {% if custom_builder_defaults.get('metric') == 'scrap' %}selected{% endif %}>Scrap / Rejects</option>
+                    <option value="runtime_hours" {% if custom_builder_defaults.get('metric') == 'runtime_hours' %}selected{% endif %}>Runtime Hours</option>
+                    <option value="overtime_hours" {% if custom_builder_defaults.get('metric') == 'overtime_hours' %}selected{% endif %}>Overtime Hours</option>
+                    <option value="produced_per_hour" {% if custom_builder_defaults.get('metric') == 'produced_per_hour' %}selected{% endif %}>Produced per Hour</option>
+                    <option value="efficiency" {% if custom_builder_defaults.get('metric') == 'efficiency' %}selected{% endif %}>Efficiency</option>
+                    <option value="goal" {% if custom_builder_defaults.get('metric') == 'goal' %}selected{% endif %}>Goal</option>
+                    <option value="goal_gap" {% if custom_builder_defaults.get('metric') == 'goal_gap' %}selected{% endif %}>Goal Gap</option>
+                </select>
+            </div>
+            <div class="form-field">
+                <label for="builderAggregationSelect" class="field-label">Aggregation</label>
+                <select id="builderAggregationSelect" name="builder_aggregation">
+                    <option value="sum" {% if custom_builder_defaults.get('aggregation') == 'sum' or not custom_builder_defaults.get('aggregation') %}selected{% endif %}>Sum</option>
+                    <option value="average" {% if custom_builder_defaults.get('aggregation') == 'average' %}selected{% endif %}>Average</option>
+                </select>
+            </div>
+            <div class="form-field">
+                <label for="builderChartTypeSelect" class="field-label">Chart Type</label>
+                <select id="builderChartTypeSelect" name="builder_chart_type">
+                    <option value="bar" {% if custom_builder_defaults.get('chart_type') == 'bar' or not custom_builder_defaults.get('chart_type') %}selected{% endif %}>Bar</option>
+                    <option value="line" {% if custom_builder_defaults.get('chart_type') == 'line' %}selected{% endif %}>Line</option>
+                    <option value="stacked" {% if custom_builder_defaults.get('chart_type') == 'stacked' %}selected{% endif %}>Stacked Bar</option>
+                </select>
+            </div>
+            <div class="form-field">
+                <label class="field-label" for="builderResetButton">&nbsp;</label>
+                <button type="button" class="action-btn" id="builderResetButton">Reset to Defaults</button>
+            </div>
+        </form>
+        <div class="chart-card custom-builder-card">
+            <canvas id="customBuilderChart" aria-label="Custom graph builder chart" hidden></canvas>
+            <p class="chart-empty" data-chart-empty-for="customBuilderChart">Select a combination of dimensions and metrics to build a chart.</p>
+        </div>
+        <p class="chart-note" id="customBuilderSummary"></p>
     </section>
 
     <div class="chart-modal is-hidden" id="chartModal" role="dialog" aria-modal="true" aria-label="Expanded chart view">
@@ -206,6 +309,9 @@
     const lineDatasets = {{ line_datasets|tojson }};
     const chartAxisSettings = {{ chart_axis_settings|tojson }};
     const emailPreview = {{ email_preview|tojson }};
+    const chartVisibility = {{ chart_visibility|tojson }};
+    const customBuilderRows = {{ custom_builder_rows|tojson }};
+    const customBuilderDefaults = {{ custom_builder_defaults|tojson }};
 
     const parseDateLabel = (label) => {
         if (typeof label !== 'string') {
@@ -226,6 +332,783 @@
         }
         const dayOfWeek = parsedDate.getUTCDay();
         return dayOfWeek === 0 || dayOfWeek === 6;
+    };
+
+    const toggleChartFallback = (canvasId, hasData) => {
+        const canvas = document.getElementById(canvasId);
+        const fallback = document.querySelector(`[data-chart-empty-for="${canvasId}"]`);
+        if (canvas) {
+            canvas.hidden = !hasData;
+        }
+        if (fallback) {
+            fallback.hidden = hasData;
+        }
+    };
+
+    const chartColorPalette = [
+        '#2563eb',
+        '#f97316',
+        '#16a34a',
+        '#8b5cf6',
+        '#ec4899',
+        '#14b8a6',
+        '#facc15',
+    ];
+
+    const shiftColorMap = {
+        'Day Shift': '#0ea5e9',
+        'Night Shift': '#6366f1',
+        Unspecified: '#3b82f6',
+    };
+
+    const dimensionAccessors = {
+        date: (row) => row.date_display || row.date,
+        customer: (row) => row.customer,
+        product_type: (row) => row.product_type,
+        shift: (row) => row.shift,
+        downtime_cause: (row) => row.downtime_cause,
+        day_of_week: (row) => row.day_of_week,
+        month: (row) => row.month,
+        week: (row) => row.week,
+    };
+
+    const fallbackDimensionValue = 'Unspecified';
+
+    const getDimensionValue = (row, key) => {
+        if (!row) {
+            return fallbackDimensionValue;
+        }
+        const accessor = dimensionAccessors[key] || ((entry) => entry?.[key]);
+        const value = accessor(row);
+        if (value === undefined || value === null || value === '') {
+            return fallbackDimensionValue;
+        }
+        return String(value);
+    };
+
+    const buildShiftAggregate = (rows) => {
+        if (!Array.isArray(rows) || !rows.length) {
+            return { labels: [], data: [], colors: [] };
+        }
+        const totals = new Map();
+        rows.forEach((row) => {
+            const produced = Number(row?.metrics?.gates_produced ?? 0);
+            if (!Number.isFinite(produced) || produced === 0) {
+                return;
+            }
+            const label = row.shift || fallbackDimensionValue;
+            totals.set(label, (totals.get(label) || 0) + produced);
+        });
+        const labels = [];
+        const data = [];
+        const colors = [];
+        totals.forEach((value, label) => {
+            if (!value) {
+                return;
+            }
+            labels.push(label);
+            data.push(Number(value.toFixed(2)));
+            colors.push(shiftColorMap[label] || '#3b82f6');
+        });
+        return { labels, data, colors };
+    };
+
+    const buildProductAggregate = (rows) => {
+        if (!Array.isArray(rows) || !rows.length) {
+            return { labels: [], data: [], colors: [] };
+        }
+        const totals = new Map();
+        rows.forEach((row) => {
+            const produced = Number(row?.metrics?.gates_produced ?? 0);
+            if (!Number.isFinite(produced) || produced === 0) {
+                return;
+            }
+            const label = row.product_type || fallbackDimensionValue;
+            totals.set(label, (totals.get(label) || 0) + produced);
+        });
+        const sorted = Array.from(totals.entries()).filter(([, value]) => value).sort((a, b) => b[1] - a[1]);
+        const labels = sorted.map((entry) => entry[0]);
+        const data = sorted.map((entry) => Number(entry[1].toFixed(2)));
+        const colorLookup = new Map();
+        if (Array.isArray(stackedDatasets)) {
+            stackedDatasets.forEach((dataset) => {
+                if (dataset?.label) {
+                    colorLookup.set(dataset.label, dataset.backgroundColor || '#3b82f6');
+                }
+            });
+        }
+        const colors = labels.map((label) => colorLookup.get(label) || '#3b82f6');
+        return { labels, data, colors };
+    };
+
+    const buildScrapAggregate = (rows) => {
+        if (!Array.isArray(rows) || !rows.length) {
+            return { labels: [], produced: [], scrap: [] };
+        }
+        const dailyTotals = new Map();
+        rows.forEach((row) => {
+            const date = row.date || row.date_display;
+            if (!date) {
+                return;
+            }
+            const produced = Number(row?.metrics?.gates_produced ?? 0);
+            const scrap = Number(row?.metrics?.scrap ?? 0);
+            if (!dailyTotals.has(date)) {
+                dailyTotals.set(date, { produced: 0, scrap: 0 });
+            }
+            const entry = dailyTotals.get(date);
+            if (Number.isFinite(produced)) {
+                entry.produced += produced;
+            }
+            if (Number.isFinite(scrap)) {
+                entry.scrap += scrap;
+            }
+        });
+        const labels = Array.from(dailyTotals.keys()).sort();
+        const producedSeries = labels.map((label) => Number(dailyTotals.get(label).produced.toFixed(2)));
+        const scrapSeries = labels.map((label) => Number(dailyTotals.get(label).scrap.toFixed(2)));
+        return { labels, produced: producedSeries, scrap: scrapSeries };
+    };
+
+    const buildDowntimeAggregate = (rows) => {
+        if (!Array.isArray(rows) || !rows.length) {
+            return { labels: [], impact: [], cumulative: [] };
+        }
+        const totals = new Map();
+        rows.forEach((row) => {
+            const rawGap = row?.metrics?.goal_gap;
+            const rawHours = row?.metrics?.overtime_hours;
+            let impact = 0;
+            if (Number.isFinite(rawGap)) {
+                impact = Math.max(Number(rawGap), 0);
+            } else if (Number.isFinite(rawHours)) {
+                impact = Math.max(Number(rawHours), 0);
+            }
+            if (!impact) {
+                return;
+            }
+            const cause = row.downtime_cause || fallbackDimensionValue;
+            totals.set(cause, (totals.get(cause) || 0) + impact);
+        });
+        const sorted = Array.from(totals.entries()).filter(([, value]) => value).sort((a, b) => b[1] - a[1]);
+        const labels = sorted.map((entry) => entry[0]);
+        const impact = sorted.map((entry) => Number(entry[1].toFixed(2)));
+        const totalImpact = impact.reduce((sum, value) => sum + value, 0);
+        const cumulative = [];
+        let running = 0;
+        impact.forEach((value) => {
+            running += value;
+            cumulative.push(totalImpact ? Number(((running / totalImpact) * 100).toFixed(2)) : 0);
+        });
+        return { labels, impact, cumulative };
+    };
+
+    const buildCumulativeGoalAggregate = (rows) => {
+        if (!Array.isArray(rows) || !rows.length) {
+            return { labels: [], produced: [], goal: [] };
+        }
+        const dailyTotals = new Map();
+        rows.forEach((row) => {
+            const date = row.date || row.date_display;
+            if (!date) {
+                return;
+            }
+            const produced = Number(row?.metrics?.gates_produced ?? 0);
+            const goal = Number(row?.metrics?.goal ?? 0);
+            if (!dailyTotals.has(date)) {
+                dailyTotals.set(date, { produced: 0, goal: 0 });
+            }
+            const entry = dailyTotals.get(date);
+            if (Number.isFinite(produced)) {
+                entry.produced += produced;
+            }
+            if (Number.isFinite(goal)) {
+                entry.goal += goal;
+            }
+        });
+        const labels = Array.from(dailyTotals.keys()).sort();
+        const producedSeries = [];
+        const goalSeries = [];
+        let producedRunning = 0;
+        let goalRunning = 0;
+        labels.forEach((label) => {
+            const entry = dailyTotals.get(label);
+            producedRunning += entry.produced;
+            goalRunning += entry.goal;
+            producedSeries.push(Number(producedRunning.toFixed(2)));
+            goalSeries.push(Number(goalRunning.toFixed(2)));
+        });
+        return { labels, produced: producedSeries, goal: goalSeries };
+    };
+
+    const filterRowsForWeekends = (includeWeekends) => {
+        if (!Array.isArray(customBuilderRows)) {
+            return [];
+        }
+        if (includeWeekends) {
+            return customBuilderRows.slice();
+        }
+        return customBuilderRows.filter((row) => !isWeekendLabel(row.date));
+    };
+
+    let shiftChart = null;
+    let productTypeChart = null;
+    let scrapChart = null;
+    let downtimeChart = null;
+    let cumulativeGoalChart = null;
+    let customBuilderChart = null;
+    let activeBuilderRows = filterRowsForWeekends(true);
+
+    const registerExpandableChart = (canvasElement, chartInstance) => {
+        if (!canvasElement || !chartInstance) {
+            return;
+        }
+        if (
+            typeof window !== 'undefined' &&
+            typeof window.__registerChartExpansion === 'function'
+        ) {
+            window.__registerChartExpansion(canvasElement, chartInstance);
+        }
+    };
+
+    const ensureShiftChart = (aggregate) => {
+        if (!chartVisibility?.show_shift_chart) {
+            return;
+        }
+        const canvasId = 'shiftChart';
+        const hasData = aggregate && Array.isArray(aggregate.labels) && aggregate.labels.length > 0;
+        if (!hasData) {
+            toggleChartFallback(canvasId, false);
+            if (shiftChart) {
+                shiftChart.destroy();
+                shiftChart = null;
+            }
+            return;
+        }
+        toggleChartFallback(canvasId, true);
+        const data = {
+            labels: aggregate.labels,
+            datasets: [
+                {
+                    label: 'Gates Produced',
+                    data: aggregate.data,
+                    backgroundColor: aggregate.colors,
+                },
+            ],
+        };
+        const options = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Production by Shift' },
+                legend: { display: false },
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: 'Gates Produced' },
+                },
+            },
+        };
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) {
+            return;
+        }
+        if (shiftChart) {
+            shiftChart.data = data;
+            shiftChart.options = options;
+            shiftChart.update();
+            return;
+        }
+        shiftChart = new Chart(canvas, { type: 'bar', data, options });
+        registerExpandableChart(canvas, shiftChart);
+    };
+
+    const ensureProductTypeChart = (aggregate) => {
+        if (!chartVisibility?.show_product_type_chart) {
+            return;
+        }
+        const canvasId = 'productTypeChart';
+        const hasData = aggregate && Array.isArray(aggregate.labels) && aggregate.labels.length > 0;
+        if (!hasData) {
+            toggleChartFallback(canvasId, false);
+            if (productTypeChart) {
+                productTypeChart.destroy();
+                productTypeChart = null;
+            }
+            return;
+        }
+        toggleChartFallback(canvasId, true);
+        const data = {
+            labels: aggregate.labels,
+            datasets: [
+                {
+                    label: 'Gates Produced',
+                    data: aggregate.data,
+                    backgroundColor: aggregate.colors,
+                },
+            ],
+        };
+        const options = {
+            responsive: true,
+            maintainAspectRatio: false,
+            indexAxis: 'y',
+            plugins: {
+                title: { display: true, text: 'Production by Product Type' },
+                legend: { display: false },
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    title: { display: true, text: 'Gates Produced' },
+                },
+            },
+        };
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) {
+            return;
+        }
+        if (productTypeChart) {
+            productTypeChart.data = data;
+            productTypeChart.options = options;
+            productTypeChart.update();
+            return;
+        }
+        productTypeChart = new Chart(canvas, { type: 'bar', data, options });
+        registerExpandableChart(canvas, productTypeChart);
+    };
+
+    const ensureScrapChart = (aggregate) => {
+        if (!chartVisibility?.show_scrap_chart) {
+            return;
+        }
+        const canvasId = 'scrapChart';
+        const hasData =
+            aggregate && Array.isArray(aggregate.labels) && aggregate.labels.length > 0;
+        if (!hasData) {
+            toggleChartFallback(canvasId, false);
+            if (scrapChart) {
+                scrapChart.destroy();
+                scrapChart = null;
+            }
+            return;
+        }
+        toggleChartFallback(canvasId, true);
+        const data = {
+            labels: aggregate.labels,
+            datasets: [
+                {
+                    label: 'Total Produced',
+                    data: aggregate.produced,
+                    borderColor: '#2563eb',
+                    backgroundColor: 'rgba(37, 99, 235, 0.2)',
+                    fill: false,
+                    tension: 0.25,
+                },
+                {
+                    label: 'Scrap / Rejects',
+                    data: aggregate.scrap,
+                    borderColor: '#ef4444',
+                    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                    fill: false,
+                    tension: 0.25,
+                },
+            ],
+        };
+        const options = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Scrap and Rejects Over Time' },
+                legend: { position: 'bottom' },
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: 'Units' },
+                },
+            },
+        };
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) {
+            return;
+        }
+        if (scrapChart) {
+            scrapChart.data = data;
+            scrapChart.options = options;
+            scrapChart.update();
+            return;
+        }
+        scrapChart = new Chart(canvas, { type: 'line', data, options });
+        registerExpandableChart(canvas, scrapChart);
+    };
+
+    const ensureDowntimeChart = (aggregate) => {
+        if (!chartVisibility?.show_downtime_chart) {
+            return;
+        }
+        const canvasId = 'downtimeChart';
+        const hasData =
+            aggregate && Array.isArray(aggregate.labels) && aggregate.labels.length > 0;
+        if (!hasData) {
+            toggleChartFallback(canvasId, false);
+            if (downtimeChart) {
+                downtimeChart.destroy();
+                downtimeChart = null;
+            }
+            return;
+        }
+        toggleChartFallback(canvasId, true);
+        const data = {
+            labels: aggregate.labels,
+            datasets: [
+                {
+                    type: 'bar',
+                    label: 'Impact (units)',
+                    data: aggregate.impact,
+                    backgroundColor: 'rgba(249, 115, 22, 0.6)',
+                    borderColor: '#f97316',
+                    yAxisID: 'y',
+                },
+                {
+                    type: 'line',
+                    label: 'Cumulative %',
+                    data: aggregate.cumulative,
+                    borderColor: '#2563eb',
+                    backgroundColor: 'rgba(37, 99, 235, 0.15)',
+                    yAxisID: 'y-percentage',
+                    fill: false,
+                    tension: 0.2,
+                    pointRadius: 3,
+                },
+            ],
+        };
+        const options = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Downtime Cause Analysis' },
+                legend: { position: 'bottom' },
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: 'Impact (units)' },
+                },
+                'y-percentage': {
+                    beginAtZero: true,
+                    suggestedMax: 100,
+                    position: 'right',
+                    grid: { drawOnChartArea: false },
+                    ticks: {
+                        callback: (value) => `${value}%`,
+                    },
+                    title: { display: true, text: 'Cumulative %' },
+                },
+            },
+        };
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) {
+            return;
+        }
+        if (downtimeChart) {
+            downtimeChart.data = data;
+            downtimeChart.options = options;
+            downtimeChart.update();
+            return;
+        }
+        downtimeChart = new Chart(canvas, { data, options });
+        registerExpandableChart(canvas, downtimeChart);
+    };
+
+    const ensureCumulativeGoalChart = (aggregate) => {
+        if (!chartVisibility?.show_cumulative_goal_chart) {
+            return;
+        }
+        const canvasId = 'cumulativeGoalChart';
+        const hasData =
+            aggregate && Array.isArray(aggregate.labels) && aggregate.labels.length > 0;
+        if (!hasData) {
+            toggleChartFallback(canvasId, false);
+            if (cumulativeGoalChart) {
+                cumulativeGoalChart.destroy();
+                cumulativeGoalChart = null;
+            }
+            return;
+        }
+        toggleChartFallback(canvasId, true);
+        const datasets = [
+            {
+                label: 'Cumulative Produced',
+                data: aggregate.produced,
+                borderColor: '#2563eb',
+                backgroundColor: 'rgba(37, 99, 235, 0.15)',
+                fill: false,
+                tension: 0.25,
+            },
+        ];
+        if (Array.isArray(aggregate.goal) && aggregate.goal.some((value) => value)) {
+            datasets.push({
+                label: 'Cumulative Goal',
+                data: aggregate.goal,
+                borderColor: '#f97316',
+                backgroundColor: 'rgba(249, 115, 22, 0.15)',
+                fill: false,
+                borderDash: [6, 6],
+                tension: 0.2,
+            });
+        }
+        const data = {
+            labels: aggregate.labels,
+            datasets,
+        };
+        const options = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Cumulative Production vs Goal' },
+                legend: { position: 'bottom' },
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: 'Units' },
+                },
+            },
+        };
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) {
+            return;
+        }
+        if (cumulativeGoalChart) {
+            cumulativeGoalChart.data = data;
+            cumulativeGoalChart.options = options;
+            cumulativeGoalChart.update();
+            return;
+        }
+        cumulativeGoalChart = new Chart(canvas, { type: 'line', data, options });
+        registerExpandableChart(canvas, cumulativeGoalChart);
+    };
+
+    const recomputeAdditionalCharts = (rows) => {
+        ensureShiftChart(buildShiftAggregate(rows));
+        ensureProductTypeChart(buildProductAggregate(rows));
+        ensureScrapChart(buildScrapAggregate(rows));
+        ensureDowntimeChart(buildDowntimeAggregate(rows));
+        ensureCumulativeGoalChart(buildCumulativeGoalAggregate(rows));
+    };
+
+    const builderDimensionSelect = document.getElementById('builderDimensionSelect');
+    const builderSeriesSelect = document.getElementById('builderSeriesSelect');
+    const builderMetricSelect = document.getElementById('builderMetricSelect');
+    const builderAggregationSelect = document.getElementById('builderAggregationSelect');
+    const builderChartTypeSelect = document.getElementById('builderChartTypeSelect');
+    const builderResetButton = document.getElementById('builderResetButton');
+    const builderSummary = document.getElementById('customBuilderSummary');
+
+    const updateCustomBuilderChart = () => {
+        if (!builderDimensionSelect || !builderMetricSelect) {
+            return;
+        }
+        const dimensionKey = builderDimensionSelect.value || 'date';
+        const seriesKey = builderSeriesSelect ? builderSeriesSelect.value : '';
+        const metricKey = builderMetricSelect.value || 'gates_produced';
+        const aggregation = builderAggregationSelect ? builderAggregationSelect.value : 'sum';
+        const chartTypeChoice = builderChartTypeSelect ? builderChartTypeSelect.value : 'bar';
+
+        const grouped = new Map();
+        activeBuilderRows.forEach((row) => {
+            const metricValueRaw = row?.metrics?.[metricKey];
+            if (metricValueRaw === null || typeof metricValueRaw === 'undefined') {
+                return;
+            }
+            const metricValue = Number(metricValueRaw);
+            if (!Number.isFinite(metricValue)) {
+                return;
+            }
+            const dimensionValue = getDimensionValue(row, dimensionKey || 'date');
+            const seriesValue = seriesKey ? getDimensionValue(row, seriesKey) : '__single__';
+            let dimensionGroup = grouped.get(dimensionValue);
+            if (!dimensionGroup) {
+                dimensionGroup = new Map();
+                grouped.set(dimensionValue, dimensionGroup);
+            }
+            let aggregator = dimensionGroup.get(seriesValue);
+            if (!aggregator) {
+                aggregator = { sum: 0, count: 0 };
+                dimensionGroup.set(seriesValue, aggregator);
+            }
+            aggregator.sum += metricValue;
+            aggregator.count += 1;
+        });
+
+        const labels = Array.from(grouped.keys()).sort();
+        const includeSeries = Boolean(seriesKey);
+        const seriesNames = includeSeries
+            ? Array.from(
+                  new Set(
+                      labels.flatMap((label) =>
+                          Array.from(grouped.get(label)?.keys() || [])
+                      )
+                  )
+              )
+            : ['__single__'];
+
+        if (!labels.length || !seriesNames.length) {
+            toggleChartFallback('customBuilderChart', false);
+            if (customBuilderChart) {
+                customBuilderChart.destroy();
+                customBuilderChart = null;
+            }
+            if (builderSummary) {
+                builderSummary.textContent = 'No data available for the selected configuration.';
+            }
+            return;
+        }
+
+        const dimensionLabelText =
+            builderDimensionSelect.options[
+                builderDimensionSelect.selectedIndex
+            ]?.text || 'Dimension';
+        const metricLabelText =
+            builderMetricSelect.options[
+                builderMetricSelect.selectedIndex
+            ]?.text || 'Metric';
+
+        const datasets = [];
+        seriesNames.forEach((seriesName, index) => {
+            const data = labels.map((label) => {
+                const dimensionEntry = grouped.get(label);
+                const aggregator = dimensionEntry?.get(seriesName) || { sum: 0, count: 0 };
+                const baseValue =
+                    aggregation === 'average'
+                        ? aggregator.count
+                            ? aggregator.sum / aggregator.count
+                            : 0
+                        : aggregator.sum;
+                return Number(baseValue.toFixed(2));
+            });
+            const paletteColor = chartColorPalette[index % chartColorPalette.length];
+            const datasetLabel =
+                seriesName === '__single__'
+                    ? metricLabelText
+                    : seriesName || fallbackDimensionValue;
+            datasets.push({
+                label: datasetLabel,
+                data,
+                backgroundColor: paletteColor,
+                borderColor: paletteColor,
+                fill: chartTypeChoice === 'line' ? false : true,
+                tension: chartTypeChoice === 'line' ? 0.2 : undefined,
+            });
+        });
+
+        const hasAnyData = datasets.some((dataset) =>
+            dataset.data.some((value) => Number.isFinite(value) && value !== 0)
+        );
+        toggleChartFallback('customBuilderChart', hasAnyData);
+        if (!hasAnyData) {
+            if (customBuilderChart) {
+                customBuilderChart.destroy();
+                customBuilderChart = null;
+            }
+            if (builderSummary) {
+                builderSummary.textContent = 'No data available for the selected configuration.';
+            }
+            return;
+        }
+
+        const chartType = chartTypeChoice === 'line' ? 'line' : 'bar';
+        const isStacked = chartTypeChoice === 'stacked';
+
+        const options = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom' },
+                title: {
+                    display: true,
+                    text: `${metricLabelText} by ${dimensionLabelText}`,
+                },
+            },
+            scales: {
+                x: { stacked: isStacked },
+                y: {
+                    beginAtZero: true,
+                    stacked: isStacked,
+                    title: {
+                        display: true,
+                        text:
+                            aggregation === 'average'
+                                ? `${metricLabelText} (avg)`
+                                : metricLabelText,
+                    },
+                },
+            },
+        };
+
+        const canvas = document.getElementById('customBuilderChart');
+        if (!canvas) {
+            return;
+        }
+        if (customBuilderChart) {
+            customBuilderChart.destroy();
+        }
+        customBuilderChart = new Chart(canvas, {
+            type: chartType,
+            data: { labels, datasets },
+            options,
+        });
+        registerExpandableChart(canvas, customBuilderChart);
+
+        if (builderSummary) {
+            const dimensionCount = labels.length;
+            builderSummary.textContent = `${
+                aggregation === 'average' ? 'Average' : 'Total'
+            } ${metricLabelText} across ${dimensionCount} ${dimensionLabelText}${
+                dimensionCount === 1 ? '' : 's'
+            }.`;
+        }
+    };
+
+    const applyBuilderDefaults = () => {
+        const defaults = customBuilderDefaults || {};
+        if (builderDimensionSelect) {
+            builderDimensionSelect.value = defaults.dimension || '';
+        }
+        if (builderSeriesSelect) {
+            builderSeriesSelect.value = defaults.series || '';
+        }
+        if (builderMetricSelect) {
+            builderMetricSelect.value = defaults.metric || 'gates_produced';
+        }
+        if (builderAggregationSelect) {
+            builderAggregationSelect.value = defaults.aggregation || 'sum';
+        }
+        if (builderChartTypeSelect) {
+            builderChartTypeSelect.value = defaults.chart_type || 'bar';
+        }
+    };
+
+    const registerBuilderEvents = () => {
+        const controls = [
+            builderDimensionSelect,
+            builderSeriesSelect,
+            builderMetricSelect,
+            builderAggregationSelect,
+            builderChartTypeSelect,
+        ];
+        controls.forEach((control) => {
+            if (control) {
+                control.addEventListener('change', () => updateCustomBuilderChart());
+            }
+        });
+        if (builderResetButton) {
+            builderResetButton.addEventListener('click', () => {
+                applyBuilderDefaults();
+                updateCustomBuilderChart();
+            });
+        }
     };
 
     const dailyDetailToggle = document.getElementById('dailyDetailToggle');
@@ -661,6 +1544,7 @@
         }
 
         const initialState = buildChartData(currentIncludeWeekends);
+        activeBuilderRows = filterRowsForWeekends(currentIncludeWeekends);
 
         const barContext = document.getElementById('gatesProducedChart');
         let barChart = null;
@@ -819,6 +1703,10 @@
             if (collapseToggle) {
                 collapseToggle.checked = !includeWeekends;
             }
+
+            activeBuilderRows = filterRowsForWeekends(includeWeekends);
+            recomputeAdditionalCharts(activeBuilderRows);
+            updateCustomBuilderChart();
         };
 
         if (collapseToggle) {
@@ -930,6 +1818,12 @@
                 }
             });
         };
+
+        if (typeof window !== 'undefined') {
+            window.__registerChartExpansion = registerChartForExpansion;
+        }
+
+        recomputeAdditionalCharts(activeBuilderRows);
 
         registerChartForExpansion(barContext, barChart);
         registerChartForExpansion(lineContext, lineChart);
@@ -1207,5 +2101,12 @@
             });
         }
     }
+
+    if (!chartLabels.length) {
+        recomputeAdditionalCharts(activeBuilderRows);
+    }
+    applyBuilderDefaults();
+    registerBuilderEvents();
+    updateCustomBuilderChart();
 </script>
 {% endblock %}

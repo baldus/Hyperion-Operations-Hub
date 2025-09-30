@@ -99,6 +99,7 @@
     <p class="section-help">
         Control the axis ranges for the Production History chart and optionally display a goal line.
     </p>
+    {% set builder_defaults = chart_settings_form.custom_builder or {} %}
     <form method="post" class="form-stack">
         <input type="hidden" name="action" value="update_chart">
         <div class="form-grid">
@@ -153,7 +154,99 @@
                     <span>Show goal line on chart</span>
                 </label>
             </div>
+            <div class="form-field">
+                <label class="checkbox-inline">
+                    <input type="checkbox" name="show_trend" {% if chart_settings_form.show_trend %}checked{% endif %}>
+                    <span>Show Gates Produced Trend line</span>
+                </label>
+            </div>
         </div>
+        <fieldset>
+            <legend>Dashboard Graph Visibility</legend>
+            <div class="form-grid">
+                <label class="checkbox-inline">
+                    <input type="checkbox" name="show_shift_chart" {% if chart_settings_form.show_shift_chart %}checked{% endif %}>
+                    <span>Show Production by Shift</span>
+                </label>
+                <label class="checkbox-inline">
+                    <input type="checkbox" name="show_product_type_chart" {% if chart_settings_form.show_product_type_chart %}checked{% endif %}>
+                    <span>Show Production by Product Type</span>
+                </label>
+                <label class="checkbox-inline">
+                    <input type="checkbox" name="show_scrap_chart" {% if chart_settings_form.show_scrap_chart %}checked{% endif %}>
+                    <span>Show Scrap and Reject Trends</span>
+                </label>
+                <label class="checkbox-inline">
+                    <input type="checkbox" name="show_downtime_chart" {% if chart_settings_form.show_downtime_chart %}checked{% endif %}>
+                    <span>Show Downtime Cause Analysis</span>
+                </label>
+                <label class="checkbox-inline">
+                    <input type="checkbox" name="show_cumulative_goal_chart" {% if chart_settings_form.show_cumulative_goal_chart %}checked{% endif %}>
+                    <span>Show Cumulative Production vs Goal</span>
+                </label>
+            </div>
+        </fieldset>
+        <fieldset>
+            <legend>Custom Graph Builder Defaults</legend>
+            <p class="field-note">Configure the default selections that load for users on the Production History page.</p>
+            <div class="form-grid">
+                <div class="form-field">
+                    <label for="builder_dimension" class="field-label">Primary Dimension</label>
+                    <select id="builder_dimension" name="builder_dimension">
+                        <option value="" {% if not builder_defaults.get('dimension') %}selected{% endif %}>Date</option>
+                        <option value="customer" {% if builder_defaults.get('dimension') == 'customer' %}selected{% endif %}>Customer</option>
+                        <option value="product_type" {% if builder_defaults.get('dimension') == 'product_type' %}selected{% endif %}>Product Type</option>
+                        <option value="shift" {% if builder_defaults.get('dimension') == 'shift' %}selected{% endif %}>Shift</option>
+                        <option value="downtime_cause" {% if builder_defaults.get('dimension') == 'downtime_cause' %}selected{% endif %}>Downtime Cause</option>
+                        <option value="day_of_week" {% if builder_defaults.get('dimension') == 'day_of_week' %}selected{% endif %}>Day of Week</option>
+                        <option value="month" {% if builder_defaults.get('dimension') == 'month' %}selected{% endif %}>Month</option>
+                        <option value="week" {% if builder_defaults.get('dimension') == 'week' %}selected{% endif %}>Week</option>
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label for="builder_series" class="field-label">Breakdown Series (optional)</label>
+                    <select id="builder_series" name="builder_series">
+                        <option value="" {% if not builder_defaults.get('series') %}selected{% endif %}>None</option>
+                        <option value="customer" {% if builder_defaults.get('series') == 'customer' %}selected{% endif %}>Customer</option>
+                        <option value="product_type" {% if builder_defaults.get('series') == 'product_type' %}selected{% endif %}>Product Type</option>
+                        <option value="shift" {% if builder_defaults.get('series') == 'shift' %}selected{% endif %}>Shift</option>
+                        <option value="downtime_cause" {% if builder_defaults.get('series') == 'downtime_cause' %}selected{% endif %}>Downtime Cause</option>
+                        <option value="day_of_week" {% if builder_defaults.get('series') == 'day_of_week' %}selected{% endif %}>Day of Week</option>
+                        <option value="month" {% if builder_defaults.get('series') == 'month' %}selected{% endif %}>Month</option>
+                        <option value="week" {% if builder_defaults.get('series') == 'week' %}selected{% endif %}>Week</option>
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label for="builder_metric" class="field-label">Metric</label>
+                    <select id="builder_metric" name="builder_metric">
+                        <option value="gates_produced" {% if builder_defaults.get('metric') == 'gates_produced' or not builder_defaults.get('metric') %}selected{% endif %}>Gates Produced</option>
+                        <option value="gates_packaged" {% if builder_defaults.get('metric') == 'gates_packaged' %}selected{% endif %}>Gates Packaged</option>
+                        <option value="scrap" {% if builder_defaults.get('metric') == 'scrap' %}selected{% endif %}>Scrap / Rejects</option>
+                        <option value="runtime_hours" {% if builder_defaults.get('metric') == 'runtime_hours' %}selected{% endif %}>Runtime Hours</option>
+                        <option value="overtime_hours" {% if builder_defaults.get('metric') == 'overtime_hours' %}selected{% endif %}>Overtime Hours</option>
+                        <option value="produced_per_hour" {% if builder_defaults.get('metric') == 'produced_per_hour' %}selected{% endif %}>Produced per Hour</option>
+                        <option value="efficiency" {% if builder_defaults.get('metric') == 'efficiency' %}selected{% endif %}>Efficiency</option>
+                        <option value="goal" {% if builder_defaults.get('metric') == 'goal' %}selected{% endif %}>Goal</option>
+                        <option value="goal_gap" {% if builder_defaults.get('metric') == 'goal_gap' %}selected{% endif %}>Goal Gap</option>
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label for="builder_aggregation" class="field-label">Aggregation</label>
+                    <select id="builder_aggregation" name="builder_aggregation">
+                        <option value="sum" {% if builder_defaults.get('aggregation') == 'sum' or not builder_defaults.get('aggregation') %}selected{% endif %}>Sum</option>
+                        <option value="average" {% if builder_defaults.get('aggregation') == 'average' %}selected{% endif %}>Average</option>
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label for="builder_chart_type" class="field-label">Default Chart Type</label>
+                    <select id="builder_chart_type" name="builder_chart_type">
+                        <option value="bar" {% if builder_defaults.get('chart_type') == 'bar' or not builder_defaults.get('chart_type') %}selected{% endif %}>Bar</option>
+                        <option value="line" {% if builder_defaults.get('chart_type') == 'line' %}selected{% endif %}>Line</option>
+                        <option value="stacked" {% if builder_defaults.get('chart_type') == 'stacked' %}selected{% endif %}>Stacked Bar</option>
+                    </select>
+                </div>
+            </div>
+        </fieldset>
         <div class="form-actions">
             <button type="submit">Save Chart Settings</button>
         </div>

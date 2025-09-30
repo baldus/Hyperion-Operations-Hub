@@ -23,6 +23,13 @@ class ProductionChartSettings(db.Model):
     secondary_step = db.Column(db.Numeric(10, 2), nullable=True)
     goal_value = db.Column(db.Numeric(10, 2), nullable=True)
     show_goal = db.Column(db.Boolean, nullable=False, default=False)
+    show_trend = db.Column(db.Boolean, nullable=False, default=True)
+    show_shift_chart = db.Column(db.Boolean, nullable=False, default=True)
+    show_product_type_chart = db.Column(db.Boolean, nullable=False, default=True)
+    show_scrap_chart = db.Column(db.Boolean, nullable=False, default=True)
+    show_downtime_chart = db.Column(db.Boolean, nullable=False, default=True)
+    show_cumulative_goal_chart = db.Column(db.Boolean, nullable=False, default=True)
+    custom_builder_state = db.Column(db.JSON, nullable=False, default=dict)
 
     @classmethod
     def get_or_create(cls):
