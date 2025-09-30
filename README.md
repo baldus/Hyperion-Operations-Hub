@@ -35,7 +35,7 @@ It supports tracking items, locations, stock balances, receiving, cycle counts, 
 - **Production Orders** – `/orders` tracks BOMs, routing steps, reservations, shortages, and progress updates.
 - **Work Instructions** – `/work` provides a managed document repository for PDFs and other allowed files.
 - **Settings & Printers** – configure UI theme and Zebra printer host/port with admin authentication.
-- **Admin Tools** – secure privileged actions behind a session-based admin login with auto-timeout.
+- **Role-Based Access** – manage user accounts, assign view/edit roles per module, and enforce session timeouts for privileged actions.
 
 ---
 
@@ -127,6 +127,8 @@ For a reliable shop-floor deployment, start with the following baseline. See the
    |----------|-------------|---------|
    | `DB_URL` | SQLAlchemy connection string for PostgreSQL. | `postgresql+psycopg2://USER:PASSWORD@localhost/invdb` |
    | `SECRET_KEY` | Flask secret used for sessions and CSRF protection. | `export SECRET_KEY="change_me"` |
+   | `ADMIN_USER` | Username for the default superuser created on startup. | `export ADMIN_USER="superuser"` |
+   | `ADMIN_PASSWORD` | Password applied to the default superuser account. | `export ADMIN_PASSWORD="change_me"` |
    | `ZEBRA_PRINTER_HOST` | Hostname or IP for the Zebra printer service. | `printer.local` |
    | `ZEBRA_PRINTER_PORT` | TCP port that the printer listens on. | `9100` |
 
@@ -135,6 +137,8 @@ For a reliable shop-floor deployment, start with the following baseline. See the
    ```bash
    export DB_URL="postgresql+psycopg2://USER:PASSWORD@localhost/invdb"
    export SECRET_KEY="change_me"
+   export ADMIN_USER="superuser"
+   export ADMIN_PASSWORD="change_me"
    export ZEBRA_PRINTER_HOST="printer.local"
    export ZEBRA_PRINTER_PORT=9100
 
@@ -166,9 +170,10 @@ For a reliable shop-floor deployment, start with the following baseline. See the
 
 ## 📚 Additional Documentation
 
-- [`docs/HARDWARE.md`](docs/HARDWARE.md) — Bill of materials and environmental
-  guidance for pilots through multi-workcell deployments.
-- _Coming soon:_ Deployment runbook and database backup checklist.
+- [`docs/HARDWARE.md`](docs/HARDWARE.md) — Bill of materials and environmental guidance for pilots through multi-workcell deployments.
+- [`docs/hardware-guide.md`](docs/hardware-guide.md) — Extended sizing guidance, peripherals, and sourcing suggestions.
+- [`docs/deployment-guide.md`](docs/deployment-guide.md) — Provisioning steps, service hardening, and operations checklists.
+- [`docs/database-schema.md`](docs/database-schema.md) — Current table definitions and relationships across inventory, production, orders, and access control.
 
 ---
 
@@ -181,6 +186,8 @@ All configuration values are read from environment variables with sane defaults 
 |----------|---------|---------|
 | `DB_URL` | SQLAlchemy connection string for PostgreSQL | `postgresql+psycopg2://inv:change_me@localhost/invdb` |
 | `SECRET_KEY` | Flask session secret | `supersecret` |
+| `ADMIN_USER` | Username for the seed superuser created at startup | `superuser` |
+| `ADMIN_PASSWORD` | Password applied to the seed superuser | `joshbaldus` |
 | `ADMIN_SESSION_TIMEOUT` | Admin session inactivity timeout (seconds) | `300` |
 | `ZEBRA_PRINTER_HOST` | Zebra printer hostname/IP | `localhost` |
 | `ZEBRA_PRINTER_PORT` | Zebra printer TCP port | `9100` |
@@ -200,7 +207,7 @@ Uploaded work instructions are stored in `invapp/static/work_instructions` and l
 - [x] Inventory module (MVP complete)
 - [x] Reports module (ZIP export)
 - [x] Orders module (BOM authoring, routing progress, material reservations)
-- [ ] User authentication & admin roles
+- [x] User authentication & admin roles
 - [ ] More advanced reporting
 
 ---

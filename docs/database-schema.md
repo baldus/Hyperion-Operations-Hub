@@ -33,9 +33,14 @@ erDiagram
 
     User ||--o{ user_role : memberships
     Role ||--o{ user_role : memberships
+    PageAccessRule ||--o{ page_access_role : grants_view
+    PageAccessRule ||--o{ page_edit_role : grants_edit
+    Role ||--o{ page_access_role : view_role
+    Role ||--o{ page_edit_role : edit_role
+    LabelTemplate ||--o{ LabelProcessAssignment : mapped_to
 ```
 
-> **Note:** `user_role` is an association table that links users and roles in a many-to-many relationship.
+> **Note:** `user_role`, `page_access_role`, and `page_edit_role` are association tables that link access rules and roles in many-to-many relationships.
 
 ## Table Reference
 
@@ -47,8 +52,6 @@ erDiagram
   - `secondary_min`, `secondary_max`, `secondary_step` – numeric range configuration for the secondary axis.
   - `goal_value` – optional numeric goal indicator.
   - `show_goal` – flag indicating whether the goal line is displayed.
-  - `show_trendline` – toggle to overlay a weekday trendline on the production chart.
-  - `show_output_per_hour` – toggle to plot the calculated output per labor hour overlay.
 
 - **`production_daily_record`**
   - `id` (PK)
@@ -127,6 +130,32 @@ erDiagram
   - `filename` – stored file reference.
   - `original_name` – upload name.
   - `uploaded_at`
+
+### Printing & Labeling
+
+- **`printer`**
+  - `id` (PK)
+  - `name` – unique printer identifier shown in the UI.
+  - `printer_type` – optional make/model notes.
+  - `location` – optional physical location description.
+  - `host`, `port` – connection target for the networked Zebra printer.
+  - `notes` – operator guidance or service details.
+  - Timestamps: `created_at`, `updated_at`.
+
+- **`label_template`**
+  - `id` (PK)
+  - `name` – unique template name.
+  - `description` – optional summary of usage.
+  - `trigger` – optional string used for automatic selection.
+  - `layout` – JSON payload describing label geometry.
+  - `fields` – JSON payload describing available data fields.
+  - Timestamps: `created_at`, `updated_at`.
+
+- **`label_process_assignment`**
+  - `id` (PK)
+  - `process` – unique manufacturing process key.
+  - `template_id` – FK to `label_template.id`.
+  - Timestamps: `created_at`, `updated_at`.
 
 ### Work Orders & Manufacturing
 
@@ -214,12 +243,28 @@ erDiagram
   - `user_id` – FK to `user.id`, part of composite PK.
   - `role_id` – FK to `role.id`, part of composite PK.
 
+- **`page_access_rule`**
+  - `id` (PK)
+  - `page_name` – unique identifier for a navigable page or blueprint.
+  - Relationships: many-to-many `view_roles` and `edit_roles` via the association tables below.
+
+- **`page_access_role`** (association table)
+  - `access_rule_id` – FK to `page_access_rule.id`, part of composite PK.
+  - `role_id` – FK to `role.id`, part of composite PK.
+  - Defines which roles can view the page.
+
+- **`page_edit_role`** (association table)
+  - `access_rule_id` – FK to `page_access_rule.id`, part of composite PK.
+  - `role_id` – FK to `role.id`, part of composite PK.
+  - Defines which roles can perform edit actions on the page.
+
 ## Relationship Summary
 
 - Inventory items flow from receipts (`movement`) into tracked batches and storage locations, and are referenced by work orders, BOMs, and reservations.
 - Production records capture daily throughput per customer and roll up into chart settings and optional output formulas.
 - Work orders (`order`) are composed of line items, which may reserve stock and consume BOM components across routing steps.
 - Routing components reference both the BOM-defined requirements and the actual material movements that fulfill them.
-- User and role tables enforce access control through the `user_role` join table.
+- Printers and label templates provide process-specific label definitions that can be mapped to shop-floor workflows.
+- User and role tables enforce access control through `user_role`, while `page_access_rule` defines per-page view/edit rights.
 
 Use this document alongside the application code to understand how data moves through the system during receiving, production scheduling, and execution.
