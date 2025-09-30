@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Import Stock Adjustments</h2>
+
+<form method="post" enctype="multipart/form-data">
+  <label class="form-label">CSV File:</label>
+  <input type="file" class="form-control" name="file" accept=".csv" required>
+  <div class="mt-3">
+    <button type="submit" class="btn btn-primary">Continue</button>
+  </div>
+</form>
+
+<p class="mt-3">
+  After the upload you'll assign each CSV column to the appropriate adjustment
+  field before the import is processed.
+</p>
+<p>
+  Expected CSV columns: <code>sku</code>, <code>location_code</code>,
+  <code>quantity</code>, <code>lot_number</code>, <code>person</code>,
+  <code>reference</code>. The <code>location_code</code> field may be left blank
+  to use the unassigned staging location (<code>UNASSIGNED</code>).
+</p>
+{% endblock %}

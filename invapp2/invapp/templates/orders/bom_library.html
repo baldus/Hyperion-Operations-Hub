@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>BOM Template Library</h2>
+
+<section class="form-section">
+    <h3>Existing Templates</h3>
+    {% if templates %}
+        <div class="table-scroll">
+            <table class="form-table">
+                <thead>
+                    <tr>
+                        <th>Finished Good</th>
+                        <th>Components</th>
+                        <th>Last Updated</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for template in templates %}
+                        <tr>
+                            <td>
+                                <div class="finished-good">
+                                    <span class="sku">{{ template.item.sku }}</span>
+                                    <span class="name">{{ template.item.name }}</span>
+                                </div>
+                            </td>
+                            <td>
+                                {% if template.components %}
+                                    <ul class="inline-list">
+                                        {% for component in template.components %}
+                                            <li>{{ component.component_item.sku }} × {{ component.quantity }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                {% else %}
+                                    <span class="muted">No components listed</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {{ template.updated_at.strftime('%Y-%m-%d %H:%M') if template.updated_at else '—' }}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p class="section-help">No BOM templates are stored yet. Create one using the forms below.</p>
+    {% endif %}
+</section>
+
+<section class="form-section">
+    <h3>Create or Update a Template</h3>
+    <form method="post" id="bom-template-form" class="form-stack">
+        <input type="hidden" name="action" value="create">
+        <div class="form-grid">
+            <label class="form-field">
+                <span class="field-label">Finished Good Part Number</span>
+                <input type="text" name="finished_good_sku" list="bom-item-skus" value="{{ form_data.finished_good_sku }}" required>
+            </label>
+        </div>
+        <datalist id="bom-item-skus">
+            {% for item in items %}
+                <option value="{{ item.sku }}">{{ item.name }}</option>
+            {% endfor %}
+        </datalist>
+        <div class="section-header">
+            <h4>Template Components</h4>
+            <button type="button" class="action-btn" id="library-add-component">Add Component</button>
+        </div>
+        <div class="table-scroll">
+            <table class="form-table">
+                <thead>
+                    <tr>
+                        <th>Component SKU</th>
+                        <th>Quantity Per</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="library-bom-rows"></tbody>
+            </table>
+        </div>
+        <input type="hidden" name="bom_data" id="library-bom-data">
+        <div class="form-actions">
+            <button type="submit" class="action-btn">Save Template</button>
+        </div>
+    </form>
+</section>
+
+<section class="form-section">
+    <h3>Import from CSV</h3>
+    <form method="post" enctype="multipart/form-data" class="form-stack">
+        <input type="hidden" name="action" value="import_csv">
+        <div class="form-grid">
+            <label class="form-field">
+                <span class="field-label">Finished Good Part Number</span>
+                <input type="text" name="finished_good_sku" list="bom-item-skus" value="{{ form_data.finished_good_sku }}" required>
+            </label>
+            <label class="form-field">
+                <span class="field-label">CSV File</span>
+                <input type="file" name="csv_file" accept=".csv" required>
+            </label>
+        </div>
+        <p class="section-help">The CSV must include headers <code>component_sku</code> and <code>quantity</code>.</p>
+        <div class="form-actions">
+            <button type="submit" class="action-btn">Import Template</button>
+        </div>
+    </form>
+</section>
+
+<datalist id="library-component-skus">
+    {% for item in items %}
+        <option value="{{ item.sku }}">{{ item.name }}</option>
+    {% endfor %}
+</datalist>
+
+<script>
+(function() {
+    const initialData = {{ form_data|tojson }};
+    const bomBody = document.getElementById('library-bom-rows');
+    const addComponentBtn = document.getElementById('library-add-component');
+    const dataInput = document.getElementById('library-bom-data');
+    const form = document.getElementById('bom-template-form');
+
+    function createRow(values = {}) {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>
+                <input type="text" class="component-sku" placeholder="Component SKU" list="library-component-skus">
+            </td>
+            <td>
+                <input type="number" class="component-qty" min="1" placeholder="Qty">
+            </td>
+            <td class="row-actions">
+                <button type="button" class="link-btn remove-row">Remove</button>
+            </td>
+        `;
+        const skuInput = row.querySelector('.component-sku');
+        const qtyInput = row.querySelector('.component-qty');
+        if (values.sku !== undefined) {
+            skuInput.value = values.sku;
+        }
+        if (values.quantity !== undefined) {
+            qtyInput.value = values.quantity;
+        }
+        row.querySelector('.remove-row').addEventListener('click', () => {
+            row.remove();
+        });
+        bomBody.appendChild(row);
+    }
+
+    function collectPayload() {
+        const entries = [];
+        bomBody.querySelectorAll('tr').forEach(row => {
+            const sku = row.querySelector('.component-sku').value.trim();
+            const quantity = row.querySelector('.component-qty').value.trim();
+            if (!sku && !quantity) {
+                return;
+            }
+            entries.push({ sku, quantity });
+        });
+        return entries;
+    }
+
+    if (addComponentBtn) {
+        addComponentBtn.addEventListener('click', () => createRow());
+    }
+
+    const initialComponents = Array.isArray(initialData.bom) && initialData.bom.length ? initialData.bom : [{}];
+    initialComponents.forEach(component => createRow(component));
+
+    if (form) {
+        form.addEventListener('submit', () => {
+            const payload = collectPayload();
+            dataInput.value = JSON.stringify(payload);
+        });
+    }
+})();
+</script>
+{% endblock %}

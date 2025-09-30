@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Cycle Count</h2>
+
+<form method="POST">
+  <label>SKU:</label><br>
+  <input type="text" name="sku" required><br><br>
+
+  <label>Batch / Lot:</label><br>
+  <select name="batch_id" required>
+    {% for batch in batches %}
+      <option value="{{ batch.id }}">{{ batch.lot_number }}</option>
+    {% endfor %}
+  </select><br><br>
+
+  <label>Location:</label><br>
+  <select name="location_id" required>
+    {% for loc in locations %}
+      <option value="{{ loc.id }}">{{ loc.code }}</option>
+    {% endfor %}
+  </select><br><br>
+
+  <label>Counted Quantity:</label><br>
+  <input type="number" name="counted_qty" required><br><br>
+
+  <label>Person:</label><br>
+  <input type="text" name="person" required><br><br>
+
+  <label>Reference:</label><br>
+  <input type="text" name="reference" value="Cycle Count"><br><br>
+
+  <button type="submit" class="bubble-btn">Submit Count</button>
+</form>
+
+<hr>
+
+<h3>Recent Cycle Counts</h3>
+<div style="margin-bottom: 15px;">
+  <a href="{{ url_for('inventory.export_cycle_counts') }}" class="bubble-btn">Export Cycle Counts (CSV)</a>
+</div>
+
+<div class="table-container">
+  <table class="inventory-table">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>SKU</th>
+        <th>Item</th>
+        <th>Lot / Batch</th>
+        <th>Location</th>
+        <th>Book vs Counted</th>
+        <th>Person</th>
+        <th>Type</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for rec in records %}
+        {% set parts = rec.reference.split('Book=') %}
+        {% if parts|length > 1 %}
+          {% set counts = parts[1].split(', Counted=') %}
+          {% set book = counts[0]|int %}
+          {% set counted = counts[1].replace(')', '')|int %}
+          {% set diff = counted - book %}
+        {% else %}
+          {% set book = "?" %}
+          {% set counted = "?" %}
+          {% set diff = 0 %}
+        {% endif %}
+        <tr class="{{ 'mismatch' if rec.movement_type == 'CYCLE_COUNT_ADJUSTMENT' else 'match' }}">
+          <td>{{ rec.date.strftime("%Y-%m-%d %H:%M") }}</td>
+          <td>{{ rec.item.sku if rec.item else "???" }}</td>
+          <td>{{ rec.item.name if rec.item else "Unknown" }}</td>
+          <td>{{ rec.batch.lot_number if rec.batch else "-" }}</td>
+          <td>{{ rec.location.code if rec.location else "-" }}</td>
+          <td>Book={{ book }} | Counted={{ counted }} | Diff={{ diff }}</td>
+          <td>{{ rec.person or "-" }}</td>
+          <td>{{ rec.movement_type }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

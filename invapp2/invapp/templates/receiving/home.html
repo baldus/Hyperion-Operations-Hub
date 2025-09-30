@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Receiving Records</h2>
+<a class="bubble-btn" href="{{ url_for('receiving.add_receiving') }}">+ Add Receiving</a>
+
+<table>
+  <tr>
+    <th>SKU</th>
+    <th>Qty</th>
+    <th>Person</th>
+    <th>PO Number</th>
+    <th>Location</th>
+    <th>Date</th>
+  </tr>
+  {% for r in records %}
+  <tr>
+    <td>{{ r.item.sku }}</td>
+    <td>{{ r.quantity }}</td>
+    <td>{{ r.person }}</td>
+    <td>{{ r.po_number or "-" }}</td>
+    <td>{{ r.location.code }}</td>
+    <td>{{ r.date_received.strftime('%Y-%m-%d %H:%M') }}</td>
+  </tr>
+  {% endfor %}
+</table>
+<div class="pagination">
+  {% if page > 1 %}
+    <a href="{{ url_for('receiving.receiving_home', page=page-1, size=size) }}">Previous</a>
+  {% endif %}
+  {% if page < pages %}
+    <a href="{{ url_for('receiving.receiving_home', page=page+1, size=size) }}">Next</a>
+  {% endif %}
+</div>
+{% endblock %}
