@@ -47,6 +47,8 @@ erDiagram
   - `secondary_min`, `secondary_max`, `secondary_step` – numeric range configuration for the secondary axis.
   - `goal_value` – optional numeric goal indicator.
   - `show_goal` – flag indicating whether the goal line is displayed.
+  - `show_trendline` – toggle to overlay a weekday trendline on the production chart.
+  - `show_output_per_hour` – toggle to plot the calculated output per labor hour overlay.
 
 - **`production_daily_record`**
   - `id` (PK)
@@ -102,6 +104,11 @@ erDiagram
   - `lot_number`
   - `quantity`
   - `received_date`
+  - `expiration_date`
+  - `supplier_name`
+  - `supplier_code`
+  - `purchase_order`
+  - `notes`
 
 - **`movement`**
   - `id` (PK)
