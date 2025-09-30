@@ -43,6 +43,16 @@ header {
     min-width: 0;
 }
 
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.theme-toggle-form {
+    margin: 0;
+}
+
 .logo-link {
     display: inline-flex;
     align-items: center;
@@ -115,6 +125,10 @@ header {
 
 .gear-btn {
     font-size: 22px;
+}
+
+.theme-toggle-btn {
+    font-size: 20px;
 }
 
 .nav-btn:hover, .action-btn:hover, button:hover, .icon-btn:hover {

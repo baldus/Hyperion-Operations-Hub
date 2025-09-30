@@ -24,6 +24,13 @@
                 {% endif %}
                 {% if current_user.is_authenticated %}
                 {% if can_access_page('settings') %}
+                {% set next_target = request.full_path if request.query_string else request.path %}
+                <form method="post" action="{{ url_for('settings.toggle_theme') }}" class="inline-form theme-toggle-form">
+                    <input type="hidden" name="next" value="{{ next_target }}">
+                    <button type="submit" class="icon-btn theme-toggle-btn" aria-label="Toggle light and dark mode">
+                        &#128161;
+                    </button>
+                </form>
                 <a href="{{ url_for('settings.settings_home') }}" class="icon-btn gear-btn" aria-label="Open settings and administration tools">
                     &#9881;
                 </a>
