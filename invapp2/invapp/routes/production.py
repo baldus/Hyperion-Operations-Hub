@@ -875,6 +875,7 @@ def history():
                 "pointRadius": 0,
                 "borderWidth": 2,
                 "order": 1,
+                "stack": "gates-trend-line",
             }
         )
     if any(value is not None for value in overlay_values):
@@ -911,6 +912,7 @@ def history():
                 "pointRadius": 0,
                 "fill": False,
                 "order": 3,
+                "stack": "gates-goal-line",
             }
         )
 
