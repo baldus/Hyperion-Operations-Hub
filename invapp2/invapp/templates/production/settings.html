@@ -153,6 +153,18 @@
                     <span>Show goal line on chart</span>
                 </label>
             </div>
+            <div class="form-field">
+                <label class="checkbox-inline">
+                    <input type="checkbox" name="show_trendline" {% if chart_settings_form.show_trendline %}checked{% endif %}>
+                    <span>Show trend line on chart</span>
+                </label>
+            </div>
+            <div class="form-field">
+                <label class="checkbox-inline">
+                    <input type="checkbox" name="show_output_per_hour" {% if chart_settings_form.show_output_per_hour %}checked{% endif %}>
+                    <span>Show output per labor hour line</span>
+                </label>
+            </div>
         </div>
         <div class="form-actions">
             <button type="submit">Save Chart Settings</button>

@@ -23,6 +23,8 @@ class ProductionChartSettings(db.Model):
     secondary_step = db.Column(db.Numeric(10, 2), nullable=True)
     goal_value = db.Column(db.Numeric(10, 2), nullable=True)
     show_goal = db.Column(db.Boolean, nullable=False, default=False)
+    show_trendline = db.Column(db.Boolean, nullable=False, default=True)
+    show_output_per_hour = db.Column(db.Boolean, nullable=False, default=True)
 
     @classmethod
     def get_or_create(cls):

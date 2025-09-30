@@ -861,7 +861,7 @@ def history():
             trendline_values = [slope * x + intercept for x in range(len(total_produced_values))]
 
     overlay_datasets: List[Dict[str, object]] = []
-    if trendline_values:
+    if trendline_values and chart_settings.show_trendline:
         overlay_datasets.append(
             {
                 "label": "Gates Produced Trend",
@@ -875,9 +875,12 @@ def history():
                 "pointRadius": 0,
                 "borderWidth": 2,
                 "order": 1,
+                "stack": "trend-line",
             }
         )
-    if any(value is not None for value in overlay_values):
+    if chart_settings.show_output_per_hour and any(
+        value is not None for value in overlay_values
+    ):
         overlay_datasets.append(
             {
                 "label": "Output per Labor Hour",
@@ -891,6 +894,7 @@ def history():
                 "pointRadius": 3,
                 "spanGaps": True,
                 "order": 2,
+                "stack": "output-per-hour",
             }
         )
 
@@ -911,6 +915,7 @@ def history():
                 "pointRadius": 0,
                 "fill": False,
                 "order": 3,
+                "stack": "goal-line",
             }
         )
 
@@ -999,6 +1004,8 @@ def production_settings():
         "secondary_step": _format_optional_decimal(chart_settings.secondary_step),
         "goal_value": _format_optional_decimal(chart_settings.goal_value),
         "show_goal": chart_settings.show_goal,
+        "show_trendline": chart_settings.show_trendline,
+        "show_output_per_hour": chart_settings.show_output_per_hour,
     }
 
 
@@ -1116,6 +1123,10 @@ def production_settings():
                 parsed_values[field] = parsed
 
             show_goal_value = request.form.get("show_goal") is not None
+            show_trendline_value = request.form.get("show_trendline") is not None
+            show_output_value = (
+                request.form.get("show_output_per_hour") is not None
+            )
 
             if has_errors:
                 chart_settings_form_values = {
@@ -1127,11 +1138,15 @@ def production_settings():
                     "secondary_step": request.form.get("secondary_step", ""),
                     "goal_value": request.form.get("goal_value", ""),
                     "show_goal": show_goal_value,
+                    "show_trendline": show_trendline_value,
+                    "show_output_per_hour": show_output_value,
                 }
             else:
                 for field in field_labels:
                     setattr(chart_settings, field, parsed_values[field])
                 chart_settings.show_goal = show_goal_value
+                chart_settings.show_trendline = show_trendline_value
+                chart_settings.show_output_per_hour = show_output_value
                 db.session.commit()
                 flash("Chart settings updated.", "success")
                 return redirect(url_for("production.production_settings"))
