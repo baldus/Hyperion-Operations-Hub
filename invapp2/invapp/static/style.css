@@ -1263,6 +1263,10 @@ body.light .orders-filter input[type="search"] {
     gap: 24px;
 }
 
+.production-entry-form {
+    gap: 16px;
+}
+
 .form-section {
     padding: 20px;
     border-radius: 12px;
@@ -1271,6 +1275,11 @@ body.light .orders-filter input[type="search"] {
     display: flex;
     flex-direction: column;
     gap: 16px;
+}
+
+.production-entry-form .form-section {
+    padding: 16px;
+    gap: 12px;
 }
 
 /* --- Scanner Layout --- */
@@ -1430,10 +1439,18 @@ body.light .section-help {
     gap: 16px;
 }
 
+.production-entry-form .form-grid {
+    gap: 12px;
+}
+
 .form-field {
     display: flex;
     flex-direction: column;
     gap: 6px;
+}
+
+.production-entry-form .form-field {
+    gap: 4px;
 }
 
 .form-field .field-label {
@@ -1454,6 +1471,14 @@ body.light .section-help {
     color: inherit;
     font: inherit;
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.production-entry-form .form-section input[type="text"],
+.production-entry-form .form-section input[type="number"],
+.production-entry-form .form-section input[type="date"],
+.production-entry-form .form-section textarea,
+.production-entry-form select {
+    padding: 8px 10px;
 }
 
 body.light .form-section input[type="text"],
@@ -1478,6 +1503,10 @@ body.light .form-section select {
 .form-section textarea {
     min-height: 72px;
     resize: vertical;
+}
+
+.production-entry-form .form-section textarea {
+    min-height: 60px;
 }
 
 .table-scroll {
