@@ -104,6 +104,11 @@ erDiagram
   - `lot_number`
   - `quantity`
   - `received_date`
+  - `expiration_date`
+  - `supplier_name`
+  - `supplier_code`
+  - `purchase_order`
+  - `notes`
 
 - **`movement`**
   - `id` (PK)

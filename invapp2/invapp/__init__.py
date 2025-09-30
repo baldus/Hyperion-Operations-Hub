@@ -91,17 +91,18 @@ def _ensure_core_roles() -> None:
     if created:
         db.session.commit()
 
-def _ensure_item_columns(engine):
-    """Ensure legacy databases include the latest ``item`` columns."""
+def _ensure_inventory_schema(engine):
+    """Backfill legacy inventory tables with the current columns."""
 
     inspector = inspect(engine)
+
     try:
         item_columns = {col["name"] for col in inspector.get_columns("item")}
     except (NoSuchTableError, OperationalError):
         item_columns = set()
 
-    columns_to_add = []
-    required_columns = {
+    item_columns_to_add = []
+    item_required_columns = {
         "type": "VARCHAR",
         "notes": "TEXT",
         "list_price": "NUMERIC(12, 2)",
@@ -109,15 +110,34 @@ def _ensure_item_columns(engine):
         "item_class": "VARCHAR",
     }
 
-    for column_name, column_type in required_columns.items():
+    for column_name, column_type in item_required_columns.items():
         if column_name not in item_columns:
-            columns_to_add.append((column_name, column_type))
+            item_columns_to_add.append(("item", column_name, column_type))
 
-    if columns_to_add:
+    try:
+        batch_columns = {col["name"] for col in inspector.get_columns("batch")}
+    except (NoSuchTableError, OperationalError):
+        batch_columns = set()
+
+    batch_required_columns = {
+        "expiration_date": "DATE",
+        "supplier_name": "VARCHAR",
+        "supplier_code": "VARCHAR",
+        "purchase_order": "VARCHAR",
+        "notes": "TEXT",
+    }
+
+    for column_name, column_type in batch_required_columns.items():
+        if column_name not in batch_columns:
+            item_columns_to_add.append(("batch", column_name, column_type))
+
+    if item_columns_to_add:
         with engine.begin() as conn:
-            for column_name, column_type in columns_to_add:
+            for table_name, column_name, column_type in item_columns_to_add:
                 conn.execute(
-                    text(f"ALTER TABLE item ADD COLUMN {column_name} {column_type}")
+                    text(
+                        f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
+                    )
                 )
 
 
@@ -297,7 +317,7 @@ def create_app(config_override=None):
     # create tables if they do not exist and ensure legacy schema
     with app.app_context():
         db.create_all()
-        _ensure_item_columns(db.engine)
+        _ensure_inventory_schema(db.engine)
         _ensure_order_schema(db.engine)
         _ensure_production_schema(db.engine)
         # ✅ ensure default production customers at startup
