@@ -384,19 +384,19 @@ def _format_optional_decimal(value: Decimal | None) -> str:
 
 def _empty_form_values(customers: List[ProductionCustomer]) -> Dict[str, object]:
     return {
-        "gates_produced": {customer.id: 0 for customer in customers},
-        "gates_packaged": {customer.id: 0 for customer in customers},
+        "gates_produced": {customer.id: "" for customer in customers},
+        "gates_packaged": {customer.id: "" for customer in customers},
 
-        "gates_employees": 0,
-        "gates_hours_ot": _format_decimal(DECIMAL_ZERO),
-        "controllers_4_stop": 0,
-        "controllers_6_stop": 0,
-        "door_locks_lh": 0,
-        "door_locks_rh": 0,
-        "operators_produced": 0,
-        "cops_produced": 0,
-        "additional_employees": 0,
-        "additional_hours_ot": _format_decimal(DECIMAL_ZERO),
+        "gates_employees": "",
+        "gates_hours_ot": "",
+        "controllers_4_stop": "",
+        "controllers_6_stop": "",
+        "door_locks_lh": "",
+        "door_locks_rh": "",
+        "operators_produced": "",
+        "cops_produced": "",
+        "additional_employees": "",
+        "additional_hours_ot": "",
         "daily_notes": "",
     }
 
