@@ -1950,6 +1950,107 @@ body.light .production-table input[type="date"] {
     position: relative;
 }
 
+.custom-builder {
+    margin-top: 32px;
+}
+
+.custom-builder .builder-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+.custom-builder .builder-panel {
+    padding: 16px;
+    border-radius: 12px;
+    background-color: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.custom-builder .builder-panel h4 {
+    margin-top: 0;
+    font-size: 1rem;
+    margin-bottom: 12px;
+}
+
+.builder-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+}
+
+.builder-item {
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    background: rgba(37, 99, 235, 0.08);
+    color: inherit;
+    transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+.builder-item:hover,
+.builder-item:focus {
+    background: rgba(37, 99, 235, 0.18);
+}
+
+.builder-item.is-selected {
+    background: rgba(37, 99, 235, 0.32);
+    font-weight: 600;
+}
+
+.builder-drop {
+    min-height: 140px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    border: 2px dashed rgba(148, 163, 184, 0.4);
+    border-radius: 12px;
+    padding: 16px;
+    background-color: rgba(255, 255, 255, 0.02);
+}
+
+.builder-drop.is-empty {
+    border-style: dashed;
+}
+
+.builder-placeholder {
+    margin: 0;
+    font-size: 0.9rem;
+    color: rgba(148, 163, 184, 0.9);
+}
+
+.builder-selection {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.builder-pill {
+    background: rgba(37, 99, 235, 0.18);
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.builder-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 16px;
+}
+
+.builder-chart {
+    min-height: 260px;
+}
+
 .chart-card canvas.chart-expandable {
     cursor: zoom-in;
     outline: none;
@@ -1963,6 +2064,28 @@ body.light .production-table input[type="date"] {
 body.light .chart-card {
     background-color: #ffffff;
     border-color: rgba(0, 0, 0, 0.08);
+}
+
+body.light .custom-builder .builder-panel {
+    background-color: #ffffff;
+    border-color: rgba(0, 0, 0, 0.08);
+}
+
+body.light .builder-drop {
+    background-color: #f8fafc;
+    border-color: rgba(15, 23, 42, 0.16);
+}
+
+body.light .builder-item {
+    background: rgba(37, 99, 235, 0.12);
+}
+
+body.light .builder-item.is-selected {
+    background: rgba(37, 99, 235, 0.26);
+}
+
+body.light .builder-pill {
+    background: rgba(37, 99, 235, 0.16);
 }
 
 .chart-modal {

@@ -49,6 +49,69 @@
             <div class="chart-card">
                 <canvas id="cumulativeChart" aria-label="Line chart showing cumulative month-to-date production totals"></canvas>
             </div>
+            {% if chart_visibility.shift %}
+                <div class="chart-card">
+                    <canvas id="shiftChart" aria-label="Stacked column chart showing gates produced by shift"></canvas>
+                </div>
+            {% endif %}
+            {% if chart_visibility.product %}
+                <div class="chart-card">
+                    <canvas id="productChart" aria-label="Stacked column chart showing gates produced by product type"></canvas>
+                </div>
+            {% endif %}
+            {% if chart_visibility.scrap %}
+                <div class="chart-card">
+                    <canvas id="scrapChart" aria-label="Line chart comparing scrap and rejects to gates produced"></canvas>
+                </div>
+            {% endif %}
+            {% if chart_visibility.downtime %}
+                <div class="chart-card">
+                    <canvas id="downtimeChart" aria-label="Pareto chart of downtime causes"></canvas>
+                </div>
+            {% endif %}
+            {% if chart_visibility.cumulative_goal %}
+                <div class="chart-card">
+                    <canvas id="cumulativeGoalChart" aria-label="Cumulative production compared to goal"></canvas>
+                </div>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="dashboard-section custom-builder">
+        <div class="section-header">
+            <h3>Custom Graph Builder</h3>
+            <p class="section-help">Drag dimensions and metrics into the chart to craft ad-hoc views of production performance.</p>
+        </div>
+        <div class="builder-grid">
+            <div class="builder-panel">
+                <h4>Dimensions</h4>
+                <ul class="builder-list" id="dimensionList">
+                    <li class="builder-item" data-key="date">Date</li>
+                    <li class="builder-item" data-key="customer">Customer</li>
+                    <li class="builder-item" data-key="shift">Shift</li>
+                    <li class="builder-item" data-key="product_type">Product Type</li>
+                    <li class="builder-item" data-key="downtime_cause">Downtime Cause</li>
+                </ul>
+            </div>
+            <div class="builder-panel">
+                <h4>Metrics</h4>
+                <ul class="builder-list" id="metricList">
+                    <li class="builder-item" data-key="gates_produced">Gates Produced</li>
+                    <li class="builder-item" data-key="scrap_rejects">Scrap &amp; Rejects</li>
+                    <li class="builder-item" data-key="runtime_hours">Runtime Hours</li>
+                    <li class="builder-item" data-key="efficiency">Efficiency</li>
+                </ul>
+            </div>
+            <div class="builder-panel builder-drop" id="builderDropZone" aria-label="Custom chart drop zone">
+                <p class="builder-placeholder">Select up to two dimensions and a metric to generate a chart.</p>
+                <div class="builder-selection" id="builderSelection"></div>
+            </div>
+        </div>
+        <div class="builder-actions">
+            <button type="button" class="action-btn" id="resetBuilder">Reset Builder</button>
+        </div>
+        <div class="chart-card builder-chart">
+            <canvas id="customBuilderChart" aria-label="Custom chart output"></canvas>
         </div>
     </section>
 
@@ -206,6 +269,11 @@
     const lineDatasets = {{ line_datasets|tojson }};
     const chartAxisSettings = {{ chart_axis_settings|tojson }};
     const emailPreview = {{ email_preview|tojson }};
+    const supplementalCharts = {{ supplemental_charts|tojson }};
+    const chartVisibility = {{ chart_visibility|tojson }};
+    const builderRows = {{ builder_rows|tojson }};
+    const builderState = {{ builder_state|tojson }};
+    const builderStateEndpoint = "{{ url_for('production.save_builder_state') }}";
 
     const parseDateLabel = (label) => {
         if (typeof label !== 'string') {
@@ -602,6 +670,180 @@
         Chart.register(stackedTotalsPlugin);
     }
 
+    const supplementalPalette = [
+        '#2563eb',
+        '#f97316',
+        '#16a34a',
+        '#7c3aed',
+        '#0ea5e9',
+        '#ef4444',
+        '#14b8a6',
+    ];
+
+    const createStackedBarChart = (canvasId, chartData, title) => {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas || !chartData || !Array.isArray(chartData.labels) || !chartData.labels.length) {
+            return null;
+        }
+
+        const datasets = (chartData.datasets || []).map((dataset, index) => ({
+            backgroundColor: supplementalPalette[index % supplementalPalette.length],
+            stack: 'supplemental',
+            ...dataset,
+        }));
+
+        return new Chart(canvas, {
+            type: 'bar',
+            data: {
+                labels: chartData.labels,
+                datasets,
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    weekendBackground: {
+                        enabled: true,
+                        color: 'rgba(0, 0, 0, 0.08)',
+                    },
+                    stackedTotals: {
+                        enabled: true,
+                        color: '#0f172a',
+                        yOffset: -6,
+                    },
+                    title: {
+                        display: true,
+                        text: title,
+                    },
+                    legend: {
+                        position: 'bottom',
+                    },
+                },
+                scales: {
+                    x: { stacked: true },
+                    y: {
+                        stacked: true,
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Units',
+                        },
+                    },
+                },
+            },
+        });
+    };
+
+    const createLineChart = (canvasId, chartData, title, options = {}) => {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas || !chartData || !Array.isArray(chartData.labels) || !chartData.labels.length) {
+            return null;
+        }
+
+        return new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels: chartData.labels,
+                datasets: chartData.datasets || [],
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    weekendBackground: {
+                        enabled: true,
+                        color: 'rgba(0, 0, 0, 0.08)',
+                    },
+                    title: {
+                        display: true,
+                        text: title,
+                    },
+                    legend: {
+                        position: 'bottom',
+                    },
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: options.yAxisTitle || 'Units',
+                        },
+                    },
+                },
+            },
+        });
+    };
+
+    const createParetoChart = (canvasId, chartData, title) => {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas || !chartData || !Array.isArray(chartData.labels) || !chartData.labels.length) {
+            return null;
+        }
+
+        return new Chart(canvas, {
+            type: 'bar',
+            data: {
+                labels: chartData.labels,
+                datasets: [
+                    {
+                        type: 'bar',
+                        label: 'Minutes Lost',
+                        data: chartData.bars || [],
+                        backgroundColor: '#ef4444',
+                        yAxisID: 'y',
+                    },
+                    {
+                        type: 'line',
+                        label: 'Cumulative %',
+                        data: chartData.cumulative || [],
+                        borderColor: '#2563eb',
+                        backgroundColor: 'rgba(37, 99, 235, 0.25)',
+                        fill: false,
+                        tension: 0.2,
+                        pointRadius: 3,
+                        yAxisID: 'y1',
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: title,
+                    },
+                    legend: {
+                        position: 'bottom',
+                    },
+                },
+                scales: {
+                    x: {
+                        stacked: false,
+                    },
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Minutes',
+                        },
+                    },
+                    y1: {
+                        beginAtZero: true,
+                        max: 100,
+                        position: 'right',
+                        grid: { drawOnChartArea: false },
+                        ticks: {
+                            callback: (value) => `${value}%`,
+                        },
+                        title: {
+                            display: true,
+                            text: 'Cumulative %',
+                        },
+                    },
+                },
+            },
+        });
+    };
+
     if (chartLabels.length) {
         const stackedDatasetList = Array.isArray(stackedDatasets) ? stackedDatasets : [];
         const overlayDatasetList = Array.isArray(overlayDatasets) ? overlayDatasets : [];
@@ -614,6 +856,7 @@
         const originalStackedDatasets = deepCloneDatasets(stackedDatasetList);
         const originalOverlayDatasets = deepCloneDatasets(overlayDatasetList);
         const originalLineDatasets = deepCloneDatasets(lineDatasetList);
+        const originalSupplemental = JSON.parse(JSON.stringify(supplementalCharts || {}));
         const weekendMask = originalLabels.map((label) => isWeekendLabel(label));
 
         const cloneAndFilterDataset = (dataset, includeWeekends) => {
@@ -647,10 +890,37 @@
             const overlays = originalOverlayDatasets.map((dataset) => cloneAndFilterDataset(dataset, includeWeekends));
             const line = originalLineDatasets.map((dataset) => cloneAndFilterDataset(dataset, includeWeekends));
 
+            const supplemental = {};
+            Object.entries(originalSupplemental).forEach(([key, value]) => {
+                if (!value) {
+                    supplemental[key] = value;
+                    return;
+                }
+
+                if (Array.isArray(value.datasets)) {
+                    const baseLabels = Array.isArray(value.labels) ? value.labels : [];
+                    const matchesMask = baseLabels.length === weekendMask.length;
+                    const filteredLabels = !matchesMask || includeWeekends
+                        ? baseLabels.slice()
+                        : baseLabels.filter((_, index) => !weekendMask[index]);
+                    supplemental[key] = {
+                        labels: filteredLabels,
+                        datasets: (value.datasets || []).map((dataset) =>
+                            matchesMask
+                                ? cloneAndFilterDataset(dataset, includeWeekends)
+                                : deepCloneDataset(dataset)
+                        ),
+                    };
+                } else {
+                    supplemental[key] = JSON.parse(JSON.stringify(value));
+                }
+            });
+
             return {
                 labels,
                 combinedDatasets: stacked.concat(overlays),
                 lineDatasets: line,
+                supplemental,
             };
         };
 
@@ -790,6 +1060,72 @@
             });
         }
 
+        let shiftChart = null;
+        let productChart = null;
+        let scrapChart = null;
+        let downtimeChartInstance = null;
+        let cumulativeGoalChartInstance = null;
+
+        const renderSupplementalCharts = (supplemental) => {
+            const charts = supplemental || {};
+            if (chartVisibility.shift) {
+                if (shiftChart) {
+                    shiftChart.destroy();
+                    shiftChart = null;
+                }
+                shiftChart = createStackedBarChart('shiftChart', charts.shift, 'Production by Shift');
+                if (typeof registerChartForExpansion === 'function') {
+                    registerChartForExpansion(document.getElementById('shiftChart'), shiftChart);
+                }
+            }
+            if (chartVisibility.product) {
+                if (productChart) {
+                    productChart.destroy();
+                    productChart = null;
+                }
+                productChart = createStackedBarChart('productChart', charts.product, 'Production by Product Type');
+                if (typeof registerChartForExpansion === 'function') {
+                    registerChartForExpansion(document.getElementById('productChart'), productChart);
+                }
+            }
+            if (chartVisibility.scrap) {
+                if (scrapChart) {
+                    scrapChart.destroy();
+                    scrapChart = null;
+                }
+                scrapChart = createLineChart('scrapChart', charts.scrap, 'Scrap and Rejects Over Time', {
+                    yAxisTitle: 'Units',
+                });
+                if (typeof registerChartForExpansion === 'function') {
+                    registerChartForExpansion(document.getElementById('scrapChart'), scrapChart);
+                }
+            }
+            if (chartVisibility.downtime) {
+                if (downtimeChartInstance) {
+                    downtimeChartInstance.destroy();
+                    downtimeChartInstance = null;
+                }
+                downtimeChartInstance = createParetoChart('downtimeChart', supplementalCharts.downtime, 'Downtime Cause Analysis');
+                if (typeof registerChartForExpansion === 'function') {
+                    registerChartForExpansion(document.getElementById('downtimeChart'), downtimeChartInstance);
+                }
+            }
+            if (chartVisibility.cumulative_goal) {
+                if (cumulativeGoalChartInstance) {
+                    cumulativeGoalChartInstance.destroy();
+                    cumulativeGoalChartInstance = null;
+                }
+                cumulativeGoalChartInstance = createLineChart('cumulativeGoalChart', charts.cumulative_goal, 'Cumulative Production vs Goal', {
+                    yAxisTitle: 'Units',
+                });
+                if (typeof registerChartForExpansion === 'function') {
+                    registerChartForExpansion(document.getElementById('cumulativeGoalChart'), cumulativeGoalChartInstance);
+                }
+            }
+        };
+
+        renderSupplementalCharts(initialState.supplemental);
+
         const updateChartsForWeekendState = (includeWeekends) => {
             if (includeWeekends === currentIncludeWeekends) {
                 return;
@@ -815,6 +1151,8 @@
                 }
                 lineChart.update();
             }
+
+            renderSupplementalCharts(updatedState.supplemental);
 
             if (collapseToggle) {
                 collapseToggle.checked = !includeWeekends;
@@ -905,7 +1243,7 @@
             }
         });
 
-        const registerChartForExpansion = (canvasElement, chartInstance) => {
+        function registerChartForExpansion(canvasElement, chartInstance) {
             if (!canvasElement || !chartInstance) {
                 return;
             }
@@ -929,10 +1267,15 @@
                     openChartModal(chartInstance);
                 }
             });
-        };
+        }
 
         registerChartForExpansion(barContext, barChart);
         registerChartForExpansion(lineContext, lineChart);
+        registerChartForExpansion(document.getElementById('shiftChart'), shiftChart);
+        registerChartForExpansion(document.getElementById('productChart'), productChart);
+        registerChartForExpansion(document.getElementById('scrapChart'), scrapChart);
+        registerChartForExpansion(document.getElementById('downtimeChart'), downtimeChartInstance);
+        registerChartForExpansion(document.getElementById('cumulativeGoalChart'), cumulativeGoalChartInstance);
 
         const emailButton = document.getElementById('emailDataButton');
         const emailModal = document.getElementById('emailDataModal');
@@ -1206,6 +1549,347 @@
                 withTemporaryLabel(copyEmailNoteButton, 'Copy failed');
             });
         }
+
+        const initializeBuilder = () => {
+            const dimensionList = document.getElementById('dimensionList');
+            const metricList = document.getElementById('metricList');
+            const selectionContainer = document.getElementById('builderSelection');
+            const dropZone = document.getElementById('builderDropZone');
+            const resetButton = document.getElementById('resetBuilder');
+            const chartCanvas = document.getElementById('customBuilderChart');
+            const placeholder = dropZone ? dropZone.querySelector('.builder-placeholder') : null;
+            if (!dimensionList || !metricList || !selectionContainer || !dropZone || !chartCanvas) {
+                return;
+            }
+
+            const availableRows = Array.isArray(builderRows) ? builderRows : [];
+            const dimensionLabels = {
+                date: 'Date',
+                customer: 'Customer',
+                shift: 'Shift',
+                product_type: 'Product Type',
+                downtime_cause: 'Downtime Cause',
+            };
+            const metricLabels = {
+                gates_produced: 'Gates Produced',
+                scrap_rejects: 'Scrap & Rejects',
+                runtime_hours: 'Runtime Hours',
+                efficiency: 'Efficiency',
+            };
+
+            const storageKey = 'productionBuilderState';
+            let selectedDimensions = [];
+            let selectedMetric = null;
+            let builderChart = null;
+            let saveTimeout = null;
+
+            const loadPersistedState = () => {
+                if (builderState && typeof builderState === 'object') {
+                    const dimensions = Array.isArray(builderState.dimensions)
+                        ? builderState.dimensions.slice(0, 2)
+                        : [];
+                    selectedDimensions = dimensions;
+                    selectedMetric = typeof builderState.metric === 'string'
+                        ? builderState.metric
+                        : null;
+                } else {
+                    try {
+                        const stored = JSON.parse(window.localStorage.getItem(storageKey) || 'null');
+                        if (stored && typeof stored === 'object') {
+                            selectedDimensions = Array.isArray(stored.dimensions)
+                                ? stored.dimensions.slice(0, 2)
+                                : [];
+                            selectedMetric = typeof stored.metric === 'string'
+                                ? stored.metric
+                                : null;
+                        }
+                    } catch (error) {
+                        selectedDimensions = [];
+                        selectedMetric = null;
+                    }
+                }
+
+                if (!selectedDimensions.length) {
+                    selectedDimensions = ['customer'];
+                }
+                if (!selectedMetric) {
+                    selectedMetric = 'gates_produced';
+                }
+            };
+
+            const persistState = () => {
+                const state = {
+                    dimensions: selectedDimensions,
+                    metric: selectedMetric,
+                };
+                try {
+                    window.localStorage.setItem(storageKey, JSON.stringify(state));
+                } catch (error) {
+                    // Ignore storage failures.
+                }
+                if (!builderStateEndpoint) {
+                    return;
+                }
+                if (saveTimeout) {
+                    window.clearTimeout(saveTimeout);
+                }
+                saveTimeout = window.setTimeout(() => {
+                    fetch(builderStateEndpoint, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(state),
+                    }).catch(() => {
+                        // Ignore persistence failures; state remains in localStorage.
+                    });
+                }, 500);
+            };
+
+            const destroyBuilderChart = () => {
+                if (builderChart) {
+                    builderChart.destroy();
+                    builderChart = null;
+                }
+            };
+
+            const updatePlaceholderVisibility = () => {
+                const isEmpty = !selectedDimensions.length || !selectedMetric;
+                dropZone.classList.toggle('is-empty', isEmpty);
+                if (placeholder) {
+                    placeholder.hidden = !isEmpty;
+                }
+            };
+
+            const updateSelectionDisplay = () => {
+                selectionContainer.innerHTML = '';
+                selectedDimensions.forEach((dimension) => {
+                    const pill = document.createElement('span');
+                    pill.className = 'builder-pill';
+                    pill.textContent = `Dimension: ${dimensionLabels[dimension] || dimension}`;
+                    selectionContainer.appendChild(pill);
+                });
+                if (selectedMetric) {
+                    const pill = document.createElement('span');
+                    pill.className = 'builder-pill';
+                    pill.textContent = `Metric: ${metricLabels[selectedMetric] || selectedMetric}`;
+                    selectionContainer.appendChild(pill);
+                }
+                updatePlaceholderVisibility();
+            };
+
+            const setActiveStates = () => {
+                dimensionList.querySelectorAll('.builder-item').forEach((item) => {
+                    const key = item.getAttribute('data-key');
+                    if (key && selectedDimensions.includes(key)) {
+                        item.classList.add('is-selected');
+                    } else {
+                        item.classList.remove('is-selected');
+                    }
+                });
+                metricList.querySelectorAll('.builder-item').forEach((item) => {
+                    const key = item.getAttribute('data-key');
+                    if (key && key === selectedMetric) {
+                        item.classList.add('is-selected');
+                    } else {
+                        item.classList.remove('is-selected');
+                    }
+                });
+            };
+
+            const aggregateMetric = (rows) => {
+                if (!rows || !rows.length) {
+                    return 0;
+                }
+                if (selectedMetric === 'efficiency') {
+                    const produced = rows.reduce((total, row) => total + (row.gates_produced || 0), 0);
+                    const runtime = rows.reduce((total, row) => total + (row.runtime_hours || 0), 0);
+                    return runtime > 0 ? produced / runtime : 0;
+                }
+                if (selectedMetric === 'runtime_hours') {
+                    return rows.reduce((total, row) => total + (row.runtime_hours || 0), 0);
+                }
+                if (selectedMetric === 'scrap_rejects') {
+                    return rows.reduce((total, row) => total + (row.scrap_rejects || 0), 0);
+                }
+                return rows.reduce((total, row) => total + (row.gates_produced || 0), 0);
+            };
+
+            const renderBuilderChart = () => {
+                destroyBuilderChart();
+                if (!selectedMetric || !selectedDimensions.length) {
+                    updatePlaceholderVisibility();
+                    return;
+                }
+
+                const dimensions = selectedDimensions.slice(0, 2);
+                const metricLabel = metricLabels[selectedMetric] || 'Value';
+
+                if (dimensions.length === 1) {
+                    const dimensionKey = dimensions[0];
+                    const grouped = new Map();
+                    availableRows.forEach((row) => {
+                        const key = row[dimensionKey] || 'Unspecified';
+                        if (!grouped.has(key)) {
+                            grouped.set(key, []);
+                        }
+                        grouped.get(key).push(row);
+                    });
+
+                    const labels = Array.from(grouped.keys()).sort();
+                    if (!labels.length) {
+                        updatePlaceholderVisibility();
+                        return;
+                    }
+                    const data = labels.map((label) => aggregateMetric(grouped.get(label)));
+
+                    builderChart = new Chart(chartCanvas, {
+                        type: 'bar',
+                        data: {
+                            labels,
+                            datasets: [
+                                {
+                                    label: metricLabel,
+                                    data,
+                                    backgroundColor: '#2563eb',
+                                },
+                            ],
+                        },
+                        options: {
+                            responsive: true,
+                            plugins: {
+                                title: {
+                                    display: true,
+                                    text: `${metricLabel} by ${dimensionLabels[dimensionKey] || dimensionKey}`,
+                                },
+                                legend: {
+                                    display: false,
+                                },
+                            },
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                },
+                            },
+                        },
+                    });
+                    return;
+                }
+
+                const [primaryDimension, secondaryDimension] = dimensions;
+                const grouped = new Map();
+                availableRows.forEach((row) => {
+                    const primaryKey = row[primaryDimension] || 'Unspecified';
+                    const secondaryKey = row[secondaryDimension] || 'Unspecified';
+                    if (!grouped.has(primaryKey)) {
+                        grouped.set(primaryKey, new Map());
+                    }
+                    const nested = grouped.get(primaryKey);
+                    if (!nested.has(secondaryKey)) {
+                        nested.set(secondaryKey, []);
+                    }
+                    nested.get(secondaryKey).push(row);
+                });
+
+                const labels = Array.from(grouped.keys()).sort();
+                const seriesKeys = Array.from(
+                    new Set(
+                        labels.flatMap((label) => Array.from(grouped.get(label).keys()))
+                    )
+                ).sort();
+                if (!labels.length || !seriesKeys.length) {
+                    updatePlaceholderVisibility();
+                    return;
+                }
+                const datasets = seriesKeys.map((seriesKey, index) => ({
+                    label: seriesKey,
+                    data: labels.map((label) => aggregateMetric(grouped.get(label).get(seriesKey))),
+                    backgroundColor: supplementalPalette[index % supplementalPalette.length],
+                }));
+
+                builderChart = new Chart(chartCanvas, {
+                    type: 'bar',
+                    data: {
+                        labels,
+                        datasets,
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: `${metricLabel} by ${dimensionLabels[primaryDimension] || primaryDimension} and ${dimensionLabels[secondaryDimension] || secondaryDimension}`,
+                            },
+                            legend: {
+                                position: 'bottom',
+                            },
+                        },
+                        scales: {
+                            x: { stacked: true },
+                            y: { beginAtZero: true },
+                        },
+                    },
+                });
+            };
+
+            const handleDimensionSelection = (key) => {
+                if (!key) {
+                    return;
+                }
+                if (selectedDimensions.includes(key)) {
+                    selectedDimensions = selectedDimensions.filter((value) => value !== key);
+                } else {
+                    if (selectedDimensions.length >= 2) {
+                        selectedDimensions.shift();
+                    }
+                    selectedDimensions.push(key);
+                }
+                updateSelectionDisplay();
+                setActiveStates();
+                renderBuilderChart();
+                persistState();
+            };
+
+            const handleMetricSelection = (key) => {
+                if (!key) {
+                    return;
+                }
+                selectedMetric = selectedMetric === key ? null : key;
+                updateSelectionDisplay();
+                setActiveStates();
+                renderBuilderChart();
+                persistState();
+            };
+
+            loadPersistedState();
+            updateSelectionDisplay();
+            setActiveStates();
+            renderBuilderChart();
+
+            dimensionList.querySelectorAll('.builder-item').forEach((item) => {
+                item.addEventListener('click', () => {
+                    handleDimensionSelection(item.getAttribute('data-key'));
+                });
+            });
+            metricList.querySelectorAll('.builder-item').forEach((item) => {
+                item.addEventListener('click', () => {
+                    handleMetricSelection(item.getAttribute('data-key'));
+                });
+            });
+
+            if (resetButton) {
+                resetButton.addEventListener('click', () => {
+                    selectedDimensions = [];
+                    selectedMetric = null;
+                    updateSelectionDisplay();
+                    setActiveStates();
+                    renderBuilderChart();
+                    persistState();
+                });
+            }
+        };
+
+        initializeBuilder();
     }
 </script>
 {% endblock %}

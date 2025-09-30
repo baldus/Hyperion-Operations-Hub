@@ -23,6 +23,14 @@ class ProductionChartSettings(db.Model):
     secondary_step = db.Column(db.Numeric(10, 2), nullable=True)
     goal_value = db.Column(db.Numeric(10, 2), nullable=True)
     show_goal = db.Column(db.Boolean, nullable=False, default=False)
+    show_trendline = db.Column(db.Boolean, nullable=False, default=True)
+    show_output_per_hour = db.Column(db.Boolean, nullable=False, default=True)
+    show_shift_breakdown = db.Column(db.Boolean, nullable=False, default=False)
+    show_product_type_breakdown = db.Column(db.Boolean, nullable=False, default=False)
+    show_scrap_trend = db.Column(db.Boolean, nullable=False, default=False)
+    show_downtime_analysis = db.Column(db.Boolean, nullable=False, default=False)
+    show_cumulative_goal = db.Column(db.Boolean, nullable=False, default=True)
+    custom_builder_state = db.Column(db.JSON, nullable=False, default=dict)
 
     @classmethod
     def get_or_create(cls):
@@ -31,6 +39,26 @@ class ProductionChartSettings(db.Model):
             settings = cls()
             db.session.add(settings)
             db.session.commit()
+        else:
+            # Ensure legacy rows have defaults for newly introduced columns.
+            changed = False
+            for field, default in (
+                ("show_trendline", True),
+                ("show_output_per_hour", True),
+                ("show_shift_breakdown", False),
+                ("show_product_type_breakdown", False),
+                ("show_scrap_trend", False),
+                ("show_downtime_analysis", False),
+                ("show_cumulative_goal", True),
+            ):
+                if getattr(settings, field) is None:
+                    setattr(settings, field, default)
+                    changed = True
+            if settings.custom_builder_state is None:
+                settings.custom_builder_state = {}
+                changed = True
+            if changed:
+                db.session.commit()
         return settings
 
 
@@ -188,6 +216,10 @@ class ProductionDailyRecord(db.Model):
     additional_employees = db.Column(db.Integer, nullable=False, default=0)
     additional_hours_ot = db.Column(db.Numeric(7, 2), nullable=False, default=0)
     daily_notes = db.Column(db.Text, nullable=True)
+    shift_summary = db.Column(db.JSON, nullable=True)
+    product_mix = db.Column(db.JSON, nullable=True)
+    scrap_summary = db.Column(db.JSON, nullable=True)
+    downtime_summary = db.Column(db.JSON, nullable=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(

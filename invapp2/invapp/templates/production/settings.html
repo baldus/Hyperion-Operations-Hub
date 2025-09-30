@@ -154,6 +154,39 @@
                 </label>
             </div>
         </div>
+        <fieldset class="chart-toggle-grid">
+            <legend>Optional Chart Layers</legend>
+            <div class="toggle-list">
+                <label class="checkbox-inline">
+                    <input type="checkbox" name="show_trend" {% if chart_settings_form.show_trend %}checked{% endif %}>
+                    <span>Show Gates Produced Trend line</span>
+                </label>
+                <label class="checkbox-inline">
+                    <input type="checkbox" name="show_output" {% if chart_settings_form.show_output %}checked{% endif %}>
+                    <span>Show Output per Labor Hour overlay</span>
+                </label>
+                <label class="checkbox-inline">
+                    <input type="checkbox" name="show_shift" {% if chart_settings_form.show_shift %}checked{% endif %}>
+                    <span>Display Production by Shift graph</span>
+                </label>
+                <label class="checkbox-inline">
+                    <input type="checkbox" name="show_product" {% if chart_settings_form.show_product %}checked{% endif %}>
+                    <span>Display Production by Product Type graph</span>
+                </label>
+                <label class="checkbox-inline">
+                    <input type="checkbox" name="show_scrap" {% if chart_settings_form.show_scrap %}checked{% endif %}>
+                    <span>Display Scrap and Reject trend graph</span>
+                </label>
+                <label class="checkbox-inline">
+                    <input type="checkbox" name="show_downtime" {% if chart_settings_form.show_downtime %}checked{% endif %}>
+                    <span>Display Downtime Cause analysis</span>
+                </label>
+                <label class="checkbox-inline">
+                    <input type="checkbox" name="show_cumulative_goal" {% if chart_settings_form.show_cumulative_goal %}checked{% endif %}>
+                    <span>Display Cumulative Production vs Goal graph</span>
+                </label>
+            </div>
+        </fieldset>
         <div class="form-actions">
             <button type="submit">Save Chart Settings</button>
         </div>

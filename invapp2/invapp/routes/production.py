@@ -3,12 +3,14 @@ from __future__ import annotations
 import ast
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import date
-from typing import Any, Dict, List
+from collections import defaultdict
+from typing import Any, Dict, Iterable, List, Tuple
 
 
 from flask import (
     Blueprint,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -62,6 +64,134 @@ def _parse_optional_decimal(value: str | None) -> Decimal | None:
         return Decimal(value)
     except (InvalidOperation, TypeError):
         return None
+
+
+def _coerce_numeric(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
+def _extract_named_totals(
+    raw_value: Any, value_key: str = "produced"
+) -> Dict[str, float]:
+    """Normalize data stored as a dict or list of dicts into {name: value}."""
+
+    result: Dict[str, float] = {}
+
+    if isinstance(raw_value, dict):
+        for key, value in raw_value.items():
+            if isinstance(value, dict):
+                numeric = _coerce_numeric(value.get(value_key))
+            else:
+                numeric = _coerce_numeric(value)
+            if numeric is not None:
+                result[str(key)] = numeric
+    elif isinstance(raw_value, list):
+        for entry in raw_value:
+            if not isinstance(entry, dict):
+                continue
+            key = entry.get("name") or entry.get("label") or entry.get("key")
+            if not key:
+                continue
+            numeric = _coerce_numeric(entry.get(value_key) or entry.get("value"))
+            if numeric is None:
+                continue
+            result[str(key)] = numeric
+
+    return result
+
+
+def _extract_scrap_totals(raw_value: Any) -> Tuple[float, float]:
+    data = _extract_named_totals(raw_value)
+    scrap_total = 0.0
+    reject_total = 0.0
+    for key, value in data.items():
+        normalized_key = key.lower()
+        if "reject" in normalized_key:
+            reject_total += value
+        else:
+            scrap_total += value
+    return scrap_total, reject_total
+
+
+def _build_stacked_chart_data(
+    labels: List[str],
+    breakdowns: Iterable[Dict[str, float]],
+    fallback_totals: Iterable[int],
+    fallback_label: str,
+) -> Dict[str, Any]:
+    series_map: Dict[str, List[float]] = {}
+    for index, (breakdown, total) in enumerate(zip(breakdowns, fallback_totals)):
+        remaining = float(total)
+        if not breakdown:
+            breakdown = {}
+        for name, value in breakdown.items():
+            series = series_map.setdefault(name, [0.0] * len(labels))
+            series[index] = value
+            remaining -= value
+        if remaining > 0:
+            series = series_map.setdefault(fallback_label, [0.0] * len(labels))
+            series[index] = series[index] + remaining
+
+    datasets = []
+    palette = [
+        "#2563eb",
+        "#f97316",
+        "#16a34a",
+        "#7c3aed",
+        "#0ea5e9",
+        "#ef4444",
+        "#14b8a6",
+    ]
+    for idx, (name, values) in enumerate(sorted(series_map.items())):
+        datasets.append(
+            {
+                "label": name,
+                "data": values,
+                "backgroundColor": palette[idx % len(palette)],
+                "stack": "breakdown",
+            }
+        )
+
+    return {"labels": labels, "datasets": datasets}
+
+
+def _build_downtime_pareto(
+    entries: Iterable[Dict[str, float]]
+) -> Dict[str, Any]:
+    totals: Dict[str, float] = defaultdict(float)
+    for entry in entries:
+        for cause, value in entry.items():
+            numeric = _coerce_numeric(value)
+            if numeric is None:
+                continue
+            totals[cause] += numeric
+
+    sorted_items = sorted(totals.items(), key=lambda item: item[1], reverse=True)
+    labels = [item[0] for item in sorted_items]
+    values = [item[1] for item in sorted_items]
+    cumulative_values: List[float] = []
+    running_total = 0.0
+    total_sum = sum(values) or 1.0
+    for value in values:
+        running_total += value
+        cumulative_values.append((running_total / total_sum) * 100)
+
+    return {
+        "labels": labels,
+        "bars": values,
+        "cumulative": cumulative_values,
+    }
 
 ADDITIONAL_METRICS: List[Dict[str, str]] = [
     {"key": "controllers_4_stop", "label": "Controllers (4 Stop)"},
@@ -645,6 +775,7 @@ def history():
     ]
     if other_customer:
         table_customers.append(other_customer)
+    customer_lookup = {customer.id: customer.name for customer in table_customers}
 
 
     table_rows = []
@@ -653,6 +784,10 @@ def history():
     stack_datasets: List[Dict[str, object]] = []
     overlay_values: List[float | None] = []
     total_produced_values: List[int] = []
+    shift_breakdowns: List[Dict[str, float]] = []
+    product_breakdowns: List[Dict[str, float]] = []
+    scrap_values: List[Tuple[float, float]] = []
+    downtime_breakdowns: List[Dict[str, float]] = []
     cumulative_series: Dict[str, List[int]] = {
         series["key"]: [] for series in LINE_SERIES
     }
@@ -754,6 +889,23 @@ def history():
 
         overlay_values.append(float(output_value) if output_value is not None else None)
         total_produced_values.append(produced_sum)
+        shift_breakdown = _extract_named_totals(
+            record.shift_summary, value_key="produced"
+        )
+        if not shift_breakdown and produced_sum:
+            shift_breakdown = {"Unassigned Shift": float(produced_sum)}
+        shift_breakdowns.append(shift_breakdown)
+
+        product_breakdown = _extract_named_totals(
+            record.product_mix, value_key="produced"
+        )
+        if not product_breakdown and produced_sum:
+            product_breakdown = {"Unassigned Type": float(produced_sum)}
+        product_breakdowns.append(product_breakdown)
+        scrap_values.append(_extract_scrap_totals(record.scrap_summary))
+        downtime_breakdowns.append(
+            _extract_named_totals(record.downtime_summary, value_key="minutes")
+        )
 
 
         additional_total_hours_value = record.additional_total_labor_hours
@@ -825,6 +977,117 @@ def history():
             }
         )
 
+    builder_rows: List[Dict[str, Any]] = []
+    for index, (
+        row,
+        date_label,
+        shift_breakdown,
+        product_breakdown,
+        scrap_tuple,
+        downtime_breakdown,
+    ) in enumerate(
+        zip(
+            table_rows,
+            chart_labels,
+            shift_breakdowns,
+            product_breakdowns,
+            scrap_values,
+            downtime_breakdowns,
+        )
+    ):
+        produced_total = float(total_produced_values[index])
+        scrap_total, reject_total = scrap_tuple
+        combined_scrap = float(scrap_total + reject_total)
+        runtime_hours = float(row.get("gates_total_hours_value", 0.0))
+
+        per_customer = row.get("per_customer_produced", {})
+        for customer_id, produced_value in per_customer.items():
+            if not produced_value:
+                continue
+            customer_name = customer_lookup.get(customer_id, "Unknown")
+            fraction = (produced_value / produced_total) if produced_total else 0.0
+            scrap_share = combined_scrap * fraction if fraction else 0.0
+            customer_runtime = runtime_hours * fraction if fraction else 0.0
+            builder_rows.append(
+                {
+                    "date": date_label,
+                    "customer": customer_name,
+                    "shift": "All Shifts",
+                    "product_type": "All Products",
+                    "downtime_cause": "All Causes",
+                    "gates_produced": float(produced_value),
+                    "scrap_rejects": scrap_share,
+                    "runtime_hours": customer_runtime,
+                    "efficiency": (
+                        (produced_value / customer_runtime)
+                        if customer_runtime
+                        else 0.0
+                    ),
+                }
+            )
+
+        for shift_name, shift_value in shift_breakdown.items():
+            if not shift_value:
+                continue
+            fraction = (shift_value / produced_total) if produced_total else 0.0
+            shift_scrap = combined_scrap * fraction if fraction else 0.0
+            shift_runtime = runtime_hours * fraction if fraction else 0.0
+            builder_rows.append(
+                {
+                    "date": date_label,
+                    "customer": "All Customers",
+                    "shift": shift_name,
+                    "product_type": "All Products",
+                    "downtime_cause": "All Causes",
+                    "gates_produced": float(shift_value),
+                    "scrap_rejects": shift_scrap,
+                    "runtime_hours": shift_runtime,
+                    "efficiency": (
+                        (shift_value / shift_runtime) if shift_runtime else 0.0
+                    ),
+                }
+            )
+
+        for product_name, product_value in product_breakdown.items():
+            if not product_value:
+                continue
+            fraction = (product_value / produced_total) if produced_total else 0.0
+            product_scrap = combined_scrap * fraction if fraction else 0.0
+            product_runtime = runtime_hours * fraction if fraction else 0.0
+            builder_rows.append(
+                {
+                    "date": date_label,
+                    "customer": "All Customers",
+                    "shift": "All Shifts",
+                    "product_type": product_name,
+                    "downtime_cause": "All Causes",
+                    "gates_produced": float(product_value),
+                    "scrap_rejects": product_scrap,
+                    "runtime_hours": product_runtime,
+                    "efficiency": (
+                        (product_value / product_runtime)
+                        if product_runtime
+                        else 0.0
+                    ),
+                }
+            )
+
+        for cause, minutes in downtime_breakdown.items():
+            numeric_minutes = _coerce_numeric(minutes) or 0.0
+            builder_rows.append(
+                {
+                    "date": date_label,
+                    "customer": "All Customers",
+                    "shift": "All Shifts",
+                    "product_type": "All Products",
+                    "downtime_cause": cause,
+                    "gates_produced": 0.0,
+                    "scrap_rejects": 0.0,
+                    "runtime_hours": float(numeric_minutes) / 60.0,
+                    "efficiency": 0.0,
+                }
+            )
+
     line_datasets = []
     for series in LINE_SERIES:
         line_datasets.append(
@@ -861,7 +1124,7 @@ def history():
             trendline_values = [slope * x + intercept for x in range(len(total_produced_values))]
 
     overlay_datasets: List[Dict[str, object]] = []
-    if trendline_values:
+    if chart_settings.show_trendline and trendline_values:
         overlay_datasets.append(
             {
                 "label": "Gates Produced Trend",
@@ -877,7 +1140,9 @@ def history():
                 "order": 1,
             }
         )
-    if any(value is not None for value in overlay_values):
+    if chart_settings.show_output_per_hour and any(
+        value is not None for value in overlay_values
+    ):
         overlay_datasets.append(
             {
                 "label": "Output per Labor Hour",
@@ -913,6 +1178,75 @@ def history():
                 "order": 3,
             }
         )
+
+    shift_chart_data = _build_stacked_chart_data(
+        chart_labels,
+        shift_breakdowns,
+        total_produced_values,
+        "Unassigned Shift",
+    )
+    product_chart_data = _build_stacked_chart_data(
+        chart_labels,
+        product_breakdowns,
+        total_produced_values,
+        "Unassigned Type",
+    )
+    scrap_combined = [scrap + rejects for scrap, rejects in scrap_values]
+    scrap_chart_data = {
+        "labels": chart_labels,
+        "datasets": [
+            {
+                "label": "Scrap & Rejects",
+                "data": scrap_combined,
+                "borderColor": "#dc2626",
+                "backgroundColor": "rgba(220, 38, 38, 0.2)",
+                "tension": 0.2,
+                "fill": False,
+            },
+            {
+                "label": "Gates Produced",
+                "data": total_produced_values,
+                "borderColor": "#2563eb",
+                "backgroundColor": "rgba(37, 99, 235, 0.2)",
+                "tension": 0.2,
+                "fill": False,
+            },
+        ],
+    }
+    downtime_chart_data = _build_downtime_pareto(downtime_breakdowns)
+    cumulative_goal_chart = {
+        "labels": chart_labels,
+        "datasets": [
+            {
+                "label": "Cumulative Production",
+                "data": cumulative_series["produced"],
+                "borderColor": "#2563eb",
+                "backgroundColor": "rgba(37, 99, 235, 0.25)",
+                "fill": False,
+                "tension": 0.2,
+            }
+        ],
+    }
+    if chart_settings.show_goal and goal_value is not None:
+        cumulative_goal_chart["datasets"].append(
+            {
+                "label": "Goal",
+                "data": [goal_value for _ in chart_labels],
+                "borderColor": "#f97316",
+                "backgroundColor": "rgba(249, 115, 22, 0.25)",
+                "fill": False,
+                "borderDash": [6, 6],
+                "tension": 0.2,
+            }
+        )
+
+    supplemental_charts = {
+        "shift": shift_chart_data,
+        "product": product_chart_data,
+        "scrap": scrap_chart_data,
+        "downtime": downtime_chart_data,
+        "cumulative_goal": cumulative_goal_chart,
+    }
 
     chart_axis_settings = {
         "primary": {
@@ -969,10 +1303,44 @@ def history():
         line_datasets=line_datasets,
         overlay_datasets=overlay_datasets,
         chart_axis_settings=chart_axis_settings,
+        supplemental_charts=supplemental_charts,
         start_date=start_date,
         end_date=end_date,
         email_preview=email_preview,
+        chart_visibility={
+            "trend": chart_settings.show_trendline,
+            "output_per_hour": chart_settings.show_output_per_hour,
+            "shift": chart_settings.show_shift_breakdown,
+            "product": chart_settings.show_product_type_breakdown,
+            "scrap": chart_settings.show_scrap_trend,
+            "downtime": chart_settings.show_downtime_analysis,
+            "cumulative_goal": chart_settings.show_cumulative_goal,
+        },
+        builder_state=chart_settings.custom_builder_state or {},
+        builder_rows=builder_rows,
     )
+
+
+@bp.route("/history/builder-state", methods=["POST"])
+def save_builder_state():
+    chart_settings = ProductionChartSettings.get_or_create()
+    payload = request.get_json(silent=True) or {}
+    dimensions = payload.get("dimensions")
+    metric = payload.get("metric")
+
+    state: Dict[str, Any] = {}
+    if isinstance(dimensions, list):
+        state["dimensions"] = [
+            str(value)
+            for value in dimensions
+            if isinstance(value, str)
+        ][:2]
+    if isinstance(metric, str):
+        state["metric"] = metric
+
+    chart_settings.custom_builder_state = state
+    db.session.commit()
+    return jsonify({"status": "ok"})
 
 
 @bp.route("/settings", methods=["GET", "POST"])
@@ -999,6 +1367,13 @@ def production_settings():
         "secondary_step": _format_optional_decimal(chart_settings.secondary_step),
         "goal_value": _format_optional_decimal(chart_settings.goal_value),
         "show_goal": chart_settings.show_goal,
+        "show_trend": chart_settings.show_trendline,
+        "show_output": chart_settings.show_output_per_hour,
+        "show_shift": chart_settings.show_shift_breakdown,
+        "show_product": chart_settings.show_product_type_breakdown,
+        "show_scrap": chart_settings.show_scrap_trend,
+        "show_downtime": chart_settings.show_downtime_analysis,
+        "show_cumulative_goal": chart_settings.show_cumulative_goal,
     }
 
 
@@ -1116,6 +1491,15 @@ def production_settings():
                 parsed_values[field] = parsed
 
             show_goal_value = request.form.get("show_goal") is not None
+            show_trend_value = request.form.get("show_trend") is not None
+            show_output_value = request.form.get("show_output") is not None
+            show_shift_value = request.form.get("show_shift") is not None
+            show_product_value = request.form.get("show_product") is not None
+            show_scrap_value = request.form.get("show_scrap") is not None
+            show_downtime_value = request.form.get("show_downtime") is not None
+            show_cumulative_goal_value = (
+                request.form.get("show_cumulative_goal") is not None
+            )
 
             if has_errors:
                 chart_settings_form_values = {
@@ -1127,11 +1511,25 @@ def production_settings():
                     "secondary_step": request.form.get("secondary_step", ""),
                     "goal_value": request.form.get("goal_value", ""),
                     "show_goal": show_goal_value,
+                    "show_trend": show_trend_value,
+                    "show_output": show_output_value,
+                    "show_shift": show_shift_value,
+                    "show_product": show_product_value,
+                    "show_scrap": show_scrap_value,
+                    "show_downtime": show_downtime_value,
+                    "show_cumulative_goal": show_cumulative_goal_value,
                 }
             else:
                 for field in field_labels:
                     setattr(chart_settings, field, parsed_values[field])
                 chart_settings.show_goal = show_goal_value
+                chart_settings.show_trendline = show_trend_value
+                chart_settings.show_output_per_hour = show_output_value
+                chart_settings.show_shift_breakdown = show_shift_value
+                chart_settings.show_product_type_breakdown = show_product_value
+                chart_settings.show_scrap_trend = show_scrap_value
+                chart_settings.show_downtime_analysis = show_downtime_value
+                chart_settings.show_cumulative_goal = show_cumulative_goal_value
                 db.session.commit()
                 flash("Chart settings updated.", "success")
                 return redirect(url_for("production.production_settings"))

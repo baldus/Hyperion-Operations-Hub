@@ -10,6 +10,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from invapp import create_app
 from invapp.extensions import db
 from invapp.models import (
+    ProductionChartSettings,
     ProductionCustomer,
     ProductionDailyCustomerTotal,
     ProductionDailyRecord,
@@ -119,4 +120,19 @@ def test_history_uses_custom_output_formula(client, app):
     assert "0.59" in page
     assert "Produced Only: 10.00" in page
     assert "Hours: 17.00" in page
+
+
+def test_builder_state_endpoint(client, app):
+    response = client.post(
+        "/production/history/builder-state",
+        json={"dimensions": ["customer", "shift"], "metric": "gates_produced"},
+    )
+    assert response.status_code == 200
+    with app.app_context():
+        settings = ProductionChartSettings.get_or_create()
+        assert settings.custom_builder_state.get("dimensions") == [
+            "customer",
+            "shift",
+        ]
+        assert settings.custom_builder_state.get("metric") == "gates_produced"
 

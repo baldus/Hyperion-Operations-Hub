@@ -49,6 +49,8 @@ erDiagram
   - `show_goal` – flag indicating whether the goal line is displayed.
   - `show_trendline` – toggle to overlay a weekday trendline on the production chart.
   - `show_output_per_hour` – toggle to plot the calculated output per labor hour overlay.
+  - `show_shift_breakdown`, `show_product_type_breakdown`, `show_scrap_trend`, `show_downtime_analysis`, `show_cumulative_goal` – booleans controlling optional dashboard charts.
+  - `custom_builder_state` – JSON payload storing the persisted custom graph builder configuration.
 
 - **`production_daily_record`**
   - `id` (PK)
@@ -56,6 +58,7 @@ erDiagram
   - `day_of_week` – localized weekday label.
   - Labor and throughput metrics: `gates_employees`, `gates_hours_ot`, `controllers_4_stop`, `controllers_6_stop`, `door_locks_lh`, `door_locks_rh`, `operators_produced`, `cops_produced`, `additional_employees`, `additional_hours_ot`.
   - `daily_notes` – optional commentary field.
+  - Dashboard support JSON snapshots: `shift_summary`, `product_mix`, `scrap_summary`, `downtime_summary`.
   - Timestamps: `created_at`, `updated_at`.
   - Relationships: one-to-many `customer_totals`.
 
