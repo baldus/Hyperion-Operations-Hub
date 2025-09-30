@@ -1,0 +1,1211 @@
+{% extends "base.html" %}
+
+{% block content %}
+<nav class="production-nav" aria-label="Production pages">
+    <a href="{{ url_for('production.daily_entry') }}" class="production-nav-link">Daily Entry</a>
+    <a href="{{ url_for('production.history') }}" class="production-nav-link is-active">History</a>
+    <a href="{{ url_for('production.production_settings') }}" class="production-nav-link">Settings</a>
+</nav>
+
+<h2>Production History</h2>
+<p class="section-help">Select a date range to review production totals, customer breakdowns, and month-to-date trends.</p>
+{% if grouped_customer_names %}
+    <p class="chart-note">Customers grouped into the <strong>Other</strong> series: {{ grouped_customer_names | join(', ') }}.</p>
+{% endif %}
+
+
+<form method="get" class="date-range-form">
+    <div class="form-field">
+        <label for="start_date" class="field-label">Start Date</label>
+        <input type="date" id="start_date" name="start_date" value="{{ start_date.isoformat() }}">
+    </div>
+    <div class="form-field">
+        <label for="end_date" class="field-label">End Date</label>
+        <input type="date" id="end_date" name="end_date" value="{{ end_date.isoformat() }}">
+    </div>
+    <div class="form-actions">
+        <button type="submit">Update Range</button>
+    </div>
+</form>
+
+{% if not chart_labels %}
+    <p class="chart-empty">No production records were found for the selected dates.</p>
+{% else %}
+    <section class="dashboard-section">
+        <h3>Visual Breakdown</h3>
+        <div class="chart-controls">
+            <label class="chart-toggle" for="collapseWeekendsToggle">
+                <input type="checkbox" id="collapseWeekendsToggle" name="collapse_weekends">
+                Collapse weekends
+            </label>
+            <button type="button" class="action-btn chart-export-button" id="emailDataButton" {% if not chart_labels %}disabled{% endif %}>
+                Email Data
+            </button>
+        </div>
+        <div class="chart-grid">
+            <div class="chart-card">
+                <canvas id="gatesProducedChart" aria-label="Stacked column chart showing gates produced per customer"></canvas>
+            </div>
+            <div class="chart-card">
+                <canvas id="cumulativeChart" aria-label="Line chart showing cumulative month-to-date production totals"></canvas>
+            </div>
+        </div>
+    </section>
+
+    <div class="chart-modal is-hidden" id="chartModal" role="dialog" aria-modal="true" aria-label="Expanded chart view">
+        <div class="chart-modal-dialog">
+            <button type="button" class="chart-modal-close" data-modal-dismiss aria-label="Close expanded chart">&times;</button>
+            <canvas id="expandedChart" aria-label="Expanded chart canvas"></canvas>
+        </div>
+    </div>
+
+    <div class="email-modal is-hidden" id="emailDataModal" role="dialog" aria-modal="true" aria-labelledby="emailDataTitle">
+        <div class="email-modal-dialog" tabindex="-1">
+            <button type="button" class="email-modal-close" data-email-dismiss aria-label="Close email data preview">&times;</button>
+            <div class="email-modal-header">
+                <h3 id="emailDataTitle">Email Data Preview</h3>
+                <p id="emailDataSubtitle" class="email-modal-subtitle"></p>
+            </div>
+            <div class="email-modal-note" id="emailDataNote"></div>
+            <div class="email-modal-actions">
+                <button type="button" class="action-btn email-modal-copy-button" id="copyEmailNoteButton">Copy Notes</button>
+            </div>
+            <div class="email-modal-gallery">
+                <figure>
+                    <img id="emailDataBarImage" alt="Gates produced chart preview">
+                    <figcaption>Gates Produced by Customer</figcaption>
+                </figure>
+                <figure>
+                    <img id="emailDataLineImage" alt="Cumulative production chart preview">
+                    <figcaption>Cumulative Production Totals</figcaption>
+                </figure>
+            </div>
+            <p class="email-modal-hint">Right-click an image to copy it into your email message.</p>
+        </div>
+    </div>
+
+    <section class="dashboard-section">
+        <div class="section-header">
+            <h3>Daily Detail</h3>
+            <button type="button" class="action-btn" id="dailyDetailToggle" data-show-text="Show Daily Detail" data-hide-text="Hide Daily Detail" aria-expanded="false" aria-controls="dailyDetailContainer">
+                Show Daily Detail
+            </button>
+        </div>
+        <p class="section-help">Labor hours assume an 8-hour base shift per employee plus the overtime entered for each section.</p>
+        <div class="table-scroll" id="dailyDetailContainer" hidden>
+            <table class="inventory-table production-history-table">
+                <thead>
+                    <tr>
+                        <th scope="col" class="sortable-header" aria-sort="none">Date</th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Day</th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Gates Produced</th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Gates Packaged</th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Gates Labor<br><small>Employees / OT / Hours</small></th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Output per Labor Hour<br><small>Gates Combined</small></th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Controllers<br><small>4 Stop / 6 Stop</small></th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Door Locks<br><small>LH / RH</small></th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Operators</th>
+                        <th scope="col" class="sortable-header" aria-sort="none">COPs</th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Additional Labor<br><small>Employees / OT / Hours</small></th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Additional Output<br><small>Units per Labor Hour</small></th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in table_rows %}
+                        <tr>
+                            <td data-sort-value="{{ row.record.entry_date.strftime('%Y-%m-%d') }}">{{ row.record.entry_date.strftime('%Y-%m-%d') }}</td>
+                            <td data-sort-value="{{ row.record.day_of_week }}">{{ row.record.day_of_week }}</td>
+                            <td data-sort-value="{{ row.produced_sum }}">
+                                <strong>{{ row.produced_sum }}</strong>
+                                <div class="totals-breakdown">
+                                    {% for customer in customers %}
+                                        <span>{{ customer.name }}: {{ row.per_customer_produced.get(customer.id, 0) }}</span>
+
+                                    {% endfor %}
+                                </div>
+                            </td>
+                            <td data-sort-value="{{ row.packaged_sum }}">
+                                <strong>{{ row.packaged_sum }}</strong>
+                                <div class="totals-breakdown">
+                                    {% for customer in customers %}
+                                        <span>{{ customer.name }}: {{ row.per_customer_packaged.get(customer.id, 0) }}</span>
+
+                                    {% endfor %}
+                                </div>
+                            </td>
+                            <td data-sort-value="{{ row.gates_total_hours_value }}">
+                                <div class="totals-breakdown">
+                                    <span>Employees: {{ row.gates_employees }}</span>
+                                    <span>OT Hours: {{ row.gates_hours_ot }}</span>
+                                    <span>Total Hours: {{ row.gates_total_hours }}</span>
+                                </div>
+                            </td>
+                            <td data-sort-value="{{ row.output_per_hour_value if row.output_per_hour_value is not none else 0 }}">
+                                {% if row.gates_output_per_hour %}
+                                    <strong>{{ row.gates_output_per_hour }}</strong>
+                                {% endif %}
+                                {% if row.output_variables %}
+                                    <div class="totals-breakdown">
+                                        {% for metric in row.output_variables %}
+                                            <span>{{ metric.label }}: {{ metric.value }}</span>
+                                        {% endfor %}
+                                    </div>
+                                {% elif not row.gates_output_per_hour %}
+                                    —
+                                {% endif %}
+                            </td>
+                            <td data-sort-value="{{ row.controllers_total }}">
+                                <div class="metric-pair">
+                                    <span>{{ row.record.controllers_4_stop }}</span>
+                                    <span>{{ row.record.controllers_6_stop }}</span>
+                                </div>
+                            </td>
+                            <td data-sort-value="{{ row.door_locks_total }}">
+                                <div class="metric-pair">
+                                    <span>{{ row.record.door_locks_lh }}</span>
+                                    <span>{{ row.record.door_locks_rh }}</span>
+                                </div>
+                            </td>
+                            <td data-sort-value="{{ row.operators_total }}">{{ row.operators_total }}</td>
+                            <td data-sort-value="{{ row.cops_total }}">{{ row.cops_total }}</td>
+                            <td data-sort-value="{{ row.additional_total_hours_value }}">
+                                <div class="totals-breakdown">
+                                    <span>Employees: {{ row.additional_employees }}</span>
+                                    <span>OT Hours: {{ row.additional_hours_ot }}</span>
+                                    <span>Total Hours: {{ row.additional_total_hours }}</span>
+                                </div>
+                            </td>
+                            <td data-sort-value="{{ row.additional_output_total_value }}">
+                                {% if row.additional_per_hour %}
+                                    <div class="totals-breakdown">
+                                        {% for metric in row.additional_per_hour %}
+                                            <span>{{ metric.label }}: {{ metric.per_hour }}</span>
+                                        {% endfor %}
+                                    </div>
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                            <td data-sort-value="{{ row.record.daily_notes or '' }}">{{ row.record.daily_notes or '—' }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    const chartLabels = {{ chart_labels|tojson }};
+    const stackedDatasets = {{ stacked_datasets|tojson }};
+    const overlayDatasets = {{ overlay_datasets|tojson }};
+    const lineDatasets = {{ line_datasets|tojson }};
+    const chartAxisSettings = {{ chart_axis_settings|tojson }};
+    const emailPreview = {{ email_preview|tojson }};
+
+    const parseDateLabel = (label) => {
+        if (typeof label !== 'string') {
+            return null;
+        }
+        const parts = label.split('-').map((value) => Number.parseInt(value, 10));
+        if (parts.length !== 3 || parts.some((value) => Number.isNaN(value))) {
+            return null;
+        }
+        const [year, month, day] = parts;
+        return new Date(Date.UTC(year, month - 1, day));
+    };
+
+    const isWeekendLabel = (label) => {
+        const parsedDate = parseDateLabel(label);
+        if (!parsedDate) {
+            return false;
+        }
+        const dayOfWeek = parsedDate.getUTCDay();
+        return dayOfWeek === 0 || dayOfWeek === 6;
+    };
+
+    const dailyDetailToggle = document.getElementById('dailyDetailToggle');
+    const dailyDetailContainer = document.getElementById('dailyDetailContainer');
+
+    if (dailyDetailToggle && dailyDetailContainer) {
+        const showText = dailyDetailToggle.getAttribute('data-show-text') || 'Show Daily Detail';
+        const hideText = dailyDetailToggle.getAttribute('data-hide-text') || 'Hide Daily Detail';
+
+        const updateToggleState = (expanded) => {
+            dailyDetailToggle.setAttribute('aria-expanded', String(expanded));
+            dailyDetailToggle.textContent = expanded ? hideText : showText;
+            dailyDetailContainer.hidden = !expanded;
+        };
+
+        dailyDetailToggle.addEventListener('click', () => {
+            const expanded = dailyDetailToggle.getAttribute('aria-expanded') === 'true';
+            updateToggleState(!expanded);
+        });
+    }
+
+    const initializeSortableTable = (tableElement) => {
+        const headerCells = Array.from(tableElement.querySelectorAll('thead th'));
+        const tableBody = tableElement.querySelector('tbody');
+        if (!tableBody || !headerCells.length) {
+            return;
+        }
+
+        const allRows = Array.from(tableBody.querySelectorAll('tr'));
+        allRows.forEach((row, index) => {
+            row.dataset.originalOrder = String(index);
+        });
+
+        const getSortValue = (row, columnIndex) => {
+            const cell = row.children[columnIndex];
+            if (!cell) {
+                return '';
+            }
+            const value = cell.getAttribute('data-sort-value');
+            return value !== null ? value : cell.textContent.trim();
+        };
+
+        const compareValues = (valueA, valueB) => {
+            const numericA = Number(valueA);
+            const numericB = Number(valueB);
+            const aIsNumber = Number.isFinite(numericA);
+            const bIsNumber = Number.isFinite(numericB);
+
+            if (aIsNumber && bIsNumber) {
+                return numericA - numericB;
+            }
+
+            const stringA = String(valueA).toLowerCase();
+            const stringB = String(valueB).toLowerCase();
+            if (stringA < stringB) {
+                return -1;
+            }
+            if (stringA > stringB) {
+                return 1;
+            }
+            return 0;
+        };
+
+        const sortByColumn = (columnIndex) => {
+            const activeHeader = headerCells[columnIndex];
+            if (!activeHeader) {
+                return;
+            }
+
+            const currentDirection = activeHeader.getAttribute('data-sort-direction') || 'none';
+            let nextDirection = 'asc';
+            if (currentDirection === 'asc') {
+                nextDirection = 'desc';
+            } else if (currentDirection === 'desc') {
+                nextDirection = 'none';
+            }
+
+            headerCells.forEach((header, headerIndex) => {
+                if (headerIndex === columnIndex) {
+                    header.setAttribute('data-sort-direction', nextDirection);
+                    header.setAttribute('aria-sort', nextDirection === 'none' ? 'none' : nextDirection);
+                } else {
+                    header.removeAttribute('data-sort-direction');
+                    header.setAttribute('aria-sort', 'none');
+                }
+            });
+
+            let sortedRows = Array.from(allRows);
+            if (nextDirection === 'none') {
+                sortedRows.sort((rowA, rowB) => {
+                    const indexA = Number.parseInt(rowA.dataset.originalOrder || '0', 10);
+                    const indexB = Number.parseInt(rowB.dataset.originalOrder || '0', 10);
+                    return indexA - indexB;
+                });
+            } else {
+                sortedRows.sort((rowA, rowB) => {
+                    const valueA = getSortValue(rowA, columnIndex);
+                    const valueB = getSortValue(rowB, columnIndex);
+                    const comparison = compareValues(valueA, valueB);
+                    return nextDirection === 'asc' ? comparison : -comparison;
+                });
+            }
+
+            sortedRows.forEach((row) => {
+                tableBody.appendChild(row);
+            });
+        };
+
+        headerCells.forEach((header, index) => {
+            header.setAttribute('role', 'button');
+            header.setAttribute('tabindex', '0');
+            header.setAttribute('aria-sort', 'none');
+            header.addEventListener('click', () => sortByColumn(index));
+            header.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    sortByColumn(index);
+                }
+            });
+        });
+    };
+
+    const historyTable = document.querySelector('.production-history-table');
+    if (historyTable) {
+        initializeSortableTable(historyTable);
+    }
+
+    const weekendBackgroundPlugin = {
+        id: 'weekendBackground',
+        beforeDraw(chart, _args, pluginOptions) {
+            if (!pluginOptions || !pluginOptions.enabled) {
+                return;
+            }
+
+            const xScale = chart.scales?.x;
+            const chartArea = chart.chartArea;
+            if (!xScale || !chartArea) {
+                return;
+            }
+
+            const labels = chart.data?.labels || [];
+            if (!labels.length) {
+                return;
+            }
+
+            const weekendRanges = [];
+            let currentRange = null;
+
+            labels.forEach((label, index) => {
+                if (isWeekendLabel(label)) {
+                    if (!currentRange) {
+                        currentRange = { start: index, end: index };
+                    } else {
+                        currentRange.end = index;
+                    }
+                } else if (currentRange) {
+                    weekendRanges.push(currentRange);
+                    currentRange = null;
+                }
+            });
+
+            if (currentRange) {
+                weekendRanges.push(currentRange);
+            }
+
+            if (!weekendRanges.length) {
+                return;
+            }
+
+            const { ctx } = chart;
+            const { left, right, top, bottom } = chartArea;
+
+            const getCenterForIndex = (index) => {
+                if (typeof xScale.getPixelForValue === 'function') {
+                    try {
+                        return xScale.getPixelForValue(labels[index], index);
+                    } catch (error) {
+                        // Fallback to tick-based calculation below
+                    }
+                }
+                if (typeof xScale.getPixelForTick === 'function') {
+                    return xScale.getPixelForTick(index);
+                }
+                return Number.NaN;
+            };
+
+            const getBoundary = (index, direction) => {
+                if (labels.length === 1) {
+                    return direction === 'left' ? left : right;
+                }
+
+                const center = getCenterForIndex(index);
+                if (!Number.isFinite(center)) {
+                    return direction === 'left' ? left : right;
+                }
+
+                if (direction === 'left') {
+                    if (index === 0) {
+                        const nextCenter = getCenterForIndex(1);
+                        if (Number.isFinite(nextCenter)) {
+                            return center - (nextCenter - center) / 2;
+                        }
+                        return left;
+                    }
+                    const previousCenter = getCenterForIndex(index - 1);
+                    if (!Number.isFinite(previousCenter)) {
+                        return left;
+                    }
+                    return center - (center - previousCenter) / 2;
+                }
+
+                if (index === labels.length - 1) {
+                    const previousCenter = getCenterForIndex(index - 1);
+                    if (Number.isFinite(previousCenter)) {
+                        return center + (center - previousCenter) / 2;
+                    }
+                    return right;
+                }
+
+                const nextCenter = getCenterForIndex(index + 1);
+                if (!Number.isFinite(nextCenter)) {
+                    return right;
+                }
+                return center + (nextCenter - center) / 2;
+            };
+
+            ctx.save();
+            ctx.fillStyle = pluginOptions.color || 'rgba(0, 0, 0, 0.08)';
+            ctx.beginPath();
+            ctx.rect(left, top, right - left, bottom - top);
+            ctx.clip();
+
+            weekendRanges.forEach((range) => {
+                const rangeLeft = Math.max(left, getBoundary(range.start, 'left'));
+                const rangeRight = Math.min(right, getBoundary(range.end, 'right'));
+
+                if (!Number.isFinite(rangeLeft) || !Number.isFinite(rangeRight) || rangeRight <= rangeLeft) {
+                    return;
+                }
+
+                ctx.fillRect(rangeLeft, top, rangeRight - rangeLeft, bottom - top);
+            });
+
+            ctx.restore();
+        },
+    };
+
+    const stackedTotalsPlugin = {
+        id: 'stackedTotals',
+        defaults: {
+            enabled: true,
+            color: '#111827',
+            font: {
+                weight: '600',
+            },
+            yOffset: -6,
+            formatter: (value) => value.toLocaleString(),
+        },
+        afterDatasetsDraw(chart, _args, pluginOptions) {
+            const options = pluginOptions || {};
+            const enabled = options.enabled ?? stackedTotalsPlugin.defaults.enabled;
+            if (!enabled) {
+                return;
+            }
+
+            const labels = chart.data?.labels || [];
+            if (!labels.length) {
+                return;
+            }
+
+            const datasets = chart.data?.datasets || [];
+            const stackedMetas = datasets.reduce((accumulator, dataset, index) => {
+                if (!dataset || dataset.type === 'line') {
+                    return accumulator;
+                }
+
+                const meta = chart.getDatasetMeta(index);
+                if (!meta || meta.type !== 'bar') {
+                    return accumulator;
+                }
+
+                if (dataset.stack !== 'gates-produced') {
+                    return accumulator;
+                }
+
+                if (typeof chart.isDatasetVisible === 'function' && !chart.isDatasetVisible(index)) {
+                    return accumulator;
+                }
+
+                accumulator.push({ dataset, meta });
+                return accumulator;
+            }, []);
+
+            if (!stackedMetas.length) {
+                return;
+            }
+
+            const ctx = chart.ctx;
+            const globalFont = (Chart.defaults && Chart.defaults.font) || {};
+            const fontOptions = Object.assign({}, globalFont, options.font || {});
+            const fontSize = fontOptions.size || 12;
+            const fontFamily = fontOptions.family || globalFont.family || 'sans-serif';
+            const fontStyle = fontOptions.style || globalFont.style || 'normal';
+            const fontWeight = fontOptions.weight || 'bold';
+            const yOffset = typeof options.yOffset === 'number'
+                ? options.yOffset
+                : stackedTotalsPlugin.defaults.yOffset;
+
+            const formatter = typeof options.formatter === 'function'
+                ? options.formatter
+                : stackedTotalsPlugin.defaults.formatter;
+
+            const color = options.color || stackedTotalsPlugin.defaults.color;
+
+            ctx.save();
+            ctx.fillStyle = color;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+
+            const fontParts = [];
+            if (fontStyle) {
+                fontParts.push(fontStyle);
+            }
+            if (fontWeight) {
+                fontParts.push(fontWeight);
+            }
+            fontParts.push(`${fontSize}px`);
+            fontParts.push(fontFamily);
+            ctx.font = fontParts.join(' ');
+
+            labels.forEach((_, dataIndex) => {
+                let total = 0;
+                let hasValue = false;
+                let topY = Number.POSITIVE_INFINITY;
+
+                stackedMetas.forEach(({ dataset, meta }) => {
+                    const value = Array.isArray(dataset.data)
+                        ? dataset.data[dataIndex]
+                        : undefined;
+                    if (typeof value === 'number' && Number.isFinite(value)) {
+                        total += value;
+                        hasValue = true;
+                    }
+
+                    const element = meta.data && meta.data[dataIndex];
+                    if (element && Number.isFinite(element.y)) {
+                        topY = Math.min(topY, element.y);
+                    }
+                });
+
+                if (!hasValue || !Number.isFinite(topY)) {
+                    return;
+                }
+
+                const formatted = formatter(total);
+                if (formatted === null || formatted === undefined) {
+                    return;
+                }
+
+                const xPosition = stackedMetas[0].meta.data?.[dataIndex]?.x;
+                if (!Number.isFinite(xPosition)) {
+                    return;
+                }
+
+                ctx.fillText(String(formatted), xPosition, topY + yOffset);
+            });
+
+            ctx.restore();
+        },
+    };
+
+    if (typeof Chart !== 'undefined') {
+        Chart.register(weekendBackgroundPlugin);
+        Chart.register(stackedTotalsPlugin);
+    }
+
+    if (chartLabels.length) {
+        const stackedDatasetList = Array.isArray(stackedDatasets) ? stackedDatasets : [];
+        const overlayDatasetList = Array.isArray(overlayDatasets) ? overlayDatasets : [];
+        const lineDatasetList = Array.isArray(lineDatasets) ? lineDatasets : [];
+
+        const deepCloneDataset = (dataset) => JSON.parse(JSON.stringify(dataset));
+        const deepCloneDatasets = (datasets) => datasets.map((dataset) => deepCloneDataset(dataset));
+
+        const originalLabels = chartLabels.slice();
+        const originalStackedDatasets = deepCloneDatasets(stackedDatasetList);
+        const originalOverlayDatasets = deepCloneDatasets(overlayDatasetList);
+        const originalLineDatasets = deepCloneDatasets(lineDatasetList);
+        const weekendMask = originalLabels.map((label) => isWeekendLabel(label));
+
+        const cloneAndFilterDataset = (dataset, includeWeekends) => {
+            const clonedDataset = deepCloneDataset(dataset);
+
+            if (!includeWeekends && Array.isArray(dataset.data) && dataset.data.length === weekendMask.length) {
+                clonedDataset.data = dataset.data.filter((_, index) => !weekendMask[index]);
+            }
+
+            if (!includeWeekends) {
+                Object.keys(dataset).forEach((key) => {
+                    if (key === 'data') {
+                        return;
+                    }
+                    const value = dataset[key];
+                    if (Array.isArray(value) && value.length === weekendMask.length) {
+                        clonedDataset[key] = value.filter((_, index) => !weekendMask[index]);
+                    }
+                });
+            }
+
+            return clonedDataset;
+        };
+
+        const buildChartData = (includeWeekends) => {
+            const labels = includeWeekends
+                ? originalLabels.slice()
+                : originalLabels.filter((_, index) => !weekendMask[index]);
+
+            const stacked = originalStackedDatasets.map((dataset) => cloneAndFilterDataset(dataset, includeWeekends));
+            const overlays = originalOverlayDatasets.map((dataset) => cloneAndFilterDataset(dataset, includeWeekends));
+            const line = originalLineDatasets.map((dataset) => cloneAndFilterDataset(dataset, includeWeekends));
+
+            return {
+                labels,
+                combinedDatasets: stacked.concat(overlays),
+                lineDatasets: line,
+            };
+        };
+
+        let currentIncludeWeekends = true;
+        const collapseToggle = document.getElementById('collapseWeekendsToggle');
+        if (collapseToggle) {
+            collapseToggle.checked = !currentIncludeWeekends;
+        }
+
+        const initialState = buildChartData(currentIncludeWeekends);
+
+        const barContext = document.getElementById('gatesProducedChart');
+        let barChart = null;
+        if (barContext) {
+            const primaryScale = {
+                stacked: true,
+                beginAtZero: chartAxisSettings.primary.min === null,
+                title: {
+                    display: true,
+                    text: 'Units',
+                },
+            };
+
+            if (chartAxisSettings.primary.min !== null) {
+                primaryScale.min = chartAxisSettings.primary.min;
+            }
+            if (chartAxisSettings.primary.max !== null) {
+                primaryScale.max = chartAxisSettings.primary.max;
+            }
+            if (chartAxisSettings.primary.step !== null) {
+                primaryScale.ticks = Object.assign({}, primaryScale.ticks, {
+                    stepSize: chartAxisSettings.primary.step,
+                });
+            }
+
+            const secondaryScale = {
+                position: 'right',
+                beginAtZero: chartAxisSettings.secondary.min === null,
+                grid: {
+                    drawOnChartArea: false,
+                },
+                title: {
+                    display: true,
+                    text: 'Output per Labor Hour',
+                },
+            };
+            if (chartAxisSettings.secondary.min !== null) {
+                secondaryScale.min = chartAxisSettings.secondary.min;
+            }
+            if (chartAxisSettings.secondary.max !== null) {
+                secondaryScale.max = chartAxisSettings.secondary.max;
+            }
+            if (chartAxisSettings.secondary.step !== null) {
+                secondaryScale.ticks = Object.assign({}, secondaryScale.ticks, {
+                    stepSize: chartAxisSettings.secondary.step,
+                });
+            }
+
+            barChart = new Chart(barContext, {
+
+                type: 'bar',
+                data: {
+                    labels: initialState.labels,
+                    datasets: initialState.combinedDatasets,
+                },
+                options: {
+                    responsive: true,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        weekendBackground: {
+                            enabled: currentIncludeWeekends,
+                            color: 'rgba(0, 0, 0, 0.08)',
+                        },
+                        stackedTotals: {
+                            enabled: true,
+                            color: '#0f172a',
+                            font: {
+                                weight: '600',
+                            },
+                            yOffset: -8,
+                        },
+                        title: {
+                            display: true,
+                            text: 'Gates Produced by Customer',
+                        },
+                        legend: {
+                            position: 'bottom',
+                        },
+                    },
+                    scales: {
+                        x: {
+                            stacked: true,
+                        },
+                        y: primaryScale,
+                        'y-output': secondaryScale,
+                    },
+                },
+            });
+        }
+
+        const lineContext = document.getElementById('cumulativeChart');
+        let lineChart = null;
+        if (lineContext) {
+            lineChart = new Chart(lineContext, {
+
+                type: 'line',
+                data: {
+                    labels: initialState.labels,
+                    datasets: initialState.lineDatasets,
+                },
+                options: {
+                    responsive: true,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        weekendBackground: {
+                            enabled: currentIncludeWeekends,
+                            color: 'rgba(0, 0, 0, 0.08)',
+                        },
+                        title: {
+                            display: true,
+                            text: 'Cumulative Month-to-Date Totals',
+                        },
+                        legend: {
+                            position: 'bottom',
+                        },
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Units',
+                            },
+                        },
+                    },
+                },
+            });
+        }
+
+        const updateChartsForWeekendState = (includeWeekends) => {
+            if (includeWeekends === currentIncludeWeekends) {
+                return;
+            }
+            currentIncludeWeekends = includeWeekends;
+
+            const updatedState = buildChartData(includeWeekends);
+
+            if (barChart) {
+                barChart.data.labels = updatedState.labels;
+                barChart.data.datasets = updatedState.combinedDatasets;
+                if (barChart.options?.plugins?.weekendBackground) {
+                    barChart.options.plugins.weekendBackground.enabled = includeWeekends;
+                }
+                barChart.update();
+            }
+
+            if (lineChart) {
+                lineChart.data.labels = updatedState.labels;
+                lineChart.data.datasets = updatedState.lineDatasets;
+                if (lineChart.options?.plugins?.weekendBackground) {
+                    lineChart.options.plugins.weekendBackground.enabled = includeWeekends;
+                }
+                lineChart.update();
+            }
+
+            if (collapseToggle) {
+                collapseToggle.checked = !includeWeekends;
+            }
+        };
+
+        if (collapseToggle) {
+            collapseToggle.addEventListener('change', (event) => {
+                const includeWeekends = !event.target.checked;
+                updateChartsForWeekendState(includeWeekends);
+            });
+        }
+
+        const chartModal = document.getElementById('chartModal');
+        const modalCanvas = document.getElementById('expandedChart');
+        const dismissButtons = chartModal ? chartModal.querySelectorAll('[data-modal-dismiss]') : [];
+        let modalChart = null;
+
+        const cloneChartConfig = (chartInstance) => {
+            const clonedData = JSON.parse(JSON.stringify(chartInstance.data));
+            const clonedOptions = JSON.parse(JSON.stringify(chartInstance.options || {}));
+            return {
+                type: chartInstance.config.type,
+                data: clonedData,
+                options: Object.assign({}, clonedOptions, {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                }),
+            };
+        };
+
+        const closeChartModal = () => {
+            if (!chartModal) {
+                return;
+            }
+            if (modalChart) {
+                modalChart.destroy();
+                modalChart = null;
+            }
+            chartModal.classList.add('is-hidden');
+            chartModal.setAttribute('aria-label', 'Expanded chart view');
+        };
+
+        const openChartModal = (chartInstance) => {
+            if (!chartModal || !modalCanvas || !chartInstance) {
+                return;
+            }
+
+            chartModal.classList.remove('is-hidden');
+
+            window.requestAnimationFrame(() => {
+                const config = cloneChartConfig(chartInstance);
+                if (modalChart) {
+                    modalChart.destroy();
+                    modalChart = null;
+                }
+                modalChart = new Chart(modalCanvas.getContext('2d'), config);
+                const modalTitle = chartInstance.options?.plugins?.title?.text;
+                if (modalTitle) {
+                    chartModal.setAttribute('aria-label', `Expanded chart view: ${modalTitle}`);
+                } else {
+                    chartModal.setAttribute('aria-label', 'Expanded chart view');
+                }
+            });
+        };
+
+        if (chartModal) {
+            chartModal.addEventListener('click', (event) => {
+                if (event.target === chartModal) {
+                    closeChartModal();
+                }
+            });
+        }
+
+        dismissButtons.forEach((button) => {
+            button.addEventListener('click', closeChartModal);
+        });
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key !== 'Escape') {
+                return;
+            }
+            if (chartModal && !chartModal.classList.contains('is-hidden')) {
+                closeChartModal();
+            }
+            if (emailModal && !emailModal.classList.contains('is-hidden')) {
+                closeEmailModal();
+            }
+        });
+
+        const registerChartForExpansion = (canvasElement, chartInstance) => {
+            if (!canvasElement || !chartInstance) {
+                return;
+            }
+
+            canvasElement.classList.add('chart-expandable');
+            canvasElement.setAttribute('tabindex', '0');
+            canvasElement.setAttribute('role', 'button');
+
+            const originalLabel = canvasElement.getAttribute('aria-label') || 'Chart';
+            if (!originalLabel.toLowerCase().includes('click to expand')) {
+                canvasElement.setAttribute('aria-label', `${originalLabel} (click to expand)`);
+            }
+
+            canvasElement.addEventListener('click', () => {
+                openChartModal(chartInstance);
+            });
+
+            canvasElement.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    openChartModal(chartInstance);
+                }
+            });
+        };
+
+        registerChartForExpansion(barContext, barChart);
+        registerChartForExpansion(lineContext, lineChart);
+
+        const emailButton = document.getElementById('emailDataButton');
+        const emailModal = document.getElementById('emailDataModal');
+        const emailModalDialog = emailModal ? emailModal.querySelector('.email-modal-dialog') : null;
+        const emailCloseButtons = emailModal ? emailModal.querySelectorAll('[data-email-dismiss]') : [];
+        const emailBarImage = document.getElementById('emailDataBarImage');
+        const emailLineImage = document.getElementById('emailDataLineImage');
+        const emailNoteContainer = document.getElementById('emailDataNote');
+        const emailSubtitle = document.getElementById('emailDataSubtitle');
+        const copyEmailNoteButton = document.getElementById('copyEmailNoteButton');
+        let latestBarChartImageDataUrl = null;
+
+        const renderEmailNote = () => {
+            if (!emailNoteContainer) {
+                return;
+            }
+
+            emailNoteContainer.innerHTML = '';
+
+            if (!emailPreview) {
+                const emptyMessage = document.createElement('p');
+                emptyMessage.classList.add('email-modal-note-empty');
+                emptyMessage.textContent = 'No notes are available for the selected date range.';
+                emailNoteContainer.appendChild(emptyMessage);
+                if (emailSubtitle) {
+                    emailSubtitle.textContent = '';
+                }
+                return;
+            }
+
+            const noteText = (emailPreview.notes || '').trim();
+            const noteDateParts = [emailPreview.day_of_week, emailPreview.date_display]
+                .filter(Boolean)
+                .join(', ');
+            if (emailSubtitle) {
+                emailSubtitle.textContent = noteDateParts || '';
+            }
+
+            if (!noteText) {
+                const placeholder = document.createElement('p');
+                placeholder.classList.add('email-modal-note-empty');
+                placeholder.textContent = 'No notes were recorded for this day.';
+                emailNoteContainer.appendChild(placeholder);
+                return;
+            }
+
+            noteText.split('\n').forEach((line) => {
+                const paragraph = document.createElement('p');
+                paragraph.textContent = line;
+                emailNoteContainer.appendChild(paragraph);
+            });
+        };
+
+        const closeEmailModal = () => {
+            if (!emailModal) {
+                return;
+            }
+            emailModal.classList.add('is-hidden');
+            emailModal.removeAttribute('aria-label');
+        };
+
+        const openEmailModal = () => {
+            if (!emailModal || !emailButton || emailButton.disabled) {
+                return;
+            }
+
+            latestBarChartImageDataUrl = null;
+
+            if (emailBarImage && barChart) {
+                try {
+                    const chartImage = barChart.toBase64Image('image/png', 1);
+                    emailBarImage.src = chartImage;
+                    latestBarChartImageDataUrl = chartImage;
+                } catch (error) {
+                    emailBarImage.removeAttribute('src');
+                }
+            }
+            if (emailLineImage && lineChart) {
+                try {
+                    emailLineImage.src = lineChart.toBase64Image();
+                } catch (error) {
+                    emailLineImage.removeAttribute('src');
+                }
+            }
+
+            renderEmailNote();
+
+            if (emailPreview) {
+                const labelParts = [
+                    'Email data preview',
+                    emailPreview.day_of_week,
+                    emailPreview.date_display,
+                ].filter(Boolean);
+                emailModal.setAttribute('aria-label', labelParts.join(': '));
+            }
+
+            emailModal.classList.remove('is-hidden');
+            window.requestAnimationFrame(() => {
+                if (emailModalDialog) {
+                    emailModalDialog.focus();
+                }
+            });
+        };
+
+        if (emailButton && emailModal) {
+            emailButton.addEventListener('click', openEmailModal);
+        }
+
+        if (emailModal) {
+            emailModal.addEventListener('click', (event) => {
+                if (event.target === emailModal) {
+                    closeEmailModal();
+                }
+            });
+        }
+
+        emailCloseButtons.forEach((button) => {
+            button.addEventListener('click', closeEmailModal);
+        });
+
+        const selectEmailNoteText = () => {
+            if (!emailNoteContainer || !window.getSelection || !document.createRange) {
+                return;
+            }
+
+            const selection = window.getSelection();
+            if (!selection) {
+                return;
+            }
+
+            selection.removeAllRanges();
+            const range = document.createRange();
+            range.selectNodeContents(emailNoteContainer);
+            selection.addRange(range);
+        };
+
+        const dataUrlToBlob = async (dataUrl) => {
+            if (!dataUrl || typeof dataUrl !== 'string') {
+                return null;
+            }
+
+            try {
+                const response = await fetch(dataUrl);
+                return await response.blob();
+            } catch (error) {
+                return null;
+            }
+        };
+
+        const fallbackCopyToClipboard = (text) => {
+            if (!document.body || typeof document.execCommand !== 'function') {
+                return false;
+            }
+
+            const hiddenField = document.createElement('textarea');
+            hiddenField.value = text;
+            hiddenField.setAttribute('readonly', '');
+            hiddenField.setAttribute('aria-hidden', 'true');
+            hiddenField.style.position = 'fixed';
+            hiddenField.style.top = '-1000px';
+            hiddenField.style.left = '-1000px';
+            hiddenField.style.opacity = '0';
+            hiddenField.style.pointerEvents = 'none';
+
+            document.body.appendChild(hiddenField);
+
+            try {
+                hiddenField.focus({ preventScroll: true });
+            } catch (error) {
+                hiddenField.focus();
+            }
+            hiddenField.select();
+
+            let succeeded = false;
+            try {
+                succeeded = document.execCommand('copy');
+            } catch (error) {
+                succeeded = false;
+            }
+
+            hiddenField.remove();
+
+            if (window.getSelection) {
+                const selection = window.getSelection();
+                if (selection && selection.removeAllRanges) {
+                    selection.removeAllRanges();
+                }
+            }
+
+            return succeeded;
+        };
+
+        const copyNoteToClipboard = async (text) => {
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                try {
+                    await navigator.clipboard.writeText(text);
+                    return true;
+                } catch (error) {
+                    // Continue to the fallback below when direct clipboard access fails.
+                }
+            }
+
+            return fallbackCopyToClipboard(text);
+        };
+
+        const copyChartAndNotesToClipboard = async (text) => {
+            if (!latestBarChartImageDataUrl) {
+                return false;
+            }
+
+            if (!navigator.clipboard || typeof navigator.clipboard.write !== 'function' || typeof ClipboardItem === 'undefined') {
+                return false;
+            }
+
+            const imageBlob = await dataUrlToBlob(latestBarChartImageDataUrl);
+            if (!imageBlob) {
+                return false;
+            }
+
+            const clipboardContents = {
+                'text/plain': new Blob([text], { type: 'text/plain' }),
+            };
+            clipboardContents[imageBlob.type || 'image/png'] = imageBlob;
+
+            try {
+                await navigator.clipboard.write([new ClipboardItem(clipboardContents)]);
+                return true;
+            } catch (error) {
+                return false;
+            }
+        };
+
+        const withTemporaryLabel = (button, label) => {
+            if (!button) {
+                return;
+            }
+
+            if (!button.dataset.originalLabel) {
+                button.dataset.originalLabel = button.textContent;
+            }
+
+            button.textContent = label;
+            window.setTimeout(() => {
+                button.textContent = button.dataset.originalLabel;
+            }, 2000);
+        };
+
+        if (copyEmailNoteButton) {
+            copyEmailNoteButton.addEventListener('click', async () => {
+                const noteText = emailPreview && emailPreview.notes
+                    ? emailPreview.notes.trim()
+                    : 'No notes were recorded for this day.';
+
+                const copiedChartAndNotes = await copyChartAndNotesToClipboard(noteText);
+                if (copiedChartAndNotes) {
+                    withTemporaryLabel(copyEmailNoteButton, 'Notes & chart copied!');
+                    return;
+                }
+
+                const copiedNotes = await copyNoteToClipboard(noteText);
+
+                if (copiedNotes) {
+                    const fallbackLabel = latestBarChartImageDataUrl
+                        ? 'Notes copied (chart unavailable)'
+                        : 'Notes copied!';
+                    withTemporaryLabel(copyEmailNoteButton, fallbackLabel);
+                    return;
+                }
+
+                selectEmailNoteText();
+                withTemporaryLabel(copyEmailNoteButton, 'Copy failed');
+            });
+        }
+    }
+</script>
+{% endblock %}

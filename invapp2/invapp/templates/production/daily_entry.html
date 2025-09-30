@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block content %}
+<nav class="production-nav" aria-label="Production pages">
+    <a href="{{ url_for('production.daily_entry') }}" class="production-nav-link is-active">Daily Entry</a>
+    <a href="{{ url_for('production.history') }}" class="production-nav-link">History</a>
+    <a href="{{ url_for('production.production_settings') }}" class="production-nav-link">Settings</a>
+</nav>
+
+<h2>Daily Production Entry</h2>
+<p class="section-help">Record production totals for each customer and component. Use the selector below to view or update a different day.</p>
+{% if grouped_customers %}
+    <p class="chart-note">The following customers will be rolled into the <strong>Other</strong> category on dashboards: {{ grouped_customers | map(attribute='name') | join(', ') }}.</p>
+{% endif %}
+
+
+<form method="get" class="date-selector" aria-label="Load production entry for a different day">
+    <label for="entry_date_lookup" class="field-label">Jump to Date</label>
+    <div class="date-selector-controls">
+        <input type="date" id="entry_date_lookup" name="entry_date" value="{{ selected_date.isoformat() }}">
+        <button type="submit" class="action-btn">Load</button>
+    </div>
+</form>
+
+<form method="post" class="form-stack production-entry-form">
+    <div class="form-section">
+        <div class="form-grid">
+            <div class="form-field">
+                <label for="entry_date" class="field-label">Entry Date</label>
+                <input type="date" id="entry_date" name="entry_date" value="{{ selected_date.isoformat() }}" {% if record_exists %}disabled{% endif %}>
+                {% if record_exists %}
+                    <input type="hidden" name="entry_date" value="{{ selected_date.isoformat() }}">
+                    <p class="field-note">The entry date is locked because this record already exists. Use the selector above to load a different day.</p>
+                {% else %}
+                    <p class="field-note">Defaulted to today. Adjust if you are entering totals for a different day.</p>
+                {% endif %}
+            </div>
+            <div class="form-field">
+                <label class="field-label">Day of Week</label>
+                <input type="text" value="{{ selected_date.strftime('%A') }}" disabled>
+            </div>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <div class="section-heading">
+            <h3>Gates Produced &amp; Packaged</h3>
+            <a href="{{ url_for('production.production_settings') }}" class="section-link">Manage customers</a>
+        </div>
+
+        <div class="form-grid">
+            <div class="form-field">
+                <label for="gates_employees" class="field-label">Number of Employees</label>
+                <input type="number" min="0" step="1" id="gates_employees" name="gates_employees" value="{{ form_values.gates_employees }}">
+            </div>
+            <div class="form-field">
+                <label for="gates_hours_ot" class="field-label">Hours OT Worked</label>
+                <input type="number" min="0" step="0.25" id="gates_hours_ot" name="gates_hours_ot" value="{{ form_values.gates_hours_ot }}">
+                <p class="field-note">Enter total overtime hours worked by the gates crew.</p>
+            </div>
+        </div>
+
+        <div class="table-scroll">
+            <table class="form-table production-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Customer</th>
+                        <th scope="col">Gates Produced</th>
+                        <th scope="col">Gates Packaged</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for customer in customers %}
+                        <tr>
+                            <th scope="row">
+                                {{ customer.name }}
+                                {% if customer.lump_into_other and not customer.is_other_bucket %}
+                                    <span class="customer-chip" title="Counts are rolled into Other on charts">Grouped</span>
+                                {% endif %}
+                            </th>
+                            <td>
+                                <input type="number" min="0" name="gates_produced_{{ customer.id }}" value="{{ form_values.gates_produced[customer.id] }}">
+                            </td>
+                            <td>
+                                <input type="number" min="0" name="gates_packaged_{{ customer.id }}" value="{{ form_values.gates_packaged[customer.id] }}">
+
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <h3>Additional Production Totals</h3>
+        <div class="form-grid">
+            <div class="form-field">
+                <label for="additional_employees" class="field-label">Number of Employees</label>
+                <input type="number" min="0" step="1" id="additional_employees" name="additional_employees" value="{{ form_values.additional_employees }}">
+            </div>
+            <div class="form-field">
+                <label for="additional_hours_ot" class="field-label">Hours OT Worked</label>
+                <input type="number" min="0" step="0.25" id="additional_hours_ot" name="additional_hours_ot" value="{{ form_values.additional_hours_ot }}">
+                <p class="field-note">Enter total overtime hours worked by the additional production team.</p>
+            </div>
+        </div>
+        <div class="form-grid">
+            <div class="form-field">
+                <label for="controllers_4_stop" class="field-label">Controllers (4 Stop)</label>
+                <input type="number" min="0" id="controllers_4_stop" name="controllers_4_stop" value="{{ form_values.controllers_4_stop }}">
+            </div>
+            <div class="form-field">
+                <label for="controllers_6_stop" class="field-label">Controllers (6 Stop)</label>
+                <input type="number" min="0" id="controllers_6_stop" name="controllers_6_stop" value="{{ form_values.controllers_6_stop }}">
+            </div>
+            <div class="form-field">
+                <label for="door_locks_lh" class="field-label">Door Locks (LH)</label>
+                <input type="number" min="0" id="door_locks_lh" name="door_locks_lh" value="{{ form_values.door_locks_lh }}">
+            </div>
+            <div class="form-field">
+                <label for="door_locks_rh" class="field-label">Door Locks (RH)</label>
+                <input type="number" min="0" id="door_locks_rh" name="door_locks_rh" value="{{ form_values.door_locks_rh }}">
+            </div>
+            <div class="form-field">
+                <label for="operators_produced" class="field-label">Operators Produced</label>
+                <input type="number" min="0" id="operators_produced" name="operators_produced" value="{{ form_values.operators_produced }}">
+            </div>
+            <div class="form-field">
+                <label for="cops_produced" class="field-label">COPs Produced</label>
+                <input type="number" min="0" id="cops_produced" name="cops_produced" value="{{ form_values.cops_produced }}">
+            </div>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <h3>Daily Notes</h3>
+        <textarea id="daily_notes" name="daily_notes" placeholder="Add any notes about the day's production...">{{ form_values.daily_notes }}</textarea>
+    </div>
+
+    <div class="form-actions">
+        <a href="{{ url_for('production.history', start_date=selected_date.replace(day=1).isoformat(), end_date=selected_date.isoformat()) }}" class="action-btn secondary-link">View Month-to-Date</a>
+        <button type="submit">Save Daily Totals</button>
+    </div>
+</form>
+{% endblock %}
