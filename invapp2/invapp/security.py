@@ -45,17 +45,6 @@ def require_roles(*role_names: str):
     return decorator
 
 
-def require_any_role(role_names: Iterable[str]):
-    """Decorator variant that accepts an iterable of role names."""
-
-    normalized_roles = _normalize_roles(role_names)
-
-    def decorator(view_func):
-        return require_roles(*normalized_roles)(view_func)
-
-    return decorator
-
-
 def require_admin(view_func):
     """Decorator specialized for the administrator role."""
 

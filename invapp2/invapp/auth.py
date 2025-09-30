@@ -5,13 +5,6 @@ from flask import abort
 
 from invapp.login import current_user, login_required
 from invapp.permissions import ensure_page_access, resolve_view_roles
-from invapp.security import require_roles
-
-
-def role_required(role_name):
-    """Decorator maintained for backwards compatibility."""
-
-    return require_roles(role_name)
 
 
 def page_access_required(page_name: str, *, default_roles: Sequence[str] | None = None):

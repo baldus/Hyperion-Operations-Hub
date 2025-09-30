@@ -36,6 +36,7 @@ It supports tracking items, locations, stock balances, receiving, cycle counts, 
 - **Work Instructions** – `/work` provides a managed document repository for PDFs and other allowed files.
 - **Settings & Printers** – configure UI theme and Zebra printer host/port with admin authentication.
 - **Admin Tools** – secure privileged actions behind a session-based admin login with auto-timeout.
+- **Role-Based Access Control** – Flask-Login backed sessions with configurable viewer/editor/admin roles.
 
 ---
 
@@ -46,6 +47,7 @@ It supports tracking items, locations, stock balances, receiving, cycle counts, 
 | Backend    | Flask, SQLAlchemy |
 | Frontend   | Jinja2 templates (dark-friendly theme) |
 | Database   | PostgreSQL (via `psycopg2`) |
+| Authentication | Flask-Login (session-based) |
 | Platform   | Linux edge hardware (Raspberry Pi recommended) |
 
 Project layout highlights:
@@ -129,6 +131,8 @@ For a reliable shop-floor deployment, start with the following baseline. See the
    | `SECRET_KEY` | Flask secret used for sessions and CSRF protection. | `export SECRET_KEY="change_me"` |
    | `ZEBRA_PRINTER_HOST` | Hostname or IP for the Zebra printer service. | `printer.local` |
    | `ZEBRA_PRINTER_PORT` | TCP port that the printer listens on. | `9100` |
+   | `ADMIN_USER` | Username for the bootstrap administrator account. | `superuser` |
+   | `ADMIN_PASSWORD` | Password for the bootstrap administrator account. | `change_me_immediately` |
 
    Export the values and initialize the schema:
 
@@ -168,7 +172,10 @@ For a reliable shop-floor deployment, start with the following baseline. See the
 
 - [`docs/HARDWARE.md`](docs/HARDWARE.md) — Bill of materials and environmental
   guidance for pilots through multi-workcell deployments.
-- _Coming soon:_ Deployment runbook and database backup checklist.
+- [`docs/deployment-guide.md`](docs/deployment-guide.md) — Step-by-step build
+  instructions for Raspberry Pi and Debian-based hosts.
+- [`docs/database-schema.md`](docs/database-schema.md) — Entity overview for
+  inventory, production, and authentication tables.
 
 ---
 
@@ -192,6 +199,7 @@ Uploaded work instructions are stored in `invapp/static/work_instructions` and l
 ## 🛠 Operational Docs
 - [Hardware Guide](docs/hardware-guide.md) – Bill of materials, sizing advice, and optional peripherals.
 - [Deployment Guide](docs/deployment-guide.md) – Provisioning steps for Raspberry Pi OS, PostgreSQL setup, service hardening, and backup recommendations.
+- [Database Schema](docs/database-schema.md) – Reference of core tables and relationships.
 
 ---
 
@@ -200,7 +208,7 @@ Uploaded work instructions are stored in `invapp/static/work_instructions` and l
 - [x] Inventory module (MVP complete)
 - [x] Reports module (ZIP export)
 - [x] Orders module (BOM authoring, routing progress, material reservations)
-- [ ] User authentication & admin roles
+- [x] User authentication & admin roles
 - [ ] More advanced reporting
 
 ---
