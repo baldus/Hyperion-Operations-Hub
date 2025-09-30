@@ -121,6 +121,49 @@ def test_list_stock_all_filter(client, stock_items):
     assert stock_items["ok"] in page
 
 
+def test_receiving_creates_movement_and_updates_stock(client, app):
+    with app.app_context():
+        item = Item(sku="RCV-100", name="Receiving Widget", unit="ea")
+        location = Location(code="RCV-LOC", description="Receiving Dock")
+        db.session.add_all([item, location])
+        db.session.commit()
+        item_id = item.id
+        location_id = location.id
+
+    response = client.post(
+        "/inventory/receiving",
+        data={
+            "sku": "RCV-100",
+            "qty": "7",
+            "location_id": str(location_id),
+            "person": "Taylor",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+
+    with app.app_context():
+        movement = (
+            Movement.query.filter_by(
+                item_id=item_id, movement_type="RECEIPT"
+            )
+            .order_by(Movement.id.desc())
+            .first()
+        )
+        assert movement is not None
+        assert movement.quantity == 7
+        assert movement.location_id == location_id
+        assert movement.batch is not None
+
+    stock_page = client.get("/inventory/stock")
+    assert stock_page.status_code == 200
+    body = stock_page.data.decode("utf-8")
+    assert "RCV-100" in body
+    assert "RCV-LOC" in body
+    assert ">7<" in body or "RCV-100</td>\n            <td>Receiving Widget</td>\n            <td>7" in body
+
+
 def test_receiving_prints_batch_label(client, app, monkeypatch):
     with app.app_context():
         item = Item(sku="WIDGET-1", name="Widget", unit="ea")
