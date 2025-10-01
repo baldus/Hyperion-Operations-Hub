@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Purchase Requests</h2>
+
+<div class="purchasing-toolbar">
+    <div class="toolbar-actions">
+        {% if can_edit_page('purchasing') %}
+            <a class="action-btn primary-action" href="{{ url_for('purchasing.new_request') }}">Log Purchase Need</a>
+        {% endif %}
+    </div>
+    <form method="get" class="status-filter-form">
+        <label for="status" class="sr-only">Filter by status</label>
+        <select name="status" id="status">
+            <option value="" {% if not status_filter %}selected{% endif %}>All statuses</option>
+            <option value="open" {% if status_filter == 'open' %}selected{% endif %}>Open requests</option>
+            {% for value, label in status_choices %}
+                <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit">Apply</button>
+    </form>
+</div>
+
+<div class="status-summary-grid">
+    <div class="status-summary-card">
+        <span class="summary-label">Open</span>
+        <span class="summary-value">{{ open_count }}</span>
+    </div>
+    {% for value, label in status_choices %}
+        <div class="status-summary-card">
+            <span class="summary-label">{{ label }}</span>
+            <span class="summary-value">{{ status_counts.get(value, 0) }}</span>
+        </div>
+    {% endfor %}
+</div>
+
+{% if requests %}
+    <div class="table-scroll">
+        <table class="data-table purchasing-table">
+            <thead>
+                <tr>
+                    <th scope="col">ID</th>
+                    <th scope="col">Item / Description</th>
+                    <th scope="col">Quantity</th>
+                    <th scope="col">Needed By</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Supplier</th>
+                    <th scope="col">ETA</th>
+                    <th scope="col">Requested By</th>
+                    <th scope="col">Updated</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for req in requests %}
+                    <tr>
+                        <td data-label="ID">
+                            <a href="{{ url_for('purchasing.view_request', request_id=req.id) }}">PR-{{ "%04d" | format(req.id) }}</a>
+                        </td>
+                        <td data-label="Item / Description">
+                            <strong>{{ req.title }}</strong>
+                            {% if req.description %}
+                                <div class="secondary-text">{{ req.description }}</div>
+                            {% endif %}
+                        </td>
+                        <td data-label="Quantity">
+                            {% if req.quantity is not none %}
+                                {{ "{:.2f}".format(req.quantity) }}{% if req.unit %} {{ req.unit }}{% endif %}
+                            {% elif req.unit %}
+                                {{ req.unit }}
+                            {% else %}
+                                &mdash;
+                            {% endif %}
+                        </td>
+                        <td data-label="Needed By">
+                            {% if req.needed_by %}
+                                {{ req.needed_by.isoformat() }}
+                            {% else %}
+                                &mdash;
+                            {% endif %}
+                        </td>
+                        <td data-label="Status">
+                            <span class="status-pill status-{{ req.status }}">{{ status_labels.get(req.status, req.status) }}</span>
+                        </td>
+                        <td data-label="Supplier">
+                            {% if req.supplier_name %}
+                                {{ req.supplier_name }}
+                                {% if req.purchase_order_number %}
+                                    <div class="secondary-text">PO {{ req.purchase_order_number }}</div>
+                                {% endif %}
+                            {% else %}
+                                {% if req.purchase_order_number %}
+                                    PO {{ req.purchase_order_number }}
+                                {% else %}
+                                    &mdash;
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                        <td data-label="ETA">
+                            {% if req.eta_date %}
+                                {{ req.eta_date.isoformat() }}
+                            {% else %}
+                                &mdash;
+                            {% endif %}
+                        </td>
+                        <td data-label="Requested By">{{ req.requested_by }}</td>
+                        <td data-label="Updated">{{ req.updated_at.strftime('%Y-%m-%d') }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% else %}
+    <div class="empty-state">
+        <p>No purchase requests logged yet.</p>
+        {% if can_edit_page('purchasing') %}
+            <a class="action-btn primary-action" href="{{ url_for('purchasing.new_request') }}">Create the first request</a>
+        {% endif %}
+    </div>
+{% endif %}
+{% endblock %}

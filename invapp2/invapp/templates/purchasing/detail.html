@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Purchase Request PR-{{ "%04d" | format(purchase_request.id) }}</h2>
+
+<div class="purchasing-detail-header">
+    <span class="status-pill status-{{ purchase_request.status }}">{{ status_labels.get(purchase_request.status, purchase_request.status) }}</span>
+    <div class="meta">
+        <span>Requested by <strong>{{ purchase_request.requested_by }}</strong></span>
+        <span>Logged {{ purchase_request.created_at.strftime('%Y-%m-%d') }}</span>
+        {% if purchase_request.updated_at %}
+            <span>Updated {{ purchase_request.updated_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        {% endif %}
+    </div>
+</div>
+
+<div class="purchasing-detail-grid">
+    <section>
+        <h3>Request Overview</h3>
+        <dl>
+            <dt>Item or part</dt>
+            <dd>{{ purchase_request.title }}</dd>
+
+            <dt>Quantity</dt>
+            <dd>
+                {% if purchase_request.quantity is not none %}
+                    {{ "{:.2f}".format(purchase_request.quantity) }}{% if purchase_request.unit %} {{ purchase_request.unit }}{% endif %}
+                {% elif purchase_request.unit %}
+                    {{ purchase_request.unit }}
+                {% else %}
+                    <span class="muted">Not specified</span>
+                {% endif %}
+            </dd>
+
+            <dt>Needed by</dt>
+            <dd>
+                {% if purchase_request.needed_by %}
+                    {{ purchase_request.needed_by.isoformat() }}
+                {% else %}
+                    <span class="muted">Not set</span>
+                {% endif %}
+            </dd>
+
+            <dt>Supplier</dt>
+            <dd>
+                {% if purchase_request.supplier_name %}
+                    {{ purchase_request.supplier_name }}
+                    {% if purchase_request.supplier_contact %}
+                        <div class="secondary-text">{{ purchase_request.supplier_contact }}</div>
+                    {% endif %}
+                {% else %}
+                    <span class="muted">Not provided</span>
+                {% endif %}
+            </dd>
+
+            <dt>ETA</dt>
+            <dd>
+                {% if purchase_request.eta_date %}
+                    {{ purchase_request.eta_date.isoformat() }}
+                {% else %}
+                    <span class="muted">Awaiting update</span>
+                {% endif %}
+            </dd>
+
+            <dt>Purchase order</dt>
+            <dd>
+                {% if purchase_request.purchase_order_number %}
+                    {{ purchase_request.purchase_order_number }}
+                {% else %}
+                    <span class="muted">Not assigned</span>
+                {% endif %}
+            </dd>
+        </dl>
+    </section>
+
+    <section>
+        <h3>Notes</h3>
+        {% if purchase_request.description %}
+            <p>{{ purchase_request.description }}</p>
+        {% endif %}
+        {% if purchase_request.notes %}
+            <p>{{ purchase_request.notes }}</p>
+        {% elif not purchase_request.description %}
+            <p class="muted">No notes yet.</p>
+        {% endif %}
+    </section>
+</div>
+
+{% if can_edit_page('purchasing') %}
+<hr>
+<h3>Update Request</h3>
+<form method="post" action="{{ url_for('purchasing.update_request', request_id=purchase_request.id) }}" class="form-grid purchasing-form">
+    <div class="form-row two-col">
+        <div>
+            <label for="status">Status</label>
+            <select id="status" name="status">
+                {% for value, label in status_choices %}
+                    <option value="{{ value }}" {% if purchase_request.status == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="requested_by">Requested by</label>
+            <input type="text" id="requested_by" name="requested_by" value="{{ purchase_request.requested_by }}">
+        </div>
+    </div>
+
+    <div class="form-row">
+        <label for="title">Item or part</label>
+        <input type="text" id="title" name="title" value="{{ purchase_request.title }}">
+    </div>
+
+    <div class="form-row">
+        <label for="description">Reason or description</label>
+        <textarea id="description" name="description" rows="3">{{ purchase_request.description }}</textarea>
+    </div>
+
+    <div class="form-row two-col">
+        <div>
+            <label for="quantity">Quantity</label>
+            <input type="text" id="quantity" name="quantity" value="{% if purchase_request.quantity is not none %}{{ "{:.2f}".format(purchase_request.quantity) }}{% endif %}">
+        </div>
+        <div>
+            <label for="unit">Unit</label>
+            <input type="text" id="unit" name="unit" value="{{ purchase_request.unit or '' }}">
+        </div>
+    </div>
+
+    <div class="form-row two-col">
+        <div>
+            <label for="needed_by">Needed by</label>
+            <input type="date" id="needed_by" name="needed_by" value="{{ purchase_request.needed_by.isoformat() if purchase_request.needed_by else '' }}">
+        </div>
+        <div>
+            <label for="eta_date">ETA</label>
+            <input type="date" id="eta_date" name="eta_date" value="{{ purchase_request.eta_date.isoformat() if purchase_request.eta_date else '' }}">
+        </div>
+    </div>
+
+    <div class="form-row two-col">
+        <div>
+            <label for="supplier_name">Supplier</label>
+            <input type="text" id="supplier_name" name="supplier_name" value="{{ purchase_request.supplier_name or '' }}">
+        </div>
+        <div>
+            <label for="supplier_contact">Supplier contact</label>
+            <input type="text" id="supplier_contact" name="supplier_contact" value="{{ purchase_request.supplier_contact or '' }}">
+        </div>
+    </div>
+
+    <div class="form-row">
+        <label for="purchase_order_number">Purchase order</label>
+        <input type="text" id="purchase_order_number" name="purchase_order_number" value="{{ purchase_request.purchase_order_number or '' }}">
+    </div>
+
+    <div class="form-row">
+        <label for="notes">Internal notes</label>
+        <textarea id="notes" name="notes" rows="3">{{ purchase_request.notes or '' }}</textarea>
+    </div>
+
+    <div class="form-actions">
+        <button type="submit" class="action-btn primary-action">Save Updates</button>
+    </div>
+</form>
+{% endif %}
+{% endblock %}

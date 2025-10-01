@@ -1,5 +1,5 @@
 from decimal import Decimal
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import inspect
 from sqlalchemy.ext.associationproxy import association_proxy
@@ -158,6 +158,62 @@ class Movement(db.Model):
     item = db.relationship("Item", backref="movements")
     batch = db.relationship("Batch", backref="movements")
     location = db.relationship("Location", backref="movements")
+
+
+class PurchaseRequest(db.Model):
+    __tablename__ = "purchase_request"
+
+    STATUS_NEW = "new"
+    STATUS_REVIEW = "review"
+    STATUS_WAITING = "waiting"
+    STATUS_ORDERED = "ordered"
+    STATUS_RECEIVED = "received"
+    STATUS_CANCELLED = "cancelled"
+
+    STATUS_CHOICES: tuple[tuple[str, str], ...] = (
+        (STATUS_NEW, "New"),
+        (STATUS_REVIEW, "Reviewing"),
+        (STATUS_WAITING, "Waiting on Supplier"),
+        (STATUS_ORDERED, "Ordered"),
+        (STATUS_RECEIVED, "Received"),
+        (STATUS_CANCELLED, "Cancelled"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    quantity = db.Column(db.Numeric(10, 2), nullable=True)
+    unit = db.Column(db.String(32), nullable=True)
+    requested_by = db.Column(db.String(128), nullable=False)
+    needed_by = db.Column(db.Date, nullable=True)
+    status = db.Column(db.String(32), nullable=False, default=STATUS_NEW)
+    supplier_name = db.Column(db.String(255), nullable=True)
+    supplier_contact = db.Column(db.String(255), nullable=True)
+    eta_date = db.Column(db.Date, nullable=True)
+    purchase_order_number = db.Column(db.String(64), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    @classmethod
+    def status_values(cls) -> tuple[str, ...]:
+        return tuple(choice for choice, _ in cls.STATUS_CHOICES)
+
+    @classmethod
+    def status_label(cls, value: str) -> str:
+        labels = dict(cls.STATUS_CHOICES)
+        return labels.get(value, value.replace("_", " ").title())
+
+    def mark_status(self, new_status: str) -> None:
+        if new_status not in self.status_values():
+            raise ValueError(f"Invalid purchase request status: {new_status}")
+        self.status = new_status
+
+    @property
+    def is_closed(self) -> bool:
+        return self.status in {self.STATUS_RECEIVED, self.STATUS_CANCELLED}
 
 
 class WorkInstruction(db.Model):

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Log Purchase Need</h2>
+<p class="section-lead">Capture the details of the item or material that needs to be purchased so the purchasing team can follow up.</p>
+
+<form method="post" class="form-grid purchasing-form">
+    <div class="form-row">
+        <label for="title">Item or part <span aria-hidden="true">*</span></label>
+        <input type="text" id="title" name="title" value="{{ form_data.title }}" required>
+    </div>
+
+    <div class="form-row">
+        <label for="description">Reason or description</label>
+        <textarea id="description" name="description" rows="3">{{ form_data.description }}</textarea>
+    </div>
+
+    <div class="form-row two-col">
+        <div>
+            <label for="quantity">Quantity needed</label>
+            <input type="text" id="quantity" name="quantity" value="{{ form_data.quantity }}" placeholder="e.g. 25">
+        </div>
+        <div>
+            <label for="unit">Unit</label>
+            <input type="text" id="unit" name="unit" value="{{ form_data.unit }}" placeholder="ea, box, roll">
+        </div>
+    </div>
+
+    <div class="form-row two-col">
+        <div>
+            <label for="needed_by">Needed by</label>
+            <input type="date" id="needed_by" name="needed_by" value="{{ form_data.needed_by }}">
+        </div>
+        <div>
+            <label for="requested_by">Requested by <span aria-hidden="true">*</span></label>
+            <input type="text" id="requested_by" name="requested_by" value="{{ form_data.requested_by }}" required>
+        </div>
+    </div>
+
+    <div class="form-row two-col">
+        <div>
+            <label for="supplier_name">Preferred supplier</label>
+            <input type="text" id="supplier_name" name="supplier_name" value="{{ form_data.supplier_name }}">
+        </div>
+        <div>
+            <label for="supplier_contact">Supplier contact</label>
+            <input type="text" id="supplier_contact" name="supplier_contact" value="{{ form_data.supplier_contact }}" placeholder="email or phone">
+        </div>
+    </div>
+
+    <div class="form-row">
+        <label for="notes">Additional notes for purchasing</label>
+        <textarea id="notes" name="notes" rows="3">{{ form_data.notes }}</textarea>
+    </div>
+
+    <div class="form-actions">
+        <a class="action-btn subtle-action" href="{{ url_for('purchasing.purchasing_home') }}">Cancel</a>
+        <button type="submit" class="action-btn primary-action">Submit Request</button>
+    </div>
+</form>
+{% endblock %}
