@@ -104,6 +104,7 @@
           <th>On Hand</th>
           <th>Minimum</th>
           <th>Coverage</th>
+          <th>Action</th>
         </tr>
       </thead>
       <tbody>
@@ -116,6 +117,19 @@
           <td>{{ entry.on_hand }}</td>
           <td>{{ entry.min_stock }}</td>
           <td>{{ (entry.coverage * 100)|round(0, 'floor') }}%</td>
+          <td>
+            {% if entry.item %}
+              {% if can_edit_page('purchasing') %}
+              <form method="post" class="inline-form" action="{{ url_for('inventory.create_purchase_request_from_low_stock', item_id=entry.item.id) }}">
+                <button type="submit" class="bubble-btn">Create Purchase Request</button>
+              </form>
+              {% else %}
+              <span class="field-note">Requires purchasing access</span>
+              {% endif %}
+            {% else %}
+            <span class="field-note">Item record unavailable</span>
+            {% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>

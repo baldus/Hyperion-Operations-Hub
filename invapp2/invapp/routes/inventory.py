@@ -29,7 +29,9 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload, load_only
 
 from invapp.auth import blueprint_page_guard
-from invapp.security import require_roles
+from invapp.login import current_user
+from invapp.permissions import resolve_edit_roles
+from invapp.security import require_any_role, require_roles
 from invapp.models import (
     Batch,
     BillOfMaterial,
@@ -42,6 +44,7 @@ from invapp.models import (
     OrderComponent,
     OrderLine,
     OrderStatus,
+    PurchaseRequest,
     Reservation,
     RoutingStepConsumption,
     db,
@@ -498,6 +501,79 @@ def inventory_home():
         inventory_chart_data=chart_datasets,
         inventory_chart_default=default_chart_key,
     )
+
+
+@bp.route("/low-stock/<int:item_id>/purchase-request", methods=["POST"])
+def create_purchase_request_from_low_stock(item_id: int):
+    """Convert a dashboard low stock alert into a purchase request."""
+
+    edit_roles = resolve_edit_roles(
+        "purchasing", default_roles=("editor", "admin", "purchasing")
+    )
+    guard = require_any_role(edit_roles)
+
+    @guard
+    def _create_request():
+        item = Item.query.get_or_404(item_id)
+
+        total_on_hand = (
+            db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+            .filter(Movement.item_id == item.id)
+            .scalar()
+        ) or 0
+        total_on_hand = int(total_on_hand)
+        min_stock = int(item.min_stock or 0)
+        recommended_quantity = max(min_stock - total_on_hand, 0)
+        quantity_value = Decimal(recommended_quantity) if recommended_quantity > 0 else None
+
+        requester = (
+            current_user.username
+            if current_user.is_authenticated and getattr(current_user, "username", None)
+            else "inventory"
+        )
+
+        title = f"{item.sku} – {item.name}"
+        existing_request = (
+            PurchaseRequest.query.filter(
+                PurchaseRequest.title == title,
+                ~PurchaseRequest.status.in_(
+                    (PurchaseRequest.STATUS_RECEIVED, PurchaseRequest.STATUS_CANCELLED)
+                ),
+            )
+            .order_by(PurchaseRequest.created_at.desc())
+            .first()
+        )
+        if existing_request:
+            flash(
+                "An open purchase request already exists for this item. Redirecting to the existing request.",
+                "info",
+            )
+            return redirect(
+                url_for("purchasing.view_request", request_id=existing_request.id)
+            )
+
+        description = (
+            "Generated from the low stock alert on the inventory dashboard. "
+            f"On-hand balance: {total_on_hand}. Minimum stock: {min_stock}."
+        )
+
+        purchase_request = PurchaseRequest(
+            title=title,
+            description=description,
+            quantity=quantity_value,
+            unit=item.unit,
+            requested_by=requester,
+            notes="Update with supplier details and ordering information as needed.",
+        )
+        db.session.add(purchase_request)
+        db.session.commit()
+
+        flash("Purchase request created from low stock alert.", "success")
+        return redirect(
+            url_for("purchasing.view_request", request_id=purchase_request.id)
+        )
+
+    return _create_request()
 
 
 @bp.route("/scan")
