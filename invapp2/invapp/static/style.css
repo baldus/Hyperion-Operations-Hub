@@ -622,6 +622,205 @@ body.light .info-callout {
     margin-top: 24px;
 }
 
+.purchasing-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.status-filter-form {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.status-filter-form select {
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.08);
+    color: inherit;
+    font: inherit;
+}
+
+.status-filter-form button {
+    padding: 10px 16px;
+}
+
+body.light .status-filter-form select {
+    background: #fff;
+    border-color: rgba(0, 0, 0, 0.18);
+}
+
+.status-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.status-summary-card {
+    border-radius: 12px;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.06);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+body.light .status-summary-card {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+.summary-label {
+    font-size: 0.85rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    opacity: 0.75;
+}
+
+.summary-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+}
+
+.section-lead {
+    margin-top: 6px;
+    margin-bottom: 24px;
+    font-size: 1rem;
+    opacity: 0.8;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 720px;
+}
+
+.data-table thead th {
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.8rem;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+body.light .data-table thead th {
+    background: rgba(0, 0, 0, 0.06);
+}
+
+.data-table th,
+.data-table td {
+    padding: 12px 16px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+body.light .data-table th,
+body.light .data-table td {
+    border-color: rgba(0, 0, 0, 0.1);
+}
+
+.data-table tbody tr:nth-child(even) td {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+body.light .data-table tbody tr:nth-child(even) td {
+    background: rgba(0, 0, 0, 0.03);
+}
+
+.data-table tbody tr:hover td {
+    background: rgba(104, 164, 255, 0.16);
+}
+
+body.light .data-table tbody tr:hover td {
+    background: rgba(104, 164, 255, 0.12);
+}
+
+.secondary-text {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.85rem;
+    opacity: 0.75;
+}
+
+.purchasing-table th,
+.purchasing-table td {
+    vertical-align: top;
+}
+
+.purchasing-detail-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+    align-items: center;
+    margin-bottom: 24px;
+}
+
+.purchasing-detail-header .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-size: 0.9rem;
+    opacity: 0.85;
+}
+
+.purchasing-detail-header .meta span {
+    display: inline-flex;
+    gap: 6px;
+}
+
+.purchasing-detail-grid {
+    display: grid;
+    gap: 18px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    margin-bottom: 28px;
+}
+
+.purchasing-detail-grid section {
+    padding: 18px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+body.light .purchasing-detail-grid section {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+.purchasing-detail-grid dl {
+    display: grid;
+    grid-template-columns: minmax(140px, auto) 1fr;
+    gap: 8px 16px;
+    margin: 0;
+}
+
+.purchasing-detail-grid dt {
+    font-weight: 600;
+    opacity: 0.8;
+}
+
+.purchasing-detail-grid dd {
+    margin: 0;
+}
+
+.purchasing-form textarea {
+    resize: vertical;
+}
+
+@media (max-width: 720px) {
+    .purchasing-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .status-filter-form {
+        width: 100%;
+        justify-content: space-between;
+    }
+}
+
 .status-card {
     border-radius: 12px;
     padding: 18px;
@@ -1751,6 +1950,66 @@ body.light .status-pill.status-complete {
 body.light .status-pill.status-pending {
     background-color: rgba(158, 158, 158, 0.2);
     color: #3c3c3c;
+}
+
+.status-pill.status-new {
+    background-color: rgba(2, 132, 199, 0.28);
+    color: #c3ecff;
+}
+
+.status-pill.status-review {
+    background-color: rgba(234, 179, 8, 0.28);
+    color: #ffe59a;
+}
+
+.status-pill.status-waiting {
+    background-color: rgba(249, 115, 22, 0.26);
+    color: #ffd4b5;
+}
+
+.status-pill.status-ordered {
+    background-color: rgba(99, 102, 241, 0.28);
+    color: #d8ddff;
+}
+
+.status-pill.status-received {
+    background-color: rgba(34, 197, 94, 0.28);
+    color: #c9f7d8;
+}
+
+.status-pill.status-cancelled {
+    background-color: rgba(239, 68, 68, 0.28);
+    color: #ffd2d2;
+}
+
+body.light .status-pill.status-new {
+    background-color: rgba(2, 132, 199, 0.18);
+    color: #075985;
+}
+
+body.light .status-pill.status-review {
+    background-color: rgba(234, 179, 8, 0.18);
+    color: #7c5804;
+}
+
+body.light .status-pill.status-waiting {
+    background-color: rgba(249, 115, 22, 0.18);
+    color: #8a3906;
+}
+
+body.light .status-pill.status-ordered {
+    background-color: rgba(99, 102, 241, 0.18);
+    color: #3730a3;
+}
+
+body.light .status-pill.status-received {
+    background-color: rgba(34, 197, 94, 0.18);
+    color: #166534;
+}
+
+body.light .status-pill.status-cancelled {
+    background-color: rgba(239, 68, 68, 0.18);
+    color: #7f1d1d;
 }
 
 @media (max-width: 960px) {

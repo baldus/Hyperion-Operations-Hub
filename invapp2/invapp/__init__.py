@@ -19,6 +19,7 @@ from .routes import (
     auth,
     inventory,
     orders,
+    purchasing,
     printers,
     production,
     reports,
@@ -33,6 +34,7 @@ from . import models  # ensure models are registered with SQLAlchemy
 NAVIGATION_PAGES: tuple[tuple[str, str, str], ...] = (
     ("inventory", "inventory.inventory_home", "Inventory"),
     ("orders", "orders.orders_home", "Orders"),
+    ("purchasing", "purchasing.purchasing_home", "Purchase Requests"),
     ("work", "work.work_home", "Work Instructions"),
     ("production", "production.history", "Production History"),
 )
@@ -71,6 +73,7 @@ def _ensure_core_roles() -> None:
         "viewer": "Read-only user",
         "editor": "Operations editor",
         "admin": "Administrator",
+        "purchasing": "Purchasing team member",
     }
 
     existing_roles = {
@@ -340,6 +343,7 @@ def create_app(config_override=None):
     app.register_blueprint(inventory.bp)
     app.register_blueprint(reports.bp)
     app.register_blueprint(orders.bp)
+    app.register_blueprint(purchasing.bp)
     app.register_blueprint(work.bp)
     app.register_blueprint(settings.bp)
     app.register_blueprint(printers.bp)
