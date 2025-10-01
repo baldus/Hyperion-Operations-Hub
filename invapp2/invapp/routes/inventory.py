@@ -879,57 +879,67 @@ def add_item():
 
 
 @bp.route("/item/<int:item_id>/edit", methods=["GET", "POST"])
-@require_roles("admin")
 def edit_item(item_id):
-    item = Item.query.get_or_404(item_id)
+    edit_roles = resolve_edit_roles(
+        "inventory", default_roles=("editor", "admin", "inventory")
+    )
+    guard = require_any_role(edit_roles)
 
-    if request.method == "POST":
-        name_value = request.form.get("name", "").strip()
-        if not name_value:
-            flash("Name is required.", "danger")
-            return render_template("inventory/edit_item.html", item=item)
+    @guard
+    def _edit_item(item_id):
+        item = Item.query.get_or_404(item_id)
 
-        item.name = name_value
-        item.type = request.form.get("type", "").strip() or None
-        item.unit = request.form.get("unit", "ea").strip() or "ea"
-        item.description = request.form.get("description", "").strip()
+        if request.method == "POST":
+            name_value = request.form.get("name", "").strip()
+            if not name_value:
+                flash("Name is required.", "danger")
+                return render_template("inventory/edit_item.html", item=item)
 
-        min_stock_raw = request.form.get("min_stock", 0)
-        try:
-            item.min_stock = int(min_stock_raw or 0)
-        except (TypeError, ValueError):
-            item.min_stock = 0
+            item.name = name_value
+            item.type = request.form.get("type", "").strip() or None
+            item.unit = request.form.get("unit", "ea").strip() or "ea"
+            item.description = request.form.get("description", "").strip()
 
-        notes_raw = request.form.get("notes")
-        notes = notes_raw.strip() if notes_raw is not None else None
-        notes_value = notes or None
-        item.notes = notes_value
+            min_stock_raw = request.form.get("min_stock", 0)
+            try:
+                item.min_stock = int(min_stock_raw or 0)
+            except (TypeError, ValueError):
+                item.min_stock = 0
 
-        item.list_price = _parse_decimal(request.form.get("list_price"))
-        item.last_unit_cost = _parse_decimal(request.form.get("last_unit_cost"))
-        item.item_class = request.form.get("item_class", "").strip() or None
+            notes_raw = request.form.get("notes")
+            notes = notes_raw.strip() if notes_raw is not None else None
+            notes_value = notes or None
+            item.notes = notes_value
 
-        attachment_file = request.files.get("attachment")
-        attachment_saved, error_message = _save_item_attachment(item, attachment_file)
-        if not attachment_saved and error_message:
-            flash(error_message, "danger")
+            item.list_price = _parse_decimal(request.form.get("list_price"))
+            item.last_unit_cost = _parse_decimal(request.form.get("last_unit_cost"))
+            item.item_class = request.form.get("item_class", "").strip() or None
 
-        db.session.commit()
-        if notes_raw is not None:
-            if notes_value:
-                note_msg = " (notes saved)"
+            attachment_file = request.files.get("attachment")
+            attachment_saved, error_message = _save_item_attachment(item, attachment_file)
+            if not attachment_saved and error_message:
+                flash(error_message, "danger")
+
+            db.session.commit()
+            if notes_raw is not None:
+                if notes_value:
+                    note_msg = " (notes saved)"
+                else:
+                    note_msg = " (notes cleared)"
             else:
-                note_msg = " (notes cleared)"
-        else:
-            note_msg = ""
-        attachment_msg = " (attachment uploaded)" if attachment_file and attachment_saved else ""
-        flash(
-            f"Item {item.sku} updated successfully{note_msg}{attachment_msg}",
-            "success",
-        )
-        return redirect(url_for("inventory.list_items"))
+                note_msg = ""
+            attachment_msg = (
+                " (attachment uploaded)" if attachment_file and attachment_saved else ""
+            )
+            flash(
+                f"Item {item.sku} updated successfully{note_msg}{attachment_msg}",
+                "success",
+            )
+            return redirect(url_for("inventory.list_items"))
 
-    return render_template("inventory/edit_item.html", item=item)
+        return render_template("inventory/edit_item.html", item=item)
+
+    return _edit_item(item_id)
 
 
 @bp.route(
