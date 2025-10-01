@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Add Item</h2>
-<form method="POST">
+<form method="POST" enctype="multipart/form-data">
   <label for="sku">SKU (auto-assigned):</label>
   <input type="text" name="sku" value="{{ next_sku }}" readonly><br>
 
@@ -31,6 +31,10 @@
 
   <label for="notes">Notes:</label>
   <textarea name="notes" rows="4"></textarea><br>
+
+  <label for="attachment">Attachment:</label>
+  <input type="file" name="attachment" accept=".pdf,.png,.jpg,.jpeg"><br>
+  <small class="form-text text-muted">Optional document or image to associate with this item.</small><br>
 
   <button type="submit">Save</button>
 </form>

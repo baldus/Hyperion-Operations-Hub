@@ -97,6 +97,13 @@ def _ensure_inventory_schema(engine):
     inspector = inspect(engine)
 
     try:
+        inspector.get_columns("item_attachment")
+    except (NoSuchTableError, OperationalError):
+        metadata = db.Model.metadata
+        if "item_attachment" in metadata.tables:
+            metadata.tables["item_attachment"].create(bind=engine)
+
+    try:
         item_columns = {col["name"] for col in inspector.get_columns("item")}
     except (NoSuchTableError, OperationalError):
         item_columns = set()

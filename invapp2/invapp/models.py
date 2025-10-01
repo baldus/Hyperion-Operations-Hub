@@ -99,6 +99,25 @@ class Item(db.Model):
     last_unit_cost = db.Column(db.Numeric(12, 2))
     item_class = db.Column(db.String)
 
+    attachments = db.relationship(
+        "ItemAttachment",
+        back_populates="item",
+        cascade="all, delete-orphan",
+        order_by="ItemAttachment.uploaded_at.desc()",
+    )
+
+
+class ItemAttachment(db.Model):
+    __tablename__ = "item_attachment"
+
+    id = db.Column(db.Integer, primary_key=True)
+    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    filename = db.Column(db.String, nullable=False)
+    original_name = db.Column(db.String, nullable=False)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    item = db.relationship("Item", back_populates="attachments")
+
 
 class Location(db.Model):
     __tablename__ = "location"
