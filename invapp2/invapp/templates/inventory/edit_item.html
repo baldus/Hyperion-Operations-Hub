@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Edit Item</h2>
-<form method="POST">
+<form method="POST" enctype="multipart/form-data">
   <label for="sku">SKU:</label>
   <input type="text" name="sku" value="{{ item.sku }}" readonly><br>
 
@@ -32,8 +32,35 @@
   <label for="notes">Notes:</label>
   <textarea name="notes" rows="4">{{ item.notes or '' }}</textarea><br>
 
+  <label for="attachment">Add Attachment:</label>
+  <input type="file" name="attachment" accept=".pdf,.png,.jpg,.jpeg"><br>
+  <small class="form-text text-muted">Upload a PDF or image to associate with this item.</small><br>
+
   <button type="submit" class="action-btn">Update</button>
 </form>
+
+<section class="item-attachments">
+  <h3>Attachments</h3>
+  {% if item.attachments %}
+    <ul class="attachment-list">
+      {% for attachment in item.attachments %}
+        <li class="attachment-list__item">
+          <a href="{{ url_for('inventory.download_item_attachment', item_id=item.id, attachment_id=attachment.id) }}">
+            {{ attachment.original_name }}
+          </a>
+          <small class="text-muted">
+            Uploaded {{ attachment.uploaded_at.strftime('%Y-%m-%d %H:%M') if attachment.uploaded_at else '' }}
+          </small>
+          <form method="POST" action="{{ url_for('inventory.delete_item_attachment', item_id=item.id, attachment_id=attachment.id) }}" class="attachment-list__delete-form" onsubmit="return confirm('Remove this attachment?');">
+            <button type="submit" class="action-btn action-btn--danger">Delete</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="text-muted">No files have been uploaded for this item yet.</p>
+  {% endif %}
+</section>
 
 <form method="POST" action="{{ url_for('inventory.delete_item', item_id=item.id) }}" onsubmit="return confirm('Are you sure you want to delete this item? This action cannot be undone.');">
   <button type="submit" class="action-btn action-btn--danger">Delete Item</button>

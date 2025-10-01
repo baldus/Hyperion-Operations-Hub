@@ -3,7 +3,9 @@ import csv
 import io
 import os
 import re
+import shutil
 import sys
+import tempfile
 from decimal import Decimal
 
 import pytest
@@ -15,6 +17,7 @@ from invapp.extensions import db
 from invapp.models import (
     Batch,
     Item,
+    ItemAttachment,
     Location,
     Movement,
     Order,
@@ -30,12 +33,21 @@ from invapp.routes.inventory import UNASSIGNED_LOCATION_CODE
 
 @pytest.fixture
 def app():
-    app = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:"})
+    upload_dir = tempfile.mkdtemp()
+    app = create_app(
+        {
+            "TESTING": True,
+            "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+            "ITEM_ATTACHMENT_UPLOAD_FOLDER": upload_dir,
+            "ITEM_ATTACHMENT_ALLOWED_EXTENSIONS": {"pdf"},
+        }
+    )
     with app.app_context():
         db.create_all()
         yield app
         db.session.remove()
         db.drop_all()
+    shutil.rmtree(upload_dir, ignore_errors=True)
 
 
 @pytest.fixture
@@ -92,6 +104,51 @@ def stock_items(app):
             "near": near_item.sku,
             "ok": ok_item.sku,
         }
+
+
+def test_edit_item_allows_attachment_upload(client, app):
+    with app.app_context():
+        item = Item(sku="ATTACH-1", name="Attachment Item", unit="ea")
+        db.session.add(item)
+        db.session.commit()
+        item_id = item.id
+
+    response = client.post(
+        f"/inventory/item/{item_id}/edit",
+        data={
+            "sku": "ATTACH-1",
+            "name": "Attachment Item",
+            "type": "",
+            "unit": "ea",
+            "description": "",
+            "min_stock": "0",
+            "list_price": "",
+            "last_unit_cost": "",
+            "item_class": "",
+            "notes": "",
+            "attachment": (io.BytesIO(b"spec"), "spec.pdf"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+
+    with app.app_context():
+        attachments = ItemAttachment.query.filter_by(item_id=item_id).all()
+        assert len(attachments) == 1
+        attachment = attachments[0]
+        file_path = os.path.join(
+            app.config["ITEM_ATTACHMENT_UPLOAD_FOLDER"], attachment.filename
+        )
+        assert os.path.exists(file_path)
+
+    download_response = client.get(
+        f"/inventory/item/{item_id}/attachments/{attachment.id}/download"
+    )
+    assert download_response.status_code == 200
+    content_disposition = download_response.headers.get("Content-Disposition", "")
+    assert "spec.pdf" in content_disposition
 
 
 def test_list_stock_low_filter(client, stock_items):

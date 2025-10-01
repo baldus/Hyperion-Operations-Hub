@@ -16,5 +16,10 @@ class Config:
     )
     WORK_INSTRUCTION_ALLOWED_EXTENSIONS = {"pdf"}
 
+    ITEM_ATTACHMENT_UPLOAD_FOLDER = os.path.join(
+        BASE_DIR, "invapp", "static", "item_attachments"
+    )
+    ITEM_ATTACHMENT_ALLOWED_EXTENSIONS = {"pdf", "png", "jpg", "jpeg"}
+
     ZEBRA_PRINTER_HOST = os.getenv("ZEBRA_PRINTER_HOST", "localhost")
     ZEBRA_PRINTER_PORT = int(os.getenv("ZEBRA_PRINTER_PORT", 9100))

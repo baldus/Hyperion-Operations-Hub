@@ -5,6 +5,7 @@ import os
 import secrets
 import tempfile
 import time
+import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -13,11 +14,14 @@ from typing import Mapping, Optional, Union
 from flask import (
     Blueprint,
     Response,
+    abort,
+    current_app,
     flash,
     jsonify,
     redirect,
     render_template,
     request,
+    send_from_directory,
     session,
     url_for,
 )
@@ -31,6 +35,7 @@ from invapp.models import (
     BillOfMaterial,
     BillOfMaterialComponent,
     Item,
+    ItemAttachment,
     Location,
     Movement,
     Order,
@@ -41,6 +46,7 @@ from invapp.models import (
     RoutingStepConsumption,
     db,
 )
+from werkzeug.utils import secure_filename
 
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
 
@@ -81,6 +87,50 @@ STOCK_IMPORT_FIELDS = [
 
 IMPORT_STORAGE_ROOT = os.path.join(tempfile.gettempdir(), "invapp_imports")
 IMPORT_FILE_TTL_SECONDS = 3600  # one hour
+
+
+def _allowed_item_attachment(filename: str) -> bool:
+    if not filename or "." not in filename:
+        return False
+    extension = filename.rsplit(".", 1)[1].lower()
+    allowed = current_app.config.get("ITEM_ATTACHMENT_ALLOWED_EXTENSIONS", set())
+    return extension in allowed
+
+
+def _save_item_attachment(item: Item, file_storage):
+    if not file_storage or not file_storage.filename:
+        return False, None
+
+    filename = file_storage.filename
+    if not _allowed_item_attachment(filename):
+        allowed = current_app.config.get("ITEM_ATTACHMENT_ALLOWED_EXTENSIONS", set())
+        allowed_list = ", ".join(sorted(allowed)) if allowed else "(none)"
+        return (
+            False,
+            f"Attachment not saved. Allowed file types: {allowed_list}",
+        )
+
+    safe_name = secure_filename(filename)
+    if not safe_name:
+        safe_name = f"attachment_{uuid.uuid4().hex}"
+
+    upload_folder = current_app.config.get("ITEM_ATTACHMENT_UPLOAD_FOLDER")
+    if not upload_folder:
+        return False, "Attachment upload folder is not configured."
+
+    os.makedirs(upload_folder, exist_ok=True)
+    unique_name = f"{uuid.uuid4().hex}_{safe_name}"
+    file_path = os.path.join(upload_folder, unique_name)
+    file_storage.save(file_path)
+
+    db.session.add(
+        ItemAttachment(
+            item=item,
+            filename=unique_name,
+            original_name=safe_name,
+        )
+    )
+    return True, None
 
 
 def _get_import_storage_dir(namespace):
@@ -705,22 +755,46 @@ def add_item():
         notes = notes_raw.strip() if notes_raw is not None else None
         notes_value = notes or None
 
+        name = request.form.get("name", "").strip()
+        if not name:
+            flash("Name is required.", "danger")
+            return render_template("inventory/add_item.html", next_sku=next_sku)
+        unit = request.form.get("unit", "ea") or "ea"
+        description = request.form.get("description", "")
+        item_type = request.form.get("type", "").strip() or None
+        item_class = request.form.get("item_class", "").strip() or None
+
+        attachment_saved = False
+
         item = Item(
             sku=next_sku,
-            name=request.form["name"],
-            type=request.form.get("type", "").strip() or None,
-            unit=request.form.get("unit", "ea").strip() or "ea",
-            description=request.form.get("description", ""),
+            name=name,
+            type=item_type,
+            unit=unit.strip() or "ea",
+            description=description,
             min_stock=min_stock,
             notes=notes_value,
             list_price=_parse_decimal(request.form.get("list_price")),
             last_unit_cost=_parse_decimal(request.form.get("last_unit_cost")),
-            item_class=request.form.get("item_class", "").strip() or None,
+            item_class=item_class,
         )
         db.session.add(item)
+        db.session.flush()
+
+        attachment_file = request.files.get("attachment")
+        saved, error_message = _save_item_attachment(item, attachment_file)
+        if saved:
+            attachment_saved = True
+        elif error_message:
+            flash(error_message, "danger")
+
         db.session.commit()
         note_msg = " (notes saved)" if notes_value else ""
-        flash(f"Item added successfully with SKU {next_sku}{note_msg}", "success")
+        attachment_msg = " (attachment uploaded)" if attachment_saved else ""
+        flash(
+            f"Item added successfully with SKU {next_sku}{note_msg}{attachment_msg}",
+            "success",
+        )
         return redirect(url_for("inventory.list_items"))
 
     max_sku = db.session.query(db.func.max(Item.sku.cast(db.Integer))).scalar()
@@ -734,7 +808,12 @@ def edit_item(item_id):
     item = Item.query.get_or_404(item_id)
 
     if request.method == "POST":
-        item.name = request.form["name"]
+        name_value = request.form.get("name", "").strip()
+        if not name_value:
+            flash("Name is required.", "danger")
+            return render_template("inventory/edit_item.html", item=item)
+
+        item.name = name_value
         item.type = request.form.get("type", "").strip() or None
         item.unit = request.form.get("unit", "ea").strip() or "ea"
         item.description = request.form.get("description", "").strip()
@@ -754,6 +833,11 @@ def edit_item(item_id):
         item.last_unit_cost = _parse_decimal(request.form.get("last_unit_cost"))
         item.item_class = request.form.get("item_class", "").strip() or None
 
+        attachment_file = request.files.get("attachment")
+        attachment_saved, error_message = _save_item_attachment(item, attachment_file)
+        if not attachment_saved and error_message:
+            flash(error_message, "danger")
+
         db.session.commit()
         if notes_raw is not None:
             if notes_value:
@@ -762,10 +846,62 @@ def edit_item(item_id):
                 note_msg = " (notes cleared)"
         else:
             note_msg = ""
-        flash(f"Item {item.sku} updated successfully{note_msg}", "success")
+        attachment_msg = " (attachment uploaded)" if attachment_file and attachment_saved else ""
+        flash(
+            f"Item {item.sku} updated successfully{note_msg}{attachment_msg}",
+            "success",
+        )
         return redirect(url_for("inventory.list_items"))
 
     return render_template("inventory/edit_item.html", item=item)
+
+
+@bp.route(
+    "/item/<int:item_id>/attachments/<int:attachment_id>/download",
+    methods=["GET"],
+)
+def download_item_attachment(item_id, attachment_id):
+    attachment = (
+        ItemAttachment.query.filter_by(id=attachment_id, item_id=item_id)
+        .first_or_404()
+    )
+    upload_folder = current_app.config.get("ITEM_ATTACHMENT_UPLOAD_FOLDER")
+    if not upload_folder:
+        abort(404)
+
+    return send_from_directory(
+        upload_folder,
+        attachment.filename,
+        as_attachment=True,
+        download_name=attachment.original_name,
+    )
+
+
+@bp.route(
+    "/item/<int:item_id>/attachments/<int:attachment_id>/delete",
+    methods=["POST"],
+)
+@require_roles("admin")
+def delete_item_attachment(item_id, attachment_id):
+    item = Item.query.get_or_404(item_id)
+    attachment = (
+        ItemAttachment.query.filter_by(id=attachment_id, item_id=item.id)
+        .first_or_404()
+    )
+
+    upload_folder = current_app.config.get("ITEM_ATTACHMENT_UPLOAD_FOLDER")
+    if upload_folder:
+        file_path = os.path.join(upload_folder, attachment.filename)
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except OSError:
+            pass
+
+    db.session.delete(attachment)
+    db.session.commit()
+    flash("Attachment removed.", "success")
+    return redirect(url_for("inventory.edit_item", item_id=item.id))
 
 
 @bp.route("/item/<int:item_id>/delete", methods=["POST"])
