@@ -148,17 +148,20 @@ For a reliable shop-floor deployment, start with the following baseline. See the
    ```
 
 4. **Run the app**
+   Launch the production-ready WSGI server with Gunicorn (default bind: `0.0.0.0:8000`):
    ```bash
-   flask run --host=0.0.0.0 --port=5000
+   gunicorn --bind 0.0.0.0:8000 app:app
    ```
 
-   Or use the helper script which bootstraps a virtual environment, installs dependencies, and launches the server:
+   Or use the helper script which bootstraps a virtual environment, installs dependencies, and launches Gunicorn with sensible defaults:
 
    ```bash
    ./start_inventory.sh
    ```
 
-5. **Access the UI** at `http://<host-or-pi-ip>:5000`.
+   > Need a quick development server? You can still run `flask --app app run --debug` locally, but avoid using it in production.
+
+5. **Access the UI** at `http://<host-or-pi-ip>:8000`.
 
 6. **Run automated tests** (optional):
    ```bash

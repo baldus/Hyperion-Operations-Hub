@@ -11,6 +11,7 @@ declare -A MIN_PKG_VERSIONS=(
     [Flask]="3.0"
     [SQLAlchemy]="2.0"
     [psycopg2-binary]="2.9"
+    [gunicorn]="21.0"
 )
 
 echo "🔹 Step 1: Changing to app directory..."
@@ -68,8 +69,13 @@ else
     echo "✅ Using existing DB_URL: $DB_URL"
 fi
 
-echo "🔹 Step 6: Starting Hyperion Operations Console Host..."
-python -m flask run --host=0.0.0.0 --port=5000 || {
-    echo "❌ Flask failed to start"
+HOST="${HOST:-0.0.0.0}"
+PORT="${PORT:-8000}"
+WORKERS="${GUNICORN_WORKERS:-2}"
+TIMEOUT="${GUNICORN_TIMEOUT:-120}"
+
+echo "🔹 Step 6: Starting Hyperion Operations Console Host via Gunicorn..."
+gunicorn --bind "$HOST:$PORT" --workers "$WORKERS" --timeout "$TIMEOUT" app:app || {
+    echo "❌ Gunicorn failed to start"
     read -p "Press Enter to close..."
 }

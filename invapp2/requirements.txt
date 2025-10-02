@@ -1,6 +1,7 @@
 # Core web framework and utilities
 Flask==2.2.5
 Werkzeug==2.2.3
+gunicorn==21.2.0
 
 # Database integration
 Flask-SQLAlchemy==2.5.1

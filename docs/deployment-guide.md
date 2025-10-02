@@ -38,7 +38,7 @@ This document walks through provisioning a production-ready instance of **invapp
   ```bash
   sudo apt install -y ufw
   sudo ufw allow 22/tcp
-  sudo ufw allow 5000/tcp
+  sudo ufw allow 8000/tcp
   sudo ufw enable
   ```
 
@@ -108,9 +108,9 @@ Back up the credentials in a secure location.
 
 5. **Smoke-test the application:**
    ```bash
-   flask run --host=0.0.0.0 --port=5000
+   gunicorn --bind 0.0.0.0:8000 app:app
    ```
-   Visit `http://<pi-ip>:5000` and verify that you can log in, view inventory, and access reports.
+   Visit `http://<pi-ip>:8000` and verify that you can log in, view inventory, and access reports.
 
 ---
 
@@ -127,9 +127,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/invapp2
-Environment="FLASK_APP=app.py"
 EnvironmentFile=/opt/invapp2/.env
-ExecStart=/opt/invapp2/.venv/bin/flask run --host=0.0.0.0 --port=5000
+ExecStart=/opt/invapp2/.venv/bin/gunicorn --bind 0.0.0.0:8000 --workers 3 --timeout 120 app:app
 Restart=on-failure
 User=pi
 Group=pi

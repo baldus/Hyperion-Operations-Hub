@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR"
 VENV_DIR="$PROJECT_ROOT/.venv"
 REQUIREMENTS_FILE="$PROJECT_ROOT/requirements.txt"
-APP_ENTRY="$PROJECT_ROOT/app.py"
+APP_MODULE="app:app"
 
 if [ ! -d "$VENV_DIR" ]; then
   echo "[setup] Creating virtual environment at $VENV_DIR"
@@ -24,5 +24,12 @@ else
   echo "[warning] Requirements file not found at $REQUIREMENTS_FILE"
 fi
 
-echo "[run] Starting Hyperion Operations Console Host"
-exec python "$APP_ENTRY"
+HOST="${HOST:-0.0.0.0}"
+PORT="${PORT:-8000}"
+WORKERS="${GUNICORN_WORKERS:-2}"
+TIMEOUT="${GUNICORN_TIMEOUT:-120}"
+
+cd "$PROJECT_ROOT"
+
+echo "[run] Starting Hyperion Operations Console Host via Gunicorn"
+exec gunicorn --bind "$HOST:$PORT" --workers "$WORKERS" --timeout "$TIMEOUT" "$APP_MODULE"
