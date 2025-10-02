@@ -22,8 +22,6 @@
                 {% if not current_user.is_authenticated %}
                 <span class="access-indicator" role="status" aria-live="polite">Public view</span>
                 {% endif %}
-                {% if current_user.is_authenticated %}
-                {% if can_access_page('settings') %}
                 {% set next_target = request.full_path if request.query_string else request.path %}
                 <form method="post" action="{{ url_for('settings.toggle_theme') }}" class="inline-form theme-toggle-form">
                     <input type="hidden" name="next" value="{{ next_target }}">
@@ -31,10 +29,12 @@
                         &#128161;
                     </button>
                 </form>
+                {% if current_user.is_authenticated and can_access_page('settings') %}
                 <a href="{{ url_for('settings.settings_home') }}" class="icon-btn gear-btn" aria-label="Open settings and administration tools">
                     &#9881;
                 </a>
                 {% endif %}
+                {% if current_user.is_authenticated %}
                 <a href="{{ url_for('auth.logout') }}" class="nav-btn">Logout</a>
                 {% else %}
                 <a href="{{ url_for('auth.login') }}" class="nav-btn">Login</a>
