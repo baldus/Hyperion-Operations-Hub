@@ -8,6 +8,7 @@ from functools import wraps
 from typing import Iterable
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
+from werkzeug.routing import BuildError
 from sqlalchemy import func
 
 from invapp.auth import blueprint_page_guard
@@ -52,6 +53,35 @@ def _parse_date(value: str, *, field_label: str) -> tuple[date | None, str | Non
 def _clean_text(value: str) -> str | None:
     text = (value or "").strip()
     return text or None
+
+
+def _format_decimal_for_number_field(value: Decimal) -> str:
+    """Return a clean string for Decimal quantities used in number inputs."""
+
+    normalized = value.normalize()
+    text = format(normalized, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
+def _extract_sku_from_title(title: str | None) -> str | None:
+    """Attempt to pull an item SKU from a purchase request title."""
+
+    if not title:
+        return None
+
+    separators = [" – ", " — ", " - ", "–", "—", "-"]
+    for separator in separators:
+        if separator in title:
+            candidate = title.split(separator, 1)[0].strip()
+            if candidate:
+                return candidate
+
+    cleaned = title.strip()
+    if cleaned and " " not in cleaned:
+        return cleaned
+    return None
 
 
 def _require_purchasing_edit(view_func):
@@ -171,11 +201,37 @@ def new_request():
 @bp.route("/<int:request_id>")
 def view_request(request_id: int):
     purchase_request = PurchaseRequest.query.get_or_404(request_id)
+    receiving_params: dict[str, str] = {}
+
+    sku = _extract_sku_from_title(purchase_request.title)
+    if sku:
+        receiving_params["sku"] = sku
+
+    if purchase_request.quantity is not None:
+        receiving_params["qty"] = _format_decimal_for_number_field(
+            purchase_request.quantity
+        )
+
+    if purchase_request.requested_by:
+        receiving_params["person"] = purchase_request.requested_by
+
+    if purchase_request.purchase_order_number:
+        receiving_params["po_number"] = purchase_request.purchase_order_number
+
+    try:
+        receive_url = (
+            url_for("inventory.receiving", **receiving_params)
+            if receiving_params
+            else url_for("inventory.receiving")
+        )
+    except BuildError:
+        receive_url = None
     return render_template(
         "purchasing/detail.html",
         purchase_request=purchase_request,
         status_choices=PurchaseRequest.STATUS_CHOICES,
         status_labels=dict(PurchaseRequest.STATUS_CHOICES),
+        receive_url=receive_url,
     )
 
 
