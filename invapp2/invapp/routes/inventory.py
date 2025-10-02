@@ -2125,6 +2125,13 @@ def export_stock():
 @bp.route("/receiving", methods=["GET", "POST"])
 def receiving():
     locations = Location.query.all()
+    form_defaults = {
+        "sku": request.args.get("sku", "").strip(),
+        "qty": request.args.get("qty", "").strip(),
+        "person": request.args.get("person", "").strip(),
+        "po_number": request.args.get("po_number", "").strip(),
+        "location_id": request.args.get("location_id", "").strip(),
+    }
 
     if request.method == "POST":
         sku = request.form["sku"].strip()
@@ -2205,6 +2212,7 @@ def receiving():
         "inventory/receiving.html",
         records=records,
         locations=locations,
+        form_defaults=form_defaults,
     )
 
 

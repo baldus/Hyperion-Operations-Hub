@@ -140,3 +140,23 @@ def test_update_requires_edit_role(app):
         assert refreshed.supplier_contact == "rep@sealworld.test"
         assert refreshed.purchase_order_number == "PO-7788"
         assert refreshed.notes == "Confirmed delivery"
+
+
+def test_purchase_request_receive_link_prefills_receiving(app, client):
+    with app.app_context():
+        request_record = PurchaseRequest(
+            title="ABC123 – Widget",
+            requested_by="Receiver",
+            quantity=Decimal("5.00"),
+            purchase_order_number="PO-1234",
+        )
+        db.session.add(request_record)
+        db.session.commit()
+        request_id = request_record.id
+
+    response = client.get(f"/purchasing/{request_id}")
+    assert response.status_code == 200
+    assert b"/inventory/receiving?sku=ABC123" in response.data
+    assert b"qty=5" in response.data
+    assert b"person=Receiver" in response.data
+    assert b"po_number=PO-1234" in response.data
