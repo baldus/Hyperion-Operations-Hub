@@ -1,0 +1,276 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>RMA {{ rma_request.reference }}</h2>
+
+<div class="quality-detail-header">
+    <span class="status-pill status-{{ rma_request.status }}">{{ status_labels.get(rma_request.status, rma_request.status) }}</span>
+    <span class="status-pill priority-{{ rma_request.priority }}">{{ priority_labels.get(rma_request.priority, rma_request.priority) }}</span>
+    <div class="meta">
+        <span>Opened {{ rma_request.opened_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        <span>Opened by {{ rma_request.opened_by }}</span>
+        {% if rma_request.closed_at %}
+            <span>Closed {{ rma_request.closed_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        {% endif %}
+        {% if rma_request.updated_at %}
+            <span>Updated {{ rma_request.updated_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        {% endif %}
+    </div>
+</div>
+
+<div class="quality-detail-grid">
+    <section>
+        <h3>Customer &amp; Product</h3>
+        <dl>
+            <dt>Customer</dt>
+            <dd>
+                {{ rma_request.customer_name }}
+                {% if rma_request.customer_contact %}
+                    <div class="secondary-text">{{ rma_request.customer_contact }}</div>
+                {% endif %}
+                {% if rma_request.customer_reference %}
+                    <div class="secondary-text">Customer ref: {{ rma_request.customer_reference }}</div>
+                {% endif %}
+            </dd>
+
+            <dt>Product</dt>
+            <dd>
+                {% if rma_request.product_description %}
+                    {{ rma_request.product_description }}
+                {% elif rma_request.product_sku %}
+                    {{ rma_request.product_sku }}
+                {% else %}
+                    <span class="muted">Not specified</span>
+                {% endif %}
+                {% if rma_request.product_serial %}
+                    <div class="secondary-text">Serial / lot: {{ rma_request.product_serial }}</div>
+                {% endif %}
+            </dd>
+
+            <dt>Category</dt>
+            <dd>
+                {% if rma_request.issue_category %}
+                    {{ rma_request.issue_category }}
+                {% else %}
+                    <span class="muted">Not set</span>
+                {% endif %}
+            </dd>
+
+            <dt>Target resolution</dt>
+            <dd>
+                {% if rma_request.target_resolution_date %}
+                    {{ rma_request.target_resolution_date.isoformat() }}
+                {% else %}
+                    <span class="muted">Not scheduled</span>
+                {% endif %}
+            </dd>
+
+            <dt>Last customer contact</dt>
+            <dd>
+                {% if rma_request.last_customer_contact %}
+                    {{ rma_request.last_customer_contact.isoformat() }}
+                {% else %}
+                    <span class="muted">Not tracked</span>
+                {% endif %}
+            </dd>
+        </dl>
+    </section>
+
+    <section>
+        <h3>Issue Overview</h3>
+        <p>{{ rma_request.issue_description }}</p>
+        {% if rma_request.requested_action %}
+            <p><strong>Requested action:</strong> {{ rma_request.requested_action }}</p>
+        {% endif %}
+        {% if rma_request.resolution %}
+            <p><strong>Resolution:</strong> {{ rma_request.resolution }}</p>
+        {% endif %}
+        {% if rma_request.follow_up_tasks %}
+            <p><strong>Follow-up tasks:</strong> {{ rma_request.follow_up_tasks }}</p>
+        {% endif %}
+        {% if rma_request.internal_notes %}
+            <p><strong>Internal notes:</strong> {{ rma_request.internal_notes }}</p>
+        {% endif %}
+        {% if not (rma_request.requested_action or rma_request.resolution or rma_request.follow_up_tasks or rma_request.internal_notes) %}
+            <p class="muted">No additional notes yet.</p>
+        {% endif %}
+    </section>
+</div>
+
+<section class="quality-attachments">
+    <h3>Supporting Documents</h3>
+    {% if rma_request.attachments %}
+        <ul class="attachment-list">
+            {% for attachment in rma_request.attachments %}
+                <li>
+                    <a href="{{ url_for('quality.download_attachment', request_id=rma_request.id, attachment_id=attachment.id) }}">{{ attachment.original_name }}</a>
+                    <span class="secondary-text">Uploaded {{ attachment.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                    {% if can_edit_page('quality') %}
+                        <form method="post" action="{{ url_for('quality.delete_attachment', request_id=rma_request.id, attachment_id=attachment.id) }}" class="inline-form" onsubmit="return confirm('Remove this attachment?');">
+                            <button type="submit" class="link-btn">Remove</button>
+                        </form>
+                    {% endif %}
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p class="muted">No documents have been linked yet.</p>
+    {% endif %}
+
+    {% if can_edit_page('quality') %}
+        <form method="post" action="{{ url_for('quality.upload_attachment', request_id=rma_request.id) }}" enctype="multipart/form-data" class="attachment-upload">
+            <label for="attachment">Add document {% if allowed_extensions %}<span class="secondary-text">({{ allowed_extensions | join(', ') }})</span>{% endif %}</label>
+            <input type="file" id="attachment" name="attachment" required>
+            <button type="submit" class="action-btn">Upload</button>
+        </form>
+    {% endif %}
+</section>
+
+<section class="quality-timeline">
+    <h3>Activity Log</h3>
+    {% if rma_request.status_events %}
+        <ul>
+            {% for event in rma_request.status_events %}
+                <li>
+                    <div class="timeline-header">
+                        <strong>{{ event.changed_at.strftime('%Y-%m-%d %H:%M') }}</strong>
+                        <span class="secondary-text">{{ event.changed_by }}</span>
+                    </div>
+                    <div class="timeline-body">
+                        {% if event.from_status %}
+                            <div>Status changed from <strong>{{ status_labels.get(event.from_status, event.from_status) }}</strong> to <strong>{{ status_labels.get(event.to_status, event.to_status) }}</strong>.</div>
+                        {% else %}
+                            <div>Status logged as <strong>{{ status_labels.get(event.to_status, event.to_status) }}</strong>.</div>
+                        {% endif %}
+                        {% if event.note %}
+                            <pre>{{ event.note }}</pre>
+                        {% endif %}
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p class="muted">No updates have been recorded yet.</p>
+    {% endif %}
+</section>
+
+{% if can_edit_page('quality') %}
+<hr>
+<h3>Update RMA</h3>
+<form method="post" action="{{ url_for('quality.update_request', request_id=rma_request.id) }}" class="form-grid quality-form">
+    <div class="form-row two-col">
+        <div>
+            <label for="status">Status</label>
+            <select id="status" name="status">
+                {% for value, label in status_choices %}
+                    <option value="{{ value }}" {% if rma_request.status == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="priority">Priority</label>
+            <select id="priority" name="priority">
+                {% for value, label in priority_choices %}
+                    <option value="{{ value }}" {% if rma_request.priority == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+
+    <div class="form-row two-col">
+        <div>
+            <label for="customer_name">Customer name</label>
+            <input type="text" id="customer_name" name="customer_name" value="{{ rma_request.customer_name }}" required>
+        </div>
+        <div>
+            <label for="customer_contact">Customer contact</label>
+            <input type="text" id="customer_contact" name="customer_contact" value="{{ rma_request.customer_contact or '' }}">
+        </div>
+    </div>
+
+    <div class="form-row two-col">
+        <div>
+            <label for="customer_reference">Customer reference</label>
+            <input type="text" id="customer_reference" name="customer_reference" value="{{ rma_request.customer_reference or '' }}">
+        </div>
+        <div>
+            <label for="issue_category">Issue category</label>
+            <input type="text" id="issue_category" name="issue_category" value="{{ rma_request.issue_category or '' }}">
+        </div>
+    </div>
+
+    <div class="form-row two-col">
+        <div>
+            <label for="product_sku">Product SKU</label>
+            <input type="text" id="product_sku" name="product_sku" value="{{ rma_request.product_sku or '' }}">
+        </div>
+        <div>
+            <label for="product_serial">Serial / lot</label>
+            <input type="text" id="product_serial" name="product_serial" value="{{ rma_request.product_serial or '' }}">
+        </div>
+    </div>
+
+    <div class="form-row">
+        <label for="product_description">Product description</label>
+        <input type="text" id="product_description" name="product_description" value="{{ rma_request.product_description or '' }}">
+    </div>
+
+    <div class="form-row">
+        <label for="issue_description">Issue description</label>
+        <textarea id="issue_description" name="issue_description" rows="4" required>{{ rma_request.issue_description }}</textarea>
+    </div>
+
+    <div class="form-row">
+        <label for="requested_action">Requested action</label>
+        <input type="text" id="requested_action" name="requested_action" value="{{ rma_request.requested_action or '' }}">
+    </div>
+
+    <div class="form-row">
+        <label for="resolution">Resolution</label>
+        <textarea id="resolution" name="resolution" rows="3">{{ rma_request.resolution or '' }}</textarea>
+    </div>
+
+    <div class="form-row two-col">
+        <div>
+            <label for="target_resolution_date">Target resolution date</label>
+            <input type="date" id="target_resolution_date" name="target_resolution_date" value="{{ rma_request.target_resolution_date.isoformat() if rma_request.target_resolution_date else '' }}">
+        </div>
+        <div>
+            <label for="last_customer_contact">Last customer contact</label>
+            <input type="date" id="last_customer_contact" name="last_customer_contact" value="{{ rma_request.last_customer_contact.isoformat() if rma_request.last_customer_contact else '' }}">
+        </div>
+    </div>
+
+    <div class="form-row two-col">
+        <div>
+            <label for="follow_up_tasks">Follow-up tasks</label>
+            <textarea id="follow_up_tasks" name="follow_up_tasks" rows="2">{{ rma_request.follow_up_tasks or '' }}</textarea>
+        </div>
+        <div>
+            <label for="internal_notes">Internal notes</label>
+            <textarea id="internal_notes" name="internal_notes" rows="2">{{ rma_request.internal_notes or '' }}</textarea>
+        </div>
+    </div>
+
+    <div class="form-row two-col">
+        <div>
+            <label for="return_tracking_number">Return tracking number</label>
+            <input type="text" id="return_tracking_number" name="return_tracking_number" value="{{ rma_request.return_tracking_number or '' }}">
+        </div>
+        <div>
+            <label for="replacement_order_number">Replacement order number</label>
+            <input type="text" id="replacement_order_number" name="replacement_order_number" value="{{ rma_request.replacement_order_number or '' }}">
+        </div>
+    </div>
+
+    <div class="form-row">
+        <label for="note">Log note (optional)</label>
+        <textarea id="note" name="note" rows="2" placeholder="Add context for this update"></textarea>
+    </div>
+
+    <div class="form-actions">
+        <button type="submit" class="action-btn primary-action">Save Updates</button>
+    </div>
+</form>
+{% endif %}
+{% endblock %}

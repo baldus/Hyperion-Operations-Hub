@@ -21,5 +21,22 @@ class Config:
     )
     ITEM_ATTACHMENT_ALLOWED_EXTENSIONS = {"pdf", "png", "jpg", "jpeg"}
 
+    QUALITY_ATTACHMENT_UPLOAD_FOLDER = os.path.join(
+        BASE_DIR, "invapp", "static", "rma_attachments"
+    )
+    QUALITY_ATTACHMENT_ALLOWED_EXTENSIONS = {
+        "pdf",
+        "png",
+        "jpg",
+        "jpeg",
+        "gif",
+        "doc",
+        "docx",
+        "xls",
+        "xlsx",
+        "csv",
+        "txt",
+    }
+
     ZEBRA_PRINTER_HOST = os.getenv("ZEBRA_PRINTER_HOST", "localhost")
     ZEBRA_PRINTER_PORT = int(os.getenv("ZEBRA_PRINTER_PORT", 9100))

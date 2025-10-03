@@ -67,6 +67,11 @@ DEFAULT_PAGE_ACCESS: Mapping[str, Mapping[str, Sequence[str] | str]] = {
         "view_roles": ("viewer", "editor", "admin", "purchasing", "orders", "inventory"),
         "edit_roles": ("editor", "admin", "purchasing"),
     },
+    "quality": {
+        "label": "Quality & RMAs",
+        "view_roles": ("admin", "quality"),
+        "edit_roles": ("admin", "quality"),
+    },
     "production": {
         "label": "Production History",
         "view_roles": ("viewer", "editor", "admin", "production", "user"),

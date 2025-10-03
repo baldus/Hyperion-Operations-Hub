@@ -20,6 +20,7 @@ from .routes import (
     inventory,
     orders,
     purchasing,
+    quality,
     printers,
     production,
     reports,
@@ -35,6 +36,7 @@ NAVIGATION_PAGES: tuple[tuple[str, str, str], ...] = (
     ("inventory", "inventory.inventory_home", "Inventory"),
     ("orders", "orders.orders_home", "Orders"),
     ("purchasing", "purchasing.purchasing_home", "Purchase Requests"),
+    ("quality", "quality.quality_home", "Quality"),
     ("work", "work.work_home", "Work Instructions"),
     ("production", "production.history", "Production History"),
 )
@@ -74,6 +76,7 @@ def _ensure_core_roles() -> None:
         "editor": "Operations editor",
         "admin": "Administrator",
         "purchasing": "Purchasing team member",
+        "quality": "Quality assurance specialist",
     }
 
     existing_roles = {
@@ -351,6 +354,7 @@ def create_app(config_override=None):
     app.register_blueprint(reports.bp)
     app.register_blueprint(orders.bp)
     app.register_blueprint(purchasing.bp)
+    app.register_blueprint(quality.bp)
     app.register_blueprint(work.bp)
     app.register_blueprint(settings.bp)
     app.register_blueprint(printers.bp)
