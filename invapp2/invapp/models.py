@@ -1,3 +1,4 @@
+import secrets
 from decimal import Decimal
 from datetime import date, datetime
 
@@ -215,6 +216,163 @@ class PurchaseRequest(db.Model):
     def is_closed(self) -> bool:
         return self.status in {self.STATUS_RECEIVED, self.STATUS_CANCELLED}
 
+
+class RMARequest(db.Model):
+    __tablename__ = "rma_request"
+
+    STATUS_OPEN = "open"
+    STATUS_IN_REVIEW = "in_review"
+    STATUS_NEED_INFO = "need_more_info"
+    STATUS_AWAITING_RETURN = "awaiting_return"
+    STATUS_PENDING_TECH_REVIEW = "pending_tech_review"
+    STATUS_RESOLVED = "resolved"
+    STATUS_CLOSED = "closed"
+
+    STATUS_CHOICES: tuple[tuple[str, str], ...] = (
+        (STATUS_OPEN, "Open"),
+        (STATUS_IN_REVIEW, "In Review"),
+        (STATUS_NEED_INFO, "Need More Info"),
+        (STATUS_AWAITING_RETURN, "Awaiting Return"),
+        (STATUS_PENDING_TECH_REVIEW, "Pending Tech Review"),
+        (STATUS_RESOLVED, "Resolved"),
+        (STATUS_CLOSED, "Closed"),
+    )
+
+    PRIORITY_LOW = "low"
+    PRIORITY_NORMAL = "normal"
+    PRIORITY_HIGH = "high"
+    PRIORITY_CRITICAL = "critical"
+
+    PRIORITY_CHOICES: tuple[tuple[str, str], ...] = (
+        (PRIORITY_LOW, "Low"),
+        (PRIORITY_NORMAL, "Normal"),
+        (PRIORITY_HIGH, "High"),
+        (PRIORITY_CRITICAL, "Critical"),
+    )
+
+    CLOSED_STATUSES = {STATUS_RESOLVED, STATUS_CLOSED}
+
+    id = db.Column(db.Integer, primary_key=True)
+    reference = db.Column(db.String(32), unique=True, nullable=False)
+    status = db.Column(db.String(32), nullable=False, default=STATUS_OPEN)
+    priority = db.Column(db.String(16), nullable=False, default=PRIORITY_NORMAL)
+    opened_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+    closed_at = db.Column(db.DateTime, nullable=True)
+    opened_by = db.Column(db.String(128), nullable=False)
+    customer_name = db.Column(db.String(255), nullable=False)
+    customer_contact = db.Column(db.String(255), nullable=True)
+    customer_reference = db.Column(db.String(128), nullable=True)
+    product_sku = db.Column(db.String(64), nullable=True)
+    product_description = db.Column(db.String(255), nullable=True)
+    product_serial = db.Column(db.String(64), nullable=True)
+    issue_category = db.Column(db.String(64), nullable=True)
+    issue_description = db.Column(db.Text, nullable=False)
+    requested_action = db.Column(db.String(255), nullable=True)
+    target_resolution_date = db.Column(db.Date, nullable=True)
+    resolution = db.Column(db.Text, nullable=True)
+    return_tracking_number = db.Column(db.String(128), nullable=True)
+    replacement_order_number = db.Column(db.String(128), nullable=True)
+    follow_up_tasks = db.Column(db.Text, nullable=True)
+    internal_notes = db.Column(db.Text, nullable=True)
+    last_customer_contact = db.Column(db.Date, nullable=True)
+
+    attachments = db.relationship(
+        "RMAAttachment",
+        back_populates="request",
+        cascade="all, delete-orphan",
+        order_by="RMAAttachment.uploaded_at.desc()",
+    )
+    status_events = db.relationship(
+        "RMAStatusEvent",
+        back_populates="request",
+        cascade="all, delete-orphan",
+        order_by="RMAStatusEvent.changed_at.desc()",
+    )
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if not self.status:
+            self.status = self.STATUS_OPEN
+        if not self.priority:
+            self.priority = self.PRIORITY_NORMAL
+        if not self.reference:
+            self.reference = self.generate_reference()
+
+    @classmethod
+    def generate_reference(cls) -> str:
+        prefix = datetime.utcnow().strftime("RMA%Y%m%d")
+        for _ in range(10):
+            candidate = f"{prefix}-{secrets.token_hex(2).upper()}"
+            exists = db.session.query(cls.id).filter_by(reference=candidate).first()
+            if not exists:
+                return candidate
+        return f"{prefix}-{secrets.token_hex(4).upper()}"
+
+    @classmethod
+    def status_values(cls) -> tuple[str, ...]:
+        return tuple(choice for choice, _ in cls.STATUS_CHOICES)
+
+    @classmethod
+    def status_label(cls, value: str) -> str:
+        labels = dict(cls.STATUS_CHOICES)
+        return labels.get(value, value.replace("_", " ").title())
+
+    @classmethod
+    def priority_label(cls, value: str) -> str:
+        labels = dict(cls.PRIORITY_CHOICES)
+        return labels.get(value, value.replace("_", " ").title())
+
+    def mark_status(self, new_status: str) -> None:
+        if new_status not in self.status_values():
+            raise ValueError(f"Invalid RMA status: {new_status}")
+        previous_status = self.status
+        self.status = new_status
+        if new_status in self.CLOSED_STATUSES:
+            self.closed_at = datetime.utcnow()
+        elif previous_status in self.CLOSED_STATUSES and new_status not in self.CLOSED_STATUSES:
+            self.closed_at = None
+
+    @property
+    def is_closed(self) -> bool:
+        return self.status in self.CLOSED_STATUSES
+
+    @property
+    def is_open(self) -> bool:
+        return not self.is_closed
+
+    @property
+    def age_in_days(self) -> int:
+        end_point = self.closed_at or datetime.utcnow()
+        return (end_point.date() - self.opened_at.date()).days
+
+
+class RMAAttachment(db.Model):
+    __tablename__ = "rma_attachment"
+
+    id = db.Column(db.Integer, primary_key=True)
+    request_id = db.Column(db.Integer, db.ForeignKey("rma_request.id"), nullable=False)
+    filename = db.Column(db.String, nullable=False)
+    original_name = db.Column(db.String, nullable=False)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    request = db.relationship("RMARequest", back_populates="attachments")
+
+
+class RMAStatusEvent(db.Model):
+    __tablename__ = "rma_status_event"
+
+    id = db.Column(db.Integer, primary_key=True)
+    request_id = db.Column(db.Integer, db.ForeignKey("rma_request.id"), nullable=False)
+    from_status = db.Column(db.String(32), nullable=True)
+    to_status = db.Column(db.String(32), nullable=False)
+    note = db.Column(db.Text, nullable=True)
+    changed_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    changed_by = db.Column(db.String(128), nullable=False)
+
+    request = db.relationship("RMARequest", back_populates="status_events")
 
 class WorkInstruction(db.Model):
     __tablename__ = "work_instruction"

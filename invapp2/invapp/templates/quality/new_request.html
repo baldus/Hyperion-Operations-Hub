@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Log RMA Request</h2>
+<p class="section-lead">Capture the customer details, product information, and reason for return so the quality team can track the follow-up.</p>
+
+<form method="post" class="form-grid quality-form">
+    <div class="form-row two-col">
+        <div>
+            <label for="customer_name">Customer name <span aria-hidden="true">*</span></label>
+            <input type="text" id="customer_name" name="customer_name" value="{{ form_data.customer_name }}" required>
+        </div>
+        <div>
+            <label for="customer_contact">Customer contact</label>
+            <input type="text" id="customer_contact" name="customer_contact" value="{{ form_data.customer_contact }}" placeholder="email or phone">
+        </div>
+    </div>
+
+    <div class="form-row two-col">
+        <div>
+            <label for="customer_reference">Customer reference</label>
+            <input type="text" id="customer_reference" name="customer_reference" value="{{ form_data.customer_reference }}" placeholder="RMA from customer or ticket number">
+        </div>
+        <div>
+            <label for="issue_category">Issue category</label>
+            <input type="text" id="issue_category" name="issue_category" value="{{ form_data.issue_category }}" placeholder="e.g. Finish, Electronics, Shipping">
+        </div>
+    </div>
+
+    <div class="form-row two-col">
+        <div>
+            <label for="product_sku">Product SKU</label>
+            <input type="text" id="product_sku" name="product_sku" value="{{ form_data.product_sku }}" placeholder="Part number">
+        </div>
+        <div>
+            <label for="product_serial">Serial / lot</label>
+            <input type="text" id="product_serial" name="product_serial" value="{{ form_data.product_serial }}">
+        </div>
+    </div>
+
+    <div class="form-row">
+        <label for="product_description">Product description</label>
+        <input type="text" id="product_description" name="product_description" value="{{ form_data.product_description }}">
+    </div>
+
+    <div class="form-row">
+        <label for="issue_description">Issue description <span aria-hidden="true">*</span></label>
+        <textarea id="issue_description" name="issue_description" rows="4" required>{{ form_data.issue_description }}</textarea>
+    </div>
+
+    <div class="form-row">
+        <label for="requested_action">Requested action</label>
+        <input type="text" id="requested_action" name="requested_action" value="{{ form_data.requested_action }}" placeholder="Repair, replace, credit, etc.">
+    </div>
+
+    <div class="form-row two-col">
+        <div>
+            <label for="priority">Priority</label>
+            <select id="priority" name="priority">
+                {% for value, label in priority_choices %}
+                    <option value="{{ value }}" {% if form_data.priority == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="target_resolution_date">Target resolution date</label>
+            <input type="date" id="target_resolution_date" name="target_resolution_date" value="{{ form_data.target_resolution_date }}">
+        </div>
+    </div>
+
+    <div class="form-row two-col">
+        <div>
+            <label for="last_customer_contact">Last customer contact</label>
+            <input type="date" id="last_customer_contact" name="last_customer_contact" value="{{ form_data.last_customer_contact }}">
+        </div>
+        <div>
+            <label for="follow_up_tasks">Follow-up tasks</label>
+            <textarea id="follow_up_tasks" name="follow_up_tasks" rows="2">{{ form_data.follow_up_tasks }}</textarea>
+        </div>
+    </div>
+
+    <div class="form-row">
+        <label for="internal_notes">Internal notes</label>
+        <textarea id="internal_notes" name="internal_notes" rows="3">{{ form_data.internal_notes }}</textarea>
+    </div>
+
+    <div class="form-actions">
+        <a class="action-btn subtle-action" href="{{ url_for('quality.quality_home') }}">Cancel</a>
+        <button type="submit" class="action-btn primary-action">Create RMA</button>
+    </div>
+</form>
+{% endblock %}

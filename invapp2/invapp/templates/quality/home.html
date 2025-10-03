@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Quality &amp; RMA Dashboard</h2>
+<p class="intro-text">Track open returns, organize follow-ups, and keep your quality investigations moving.</p>
+
+<div class="purchasing-toolbar quality-toolbar">
+    <div class="toolbar-actions">
+        {% if can_edit_page('quality') %}
+            <a class="action-btn primary-action" href="{{ url_for('quality.new_request') }}">Log RMA Request</a>
+        {% endif %}
+    </div>
+    <form method="get" class="status-filter-form">
+        <label for="status" class="sr-only">Filter by status</label>
+        <select name="status" id="status">
+            <option value="" {% if not status_filter %}selected{% endif %}>All statuses</option>
+            <option value="open" {% if status_filter == 'open' %}selected{% endif %}>Open items</option>
+            {% for value, label in status_choices %}
+                <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit">Apply</button>
+    </form>
+</div>
+
+<div class="status-summary-grid">
+    <div class="status-summary-card">
+        <span class="summary-label">Open</span>
+        <span class="summary-value">{{ open_count }}</span>
+    </div>
+    {% for value, label in status_choices %}
+        <div class="status-summary-card">
+            <span class="summary-label">{{ label }}</span>
+            <span class="summary-value">{{ status_counts.get(value, 0) }}</span>
+        </div>
+    {% endfor %}
+</div>
+
+{% if requests %}
+    <div class="table-scroll">
+        <table class="data-table quality-table">
+            <thead>
+                <tr>
+                    <th scope="col">Reference</th>
+                    <th scope="col">Customer</th>
+                    <th scope="col">Product</th>
+                    <th scope="col">Priority</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Opened</th>
+                    <th scope="col">Target Resolution</th>
+                    <th scope="col">Owner</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rma in requests %}
+                    <tr>
+                        <td data-label="Reference">
+                            <a href="{{ url_for('quality.view_request', request_id=rma.id) }}">{{ rma.reference }}</a>
+                        </td>
+                        <td data-label="Customer">
+                            <strong>{{ rma.customer_name }}</strong>
+                            {% if rma.customer_contact %}
+                                <div class="secondary-text">{{ rma.customer_contact }}</div>
+                            {% endif %}
+                        </td>
+                        <td data-label="Product">
+                            {% if rma.product_description %}
+                                {{ rma.product_description }}
+                            {% elif rma.product_sku %}
+                                {{ rma.product_sku }}
+                            {% else %}
+                                &mdash;
+                            {% endif %}
+                            {% if rma.product_serial %}
+                                <div class="secondary-text">Serial {{ rma.product_serial }}</div>
+                            {% endif %}
+                        </td>
+                        <td data-label="Priority">
+                            <span class="status-pill priority-{{ rma.priority }}">{{ priority_labels.get(rma.priority, rma.priority) }}</span>
+                        </td>
+                        <td data-label="Status">
+                            <span class="status-pill status-{{ rma.status }}">{{ status_labels.get(rma.status, rma.status) }}</span>
+                        </td>
+                        <td data-label="Opened">{{ rma.opened_at.strftime('%Y-%m-%d') }}</td>
+                        <td data-label="Target Resolution">
+                            {% if rma.target_resolution_date %}
+                                {{ rma.target_resolution_date.isoformat() }}
+                            {% else %}
+                                &mdash;
+                            {% endif %}
+                        </td>
+                        <td data-label="Owner">{{ rma.opened_by }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% else %}
+    <div class="empty-state">
+        <p>No RMA requests logged yet.</p>
+        {% if can_edit_page('quality') %}
+            <a class="action-btn primary-action" href="{{ url_for('quality.new_request') }}">Create the first RMA</a>
+        {% endif %}
+    </div>
+{% endif %}
+{% endblock %}
