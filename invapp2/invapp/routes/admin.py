@@ -14,8 +14,12 @@ from flask import (
     render_template,
     request,
     send_file,
+    session,
     url_for,
 )
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine.url import make_url
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql.sqltypes import Date as SQLDate
 from sqlalchemy.sql.sqltypes import DateTime as SQLDateTime
 from sqlalchemy.sql.sqltypes import Numeric
@@ -269,8 +273,7 @@ def tools():
         },
         {
             "label": "Data Storage Locations",
-            "href": "#",
-            "disabled": True,
+            "href": url_for("admin.storage_locations"),
         },
     ]
 
@@ -356,3 +359,199 @@ def import_data():
 
     flash("Backup imported successfully.", "success")
     return redirect(url_for("admin.data_backup"))
+
+
+@bp.route("/storage-locations", methods=["GET", "POST"])
+@login_required
+@require_roles("admin")
+def storage_locations():
+    current_url = current_app.config.get("SQLALCHEMY_DATABASE_URI", "")
+    display_current_url = _display_database_url(current_url)
+    engine = db.get_engine()
+    engine_name = getattr(engine, "name", str(engine))
+
+    migration_summary = session.pop("storage_migration_summary", None)
+
+    if request.method == "POST":
+        action = request.form.get("action") or ""
+        target_url = (request.form.get("new_database_url") or "").strip()
+
+        if not target_url:
+            flash("Please provide a database connection URL.", "warning")
+            return redirect(url_for("admin.storage_locations"))
+
+        if target_url == current_url:
+            flash("The new database location must be different from the current one.", "warning")
+            return redirect(url_for("admin.storage_locations"))
+
+        if action == "test":
+            if _test_database_connection(target_url):
+                flash("Successfully connected to the target database.", "success")
+            else:
+                flash("Could not connect to the target database. Check the URL and credentials.", "danger")
+            return redirect(url_for("admin.storage_locations"))
+
+        if action == "migrate":
+            confirmation = (request.form.get("confirm_phrase") or "").strip().lower()
+            if confirmation != "migrate":
+                flash("Type 'migrate' in the confirmation box to start the migration.", "warning")
+                return redirect(url_for("admin.storage_locations"))
+
+            try:
+                summary = _migrate_database(target_url)
+            except ValueError as exc:
+                flash(str(exc), "warning")
+            except SQLAlchemyError as exc:
+                current_app.logger.exception("Database migration failed")
+                flash(f"Migration failed: {exc}", "danger")
+            except Exception as exc:  # pragma: no cover - defensive guard
+                current_app.logger.exception("Unexpected error during migration")
+                flash("An unexpected error occurred during migration.", "danger")
+            else:
+                session["storage_migration_summary"] = summary
+                flash(
+                    "Database copied to the new location. Update the DB_URL environment variable to begin using it.",
+                    "success",
+                )
+            return redirect(url_for("admin.storage_locations"))
+
+        flash("Unsupported action requested.", "warning")
+        return redirect(url_for("admin.storage_locations"))
+
+    storage_directories = _gather_storage_directories()
+
+    return render_template(
+        "admin/storage_locations.html",
+        current_database_url=display_current_url,
+        engine_name=engine_name,
+        storage_directories=storage_directories,
+        migration_summary=migration_summary,
+    )
+
+
+def _display_database_url(raw_url: str) -> str:
+    if not raw_url:
+        return "Unknown"
+    try:
+        url = make_url(raw_url)
+    except Exception:
+        return raw_url
+
+    if url.password:
+        url = url.set(password="••••••")
+    return str(url)
+
+
+def _test_database_connection(target_url: str) -> bool:
+    try:
+        engine = create_engine(target_url)
+    except Exception:
+        return False
+
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception:
+        return False
+    finally:
+        engine.dispose()
+    return True
+
+
+def _migrate_database(target_url: str) -> list[dict[str, int | str]]:
+    if not target_url:
+        raise ValueError("A target database URL is required.")
+
+    target_engine = create_engine(target_url)
+    metadata = db.Model.metadata
+
+    db.session.flush()
+
+    try:
+        metadata.create_all(target_engine)
+        summary: list[dict[str, int | str]] = []
+        with target_engine.begin() as target_conn:
+            for table in reversed(metadata.sorted_tables):
+                target_conn.execute(table.delete())
+
+            for table in metadata.sorted_tables:
+                rows = [dict(row) for row in db.session.execute(table.select()).mappings()]
+                if rows:
+                    target_conn.execute(table.insert(), rows)
+                summary.append({"table": table.name, "rows": len(rows)})
+
+        try:
+            from invapp import (
+                _ensure_inventory_schema,
+                _ensure_order_schema,
+                _ensure_production_schema,
+            )
+
+            _ensure_inventory_schema(target_engine)
+            _ensure_order_schema(target_engine)
+            _ensure_production_schema(target_engine)
+        except Exception:
+            current_app.logger.exception("Failed to ensure schema on target database")
+    finally:
+        target_engine.dispose()
+
+    return summary
+
+
+def _gather_storage_directories() -> list[dict[str, object]]:
+    paths = [
+        (
+            "Work Instructions",
+            current_app.config.get("WORK_INSTRUCTION_UPLOAD_FOLDER"),
+        ),
+        (
+            "Item Attachments",
+            current_app.config.get("ITEM_ATTACHMENT_UPLOAD_FOLDER"),
+        ),
+        (
+            "Quality Attachments",
+            current_app.config.get("QUALITY_ATTACHMENT_UPLOAD_FOLDER"),
+        ),
+    ]
+
+    directories: list[dict[str, object]] = []
+    for label, path in paths:
+        if not path:
+            directories.append(
+                {
+                    "label": label,
+                    "path": "Not configured",
+                    "exists": False,
+                    "file_count": 0,
+                    "size_bytes": 0,
+                    "size_display": "0 B",
+                }
+            )
+            continue
+
+        path = os.path.abspath(path)
+        exists = os.path.isdir(path)
+        size_bytes = 0
+        file_count = 0
+        if exists:
+            for root, _, files in os.walk(path):
+                for filename in files:
+                    file_count += 1
+                    file_path = os.path.join(root, filename)
+                    try:
+                        size_bytes += os.path.getsize(file_path)
+                    except OSError:
+                        continue
+
+        directories.append(
+            {
+                "label": label,
+                "path": path,
+                "exists": exists,
+                "file_count": file_count,
+                "size_bytes": size_bytes,
+                "size_display": _format_bytes(float(size_bytes)) if size_bytes else "0 B",
+            }
+        )
+
+    return directories
