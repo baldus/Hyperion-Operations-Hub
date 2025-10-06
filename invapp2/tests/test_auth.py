@@ -223,3 +223,4 @@ def test_admin_tools_dashboard(client):
     assert response.status_code == 200
     assert b"System Health" in response.data
     assert b"Operations Shortcuts" in response.data
+    assert b"/admin/storage-locations" in response.data

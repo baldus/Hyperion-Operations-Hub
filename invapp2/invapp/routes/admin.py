@@ -16,6 +16,7 @@ from flask import (
     send_file,
     url_for,
 )
+from sqlalchemy import func
 from sqlalchemy.sql.sqltypes import Date as SQLDate
 from sqlalchemy.sql.sqltypes import DateTime as SQLDateTime
 from sqlalchemy.sql.sqltypes import Numeric
@@ -23,6 +24,7 @@ from sqlalchemy.sql.sqltypes import Numeric
 from invapp.extensions import db
 from invapp.login import current_user, login_required, logout_user
 from invapp.security import require_roles
+from invapp.models import Location, Movement
 
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -269,8 +271,7 @@ def tools():
         },
         {
             "label": "Data Storage Locations",
-            "href": "#",
-            "disabled": True,
+            "href": url_for("admin.storage_locations"),
         },
     ]
 
@@ -279,6 +280,110 @@ def tools():
         system_health=system_health,
         quick_links=quick_links,
     )
+
+
+def _collect_location_usage() -> dict[int, dict[str, object]]:
+    usage_rows = (
+        db.session.query(
+            Movement.location_id.label("location_id"),
+            func.count(Movement.id).label("movement_count"),
+            func.count(func.distinct(Movement.item_id)).label("item_count"),
+            func.max(Movement.date).label("last_movement"),
+        )
+        .group_by(Movement.location_id)
+        .all()
+    )
+
+    usage: dict[int, dict[str, object]] = {}
+    for row in usage_rows:
+        usage[int(row.location_id)] = {
+            "movement_count": int(row.movement_count or 0),
+            "item_count": int(row.item_count or 0),
+            "last_movement": row.last_movement,
+        }
+    return usage
+
+
+@bp.route("/storage-locations")
+@login_required
+@require_roles("admin")
+def storage_locations():
+    usage = _collect_location_usage()
+    locations = []
+    for location in Location.query.order_by(Location.code).all():
+        stats = usage.get(location.id, {})
+        locations.append(
+            {
+                "id": location.id,
+                "code": location.code,
+                "description": location.description,
+                "movement_count": stats.get("movement_count", 0),
+                "item_count": stats.get("item_count", 0),
+                "last_movement": stats.get("last_movement"),
+            }
+        )
+
+    return render_template(
+        "admin/storage_locations.html",
+        locations=locations,
+    )
+
+
+@bp.route("/storage-locations/migrate", methods=["POST"])
+@login_required
+@require_roles("admin")
+def migrate_storage_location():
+    try:
+        source_id = int(request.form.get("from_location_id", ""))
+        target_id = int(request.form.get("to_location_id", ""))
+    except ValueError:
+        flash("Please choose both a source and destination location.", "warning")
+        return redirect(url_for("admin.storage_locations"))
+
+    confirm_code = (request.form.get("confirm_code") or "").strip()
+
+    if source_id == target_id:
+        flash("Choose different locations for the migration.", "warning")
+        return redirect(url_for("admin.storage_locations"))
+
+    source = Location.query.get(source_id)
+    target = Location.query.get(target_id)
+    if source is None or target is None:
+        flash("The selected locations could not be found.", "danger")
+        return redirect(url_for("admin.storage_locations"))
+
+    if confirm_code != source.code:
+        flash(
+            "Type the source location code to confirm the migration.",
+            "warning",
+        )
+        return redirect(url_for("admin.storage_locations"))
+
+    movement_query = Movement.query.filter_by(location_id=source.id)
+    movement_count = movement_query.count()
+
+    if movement_count == 0:
+        flash(
+            f"No inventory history is assigned to {source.code}.",
+            "info",
+        )
+        return redirect(url_for("admin.storage_locations"))
+
+    try:
+        movement_query.update(
+            {Movement.location_id: target.id}, synchronize_session=False
+        )
+        db.session.commit()
+    except Exception:  # pragma: no cover - defensive rollback
+        db.session.rollback()
+        flash("The migration failed. No changes were applied.", "danger")
+        return redirect(url_for("admin.storage_locations"))
+
+    flash(
+        f"Moved {movement_count} movement records from {source.code} to {target.code}.",
+        "success",
+    )
+    return redirect(url_for("admin.storage_locations"))
 
 
 @bp.route("/data-backup")

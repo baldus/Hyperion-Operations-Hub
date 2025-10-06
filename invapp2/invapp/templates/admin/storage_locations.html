@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Storage Locations</h2>
+<p class="page-intro">Review storage location usage and migrate historical records when consolidating locations.</p>
+
+<section class="card-section">
+    <h3>Location Usage Overview</h3>
+    {% if locations %}
+    <p>Each entry shows the number of inventory movements recorded for a location along with the last activity date.</p>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th scope="col">Code</th>
+                <th scope="col">Description</th>
+                <th scope="col">Movements</th>
+                <th scope="col">Items Affected</th>
+                <th scope="col">Last Movement</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for location in locations %}
+            <tr>
+                <td data-label="Code">{{ location.code }}</td>
+                <td data-label="Description">{{ location.description or "—" }}</td>
+                <td data-label="Movements">{{ location.movement_count }}</td>
+                <td data-label="Items Affected">{{ location.item_count }}</td>
+                <td data-label="Last Movement">
+                    {% if location.last_movement %}
+                        {{ location.last_movement.strftime('%Y-%m-%d %H:%M') }}
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No storage locations have been created yet. Add locations from the inventory module before running a migration.</p>
+    {% endif %}
+</section>
+
+<section class="card-section">
+    <h3>Migrate Inventory History</h3>
+    {% if locations|length < 2 %}
+    <p>You need at least two locations to perform a migration.</p>
+    {% else %}
+    <p>Move every inventory movement record from one location to another. This is useful when retiring duplicate or renamed locations. The source location code must be typed exactly to confirm.</p>
+    <form method="post" action="{{ url_for('admin.migrate_storage_location') }}">
+        <label for="from-location">Source location</label>
+        <select id="from-location" name="from_location_id" required>
+            <option value="" disabled selected>Choose source…</option>
+            {% for location in locations %}
+            <option value="{{ location.id }}">{{ location.code }}{% if location.description %} — {{ location.description }}{% endif %}</option>
+            {% endfor %}
+        </select>
+
+        <label for="to-location">Destination location</label>
+        <select id="to-location" name="to_location_id" required>
+            <option value="" disabled selected>Choose destination…</option>
+            {% for location in locations %}
+            <option value="{{ location.id }}">{{ location.code }}{% if location.description %} — {{ location.description }}{% endif %}</option>
+            {% endfor %}
+        </select>
+
+        <label for="confirm-code">Type the source location code to confirm</label>
+        <input id="confirm-code" name="confirm_code" type="text" required autocomplete="off" placeholder="e.g. MAIN">
+
+        <button type="submit" class="action-btn action-btn--danger">Move Records</button>
+    </form>
+    {% endif %}
+</section>
+{% endblock %}
