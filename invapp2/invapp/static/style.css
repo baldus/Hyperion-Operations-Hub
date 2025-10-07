@@ -239,6 +239,63 @@ body.light .card-section {
     flex-wrap: wrap;
 }
 
+.storage-form {
+    display: grid;
+    gap: 16px;
+    width: min(720px, 100%);
+}
+
+.storage-form .button-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.button-row .action-btn {
+    flex: 0 0 auto;
+}
+
+.button-row .action-btn:last-child {
+    margin-right: 0;
+}
+
+.action-btn--danger,
+.action-btn.danger {
+    background-color: #a62828;
+}
+
+.action-btn--danger:hover,
+.action-btn.danger:hover {
+    background-color: #c13c3c;
+}
+
+body.light .action-btn--danger,
+body.light .action-btn.danger {
+    background-color: #d9534f;
+}
+
+body.light .action-btn--danger:hover,
+body.light .action-btn.danger:hover {
+    background-color: #c9302c;
+}
+
+.action-btn.secondary {
+    background-color: #2b547e;
+}
+
+.action-btn.secondary:hover {
+    background-color: #3d6a99;
+}
+
+body.light .action-btn.secondary {
+    background-color: #4a90e2;
+    color: #fff;
+}
+
+body.light .action-btn.secondary:hover {
+    background-color: #2f6fb6;
+}
+
 .card-section input[type="file"] {
     color: inherit;
 }
@@ -273,6 +330,107 @@ body.light .card-section {
         padding: 16px;
         width: min(100%, 95vw);
     }
+}
+
+.key-value-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+}
+
+.key-value-list div {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.key-value-list dt {
+    font-weight: 600;
+}
+
+.key-value-list dd {
+    margin: 0;
+    font-family: "Fira Code", "Courier New", Courier, monospace;
+    font-size: 0.95rem;
+    word-break: break-all;
+}
+
+.section-help {
+    margin-top: 12px;
+    font-size: 0.9rem;
+    opacity: 0.8;
+}
+
+.form-hint {
+    margin: 4px 0 0;
+    font-size: 0.85rem;
+    opacity: 0.75;
+}
+
+body.light .form-hint {
+    opacity: 0.9;
+    color: #3a3a3a;
+}
+
+.table-scroll {
+    overflow-x: auto;
+}
+
+.storage-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 520px;
+}
+
+.storage-table th,
+.storage-table td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+body.light .storage-table th,
+body.light .storage-table td {
+    border-color: rgba(0, 0, 0, 0.08);
+}
+
+.storage-table th {
+    font-weight: 600;
+}
+
+.storage-table code {
+    white-space: nowrap;
+}
+
+.status-pill.success {
+    background-color: rgba(46, 204, 113, 0.25);
+    color: #b9f6ca;
+}
+
+.status-pill.warning {
+    background-color: rgba(255, 193, 7, 0.25);
+    color: #ffe8a1;
+}
+
+body.light .status-pill.success {
+    background-color: rgba(39, 174, 96, 0.18);
+    color: #1d6f3a;
+}
+
+body.light .status-pill.warning {
+    background-color: rgba(255, 193, 7, 0.2);
+    color: #8a6d3b;
+}
+
+.migration-summary {
+    margin: 12px 0 0;
+    padding-left: 20px;
+}
+
+.migration-summary li {
+    margin-bottom: 6px;
 }
 
 /* --- Grid for buttons --- */

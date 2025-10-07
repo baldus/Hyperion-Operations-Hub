@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Data Storage Locations</h2>
+<p class="lead">Review where the application keeps critical files and copy the database to a new storage location when infrastructure changes are required.</p>
+
+{% if migration_summary %}
+<section class="card-section info-callout">
+    <h3>Latest Migration Summary</h3>
+    <p>The following tables were copied to the new database:</p>
+    <ul class="migration-summary">
+        {% for entry in migration_summary %}
+        <li><strong>{{ entry.table }}</strong>: {{ entry.rows }} rows</li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
+
+<section class="card-section">
+    <h3>Current Database</h3>
+    <dl class="key-value-list">
+        <div>
+            <dt>Connection</dt>
+            <dd><code>{{ current_database_url }}</code></dd>
+        </div>
+        <div>
+            <dt>Engine</dt>
+            <dd>{{ engine_name }}</dd>
+        </div>
+    </dl>
+    <p class="section-help">Update the <code>DB_URL</code> environment variable in your deployment to switch the live application to a new database.</p>
+</section>
+
+<section class="card-section">
+    <h3>Move Database</h3>
+    <p class="section-help">Enter the SQLAlchemy connection URL for the destination database. The migration copies all tables and data to the new location.</p>
+    <form method="post" class="storage-form">
+        <div class="form-field">
+            <label class="field-label" for="new-database-url">New database URL</label>
+            <input id="new-database-url" type="text" name="new_database_url" placeholder="postgresql+psycopg2://user:pass@host/dbname" value="{{ request.form.get('new_database_url', '') }}" required>
+        </div>
+        <div class="form-field">
+            <label class="field-label" for="confirm-phrase">Confirmation</label>
+            <input id="confirm-phrase" type="text" name="confirm_phrase" placeholder="Type migrate to confirm">
+            <p class="form-hint">This prevents accidental overwrites. Existing data in the target database will be replaced.</p>
+        </div>
+        <div class="button-row">
+            <button type="submit" name="action" value="test" class="action-btn secondary">Test Connection</button>
+            <button type="submit" name="action" value="migrate" class="action-btn danger">Migrate Database</button>
+        </div>
+    </form>
+</section>
+
+<section class="card-section">
+    <h3>File Storage Directories</h3>
+    <p class="section-help">These directories store uploaded documents. Ensure they are backed up and accessible to the application server.</p>
+    <div class="table-scroll">
+        <table class="storage-table">
+            <thead>
+                <tr>
+                    <th scope="col">Location</th>
+                    <th scope="col">Path</th>
+                    <th scope="col">Exists</th>
+                    <th scope="col">Files</th>
+                    <th scope="col">Size</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for directory in storage_directories %}
+                <tr>
+                    <th scope="row">{{ directory.label }}</th>
+                    <td><code>{{ directory.path }}</code></td>
+                    <td>
+                        {% if directory.exists %}
+                            <span class="status-pill success">Available</span>
+                        {% else %}
+                            <span class="status-pill warning">Missing</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ directory.file_count }}</td>
+                    <td>{{ directory.size_display }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
