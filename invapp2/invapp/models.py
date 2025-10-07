@@ -2,7 +2,8 @@ import secrets
 from decimal import Decimal
 from datetime import date, datetime
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.orm import synonym
 from sqlalchemy.orm.exc import DetachedInstanceError
@@ -197,6 +198,74 @@ class PurchaseRequest(db.Model):
     updated_at = db.Column(
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
+
+    @staticmethod
+    def _is_duplicate_pk_error(error: IntegrityError) -> bool:
+        """Return True when the IntegrityError represents a PK collision."""
+
+        if not isinstance(error, IntegrityError):
+            return False
+
+        # SQLAlchemy wraps the DB-API error. For PostgreSQL we can look for the
+        # ``UniqueViolation`` code while falling back to string inspection for
+        # other drivers.
+        original = getattr(error, "orig", None)
+        pgcode = getattr(original, "pgcode", None)
+        if pgcode == "23505":  # unique_violation
+            constraint = getattr(original, "diag", None)
+            if constraint and getattr(constraint, "constraint_name", None):
+                return constraint.constraint_name == "purchase_request_pkey"
+        message = str(error).lower()
+        return "purchase_request_pkey" in message
+
+    @classmethod
+    def _repair_primary_key_sequence(cls) -> None:
+        """Ensure the backing sequence advances past the current max id."""
+
+        bind = db.session.bind or getattr(db, "engine", None)
+        if not bind:
+            return
+
+        dialect = bind.dialect.name
+        if dialect == "postgresql":
+            table_name = cls.__tablename__
+            sequence_sql = text(
+                "SELECT setval("
+                "pg_get_serial_sequence(:table_name, 'id'), "
+                "COALESCE(MAX(id), 0) + 1, false) "
+                f"FROM {table_name}"
+            )
+            with bind.begin() as connection:
+                connection.execute(sequence_sql, {"table_name": table_name})
+        elif dialect == "sqlite":
+            # SQLite automatically advances the ROWID for autoincrement primary
+            # keys. When a duplicate id slips in, updating the sqlite_sequence
+            # table keeps future inserts healthy.
+            maintenance_sql = text(
+                "UPDATE sqlite_sequence "
+                "SET seq = COALESCE((SELECT MAX(id) FROM {}), 0) "
+                "WHERE name = :table_name".format(cls.__tablename__)
+            )
+            with bind.begin() as connection:
+                connection.execute(maintenance_sql, {"table_name": cls.__tablename__})
+
+    @classmethod
+    def commit_with_sequence_retry(cls, instance: "PurchaseRequest") -> None:
+        """Persist a new purchase request, repairing the PK sequence if needed."""
+
+        db.session.add(instance)
+        try:
+            db.session.commit()
+        except IntegrityError as error:
+            if not cls._is_duplicate_pk_error(error):
+                db.session.rollback()
+                raise
+
+            db.session.rollback()
+            cls._repair_primary_key_sequence()
+            instance.id = None
+            db.session.add(instance)
+            db.session.commit()
 
     @classmethod
     def status_values(cls) -> tuple[str, ...]:

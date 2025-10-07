@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Iterable
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
 from werkzeug.routing import BuildError
 from sqlalchemy import func
 
@@ -185,8 +185,13 @@ def new_request():
                 supplier_contact=_clean_text(form_data["supplier_contact"]),
                 notes=_clean_text(form_data["notes"]),
             )
-            db.session.add(purchase_request)
-            db.session.commit()
+            try:
+                PurchaseRequest.commit_with_sequence_retry(purchase_request)
+            except Exception:
+                current_app.logger.exception(
+                    "Failed to create purchase request from purchasing form"
+                )
+                raise
             flash("Purchase request logged for purchasing review.", "success")
             return redirect(
                 url_for("purchasing.view_request", request_id=purchase_request.id)
