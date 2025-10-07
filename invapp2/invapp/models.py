@@ -222,21 +222,21 @@ class PurchaseRequest(db.Model):
     def _repair_primary_key_sequence(cls) -> None:
         """Ensure the backing sequence advances past the current max id."""
 
-        bind = db.session.get_bind()
+        bind = db.session.bind or getattr(db, "engine", None)
         if not bind:
             return
 
         dialect = bind.dialect.name
         if dialect == "postgresql":
+            table_name = cls.__tablename__
             sequence_sql = text(
                 "SELECT setval("
                 "pg_get_serial_sequence(:table_name, 'id'), "
                 "COALESCE(MAX(id), 0) + 1, false) "
-                "FROM "
-                "{}".format(cls.__tablename__)
+                f"FROM {table_name}"
             )
             with bind.begin() as connection:
-                connection.execute(sequence_sql, {"table_name": cls.__tablename__})
+                connection.execute(sequence_sql, {"table_name": table_name})
         elif dialect == "sqlite":
             # SQLite automatically advances the ROWID for autoincrement primary
             # keys. When a duplicate id slips in, updating the sqlite_sequence
