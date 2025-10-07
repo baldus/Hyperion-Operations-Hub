@@ -565,8 +565,13 @@ def create_purchase_request_from_low_stock(item_id: int):
             requested_by=requester,
             notes="Update with supplier details and ordering information as needed.",
         )
-        db.session.add(purchase_request)
-        db.session.commit()
+        try:
+            PurchaseRequest.commit_with_sequence_retry(purchase_request)
+        except Exception:
+            current_app.logger.exception(
+                "Failed to create purchase request from low stock alert"
+            )
+            raise
 
         flash("Purchase request created from low stock alert.", "success")
         return redirect(
