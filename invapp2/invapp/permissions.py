@@ -83,7 +83,7 @@ DEFAULT_PAGE_ACCESS: Mapping[str, Mapping[str, Sequence[str] | str]] = {
         "edit_roles": ("admin", "reports"),
     },
     "work": {
-        "label": "Work Instructions",
+        "label": "Workstations",
         "view_roles": ("public", "viewer", "editor", "admin", "production", "user"),
         "edit_roles": ("editor", "admin", "production"),
     },

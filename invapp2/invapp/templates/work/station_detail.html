@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>{{ station.name }} Queue</h2>
+<p class="page-intro">Jobs that are ready for this workstation to process.</p>
+
+{% if station.entries %}
+<table class="data-table">
+    <thead>
+        <tr>
+            <th scope="col">Order</th>
+            <th scope="col">Item</th>
+            <th scope="col">Quantity</th>
+            <th scope="col">Step</th>
+            <th scope="col">Promised</th>
+            <th scope="col">Scheduled Completion</th>
+            <th scope="col">Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for entry in station.entries %}
+        <tr>
+            <th scope="row">
+                {% if can_access_page('orders') %}
+                <a href="{{ url_for('orders.view_order', order_id=entry['order_id']) }}">
+                    {{ entry['order_number'] }}
+                </a>
+                {% else %}
+                {{ entry['order_number'] }}
+                {% endif %}
+            </th>
+            <td>
+                {% if entry['item_sku'] %}
+                <span class="badge">{{ entry['item_sku'] }}</span>
+                {{ entry['item_name'] or '' }}
+                {% else %}
+                —
+                {% endif %}
+            </td>
+            <td>{{ entry['quantity'] or '—' }}</td>
+            <td>
+                <strong>Step {{ entry['sequence'] }}</strong><br>
+                {{ entry['description'] }}
+            </td>
+            <td>{{ entry['promised_date'] or '—' }}</td>
+            <td>{{ entry['scheduled_completion'] or '—' }}</td>
+            <td>{{ entry['order_status'] }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No jobs are currently waiting on this workstation.</p>
+{% endif %}
+
+<p>
+    <a class="nav-btn" href="{{ url_for('work.station_overview') }}">Back to Workstation Overview</a>
+</p>
+{% endblock %}
