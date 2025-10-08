@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import date
+from itertools import zip_longest
 from typing import Any, Dict, List
 
 
@@ -23,6 +24,7 @@ from invapp.models import (
     ProductionChartSettings,
     ProductionCustomer,
     ProductionDailyCustomerTotal,
+    ProductionDailyGateCompletion,
     ProductionDailyRecord,
     ProductionOutputFormula,
 )
@@ -398,6 +400,7 @@ def _empty_form_values(customers: List[ProductionCustomer]) -> Dict[str, object]
         "additional_employees": "",
         "additional_hours_ot": "",
         "daily_notes": "",
+        "gate_completions": [],
     }
 
 
@@ -431,6 +434,16 @@ def _form_values_from_record(
     values["additional_employees"] = record.additional_employees or 0
     values["additional_hours_ot"] = _format_decimal(record.additional_hours_ot)
     values["daily_notes"] = record.daily_notes or ""
+    values["gate_completions"] = [
+        {
+            "id": completion.id,
+            "order_number": completion.order_number or "",
+            "customer_name": completion.customer_name or "",
+            "gates_completed": completion.gates_completed or 0,
+            "po_number": completion.po_number or "",
+        }
+        for completion in record.gate_completions
+    ]
     return values
 
 
@@ -455,6 +468,15 @@ def _get_decimal_value(form_key: str) -> Decimal:
     if value < DECIMAL_ZERO:
         return DECIMAL_ZERO
     return value.quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
+
+
+def _parse_non_negative_int(value: str | None) -> int:
+    if value in (None, ""):
+        return 0
+    try:
+        return max(int(value), 0)
+    except ValueError:
+        return 0
 
 
 def _process_output_formula_form(
@@ -515,6 +537,93 @@ def _process_output_formula_form(
     return True, {"formula": setting.formula, "variables": variables}
 
 
+@bp.route("/final-process-entry", methods=["GET", "POST"])
+def final_process_entry():
+    today = date.today()
+    selected_date = _parse_date(request.values.get("entry_date")) or today
+    form_data = {
+        "entry_date": selected_date,
+        "order_number": "",
+        "customer": "",
+        "gates_completed": "",
+        "po_number": "",
+    }
+
+    if request.method == "POST":
+        selected_date = _parse_date(request.form.get("entry_date")) or today
+        form_data["entry_date"] = selected_date
+        order_number = (request.form.get("order_number") or "").strip()
+        customer_name = (request.form.get("customer") or "").strip()
+        po_number = (request.form.get("po_number") or "").strip()
+        gates_completed_raw = request.form.get("gates_completed")
+        gates_completed = _parse_non_negative_int(gates_completed_raw)
+        form_data.update(
+            {
+                "order_number": order_number,
+                "customer": customer_name,
+                "gates_completed": gates_completed_raw or "",
+                "po_number": po_number,
+            }
+        )
+
+        has_errors = False
+        if not order_number:
+            flash("Order number is required to record a completion.", "error")
+            has_errors = True
+        if gates_completed <= 0:
+            flash("Number of gates completed must be greater than zero.", "error")
+            has_errors = True
+
+        if not has_errors:
+            record = ProductionDailyRecord.query.filter_by(
+                entry_date=selected_date
+            ).first()
+            if not record:
+                record = ProductionDailyRecord(
+                    entry_date=selected_date,
+                    day_of_week=selected_date.strftime("%A"),
+                )
+                db.session.add(record)
+            else:
+                record.day_of_week = selected_date.strftime("%A")
+
+            record.gate_completions.append(
+                ProductionDailyGateCompletion(
+                    order_number=order_number,
+                    customer_name=customer_name or None,
+                    gates_completed=gates_completed,
+                    po_number=po_number or None,
+                )
+            )
+            db.session.commit()
+            flash(
+                f"Recorded completion for order {order_number} on {selected_date.strftime('%B %d, %Y')}.",
+                "success",
+            )
+            return redirect(
+                url_for(
+                    "production.final_process_entry",
+                    entry_date=selected_date.isoformat(),
+                )
+            )
+
+    record = (
+        ProductionDailyRecord.query.options(
+            joinedload(ProductionDailyRecord.gate_completions)
+        )
+        .filter_by(entry_date=selected_date)
+        .first()
+    )
+    completions = record.gate_completions if record else []
+
+    return render_template(
+        "production/final_process_entry.html",
+        selected_date=selected_date,
+        form_data=form_data,
+        completions=completions,
+    )
+
+
 @bp.route("/daily-entry", methods=["GET", "POST"])
 def daily_entry():
     customers = _active_customers()
@@ -573,6 +682,76 @@ def daily_entry():
         record.additional_hours_ot = _get_decimal_value("additional_hours_ot")
         record.daily_notes = request.form.get("daily_notes") or None
 
+        existing_completions = {
+            completion.id: completion for completion in record.gate_completions
+        }
+        submitted_ids = request.form.getlist("completion_id")
+        submitted_order_numbers = request.form.getlist("completion_order_number")
+        submitted_customers = request.form.getlist("completion_customer")
+        submitted_gate_counts = request.form.getlist("completion_gate_count")
+        submitted_po_numbers = request.form.getlist("completion_po_number")
+        delete_ids = {
+            int(value)
+            for value in request.form.getlist("completion_delete_ids")
+            if value and value.isdigit()
+        }
+
+        processed_ids: set[int] = set()
+        for completion_id_raw, order_number, customer_name, gate_count_raw, po_number in zip_longest(
+            submitted_ids,
+            submitted_order_numbers,
+            submitted_customers,
+            submitted_gate_counts,
+            submitted_po_numbers,
+            fillvalue="",
+        ):
+            order_number = (order_number or "").strip()
+            customer_name = (customer_name or "").strip()
+            po_number = (po_number or "").strip()
+            gates_completed = _parse_non_negative_int(gate_count_raw)
+            completion_id = None
+            if completion_id_raw and completion_id_raw.isdigit():
+                completion_id = int(completion_id_raw)
+                processed_ids.add(completion_id)
+
+            is_empty = (
+                not order_number
+                and not customer_name
+                and gates_completed == 0
+                and not po_number
+            )
+
+            if completion_id is not None:
+                completion = existing_completions.get(completion_id)
+                if not completion:
+                    continue
+                if completion_id in delete_ids or is_empty:
+                    db.session.delete(completion)
+                    continue
+                completion.order_number = order_number or completion.order_number
+                completion.customer_name = customer_name or None
+                completion.gates_completed = gates_completed
+                completion.po_number = po_number or None
+                continue
+
+            if is_empty:
+                continue
+
+            record.gate_completions.append(
+                ProductionDailyGateCompletion(
+                    order_number=order_number,
+                    customer_name=customer_name or None,
+                    gates_completed=gates_completed,
+                    po_number=po_number or None,
+                )
+            )
+
+        for completion_id, completion in list(existing_completions.items()):
+            if completion_id not in processed_ids and completion_id not in delete_ids:
+                # Row removed from the form entirely; treat as delete to keep
+                # data in sync with the editor.
+                db.session.delete(completion)
+
         db.session.commit()
         flash(
             f"Production totals saved for {selected_date.strftime('%B %d, %Y')}.",
@@ -596,6 +775,7 @@ def daily_entry():
         selected_date=selected_date,
         form_values=form_values,
         record_exists=record is not None,
+        extra_completion_rows=3,
     )
 
 

@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block content %}
+<nav class="production-nav" aria-label="Production pages">
+    <a href="{{ url_for('production.daily_entry') }}" class="production-nav-link">Daily Entry</a>
+    <a href="{{ url_for('production.final_process_entry') }}" class="production-nav-link is-active">Final Process Entry</a>
+    <a href="{{ url_for('production.history') }}" class="production-nav-link">History</a>
+    <a href="{{ url_for('production.production_settings') }}" class="production-nav-link">Settings</a>
+</nav>
+
+<h2>Final Process Closeout</h2>
+<p class="section-help">Log finished gate orders as they are packaged to keep Production History up to date. Entries can be reviewed and edited from the Daily Entry page if adjustments are needed.</p>
+
+<form method="post" class="form-stack production-entry-form">
+    <div class="form-section">
+        <div class="form-grid">
+            <div class="form-field">
+                <label for="entry_date" class="field-label">Completion Date</label>
+                <input type="date" id="entry_date" name="entry_date" value="{{ form_data.entry_date.isoformat() }}" required>
+                <p class="field-note">Defaults to today. Adjust if closing out a previous day's work.</p>
+            </div>
+            <div class="form-field">
+                <label for="order_number" class="field-label">Order Number</label>
+                <input type="text" id="order_number" name="order_number" value="{{ form_data.order_number }}" placeholder="e.g. G-12345" required>
+            </div>
+        </div>
+        <div class="form-grid">
+            <div class="form-field">
+                <label for="customer" class="field-label">Customer</label>
+                <input type="text" id="customer" name="customer" value="{{ form_data.customer }}" placeholder="Customer name">
+            </div>
+            <div class="form-field">
+                <label for="gates_completed" class="field-label">Gates Completed</label>
+                <input type="number" min="1" step="1" id="gates_completed" name="gates_completed" value="{{ form_data.gates_completed }}" required>
+            </div>
+            <div class="form-field">
+                <label for="po_number" class="field-label">PO Number</label>
+                <input type="text" id="po_number" name="po_number" value="{{ form_data.po_number }}" placeholder="Purchase order">
+            </div>
+        </div>
+    </div>
+
+    <div class="form-actions">
+        <button type="submit">Record Completed Gates</button>
+    </div>
+</form>
+
+<section class="form-section">
+    <h3>Completions for {{ selected_date.strftime('%B %d, %Y') }}</h3>
+    {% if not completions %}
+        <p class="field-note">No gate completions have been recorded for this date yet.</p>
+    {% else %}
+        <div class="table-scroll">
+            <table class="form-table production-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Recorded</th>
+                        <th scope="col">Order #</th>
+                        <th scope="col">Customer</th>
+                        <th scope="col">Gates Completed</th>
+                        <th scope="col">PO #</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for completion in completions %}
+                        <tr>
+                            <td>{{ completion.created_at.strftime('%I:%M %p') if completion.created_at else '—' }}</td>
+                            <td>{{ completion.order_number }}</td>
+                            <td>{{ completion.customer_name or '—' }}</td>
+                            <td>{{ completion.gates_completed }}</td>
+                            <td>{{ completion.po_number or '—' }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+</section>
+{% endblock %}

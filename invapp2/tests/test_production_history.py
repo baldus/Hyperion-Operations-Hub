@@ -12,6 +12,7 @@ from invapp.extensions import db
 from invapp.models import (
     ProductionCustomer,
     ProductionDailyCustomerTotal,
+    ProductionDailyGateCompletion,
     ProductionDailyRecord,
     ProductionOutputFormula,
 )
@@ -119,4 +120,93 @@ def test_history_uses_custom_output_formula(client, app):
     assert "0.59" in page
     assert "Produced Only: 10.00" in page
     assert "Hours: 17.00" in page
+
+
+def test_final_process_entry_creates_completion(client, app):
+    target_date = date.today()
+
+    response = client.post(
+        "/production/final-process-entry",
+        data={
+            "entry_date": target_date.isoformat(),
+            "order_number": "G-12345",
+            "customer": "Example Customer",
+            "gates_completed": "2",
+            "po_number": "PO-9",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+
+    with app.app_context():
+        record = ProductionDailyRecord.query.filter_by(entry_date=target_date).first()
+        assert record is not None
+        assert len(record.gate_completions) == 1
+        completion = record.gate_completions[0]
+        assert completion.order_number == "G-12345"
+        assert completion.customer_name == "Example Customer"
+        assert completion.gates_completed == 2
+        assert completion.po_number == "PO-9"
+
+
+def test_daily_entry_updates_gate_completion(client, app):
+    target_date = date.today()
+
+    client.post(
+        "/production/final-process-entry",
+        data={
+            "entry_date": target_date.isoformat(),
+            "order_number": "G-54321",
+            "customer": "Initial Customer",
+            "gates_completed": "1",
+            "po_number": "PO-1",
+        },
+        follow_redirects=True,
+    )
+
+    with app.app_context():
+        record = ProductionDailyRecord.query.filter_by(entry_date=target_date).first()
+        assert record is not None
+        completion = record.gate_completions[0]
+        customers = ProductionCustomer.query.filter_by(is_active=True).all()
+
+    form_data = {
+        "entry_date": target_date.isoformat(),
+        "gates_employees": "0",
+        "gates_hours_ot": "0",
+        "controllers_4_stop": "0",
+        "controllers_6_stop": "0",
+        "door_locks_lh": "0",
+        "door_locks_rh": "0",
+        "operators_produced": "0",
+        "cops_produced": "0",
+        "additional_employees": "0",
+        "additional_hours_ot": "0",
+        "daily_notes": "",
+        "completion_id": str(completion.id),
+        "completion_order_number": "G-54321",
+        "completion_customer": "Updated Customer",
+        "completion_gate_count": "4",
+        "completion_po_number": "PO-77",
+    }
+
+    for customer in customers:
+        form_data[f"gates_produced_{customer.id}"] = "0"
+        form_data[f"gates_packaged_{customer.id}"] = "0"
+
+    response = client.post(
+        "/production/daily-entry",
+        data=form_data,
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+
+    with app.app_context():
+        updated_completion = ProductionDailyGateCompletion.query.get(completion.id)
+        assert updated_completion is not None
+        assert updated_completion.customer_name == "Updated Customer"
+        assert updated_completion.gates_completed == 4
+        assert updated_completion.po_number == "PO-77"
 

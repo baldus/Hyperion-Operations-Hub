@@ -201,6 +201,13 @@ def _ensure_production_schema(engine):
     inspector = inspect(engine)
     is_sqlite = engine.dialect.name == "sqlite"
 
+    existing_tables = {table.lower() for table in inspector.get_table_names()}
+    if "production_daily_gate_completion" not in existing_tables:
+        metadata = db.Model.metadata
+        gate_completion_table = metadata.tables.get("production_daily_gate_completion")
+        if gate_completion_table is not None:
+            gate_completion_table.create(bind=engine)
+
     try:
         production_daily_columns = inspector.get_columns("production_daily_record")
     except (NoSuchTableError, OperationalError):

@@ -503,6 +503,13 @@ class ProductionDailyRecord(db.Model):
         cascade="all, delete-orphan",
         lazy="joined",
     )
+    gate_completions = db.relationship(
+        "ProductionDailyGateCompletion",
+        back_populates="record",
+        cascade="all, delete-orphan",
+        lazy="joined",
+        order_by="ProductionDailyGateCompletion.created_at.asc()",
+    )
 
     LABOR_SHIFT_HOURS = Decimal("8.0")
 
@@ -566,12 +573,28 @@ class ProductionDailyCustomerTotal(db.Model):
         back_populates="totals",
     )
 
-    __table_args__ = (
-        db.UniqueConstraint(
-            "record_id",
-            "customer_id",
-            name="uq_production_record_customer",
-        ),
+
+class ProductionDailyGateCompletion(db.Model):
+    __tablename__ = "production_daily_gate_completion"
+
+    id = db.Column(db.Integer, primary_key=True)
+    record_id = db.Column(
+        db.Integer,
+        db.ForeignKey("production_daily_record.id"),
+        nullable=False,
+    )
+    order_number = db.Column(db.String(64), nullable=False)
+    customer_name = db.Column(db.String(120), nullable=True)
+    gates_completed = db.Column(db.Integer, nullable=False, default=0)
+    po_number = db.Column(db.String(64), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    record = db.relationship(
+        "ProductionDailyRecord",
+        back_populates="gate_completions",
     )
 
 
