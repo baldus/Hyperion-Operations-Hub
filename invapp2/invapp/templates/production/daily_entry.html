@@ -173,7 +173,7 @@
                             </td>
                             <td class="table-cell-center">
                                 <label class="checkbox-inline">
-                                    <input type="checkbox" name="completion_delete_ids" value="{{ completion.id }}">
+                                    <input type="checkbox" name="completion_delete_ids" value="{{ completion.id }}" {% if completion.marked_for_delete %}checked{% endif %}>
                                     Remove
                                 </label>
                             </td>
@@ -207,6 +207,7 @@
 
     <div class="form-actions">
         <a href="{{ url_for('production.history', start_date=selected_date.replace(day=1).isoformat(), end_date=selected_date.isoformat()) }}" class="action-btn secondary-link">View Month-to-Date</a>
+        <button type="submit" name="fill_packaged_from_completions" value="1" class="action-btn secondary">Apply Finished Gate Totals</button>
         <button type="submit">Save Daily Totals</button>
     </div>
 </form>

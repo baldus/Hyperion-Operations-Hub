@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from werkzeug.datastructures import MultiDict
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -243,4 +244,91 @@ def test_daily_entry_updates_gate_completion(client, app):
         assert updated_completion.customer_name == "Updated Customer"
         assert updated_completion.gates_completed == 4
         assert updated_completion.po_number == "PO-77"
+
+
+def test_daily_entry_fill_packaged_from_gate_completions(client, app):
+    target_date = date.today()
+
+    with app.app_context():
+        customers = ProductionCustomer.query.filter_by(is_active=True).all()
+        primary_customer = next(c for c in customers if not c.is_other_bucket)
+        other_customer = next(c for c in customers if c.is_other_bucket)
+
+    client.post(
+        "/production/final-process-entry",
+        data={
+            "entry_date": target_date.isoformat(),
+            "order_number": "A-100",
+            "customer_id": str(primary_customer.id),
+            "customer_manual": "",
+            "gates_completed": "3",
+            "po_number": "PO-100",
+        },
+        follow_redirects=True,
+    )
+
+    client.post(
+        "/production/final-process-entry",
+        data={
+            "entry_date": target_date.isoformat(),
+            "order_number": "B-200",
+            "customer_id": "__manual__",
+            "customer_manual": "Manual Customer",
+            "gates_completed": "4",
+            "po_number": "PO-200",
+        },
+        follow_redirects=True,
+    )
+
+    completion_rows: list[tuple[str, str]] = []
+    with app.app_context():
+        record = ProductionDailyRecord.query.filter_by(entry_date=target_date).first()
+        assert record is not None
+        assert len(record.gate_completions) == 2
+        for completion in record.gate_completions:
+            completion_rows.extend(
+                [
+                    ("completion_id", str(completion.id)),
+                    ("completion_order_number", completion.order_number or ""),
+                    ("completion_customer", completion.customer_name or ""),
+                    ("completion_gate_count", str(completion.gates_completed)),
+                    ("completion_po_number", completion.po_number or ""),
+                ]
+            )
+
+    form_data: list[tuple[str, str]] = [
+        ("entry_date", target_date.isoformat()),
+        ("gates_employees", "0"),
+        ("gates_hours_ot", "0"),
+        ("controllers_4_stop", "0"),
+        ("controllers_6_stop", "0"),
+        ("door_locks_lh", "0"),
+        ("door_locks_rh", "0"),
+        ("operators_produced", "0"),
+        ("cops_produced", "0"),
+        ("additional_employees", "0"),
+        ("additional_hours_ot", "0"),
+        ("daily_notes", ""),
+    ]
+
+    for customer in customers:
+        form_data.append((f"gates_produced_{customer.id}", "0"))
+        form_data.append((f"gates_packaged_{customer.id}", "0"))
+
+    form_data.extend(completion_rows)
+    form_data.append(("fill_packaged_from_completions", "1"))
+
+    response = client.post(
+        "/production/daily-entry",
+        data=MultiDict(form_data),
+    )
+
+    assert response.status_code == 200
+    page = response.data.decode()
+    assert (
+        f'name="gates_packaged_{primary_customer.id}" value="3"' in page
+    )
+    assert f'name="gates_packaged_{other_customer.id}" value="4"' in page
+    assert "Gates packaged totals were populated from finished gate entries." in page
+    assert "Manual Customer" in page
 
