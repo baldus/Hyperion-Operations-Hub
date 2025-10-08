@@ -1027,6 +1027,7 @@ def history():
     chart_labels: List[str] = []
     chart_entry_dates: List[date] = []
     stack_datasets: List[Dict[str, object]] = []
+    packaged_stack_datasets: List[Dict[str, object]] = []
     overlay_values: List[float | None] = []
     total_produced_values: List[int] = []
     cumulative_series: Dict[str, List[int]] = {
@@ -1040,6 +1041,14 @@ def history():
                 "data": [],
                 "backgroundColor": customer.color or "#3b82f6",
                 "stack": "gates-produced",
+            }
+        )
+        packaged_stack_datasets.append(
+            {
+                "label": customer.name,
+                "data": [],
+                "backgroundColor": customer.color or "#3b82f6",
+                "stack": "gates-packaged",
             }
         )
 
@@ -1086,6 +1095,15 @@ def history():
                     for grouped in grouped_customers
                 )
             dataset["data"].append(produced_value)
+
+        for dataset, customer in zip(packaged_stack_datasets, stack_customers):
+            packaged_value = per_customer_packaged.get(customer.id, 0)
+            if customer.is_other_bucket:
+                packaged_value += sum(
+                    per_customer_packaged.get(grouped.id, 0)
+                    for grouped in grouped_customers
+                )
+            dataset["data"].append(packaged_value)
 
 
         controllers_total = (record.controllers_4_stop or 0) + (
@@ -1344,6 +1362,7 @@ def history():
         table_rows=table_rows,
         chart_labels=chart_labels,
         stacked_datasets=stack_datasets,
+        packaged_datasets=packaged_stack_datasets,
         line_datasets=line_datasets,
         overlay_datasets=overlay_datasets,
         chart_axis_settings=chart_axis_settings,
