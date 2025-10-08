@@ -124,13 +124,17 @@ def test_history_uses_custom_output_formula(client, app):
 
 def test_final_process_entry_creates_completion(client, app):
     target_date = date.today()
+    with app.app_context():
+        customer = ProductionCustomer.query.filter_by(is_active=True).first()
+        assert customer is not None
 
     response = client.post(
         "/production/final-process-entry",
         data={
             "entry_date": target_date.isoformat(),
             "order_number": "G-12345",
-            "customer": "Example Customer",
+            "customer_id": str(customer.id),
+            "customer_manual": "",
             "gates_completed": "2",
             "po_number": "PO-9",
         },
@@ -145,9 +149,38 @@ def test_final_process_entry_creates_completion(client, app):
         assert len(record.gate_completions) == 1
         completion = record.gate_completions[0]
         assert completion.order_number == "G-12345"
-        assert completion.customer_name == "Example Customer"
+        assert completion.customer_name == customer.name
         assert completion.gates_completed == 2
         assert completion.po_number == "PO-9"
+
+
+def test_final_process_entry_allows_manual_customer(client, app):
+    target_date = date.today()
+
+    response = client.post(
+        "/production/final-process-entry",
+        data={
+            "entry_date": target_date.isoformat(),
+            "order_number": "G-55555",
+            "customer_id": "__manual__",
+            "customer_manual": "Example Customer",
+            "gates_completed": "3",
+            "po_number": "PO-77",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+
+    with app.app_context():
+        record = ProductionDailyRecord.query.filter_by(entry_date=target_date).first()
+        assert record is not None
+        assert len(record.gate_completions) == 1
+        completion = record.gate_completions[0]
+        assert completion.order_number == "G-55555"
+        assert completion.customer_name == "Example Customer"
+        assert completion.gates_completed == 3
+        assert completion.po_number == "PO-77"
 
 
 def test_daily_entry_updates_gate_completion(client, app):
@@ -158,7 +191,8 @@ def test_daily_entry_updates_gate_completion(client, app):
         data={
             "entry_date": target_date.isoformat(),
             "order_number": "G-54321",
-            "customer": "Initial Customer",
+            "customer_id": "__manual__",
+            "customer_manual": "Initial Customer",
             "gates_completed": "1",
             "po_number": "PO-1",
         },

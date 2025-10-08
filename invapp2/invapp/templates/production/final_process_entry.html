@@ -26,8 +26,19 @@
         </div>
         <div class="form-grid">
             <div class="form-field">
-                <label for="customer" class="field-label">Customer</label>
-                <input type="text" id="customer" name="customer" value="{{ form_data.customer }}" placeholder="Customer name">
+                <label for="customer_id" class="field-label">Customer</label>
+                <select id="customer_id" name="customer_id">
+                    <option value="">Select a customer</option>
+                    {% for customer in customers %}
+                        <option value="{{ customer.id }}" {% if form_data.customer_id == customer.id|string %}selected{% endif %}>{{ customer.name }}</option>
+                    {% endfor %}
+                    <option value="{{ manual_selection }}" {% if form_data.customer_id == manual_selection %}selected{% endif %}>Other (enter manually)</option>
+                </select>
+                <p class="field-note">Choose the customer tied to the order or select “Other” to provide a custom name.</p>
+            </div>
+            <div class="form-field">
+                <label for="customer_manual" class="field-label">Custom Customer Name</label>
+                <input type="text" id="customer_manual" name="customer_manual" value="{{ form_data.customer_manual }}" placeholder="Only needed if the customer is not listed">
             </div>
             <div class="form-field">
                 <label for="gates_completed" class="field-label">Gates Completed</label>

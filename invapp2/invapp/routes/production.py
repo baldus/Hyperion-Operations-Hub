@@ -541,10 +541,15 @@ def _process_output_formula_form(
 def final_process_entry():
     today = date.today()
     selected_date = _parse_date(request.values.get("entry_date")) or today
+    customers = _active_customers()
+    customer_lookup = {str(customer.id): customer for customer in customers}
+    manual_selection = "__manual__"
+
     form_data = {
         "entry_date": selected_date,
         "order_number": "",
-        "customer": "",
+        "customer_id": "",
+        "customer_manual": "",
         "gates_completed": "",
         "po_number": "",
     }
@@ -553,14 +558,31 @@ def final_process_entry():
         selected_date = _parse_date(request.form.get("entry_date")) or today
         form_data["entry_date"] = selected_date
         order_number = (request.form.get("order_number") or "").strip()
-        customer_name = (request.form.get("customer") or "").strip()
+        customer_choice = (request.form.get("customer_id") or "").strip()
+        customer_manual = (request.form.get("customer_manual") or "").strip()
         po_number = (request.form.get("po_number") or "").strip()
         gates_completed_raw = request.form.get("gates_completed")
         gates_completed = _parse_non_negative_int(gates_completed_raw)
+
+        selected_customer_name: str | None = None
+        if customer_choice in customer_lookup:
+            selected_customer_name = customer_lookup[customer_choice].name
+            form_data["customer_id"] = customer_choice
+            form_data["customer_manual"] = ""
+        elif customer_manual:
+            selected_customer_name = customer_manual
+            form_data["customer_id"] = manual_selection
+            form_data["customer_manual"] = customer_manual
+        elif customer_choice == manual_selection:
+            form_data["customer_id"] = manual_selection
+            form_data["customer_manual"] = ""
+        else:
+            form_data["customer_id"] = ""
+            form_data["customer_manual"] = ""
+
         form_data.update(
             {
                 "order_number": order_number,
-                "customer": customer_name,
                 "gates_completed": gates_completed_raw or "",
                 "po_number": po_number,
             }
@@ -590,7 +612,7 @@ def final_process_entry():
             record.gate_completions.append(
                 ProductionDailyGateCompletion(
                     order_number=order_number,
-                    customer_name=customer_name or None,
+                    customer_name=selected_customer_name or None,
                     gates_completed=gates_completed,
                     po_number=po_number or None,
                 )
@@ -621,6 +643,8 @@ def final_process_entry():
         selected_date=selected_date,
         form_data=form_data,
         completions=completions,
+        customers=customers,
+        manual_selection=manual_selection,
     )
 
 

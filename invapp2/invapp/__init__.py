@@ -278,6 +278,45 @@ def _ensure_production_schema(engine):
                             )
                         )
 
+        if engine.dialect.name == "postgresql":
+            managed_tables = (
+                "production_daily_record",
+                "production_daily_customer_total",
+                "production_daily_gate_completion",
+            )
+
+            with engine.begin() as conn:
+                for table_name in managed_tables:
+                    if table_name not in existing_tables:
+                        continue
+
+                    sequence_name = conn.execute(
+                        text("SELECT pg_get_serial_sequence(:table_name, 'id')"),
+                        {"table_name": table_name},
+                    ).scalar()
+
+                    if not sequence_name:
+                        continue
+
+                    max_identifier = conn.execute(
+                        text(f"SELECT COALESCE(MAX(id), 0) FROM {table_name}")
+                    ).scalar()
+
+                    if max_identifier is None:
+                        max_identifier = 0
+
+                    next_value = max_identifier if max_identifier > 0 else 1
+                    conn.execute(
+                        text(
+                            "SELECT setval(:sequence_name::regclass, :value, :is_called)"
+                        ),
+                        {
+                            "sequence_name": sequence_name,
+                            "value": next_value,
+                            "is_called": bool(max_identifier),
+                        },
+                    )
+
 
 def create_app(config_override=None):
     app = Flask(__name__)
