@@ -307,9 +307,7 @@ def _ensure_production_schema(engine):
 
                     next_value = max_identifier if max_identifier > 0 else 1
                     conn.execute(
-                        text(
-                            "SELECT setval(:sequence_name::regclass, :value, :is_called)"
-                        ),
+                        text("SELECT setval(:sequence_name, :value, :is_called)"),
                         {
                             "sequence_name": sequence_name,
                             "value": next_value,
