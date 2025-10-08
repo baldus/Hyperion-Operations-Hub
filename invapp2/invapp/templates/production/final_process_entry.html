@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+
+{% block content %}
+<nav class="production-nav" aria-label="Production pages">
+    <a href="{{ url_for('production.final_process_entry') }}" class="production-nav-link is-active">Final Process Entry</a>
+    <a href="{{ url_for('production.daily_entry') }}" class="production-nav-link">Daily Entry</a>
+    <a href="{{ url_for('production.history') }}" class="production-nav-link">History</a>
+    <a href="{{ url_for('production.production_settings') }}" class="production-nav-link">Settings</a>
+</nav>
+
+<h2>Gate Order Completion</h2>
+<p class="section-help">Record finished gates as orders are packaged. Entries made here automatically update the production daily totals so they can still be reviewed or edited later.</p>
+
+<form method="get" class="date-selector" aria-label="Load entries for a different day">
+    <label for="entry_date_lookup" class="field-label">Entry Date</label>
+    <div class="date-selector-controls">
+        <input type="date" id="entry_date_lookup" name="entry_date" value="{{ selected_date.isoformat() }}">
+        <button type="submit" class="action-btn">Load</button>
+    </div>
+</form>
+
+<form method="post" class="form-stack final-process-form">
+    <div class="form-section">
+        <div class="form-grid">
+            <div class="form-field">
+                <label for="entry_date" class="field-label">Entry Date</label>
+                <input type="date" id="entry_date" name="entry_date" value="{{ selected_date.isoformat() }}">
+                <p class="field-note">Adjust if you are closing out orders for a different day.</p>
+            </div>
+            <div class="form-field">
+                <label for="order_number" class="field-label">Order Number</label>
+                <input type="text" id="order_number" name="order_number" value="{{ form_values.order_number }}" required>
+            </div>
+        </div>
+        <div class="form-grid">
+            <div class="form-field">
+                <label for="customer_id" class="field-label">Customer</label>
+                <select id="customer_id" name="customer_id" required>
+                    {% for customer in customers %}
+                        <option value="{{ customer.id }}" {% if customer.id == form_values.customer_id %}selected{% endif %}>{{ customer.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-field">
+                <label for="gates_completed" class="field-label">Number of Gates Completed</label>
+                <input type="number" min="1" step="1" id="gates_completed" name="gates_completed" value="{{ form_values.gates_completed }}" required>
+            </div>
+            <div class="form-field">
+                <label for="po_number" class="field-label">PO Number</label>
+                <input type="text" id="po_number" name="po_number" value="{{ form_values.po_number }}" placeholder="Optional">
+            </div>
+        </div>
+    </div>
+
+    <div class="form-actions">
+        <button type="submit">Record Completed Gates</button>
+    </div>
+</form>
+
+{% if closures %}
+<section class="form-section">
+    <h3>Recorded Completions for {{ selected_date.strftime('%B %d, %Y') }}</h3>
+    <div class="table-scroll">
+        <table class="form-table">
+            <thead>
+                <tr>
+                    <th scope="col">Time Logged</th>
+                    <th scope="col">Order Number</th>
+                    <th scope="col">Customer</th>
+                    <th scope="col">Gates Completed</th>
+                    <th scope="col">PO Number</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for closure in closures %}
+                    <tr>
+                        <td>{{ closure.created_at.strftime('%I:%M %p') }}</td>
+                        <td>{{ closure.order_number }}</td>
+                        <td>{{ closure.customer.name if closure.customer else 'Unknown' }}</td>
+                        <td>{{ closure.gates_completed }}</td>
+                        <td>{{ closure.po_number or '—' }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% else %}
+    <p class="section-help">No completed gates have been recorded for this date yet.</p>
+{% endif %}
+
+{% if customer_totals %}
+<section class="form-section">
+    <h3>Daily Totals Snapshot</h3>
+    <div class="table-scroll">
+        <table class="form-table">
+            <thead>
+                <tr>
+                    <th scope="col">Customer</th>
+                    <th scope="col">Gates Packaged</th>
+                    <th scope="col">Gates Produced</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in customer_totals %}
+                    <tr>
+                        <td>{{ entry.customer.name }}</td>
+                        <td>{{ entry.packaged }}</td>
+                        <td>{{ entry.produced }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <p class="section-help">Totals remain editable from the <a href="{{ url_for('production.daily_entry', entry_date=selected_date.isoformat()) }}">Daily Entry</a> page.</p>
+</section>
+{% endif %}
+{% endblock %}

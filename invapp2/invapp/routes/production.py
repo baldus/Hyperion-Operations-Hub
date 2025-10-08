@@ -24,6 +24,7 @@ from invapp.models import (
     ProductionCustomer,
     ProductionDailyCustomerTotal,
     ProductionDailyRecord,
+    ProductionOrderClosure,
     ProductionOutputFormula,
 )
 
@@ -513,6 +514,158 @@ def _process_output_formula_form(
     setting.variables = variables
     db.session.commit()
     return True, {"formula": setting.formula, "variables": variables}
+
+
+@bp.route("/final-process", methods=["GET", "POST"])
+def final_process_entry():
+    customers = _active_customers()
+    today = date.today()
+    selected_date = _parse_date(request.values.get("entry_date")) or today
+    record = (
+        ProductionDailyRecord.query.options(
+            joinedload(ProductionDailyRecord.customer_totals),
+            joinedload(ProductionDailyRecord.order_closures).joinedload(
+                ProductionOrderClosure.customer
+            ),
+        )
+        .filter_by(entry_date=selected_date)
+        .first()
+    )
+
+    if request.method == "POST":
+        form_date = _parse_date(request.form.get("entry_date"))
+        if form_date:
+            selected_date = form_date
+        record = (
+            ProductionDailyRecord.query.options(
+                joinedload(ProductionDailyRecord.customer_totals),
+                joinedload(ProductionDailyRecord.order_closures).joinedload(
+                    ProductionOrderClosure.customer
+                ),
+            )
+            .filter_by(entry_date=selected_date)
+            .first()
+        )
+
+        order_number = (request.form.get("order_number") or "").strip()
+        po_number = (request.form.get("po_number") or "").strip()
+        gates_completed = _get_int("gates_completed")
+        customer_id_raw = request.form.get("customer_id")
+
+        errors: List[str] = []
+        try:
+            customer_id = int(customer_id_raw) if customer_id_raw else None
+        except (TypeError, ValueError):
+            customer_id = None
+
+        selected_customer = (
+            next((customer for customer in customers if customer.id == customer_id), None)
+            if customer_id is not None
+            else None
+        )
+
+        if not order_number:
+            errors.append("Order number is required.")
+        if selected_customer is None:
+            errors.append("Select a valid customer for the completed gates.")
+        if gates_completed <= 0:
+            errors.append("Enter the number of gates completed (must be greater than zero).")
+
+        if errors:
+            for message in errors:
+                flash(message, "error")
+        else:
+            if not record:
+                record = ProductionDailyRecord(entry_date=selected_date)
+                record.day_of_week = selected_date.strftime("%A")
+                db.session.add(record)
+            else:
+                record.day_of_week = selected_date.strftime("%A")
+
+            totals_by_customer = {
+                total.customer_id: total for total in record.customer_totals
+            }
+            totals = totals_by_customer.get(selected_customer.id)
+            if not totals:
+                totals = ProductionDailyCustomerTotal(customer=selected_customer)
+                record.customer_totals.append(totals)
+
+            totals.gates_packaged = (totals.gates_packaged or 0) + gates_completed
+
+            closure = ProductionOrderClosure(
+                record=record,
+                customer=selected_customer,
+                order_number=order_number,
+                po_number=po_number or None,
+                gates_completed=gates_completed,
+            )
+            db.session.add(closure)
+
+            db.session.commit()
+            flash(
+                f"Recorded {gates_completed} gate(s) for order {order_number} on {selected_date.strftime('%B %d, %Y')}.",
+                "success",
+            )
+            return redirect(
+                url_for(
+                    "production.final_process_entry",
+                    entry_date=selected_date.isoformat(),
+                )
+            )
+
+    display_record = record
+    if not display_record and selected_date != today:
+        # If the user changed the date during validation we need to reload to show entries
+        display_record = (
+            ProductionDailyRecord.query.options(
+                joinedload(ProductionDailyRecord.customer_totals),
+                joinedload(ProductionDailyRecord.order_closures).joinedload(
+                    ProductionOrderClosure.customer
+                ),
+            )
+            .filter_by(entry_date=selected_date)
+            .first()
+        )
+
+    closures: List[ProductionOrderClosure] = []
+    customer_totals_display: List[Dict[str, Any]] = []
+    if display_record:
+        closures = list(display_record.order_closures or [])
+        totals_lookup = {
+            total.customer_id: total for total in display_record.customer_totals
+        }
+        for customer in customers:
+            totals = totals_lookup.get(customer.id)
+            packaged_value = totals.gates_packaged if totals else 0
+            produced_value = totals.gates_produced if totals else 0
+            if packaged_value or produced_value:
+                customer_totals_display.append(
+                    {
+                        "customer": customer,
+                        "packaged": packaged_value,
+                        "produced": produced_value,
+                    }
+                )
+
+    form_values = {
+        "order_number": request.form.get("order_number", "") if request.method == "POST" else "",
+        "po_number": request.form.get("po_number", "") if request.method == "POST" else "",
+        "gates_completed": request.form.get("gates_completed", "") if request.method == "POST" else "",
+        "customer_id": (
+            int(request.form.get("customer_id"))
+            if request.method == "POST" and request.form.get("customer_id")
+            else (customers[0].id if customers else None)
+        ),
+    }
+
+    return render_template(
+        "production/final_process_entry.html",
+        customers=customers,
+        selected_date=selected_date,
+        closures=closures,
+        customer_totals=customer_totals_display,
+        form_values=form_values,
+    )
 
 
 @bp.route("/daily-entry", methods=["GET", "POST"])

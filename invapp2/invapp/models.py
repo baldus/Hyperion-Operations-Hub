@@ -468,6 +468,12 @@ class ProductionCustomer(db.Model):
         cascade="all, delete-orphan",
     )
 
+    order_closures = db.relationship(
+        "ProductionOrderClosure",
+        back_populates="customer",
+        cascade="all, delete-orphan",
+    )
+
 
 
 class ProductionDailyRecord(db.Model):
@@ -502,6 +508,13 @@ class ProductionDailyRecord(db.Model):
         back_populates="record",
         cascade="all, delete-orphan",
         lazy="joined",
+    )
+
+    order_closures = db.relationship(
+        "ProductionOrderClosure",
+        back_populates="record",
+        cascade="all, delete-orphan",
+        order_by="ProductionOrderClosure.created_at.asc()",
     )
 
     LABOR_SHIFT_HOURS = Decimal("8.0")
@@ -585,6 +598,35 @@ class ProductionOutputFormula(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
+class ProductionOrderClosure(db.Model):
+    __tablename__ = "production_order_closure"
+
+    id = db.Column(db.Integer, primary_key=True)
+    record_id = db.Column(
+        db.Integer,
+        db.ForeignKey("production_daily_record.id"),
+        nullable=False,
+    )
+    customer_id = db.Column(
+        db.Integer,
+        db.ForeignKey("production_customer.id"),
+        nullable=False,
+    )
+    order_number = db.Column(db.String(64), nullable=False)
+    po_number = db.Column(db.String(64), nullable=True)
+    gates_completed = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    record = db.relationship(
+        "ProductionDailyRecord",
+        back_populates="order_closures",
+    )
+    customer = db.relationship(
+        "ProductionCustomer",
+        back_populates="order_closures",
     )
 
 

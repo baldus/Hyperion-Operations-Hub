@@ -2,6 +2,7 @@
 
 {% block content %}
 <nav class="production-nav" aria-label="Production pages">
+    <a href="{{ url_for('production.final_process_entry') }}" class="production-nav-link">Final Process Entry</a>
     <a href="{{ url_for('production.daily_entry') }}" class="production-nav-link is-active">Daily Entry</a>
     <a href="{{ url_for('production.history') }}" class="production-nav-link">History</a>
     <a href="{{ url_for('production.production_settings') }}" class="production-nav-link">Settings</a>
