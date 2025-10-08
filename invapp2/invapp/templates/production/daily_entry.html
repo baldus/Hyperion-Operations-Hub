@@ -3,6 +3,7 @@
 {% block content %}
 <nav class="production-nav" aria-label="Production pages">
     <a href="{{ url_for('production.daily_entry') }}" class="production-nav-link is-active">Daily Entry</a>
+    <a href="{{ url_for('production.final_process_entry') }}" class="production-nav-link">Final Process Entry</a>
     <a href="{{ url_for('production.history') }}" class="production-nav-link">History</a>
     <a href="{{ url_for('production.production_settings') }}" class="production-nav-link">Settings</a>
 </nav>
@@ -138,8 +139,75 @@
         <textarea id="daily_notes" name="daily_notes" placeholder="Add any notes about the day's production...">{{ form_values.daily_notes }}</textarea>
     </div>
 
+    <div class="form-section">
+        <div class="section-heading">
+            <h3>Finished Gate Orders</h3>
+            <p class="section-help">Entries captured from the final process closeout form can be reviewed and adjusted below.</p>
+        </div>
+        <div class="table-scroll">
+            <table class="form-table production-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Order #</th>
+                        <th scope="col">Customer</th>
+                        <th scope="col">Gates Completed</th>
+                        <th scope="col">PO #</th>
+                        <th scope="col">Remove</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for completion in form_values.gate_completions %}
+                        <tr>
+                            <td>
+                                <input type="hidden" name="completion_id" value="{{ completion.id }}">
+                                <input type="text" name="completion_order_number" value="{{ completion.order_number }}" required>
+                            </td>
+                            <td>
+                                <input type="text" name="completion_customer" value="{{ completion.customer_name }}">
+                            </td>
+                            <td>
+                                <input type="number" min="0" step="1" name="completion_gate_count" value="{{ completion.gates_completed }}">
+                            </td>
+                            <td>
+                                <input type="text" name="completion_po_number" value="{{ completion.po_number }}">
+                            </td>
+                            <td class="table-cell-center">
+                                <label class="checkbox-inline">
+                                    <input type="checkbox" name="completion_delete_ids" value="{{ completion.id }}" {% if completion.marked_for_delete %}checked{% endif %}>
+                                    Remove
+                                </label>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    {% for _ in range(extra_completion_rows) %}
+                        <tr>
+                            <td>
+                                <input type="hidden" name="completion_id" value="">
+                                <input type="text" name="completion_order_number" value="">
+                            </td>
+                            <td>
+                                <input type="text" name="completion_customer" value="">
+                            </td>
+                            <td>
+                                <input type="number" min="0" step="1" name="completion_gate_count" value="">
+                            </td>
+                            <td>
+                                <input type="text" name="completion_po_number" value="">
+                            </td>
+                            <td class="table-cell-center">
+                                <span class="field-note">&mdash;</span>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p class="field-note">To delete an existing row, check <strong>Remove</strong> and save. Leave blank rows empty to add nothing new.</p>
+    </div>
+
     <div class="form-actions">
         <a href="{{ url_for('production.history', start_date=selected_date.replace(day=1).isoformat(), end_date=selected_date.isoformat()) }}" class="action-btn secondary-link">View Month-to-Date</a>
+        <button type="submit" name="fill_packaged_from_completions" value="1" class="action-btn secondary">Apply Finished Gate Totals</button>
         <button type="submit">Save Daily Totals</button>
     </div>
 </form>

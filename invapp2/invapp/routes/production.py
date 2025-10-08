@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import date
+from itertools import zip_longest
 from typing import Any, Dict, List
 
 
@@ -23,6 +24,7 @@ from invapp.models import (
     ProductionChartSettings,
     ProductionCustomer,
     ProductionDailyCustomerTotal,
+    ProductionDailyGateCompletion,
     ProductionDailyRecord,
     ProductionOutputFormula,
 )
@@ -398,6 +400,7 @@ def _empty_form_values(customers: List[ProductionCustomer]) -> Dict[str, object]
         "additional_employees": "",
         "additional_hours_ot": "",
         "daily_notes": "",
+        "gate_completions": [],
     }
 
 
@@ -431,6 +434,17 @@ def _form_values_from_record(
     values["additional_employees"] = record.additional_employees or 0
     values["additional_hours_ot"] = _format_decimal(record.additional_hours_ot)
     values["daily_notes"] = record.daily_notes or ""
+    values["gate_completions"] = [
+        {
+            "id": completion.id,
+            "order_number": completion.order_number or "",
+            "customer_name": completion.customer_name or "",
+            "gates_completed": completion.gates_completed or 0,
+            "po_number": completion.po_number or "",
+            "marked_for_delete": False,
+        }
+        for completion in record.gate_completions
+    ]
     return values
 
 
@@ -455,6 +469,172 @@ def _get_decimal_value(form_key: str) -> Decimal:
     if value < DECIMAL_ZERO:
         return DECIMAL_ZERO
     return value.quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
+
+
+def _parse_non_negative_int(value: str | None) -> int:
+    if value in (None, ""):
+        return 0
+    try:
+        return max(int(value), 0)
+    except ValueError:
+        return 0
+
+
+def _completion_rows_from_request() -> tuple[list[dict[str, Any]], set[int]]:
+    submitted_ids = request.form.getlist("completion_id")
+    submitted_order_numbers = request.form.getlist("completion_order_number")
+    submitted_customers = request.form.getlist("completion_customer")
+    submitted_gate_counts = request.form.getlist("completion_gate_count")
+    submitted_po_numbers = request.form.getlist("completion_po_number")
+    delete_ids = {
+        int(value)
+        for value in request.form.getlist("completion_delete_ids")
+        if value and value.isdigit()
+    }
+
+    rows: list[dict[str, Any]] = []
+    for (
+        completion_id_raw,
+        order_number,
+        customer_name,
+        gate_count_raw,
+        po_number,
+    ) in zip_longest(
+        submitted_ids,
+        submitted_order_numbers,
+        submitted_customers,
+        submitted_gate_counts,
+        submitted_po_numbers,
+        fillvalue="",
+    ):
+        order_number = (order_number or "").strip()
+        customer_name = (customer_name or "").strip()
+        po_number = (po_number or "").strip()
+        gate_count_text = (gate_count_raw or "").strip()
+        gates_completed = _parse_non_negative_int(gate_count_text)
+
+        completion_id = None
+        if completion_id_raw and completion_id_raw.isdigit():
+            completion_id = int(completion_id_raw)
+
+        is_empty = (
+            not order_number
+            and not customer_name
+            and gates_completed == 0
+            and not po_number
+        )
+
+        if completion_id is None and is_empty:
+            continue
+
+        marked_for_delete = (
+            completion_id is not None and completion_id in delete_ids
+        )
+
+        rows.append(
+            {
+                "id": completion_id,
+                "order_number": order_number,
+                "customer_name": customer_name,
+                "gates_completed": gates_completed,
+                "gates_completed_raw": gate_count_text,
+                "po_number": po_number,
+                "is_empty": is_empty,
+                "marked_for_delete": marked_for_delete,
+            }
+        )
+
+    return rows, delete_ids
+
+
+def _form_values_from_post(
+    customers: List[ProductionCustomer],
+    completion_rows: list[dict[str, Any]],
+) -> Dict[str, object]:
+    values = _empty_form_values(customers)
+
+    for customer in customers:
+        values["gates_produced"][customer.id] = (
+            request.form.get(f"gates_produced_{customer.id}") or ""
+        ).strip()
+        values["gates_packaged"][customer.id] = (
+            request.form.get(f"gates_packaged_{customer.id}") or ""
+        ).strip()
+
+    values["gates_employees"] = (request.form.get("gates_employees") or "").strip()
+    values["gates_hours_ot"] = (
+        request.form.get("gates_hours_ot") or ""
+    ).strip()
+    values["controllers_4_stop"] = (
+        request.form.get("controllers_4_stop") or ""
+    ).strip()
+    values["controllers_6_stop"] = (
+        request.form.get("controllers_6_stop") or ""
+    ).strip()
+    values["door_locks_lh"] = (request.form.get("door_locks_lh") or "").strip()
+    values["door_locks_rh"] = (request.form.get("door_locks_rh") or "").strip()
+    values["operators_produced"] = (
+        request.form.get("operators_produced") or ""
+    ).strip()
+    values["cops_produced"] = (request.form.get("cops_produced") or "").strip()
+    values["additional_employees"] = (
+        request.form.get("additional_employees") or ""
+    ).strip()
+    values["additional_hours_ot"] = (
+        request.form.get("additional_hours_ot") or ""
+    ).strip()
+    values["daily_notes"] = request.form.get("daily_notes") or ""
+
+    completion_values: list[dict[str, Any]] = []
+    for row in completion_rows:
+        completion_values.append(
+            {
+                "id": row["id"],
+                "order_number": row["order_number"],
+                "customer_name": row["customer_name"],
+                "gates_completed": (
+                    row["gates_completed_raw"]
+                    if row["gates_completed_raw"] != ""
+                    else (str(row["gates_completed"]) if row["gates_completed"] else "")
+                ),
+                "po_number": row["po_number"],
+                "marked_for_delete": row["marked_for_delete"],
+            }
+        )
+    values["gate_completions"] = completion_values
+    return values
+
+
+def _aggregate_packaged_totals(
+    customers: List[ProductionCustomer],
+    completion_rows: list[dict[str, Any]],
+) -> tuple[dict[int, int], set[str], set[str]]:
+    totals: dict[int, int] = {customer.id: 0 for customer in customers}
+    redirected_to_other: set[str] = set()
+    unmatched_customers: set[str] = set()
+    other_customer = next((c for c in customers if c.is_other_bucket), None)
+    lookup = {customer.name.casefold(): customer for customer in customers}
+
+    for row in completion_rows:
+        if row["marked_for_delete"] or row["is_empty"]:
+            continue
+        gates_completed = row["gates_completed"]
+        if gates_completed <= 0:
+            continue
+        customer_name = row["customer_name"]
+        if not customer_name:
+            continue
+        match = lookup.get(customer_name.casefold())
+        if match is not None:
+            totals[match.id] += gates_completed
+            continue
+        if other_customer is not None:
+            totals[other_customer.id] += gates_completed
+            redirected_to_other.add(customer_name)
+        else:
+            unmatched_customers.add(customer_name)
+
+    return totals, redirected_to_other, unmatched_customers
 
 
 def _process_output_formula_form(
@@ -515,9 +695,125 @@ def _process_output_formula_form(
     return True, {"formula": setting.formula, "variables": variables}
 
 
+@bp.route("/final-process-entry", methods=["GET", "POST"])
+def final_process_entry():
+    today = date.today()
+    selected_date = _parse_date(request.values.get("entry_date")) or today
+    customers = _active_customers()
+    customer_lookup = {str(customer.id): customer for customer in customers}
+    manual_selection = "__manual__"
+
+    form_data = {
+        "entry_date": selected_date,
+        "order_number": "",
+        "customer_id": "",
+        "customer_manual": "",
+        "gates_completed": "",
+        "po_number": "",
+    }
+
+    if request.method == "POST":
+        selected_date = _parse_date(request.form.get("entry_date")) or today
+        form_data["entry_date"] = selected_date
+        order_number = (request.form.get("order_number") or "").strip()
+        customer_choice = (request.form.get("customer_id") or "").strip()
+        customer_manual = (request.form.get("customer_manual") or "").strip()
+        po_number = (request.form.get("po_number") or "").strip()
+        gates_completed_raw = request.form.get("gates_completed")
+        gates_completed = _parse_non_negative_int(gates_completed_raw)
+
+        selected_customer_name: str | None = None
+        if customer_choice in customer_lookup:
+            selected_customer_name = customer_lookup[customer_choice].name
+            form_data["customer_id"] = customer_choice
+            form_data["customer_manual"] = ""
+        elif customer_manual:
+            selected_customer_name = customer_manual
+            form_data["customer_id"] = manual_selection
+            form_data["customer_manual"] = customer_manual
+        elif customer_choice == manual_selection:
+            form_data["customer_id"] = manual_selection
+            form_data["customer_manual"] = ""
+        else:
+            form_data["customer_id"] = ""
+            form_data["customer_manual"] = ""
+
+        form_data.update(
+            {
+                "order_number": order_number,
+                "gates_completed": gates_completed_raw or "",
+                "po_number": po_number,
+            }
+        )
+
+        has_errors = False
+        if not order_number:
+            flash("Order number is required to record a completion.", "error")
+            has_errors = True
+        if gates_completed <= 0:
+            flash("Number of gates completed must be greater than zero.", "error")
+            has_errors = True
+
+        if not has_errors:
+            record = ProductionDailyRecord.query.filter_by(
+                entry_date=selected_date
+            ).first()
+            if not record:
+                record = ProductionDailyRecord(
+                    entry_date=selected_date,
+                    day_of_week=selected_date.strftime("%A"),
+                )
+                db.session.add(record)
+            else:
+                record.day_of_week = selected_date.strftime("%A")
+
+            record.gate_completions.append(
+                ProductionDailyGateCompletion(
+                    order_number=order_number,
+                    customer_name=selected_customer_name or None,
+                    gates_completed=gates_completed,
+                    po_number=po_number or None,
+                )
+            )
+            db.session.commit()
+            flash(
+                f"Recorded completion for order {order_number} on {selected_date.strftime('%B %d, %Y')}.",
+                "success",
+            )
+            return redirect(
+                url_for(
+                    "production.final_process_entry",
+                    entry_date=selected_date.isoformat(),
+                )
+            )
+
+    record = (
+        ProductionDailyRecord.query.options(
+            joinedload(ProductionDailyRecord.gate_completions)
+        )
+        .filter_by(entry_date=selected_date)
+        .first()
+    )
+    completions = record.gate_completions if record else []
+
+    return render_template(
+        "production/final_process_entry.html",
+        selected_date=selected_date,
+        form_data=form_data,
+        completions=completions,
+        customers=customers,
+        manual_selection=manual_selection,
+    )
+
+
 @bp.route("/daily-entry", methods=["GET", "POST"])
 def daily_entry():
     customers = _active_customers()
+    grouped_customers = [
+        customer
+        for customer in customers
+        if customer.lump_into_other and not customer.is_other_bucket
+    ]
     today = date.today()
     selected_date = _parse_date(request.values.get("entry_date")) or today
     record = (
@@ -527,7 +823,7 @@ def daily_entry():
         .filter_by(entry_date=selected_date)
         .first()
     )
-
+    record_exists = record is not None
 
     if request.method == "POST":
         form_date = _parse_date(request.form.get("entry_date"))
@@ -540,6 +836,55 @@ def daily_entry():
             .filter_by(entry_date=selected_date)
             .first()
         )
+        record_exists = record is not None
+
+        completion_rows, delete_ids = _completion_rows_from_request()
+
+        if request.form.get("fill_packaged_from_completions"):
+            form_values = _form_values_from_post(customers, completion_rows)
+            totals, redirected_names, unmatched_names = _aggregate_packaged_totals(
+                customers, completion_rows
+            )
+            total_applied = sum(totals.values())
+            if total_applied > 0:
+                for customer in customers:
+                    form_values["gates_packaged"][customer.id] = str(
+                        totals.get(customer.id, 0)
+                    )
+                flash(
+                    "Gates packaged totals were populated from finished gate entries.",
+                    "success",
+                )
+            else:
+                flash(
+                    "No finished gate entries with customer names and positive gate counts were found to apply.",
+                    "info",
+                )
+
+            if redirected_names:
+                redirected_list = ", ".join(sorted(redirected_names))
+                flash(
+                    f"The following customers were counted under Other: {redirected_list}.",
+                    "info",
+                )
+
+            if unmatched_names:
+                unmatched_list = ", ".join(sorted(unmatched_names))
+                flash(
+                    "The following customers could not be matched to an active customer and were skipped: "
+                    f"{unmatched_list}.",
+                    "warning",
+                )
+
+            return render_template(
+                "production/daily_entry.html",
+                customers=customers,
+                grouped_customers=grouped_customers,
+                selected_date=selected_date,
+                form_values=form_values,
+                record_exists=record_exists,
+                extra_completion_rows=3,
+            )
 
         if not record:
             record = ProductionDailyRecord(entry_date=selected_date)
@@ -560,7 +905,6 @@ def daily_entry():
             totals.gates_produced = produced_value
             totals.gates_packaged = packaged_value
 
-
         record.gates_employees = _get_int("gates_employees")
         record.gates_hours_ot = _get_decimal_value("gates_hours_ot")
         record.controllers_4_stop = _get_int("controllers_4_stop")
@@ -573,6 +917,43 @@ def daily_entry():
         record.additional_hours_ot = _get_decimal_value("additional_hours_ot")
         record.daily_notes = request.form.get("daily_notes") or None
 
+        existing_completions = {
+            completion.id: completion for completion in record.gate_completions
+        }
+
+        processed_ids: set[int] = set()
+        for row in completion_rows:
+            completion_id = row["id"]
+            if completion_id is not None:
+                processed_ids.add(completion_id)
+                completion = existing_completions.get(completion_id)
+                if not completion:
+                    continue
+                if row["marked_for_delete"] or row["is_empty"]:
+                    db.session.delete(completion)
+                    continue
+                completion.order_number = row["order_number"] or completion.order_number
+                completion.customer_name = row["customer_name"] or None
+                completion.gates_completed = row["gates_completed"]
+                completion.po_number = row["po_number"] or None
+                continue
+
+            if row["is_empty"] or row["marked_for_delete"]:
+                continue
+
+            record.gate_completions.append(
+                ProductionDailyGateCompletion(
+                    order_number=row["order_number"],
+                    customer_name=row["customer_name"] or None,
+                    gates_completed=row["gates_completed"],
+                    po_number=row["po_number"] or None,
+                )
+            )
+
+        for completion_id, completion in list(existing_completions.items()):
+            if completion_id not in processed_ids and completion_id not in delete_ids:
+                db.session.delete(completion)
+
         db.session.commit()
         flash(
             f"Production totals saved for {selected_date.strftime('%B %d, %Y')}.",
@@ -583,19 +964,14 @@ def daily_entry():
         )
 
     form_values = _form_values_from_record(record, customers)
-    grouped_customers = [
-        customer
-        for customer in customers
-        if customer.lump_into_other and not customer.is_other_bucket
-    ]
     return render_template(
         "production/daily_entry.html",
         customers=customers,
         grouped_customers=grouped_customers,
-
         selected_date=selected_date,
         form_values=form_values,
         record_exists=record is not None,
+        extra_completion_rows=3,
     )
 
 
