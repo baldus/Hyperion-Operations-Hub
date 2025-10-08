@@ -1,32 +1,58 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2>Work Instructions</h2>
+<h2>Workstation Overview</h2>
+<p class="page-intro">Track which workstations currently have jobs waiting and jump directly into each queue.</p>
 
-{% if is_admin %}
-<form action="{{ url_for('work.upload_instruction') }}" method="post" enctype="multipart/form-data">
-    <input type="file" name="file" accept="application/pdf" required>
-    <button type="submit">Upload PDF</button>
-</form>
-{% endif %}
-
-{% if instructions %}
-<div class="menu-grid instruction-grid">
-    {% for instr in instructions %}
-    <div class="instruction-item">
-        <a href="{{ url_for('static', filename='work_instructions/' ~ instr.filename) }}" target="_blank" rel="noopener" class="action-btn">
-            {{ instr.original_name }}
-        </a>
-        {% if is_admin %}
-        <form action="{{ url_for('work.delete_instruction', instruction_id=instr.id) }}" method="post">
-            <button type="submit" class="action-btn action-btn--danger">Delete</button>
-        </form>
-        {% endif %}
-    </div>
-    {% endfor %}
-</div>
+{% if total_waiting %}
+<p>{{ total_waiting }} job{{ 's' if total_waiting != 1 else '' }} waiting across all workstations.</p>
 {% else %}
-<p>No work instructions uploaded.</p>
+<p>No jobs are waiting for any workstation.</p>
 {% endif %}
-{% endblock %}
 
+<table class="data-table">
+    <thead>
+        <tr>
+            <th scope="col">Workstation</th>
+            <th scope="col">Jobs Waiting</th>
+            <th scope="col">Next Order</th>
+            <th scope="col">Next Promised Date</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% if stations %}
+            {% for station in stations %}
+            <tr>
+                <th scope="row">
+                    <a href="{{ url_for('work.station_detail', station_slug=station.slug) }}">{{ station.name }}</a>
+                </th>
+                <td>{{ station.waiting_count }}</td>
+                <td>
+                    {% if station.next_order %}
+                        {% set first_entry = station.entries[0] %}
+                        {% if can_access_page('orders') %}
+                        <a href="{{ url_for('orders.view_order', order_id=first_entry['order_id']) }}">
+                            {{ station.next_order }}
+                        </a>
+                        {% else %}
+                        {{ station.next_order }}
+                        {% endif %}
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+                <td>{{ station.next_promised_date or '—' }}</td>
+            </tr>
+            {% endfor %}
+        {% else %}
+        <tr>
+            <td colspan="4">All workstations are caught up.</td>
+        </tr>
+        {% endif %}
+    </tbody>
+</table>
+
+<p>
+    <a class="nav-btn" href="{{ url_for('work.list_instructions') }}">Manage Work Instructions</a>
+</p>
+{% endblock %}

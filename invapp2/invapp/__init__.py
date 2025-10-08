@@ -37,7 +37,7 @@ NAVIGATION_PAGES: tuple[tuple[str, str, str], ...] = (
     ("orders", "orders.orders_home", "Orders"),
     ("purchasing", "purchasing.purchasing_home", "Purchase Requests"),
     ("quality", "quality.quality_home", "Quality"),
-    ("work", "work.work_home", "Work Instructions"),
+    ("work", "work.station_overview", "Workstations"),
     ("production", "production.history", "Production History"),
 )
 

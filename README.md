@@ -33,7 +33,7 @@ It supports tracking items, locations, stock balances, receiving, cycle counts, 
 - **Transaction History** – review every movement with color-coded tables and CSV export.
 - **Reports** – `/reports` generates a single ZIP containing Items, Locations, Batches, and Movements.
 - **Production Orders** – `/orders` tracks BOMs, routing steps, reservations, shortages, and progress updates.
-- **Work Instructions** – `/work` provides a managed document repository for PDFs and other allowed files.
+- **Workstations** – `/work` surfaces workstation queues with ready jobs and still provides a managed document repository for instructions.
 - **Settings & Printers** – configure UI theme and Zebra printer host/port with admin authentication.
 - **Role-Based Access** – manage user accounts, assign view/edit roles per module, and enforce session timeouts for privileged actions.
 

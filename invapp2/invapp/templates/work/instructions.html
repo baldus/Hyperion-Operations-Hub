@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Work Instructions</h2>
+<p>
+    <a class="nav-btn" href="{{ url_for('work.station_overview') }}">View Workstation Overview</a>
+</p>
+
+{% if is_admin %}
+<form action="{{ url_for('work.upload_instruction') }}" method="post" enctype="multipart/form-data">
+    <label for="instruction-file">Upload instruction (PDF)</label>
+    <input id="instruction-file" type="file" name="file" accept="application/pdf" required>
+    <button type="submit">Upload PDF</button>
+</form>
+{% endif %}
+
+{% if instructions %}
+<div class="menu-grid instruction-grid">
+    {% for instr in instructions %}
+    <div class="instruction-item">
+        <a href="{{ url_for('static', filename='work_instructions/' ~ instr.filename) }}" target="_blank" rel="noopener" class="action-btn">
+            {{ instr.original_name }}
+        </a>
+        {% if is_admin %}
+        <form action="{{ url_for('work.delete_instruction', instruction_id=instr.id) }}" method="post">
+            <button type="submit" class="action-btn action-btn--danger">Delete</button>
+        </form>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p>No work instructions uploaded.</p>
+{% endif %}
+{% endblock %}
