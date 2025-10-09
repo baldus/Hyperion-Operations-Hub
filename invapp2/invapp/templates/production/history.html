@@ -35,6 +35,16 @@
     <section class="dashboard-section">
         <h3>Visual Breakdown</h3>
         <div class="chart-controls">
+            <div class="chart-toggle-group" role="group" aria-label="Gates chart view">
+                <label class="chart-toggle">
+                    <input type="radio" id="gatesMetricProduced" name="gatesMetric" value="produced" checked>
+                    <span>Gates Produced</span>
+                </label>
+                <label class="chart-toggle">
+                    <input type="radio" id="gatesMetricPackaged" name="gatesMetric" value="packaged">
+                    <span>Gates Packaged</span>
+                </label>
+            </div>
             <label class="chart-toggle" for="collapseWeekendsToggle">
                 <input type="checkbox" id="collapseWeekendsToggle" name="collapse_weekends">
                 Collapse weekends
@@ -74,7 +84,7 @@
             <div class="email-modal-gallery">
                 <figure>
                     <img id="emailDataBarImage" alt="Gates produced chart preview">
-                    <figcaption>Gates Produced by Customer</figcaption>
+                    <figcaption id="emailDataBarCaption">Gates Produced by Customer</figcaption>
                 </figure>
                 <figure>
                     <img id="emailDataLineImage" alt="Cumulative production chart preview">
@@ -203,6 +213,7 @@
 <script>
     const chartLabels = {{ chart_labels|tojson }};
     const stackedDatasets = {{ stacked_datasets|tojson }};
+    const packagedDatasets = {{ packaged_datasets|tojson }};
     const overlayDatasets = {{ overlay_datasets|tojson }};
     const lineDatasets = {{ line_datasets|tojson }};
     const chartAxisSettings = {{ chart_axis_settings|tojson }};
@@ -508,7 +519,7 @@
                     return accumulator;
                 }
 
-                if (dataset.stack !== 'gates-produced') {
+                if (dataset.stack !== 'gates-produced' && dataset.stack !== 'gates-packaged') {
                     return accumulator;
                 }
 
@@ -604,7 +615,8 @@
     }
 
     if (chartLabels.length) {
-        const stackedDatasetList = Array.isArray(stackedDatasets) ? stackedDatasets : [];
+        const producedDatasetList = Array.isArray(stackedDatasets) ? stackedDatasets : [];
+        const packagedDatasetList = Array.isArray(packagedDatasets) ? packagedDatasets : [];
         const overlayDatasetList = Array.isArray(overlayDatasets) ? overlayDatasets : [];
         const lineDatasetList = Array.isArray(lineDatasets) ? lineDatasets : [];
 
@@ -612,10 +624,37 @@
         const deepCloneDatasets = (datasets) => datasets.map((dataset) => deepCloneDataset(dataset));
 
         const originalLabels = chartLabels.slice();
-        const originalStackedDatasets = deepCloneDatasets(stackedDatasetList);
+        const originalProducedStackedDatasets = deepCloneDatasets(producedDatasetList);
+        const originalPackagedStackedDatasets = deepCloneDatasets(packagedDatasetList);
         const originalOverlayDatasets = deepCloneDatasets(overlayDatasetList);
         const originalLineDatasets = deepCloneDatasets(lineDatasetList);
         const weekendMask = originalLabels.map((label) => isWeekendLabel(label));
+
+        const datasetConfigs = {
+            produced: {
+                stacked: originalProducedStackedDatasets,
+                overlays: originalOverlayDatasets,
+            },
+            packaged: {
+                stacked: originalPackagedStackedDatasets.length
+                    ? originalPackagedStackedDatasets
+                    : deepCloneDatasets(producedDatasetList),
+                overlays: originalOverlayDatasets,
+            },
+        };
+
+        const metricLabels = {
+            produced: 'Gates Produced by Customer',
+            packaged: 'Gates Packaged by Customer',
+        };
+        const canvasAriaLabels = {
+            produced: 'Stacked column chart showing gates produced per customer',
+            packaged: 'Stacked column chart showing gates packaged per customer',
+        };
+        const emailAltLabels = {
+            produced: 'Gates produced chart preview',
+            packaged: 'Gates packaged chart preview',
+        };
 
         const cloneAndFilterDataset = (dataset, includeWeekends) => {
             const clonedDataset = deepCloneDataset(dataset);
@@ -639,16 +678,22 @@
             return clonedDataset;
         };
 
-        const buildChartData = (includeWeekends) => {
+        const buildChartData = (includeWeekends, metric) => {
+            const resolvedMetric = datasetConfigs[metric] ? metric : 'produced';
             const labels = includeWeekends
                 ? originalLabels.slice()
                 : originalLabels.filter((_, index) => !weekendMask[index]);
 
-            const stacked = originalStackedDatasets.map((dataset) => cloneAndFilterDataset(dataset, includeWeekends));
-            const overlays = originalOverlayDatasets.map((dataset) => cloneAndFilterDataset(dataset, includeWeekends));
+            const stacked = datasetConfigs[resolvedMetric].stacked.map((dataset) =>
+                cloneAndFilterDataset(dataset, includeWeekends)
+            );
+            const overlays = datasetConfigs[resolvedMetric].overlays.map((dataset) =>
+                cloneAndFilterDataset(dataset, includeWeekends)
+            );
             const line = originalLineDatasets.map((dataset) => cloneAndFilterDataset(dataset, includeWeekends));
 
             return {
+                metric: resolvedMetric,
                 labels,
                 combinedDatasets: stacked.concat(overlays),
                 lineDatasets: line,
@@ -656,16 +701,27 @@
         };
 
         let currentIncludeWeekends = true;
+        let currentMetric = 'produced';
         const collapseToggle = document.getElementById('collapseWeekendsToggle');
+        const metricToggleInputs = Array.from(document.querySelectorAll('input[name="gatesMetric"]'));
+        const barContext = document.getElementById('gatesProducedChart');
+        const lineContext = document.getElementById('cumulativeChart');
+        const emailBarImage = document.getElementById('emailDataBarImage');
+        const emailBarCaption = document.getElementById('emailDataBarCaption');
+        let barChart = null;
+        let lineChart = null;
+
         if (collapseToggle) {
             collapseToggle.checked = !currentIncludeWeekends;
         }
+        metricToggleInputs.forEach((input) => {
+            input.checked = input.value === currentMetric;
+        });
 
-        const initialState = buildChartData(currentIncludeWeekends);
+        const initialState = buildChartData(currentIncludeWeekends, currentMetric);
 
-        const barContext = document.getElementById('gatesProducedChart');
-        let barChart = null;
         if (barContext) {
+            barContext.setAttribute('aria-label', canvasAriaLabels[currentMetric]);
             const primaryScale = {
                 stacked: true,
                 beginAtZero: chartAxisSettings.primary.min === null,
@@ -735,7 +791,7 @@
                         },
                         title: {
                             display: true,
-                            text: 'Gates Produced by Customer',
+                            text: metricLabels[currentMetric],
                         },
                         legend: {
                             position: 'bottom',
@@ -752,8 +808,6 @@
             });
         }
 
-        const lineContext = document.getElementById('cumulativeChart');
-        let lineChart = null;
         if (lineContext) {
             lineChart = new Chart(lineContext, {
 
@@ -791,43 +845,76 @@
             });
         }
 
-        const updateChartsForWeekendState = (includeWeekends) => {
-            if (includeWeekends === currentIncludeWeekends) {
-                return;
-            }
-            currentIncludeWeekends = includeWeekends;
-
-            const updatedState = buildChartData(includeWeekends);
+        const refreshCharts = (includeWeekends, metric) => {
+            const nextState = buildChartData(includeWeekends, metric);
+            const resolvedMetric = nextState.metric;
 
             if (barChart) {
-                barChart.data.labels = updatedState.labels;
-                barChart.data.datasets = updatedState.combinedDatasets;
+                barChart.data.labels = nextState.labels;
+                barChart.data.datasets = nextState.combinedDatasets;
                 if (barChart.options?.plugins?.weekendBackground) {
                     barChart.options.plugins.weekendBackground.enabled = includeWeekends;
+                }
+                if (barChart.options?.plugins?.title) {
+                    barChart.options.plugins.title.text = metricLabels[resolvedMetric];
                 }
                 barChart.update();
             }
 
+            if (barContext) {
+                const currentLabel = barContext.getAttribute('aria-label') || '';
+                const baseLabel = canvasAriaLabels[resolvedMetric];
+                if (currentLabel.toLowerCase().includes('click to expand')) {
+                    barContext.setAttribute('aria-label', `${baseLabel} (click to expand)`);
+                } else {
+                    barContext.setAttribute('aria-label', baseLabel);
+                }
+            }
+
             if (lineChart) {
-                lineChart.data.labels = updatedState.labels;
-                lineChart.data.datasets = updatedState.lineDatasets;
+                lineChart.data.labels = nextState.labels;
+                lineChart.data.datasets = nextState.lineDatasets;
                 if (lineChart.options?.plugins?.weekendBackground) {
                     lineChart.options.plugins.weekendBackground.enabled = includeWeekends;
                 }
                 lineChart.update();
             }
 
+            if (emailBarImage) {
+                emailBarImage.alt = emailAltLabels[resolvedMetric];
+            }
+            if (emailBarCaption) {
+                emailBarCaption.textContent = metricLabels[resolvedMetric];
+            }
+
+            metricToggleInputs.forEach((input) => {
+                input.checked = input.value === resolvedMetric;
+            });
+
             if (collapseToggle) {
                 collapseToggle.checked = !includeWeekends;
             }
+
+            currentMetric = resolvedMetric;
+            currentIncludeWeekends = includeWeekends;
         };
+
+        refreshCharts(currentIncludeWeekends, currentMetric);
 
         if (collapseToggle) {
             collapseToggle.addEventListener('change', (event) => {
                 const includeWeekends = !event.target.checked;
-                updateChartsForWeekendState(includeWeekends);
+                refreshCharts(includeWeekends, currentMetric);
             });
         }
+
+        metricToggleInputs.forEach((input) => {
+            input.addEventListener('change', (event) => {
+                if (event.target.checked) {
+                    refreshCharts(currentIncludeWeekends, event.target.value);
+                }
+            });
+        });
 
         const chartModal = document.getElementById('chartModal');
         const modalCanvas = document.getElementById('expandedChart');
@@ -939,7 +1026,6 @@
         const emailModal = document.getElementById('emailDataModal');
         const emailModalDialog = emailModal ? emailModal.querySelector('.email-modal-dialog') : null;
         const emailCloseButtons = emailModal ? emailModal.querySelectorAll('[data-email-dismiss]') : [];
-        const emailBarImage = document.getElementById('emailDataBarImage');
         const emailLineImage = document.getElementById('emailDataLineImage');
         const emailNoteContainer = document.getElementById('emailDataNote');
         const emailSubtitle = document.getElementById('emailDataSubtitle');
