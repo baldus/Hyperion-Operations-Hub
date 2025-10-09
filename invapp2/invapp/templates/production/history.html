@@ -80,24 +80,17 @@
         <div class="email-modal-dialog" tabindex="-1">
             <button type="button" class="email-modal-close" data-email-dismiss aria-label="Close email data preview">&times;</button>
             <div class="email-modal-header">
-                <h3 id="emailDataTitle">Email Data Preview</h3>
+                <h3 id="emailDataTitle">Email Data Summary</h3>
                 <p id="emailDataSubtitle" class="email-modal-subtitle"></p>
             </div>
-            <div class="email-modal-note" id="emailDataNote"></div>
+            <p class="email-modal-description" id="emailDataDescription"></p>
+            <div class="email-modal-summary-wrapper">
+                <label for="emailDataSummary" class="sr-only">Email summary details</label>
+                <textarea id="emailDataSummary" class="email-modal-summary" readonly></textarea>
+            </div>
             <div class="email-modal-actions">
-                <button type="button" class="action-btn email-modal-copy-button" id="copyEmailNoteButton">Copy Notes</button>
+                <button type="button" class="action-btn email-modal-copy-button" id="copyEmailSummaryButton">Copy Summary</button>
             </div>
-            <div class="email-modal-gallery">
-                <figure>
-                    <img id="emailDataBarImage" alt="Gates produced chart preview">
-                    <figcaption id="emailDataBarCaption">Gates Produced by Customer</figcaption>
-                </figure>
-                <figure>
-                    <img id="emailDataLineImage" alt="Cumulative production chart preview">
-                    <figcaption>Cumulative Production Totals</figcaption>
-                </figure>
-            </div>
-            <p class="email-modal-hint">Right-click an image to copy it into your email message.</p>
         </div>
     </div>
 
@@ -224,6 +217,7 @@
     const lineDatasets = {{ line_datasets|tojson }};
     const chartAxisSettings = {{ chart_axis_settings|tojson }};
     const emailPreview = {{ email_preview|tojson }};
+    const emailRangeSummary = {{ email_range_summary|tojson }};
 
     const parseDateLabel = (label) => {
         if (typeof label !== 'string') {
@@ -657,11 +651,6 @@
             produced: 'Stacked column chart showing gates produced per customer',
             packaged: 'Stacked column chart showing gates packaged per customer',
         };
-        const emailAltLabels = {
-            produced: 'Gates produced chart preview',
-            packaged: 'Gates packaged chart preview',
-        };
-
         const cloneAndFilterDataset = (dataset, includeWeekends) => {
             const clonedDataset = deepCloneDataset(dataset);
 
@@ -712,8 +701,6 @@
         const metricToggleInputs = Array.from(document.querySelectorAll('input[name="gatesMetric"]'));
         const barContext = document.getElementById('gatesProducedChart');
         const lineContext = document.getElementById('cumulativeChart');
-        const emailBarImage = document.getElementById('emailDataBarImage');
-        const emailBarCaption = document.getElementById('emailDataBarCaption');
         let barChart = null;
         let lineChart = null;
 
@@ -886,13 +873,6 @@
                 lineChart.update();
             }
 
-            if (emailBarImage) {
-                emailBarImage.alt = emailAltLabels[resolvedMetric];
-            }
-            if (emailBarCaption) {
-                emailBarCaption.textContent = metricLabels[resolvedMetric];
-            }
-
             metricToggleInputs.forEach((input) => {
                 input.checked = input.value === resolvedMetric;
             });
@@ -1032,51 +1012,187 @@
         const emailModal = document.getElementById('emailDataModal');
         const emailModalDialog = emailModal ? emailModal.querySelector('.email-modal-dialog') : null;
         const emailCloseButtons = emailModal ? emailModal.querySelectorAll('[data-email-dismiss]') : [];
-        const emailLineImage = document.getElementById('emailDataLineImage');
-        const emailNoteContainer = document.getElementById('emailDataNote');
         const emailSubtitle = document.getElementById('emailDataSubtitle');
-        const copyEmailNoteButton = document.getElementById('copyEmailNoteButton');
-        let latestBarChartImageDataUrl = null;
+        const emailDescription = document.getElementById('emailDataDescription');
+        const emailSummaryField = document.getElementById('emailDataSummary');
+        const copyEmailSummaryButton = document.getElementById('copyEmailSummaryButton');
+        let latestEmailSummaryText = '';
 
-        const renderEmailNote = () => {
-            if (!emailNoteContainer) {
-                return;
+        const formatDisplayValue = (value, fallback = '0') => {
+            if (value === null || value === undefined) {
+                return fallback;
             }
+            if (typeof value === 'string') {
+                const trimmed = value.trim();
+                return trimmed === '' ? fallback : trimmed;
+            }
+            return String(value);
+        };
 
-            emailNoteContainer.innerHTML = '';
+        const buildEmailSummary = () => {
+            const lines = [];
 
-            if (!emailPreview) {
-                const emptyMessage = document.createElement('p');
-                emptyMessage.classList.add('email-modal-note-empty');
-                emptyMessage.textContent = 'No notes are available for the selected date range.';
-                emailNoteContainer.appendChild(emptyMessage);
-                if (emailSubtitle) {
-                    emailSubtitle.textContent = '';
+            if (emailRangeSummary) {
+                const rangeTitle = emailRangeSummary.start_display && emailRangeSummary.end_display
+                    ? `${emailRangeSummary.start_display} – ${emailRangeSummary.end_display}`
+                    : 'Selected Date Range';
+                lines.push(`Production Summary (${rangeTitle})`);
+                lines.push('');
+                lines.push('Date Range');
+                if (emailRangeSummary.start_display) {
+                    lines.push(`Start: ${emailRangeSummary.start_display}`);
                 }
-                return;
+                if (emailRangeSummary.end_display) {
+                    lines.push(`End: ${emailRangeSummary.end_display}`);
+                }
+                if (emailRangeSummary.day_count_display) {
+                    lines.push(`Days in Range: ${formatDisplayValue(emailRangeSummary.day_count_display, '0')}`);
+                }
+
+                lines.push('');
+                lines.push('Range Totals');
+                lines.push(`Gates Produced: ${formatDisplayValue(emailRangeSummary.produced_total_display, '0')}`);
+                lines.push(`Gates Packaged: ${formatDisplayValue(emailRangeSummary.packaged_total_display, '0')}`);
+                lines.push(`Combined Output: ${formatDisplayValue(emailRangeSummary.combined_total_display, '0')}`);
+
+                if (emailRangeSummary.controllers) {
+                    const controllers = emailRangeSummary.controllers;
+                    lines.push(
+                        `Controllers: ${formatDisplayValue(controllers.total_display, '0')} (4 Stop: ${formatDisplayValue(controllers.four_stop_display, '0')} / 6 Stop: ${formatDisplayValue(controllers.six_stop_display, '0')})`,
+                    );
+                }
+                if (emailRangeSummary.door_locks) {
+                    const doors = emailRangeSummary.door_locks;
+                    lines.push(
+                        `Door Locks: ${formatDisplayValue(doors.total_display, '0')} (LH: ${formatDisplayValue(doors.lh_display, '0')} / RH: ${formatDisplayValue(doors.rh_display, '0')})`,
+                    );
+                }
+                if (emailRangeSummary.operators) {
+                    lines.push(`Operators: ${formatDisplayValue(emailRangeSummary.operators.total_display, '0')}`);
+                }
+                if (emailRangeSummary.cops) {
+                    lines.push(`COPs: ${formatDisplayValue(emailRangeSummary.cops.total_display, '0')}`);
+                }
+
+                if (emailRangeSummary.gates_labor) {
+                    const labor = emailRangeSummary.gates_labor;
+                    lines.push('');
+                    lines.push('Gate Labor Totals');
+                    lines.push(`Employees: ${formatDisplayValue(labor.employees_display, '0')}`);
+                    lines.push(`OT Hours: ${formatDisplayValue(labor.hours_ot, '0.00')}`);
+                    lines.push(`Total Hours: ${formatDisplayValue(labor.total_hours, '0.00')}`);
+                }
+
+                if (emailRangeSummary.additional_labor) {
+                    const extraLabor = emailRangeSummary.additional_labor;
+                    lines.push('');
+                    lines.push('Additional Labor Totals');
+                    lines.push(`Employees: ${formatDisplayValue(extraLabor.employees_display, '0')}`);
+                    lines.push(`OT Hours: ${formatDisplayValue(extraLabor.hours_ot, '0.00')}`);
+                    lines.push(`Total Hours: ${formatDisplayValue(extraLabor.total_hours, '0.00')}`);
+                }
+
+                if (Array.isArray(emailRangeSummary.per_customer_totals) && emailRangeSummary.per_customer_totals.length) {
+                    lines.push('');
+                    lines.push('Per-Customer Totals');
+                    emailRangeSummary.per_customer_totals.forEach((customer) => {
+                        const producedDisplay = formatDisplayValue(customer.produced_display, '0');
+                        const packagedDisplay = formatDisplayValue(customer.packaged_display, '0');
+                        lines.push(`- ${customer.name}: Produced ${producedDisplay}, Packaged ${packagedDisplay}`);
+                    });
+                }
+            } else {
+                lines.push('Production Summary (Selected Date Range)');
+                lines.push('No aggregated totals are available for the current selection.');
             }
 
-            const noteText = (emailPreview.notes || '').trim();
-            const noteDateParts = [emailPreview.day_of_week, emailPreview.date_display]
-                .filter(Boolean)
-                .join(', ');
-            if (emailSubtitle) {
-                emailSubtitle.textContent = noteDateParts || '';
+            if (emailPreview) {
+                lines.push('');
+                const dailyLabelParts = [emailPreview.day_of_week, emailPreview.date_display].filter(Boolean);
+                lines.push(`Daily Detail – ${dailyLabelParts.join(', ') || 'Selected Day'}`);
+                lines.push(`Gates Produced: ${formatDisplayValue(emailPreview.produced_sum_display, '0')}`);
+                lines.push(`Gates Packaged: ${formatDisplayValue(emailPreview.packaged_sum_display, '0')}`);
+                lines.push(`Combined Gates Output: ${formatDisplayValue(emailPreview.combined_total_display, '0')}`);
+
+                if (emailPreview.gates_labor) {
+                    const labor = emailPreview.gates_labor;
+                    lines.push(
+                        `Gate Labor: Employees ${formatDisplayValue(labor.employees_display, '0')} | OT Hours ${formatDisplayValue(labor.hours_ot, '0.00')} | Total Hours ${formatDisplayValue(labor.total_hours, '0.00')}`,
+                    );
+                }
+
+                if (emailPreview.output) {
+                    if (emailPreview.output.per_hour) {
+                        lines.push(`Output per Labor Hour: ${formatDisplayValue(emailPreview.output.per_hour, '0.00')}`);
+                    }
+                    if (Array.isArray(emailPreview.output.variables) && emailPreview.output.variables.length) {
+                        lines.push('Output Variables:');
+                        emailPreview.output.variables.forEach((variable) => {
+                            lines.push(`- ${variable.label}: ${formatDisplayValue(variable.value, '0.00')}`);
+                        });
+                    }
+                }
+
+                if (emailPreview.controllers) {
+                    const controllers = emailPreview.controllers;
+                    lines.push(
+                        `Controllers: ${formatDisplayValue(controllers.total_display, '0')} (4 Stop: ${formatDisplayValue(controllers.four_stop_display, '0')} / 6 Stop: ${formatDisplayValue(controllers.six_stop_display, '0')})`,
+                    );
+                }
+                if (emailPreview.door_locks) {
+                    const doors = emailPreview.door_locks;
+                    lines.push(
+                        `Door Locks: ${formatDisplayValue(doors.total_display, '0')} (LH: ${formatDisplayValue(doors.lh_display, '0')} / RH: ${formatDisplayValue(doors.rh_display, '0')})`,
+                    );
+                }
+                if (emailPreview.operators) {
+                    lines.push(`Operators: ${formatDisplayValue(emailPreview.operators.total_display, '0')}`);
+                }
+                if (emailPreview.cops) {
+                    lines.push(`COPs: ${formatDisplayValue(emailPreview.cops.total_display, '0')}`);
+                }
+
+                if (emailPreview.additional_labor) {
+                    const extraLabor = emailPreview.additional_labor;
+                    lines.push(
+                        `Additional Labor: Employees ${formatDisplayValue(extraLabor.employees_display, '0')} | OT Hours ${formatDisplayValue(extraLabor.hours_ot, '0.00')} | Total Hours ${formatDisplayValue(extraLabor.total_hours, '0.00')}`,
+                    );
+                }
+
+                if (Array.isArray(emailPreview.additional_output) && emailPreview.additional_output.length) {
+                    lines.push('Additional Output per Labor Hour:');
+                    emailPreview.additional_output.forEach((metric) => {
+                        lines.push(`- ${metric.label}: ${formatDisplayValue(metric.per_hour, '0.00')}`);
+                    });
+                    lines.push(`Total Additional Output per Hour: ${formatDisplayValue(emailPreview.additional_output_total, '0.00')}`);
+                }
+
+                if (Array.isArray(emailPreview.per_customer_totals) && emailPreview.per_customer_totals.length) {
+                    lines.push('');
+                    lines.push('Per-Customer (Selected Day)');
+                    emailPreview.per_customer_totals.forEach((customer) => {
+                        const producedDisplay = formatDisplayValue(customer.produced_display, '0');
+                        const packagedDisplay = formatDisplayValue(customer.packaged_display, '0');
+                        lines.push(`- ${customer.name}: Produced ${producedDisplay}, Packaged ${packagedDisplay}`);
+                    });
+                }
+
+                lines.push('');
+                if (Array.isArray(emailPreview.notes_lines) && emailPreview.notes_lines.length) {
+                    lines.push('Notes:');
+                    emailPreview.notes_lines.forEach((noteLine) => {
+                        lines.push(`- ${noteLine}`);
+                    });
+                } else {
+                    lines.push('Notes: No notes were recorded for this day.');
+                }
+            } else {
+                lines.push('');
+                lines.push('Daily Detail');
+                lines.push('No daily record is available for the selected range.');
             }
 
-            if (!noteText) {
-                const placeholder = document.createElement('p');
-                placeholder.classList.add('email-modal-note-empty');
-                placeholder.textContent = 'No notes were recorded for this day.';
-                emailNoteContainer.appendChild(placeholder);
-                return;
-            }
-
-            noteText.split('\n').forEach((line) => {
-                const paragraph = document.createElement('p');
-                paragraph.textContent = line;
-                emailNoteContainer.appendChild(paragraph);
-            });
+            return lines.join('\n');
         };
 
         const closeEmailModal = () => {
@@ -1087,40 +1203,68 @@
             emailModal.removeAttribute('aria-label');
         };
 
+        const updateEmailSummary = () => {
+            if (!emailSummaryField) {
+                latestEmailSummaryText = '';
+                return;
+            }
+
+            const summaryText = buildEmailSummary();
+            latestEmailSummaryText = summaryText;
+            emailSummaryField.value = summaryText;
+            const lineCount = summaryText.split('\n').length;
+            const suggestedRows = Math.min(Math.max(lineCount + 2, 16), 40);
+            emailSummaryField.setAttribute('rows', String(suggestedRows));
+            emailSummaryField.scrollTop = 0;
+
+            if (copyEmailSummaryButton) {
+                copyEmailSummaryButton.disabled = summaryText.trim().length === 0;
+            }
+
+            if (emailSubtitle) {
+                const subtitleParts = [];
+                if (emailRangeSummary && emailRangeSummary.start_display && emailRangeSummary.end_display) {
+                    subtitleParts.push(`Range: ${emailRangeSummary.start_display} – ${emailRangeSummary.end_display}`);
+                }
+                if (emailPreview && emailPreview.date_display) {
+                    const previewLabel = emailPreview.day_of_week
+                        ? `${emailPreview.day_of_week}, ${emailPreview.date_display}`
+                        : emailPreview.date_display;
+                    subtitleParts.push(`Daily focus: ${previewLabel}`);
+                }
+                emailSubtitle.textContent = subtitleParts.join(' • ');
+            }
+
+            if (emailDescription) {
+                const descriptionParts = [];
+                if (emailRangeSummary && emailRangeSummary.start_display && emailRangeSummary.end_display) {
+                    descriptionParts.push(`Range covers ${emailRangeSummary.start_display} – ${emailRangeSummary.end_display}.`);
+                } else {
+                    descriptionParts.push('No date range totals were found for this selection.');
+                }
+                descriptionParts.push('Use the button below to copy the complete summary into Outlook in one paste.');
+                emailDescription.textContent = descriptionParts.join(' ');
+            }
+        };
+
         const openEmailModal = () => {
             if (!emailModal || !emailButton || emailButton.disabled) {
                 return;
             }
 
-            latestBarChartImageDataUrl = null;
+            updateEmailSummary();
 
-            if (emailBarImage && barChart) {
-                try {
-                    const chartImage = barChart.toBase64Image('image/png', 1);
-                    emailBarImage.src = chartImage;
-                    latestBarChartImageDataUrl = chartImage;
-                } catch (error) {
-                    emailBarImage.removeAttribute('src');
-                }
+            const labelParts = ['Email data summary'];
+            if (emailRangeSummary && emailRangeSummary.start_display && emailRangeSummary.end_display) {
+                labelParts.push(`${emailRangeSummary.start_display} to ${emailRangeSummary.end_display}`);
             }
-            if (emailLineImage && lineChart) {
-                try {
-                    emailLineImage.src = lineChart.toBase64Image();
-                } catch (error) {
-                    emailLineImage.removeAttribute('src');
-                }
+            if (emailPreview && emailPreview.date_display) {
+                const previewLabel = emailPreview.day_of_week
+                    ? `${emailPreview.day_of_week}, ${emailPreview.date_display}`
+                    : emailPreview.date_display;
+                labelParts.push(previewLabel);
             }
-
-            renderEmailNote();
-
-            if (emailPreview) {
-                const labelParts = [
-                    'Email data preview',
-                    emailPreview.day_of_week,
-                    emailPreview.date_display,
-                ].filter(Boolean);
-                emailModal.setAttribute('aria-label', labelParts.join(': '));
-            }
+            emailModal.setAttribute('aria-label', labelParts.join(': '));
 
             emailModal.classList.remove('is-hidden');
             window.requestAnimationFrame(() => {
@@ -1145,35 +1289,6 @@
         emailCloseButtons.forEach((button) => {
             button.addEventListener('click', closeEmailModal);
         });
-
-        const selectEmailNoteText = () => {
-            if (!emailNoteContainer || !window.getSelection || !document.createRange) {
-                return;
-            }
-
-            const selection = window.getSelection();
-            if (!selection) {
-                return;
-            }
-
-            selection.removeAllRanges();
-            const range = document.createRange();
-            range.selectNodeContents(emailNoteContainer);
-            selection.addRange(range);
-        };
-
-        const dataUrlToBlob = async (dataUrl) => {
-            if (!dataUrl || typeof dataUrl !== 'string') {
-                return null;
-            }
-
-            try {
-                const response = await fetch(dataUrl);
-                return await response.blob();
-            } catch (error) {
-                return null;
-            }
-        };
 
         const fallbackCopyToClipboard = (text) => {
             if (!document.body || typeof document.execCommand !== 'function') {
@@ -1218,7 +1333,10 @@
             return succeeded;
         };
 
-        const copyNoteToClipboard = async (text) => {
+        const copyTextToClipboard = async (text) => {
+            if (!text || !text.trim()) {
+                return false;
+            }
             if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
                 try {
                     await navigator.clipboard.writeText(text);
@@ -1229,33 +1347,6 @@
             }
 
             return fallbackCopyToClipboard(text);
-        };
-
-        const copyChartAndNotesToClipboard = async (text) => {
-            if (!latestBarChartImageDataUrl) {
-                return false;
-            }
-
-            if (!navigator.clipboard || typeof navigator.clipboard.write !== 'function' || typeof ClipboardItem === 'undefined') {
-                return false;
-            }
-
-            const imageBlob = await dataUrlToBlob(latestBarChartImageDataUrl);
-            if (!imageBlob) {
-                return false;
-            }
-
-            const clipboardContents = {
-                'text/plain': new Blob([text], { type: 'text/plain' }),
-            };
-            clipboardContents[imageBlob.type || 'image/png'] = imageBlob;
-
-            try {
-                await navigator.clipboard.write([new ClipboardItem(clipboardContents)]);
-                return true;
-            } catch (error) {
-                return false;
-            }
         };
 
         const withTemporaryLabel = (button, label) => {
@@ -1273,30 +1364,21 @@
             }, 2000);
         };
 
-        if (copyEmailNoteButton) {
-            copyEmailNoteButton.addEventListener('click', async () => {
-                const noteText = emailPreview && emailPreview.notes
-                    ? emailPreview.notes.trim()
-                    : 'No notes were recorded for this day.';
+        if (copyEmailSummaryButton) {
+            copyEmailSummaryButton.addEventListener('click', async () => {
+                const summaryText = latestEmailSummaryText;
+                const copied = await copyTextToClipboard(summaryText);
 
-                const copiedChartAndNotes = await copyChartAndNotesToClipboard(noteText);
-                if (copiedChartAndNotes) {
-                    withTemporaryLabel(copyEmailNoteButton, 'Notes & chart copied!');
+                if (copied) {
+                    withTemporaryLabel(copyEmailSummaryButton, 'Summary copied!');
                     return;
                 }
 
-                const copiedNotes = await copyNoteToClipboard(noteText);
-
-                if (copiedNotes) {
-                    const fallbackLabel = latestBarChartImageDataUrl
-                        ? 'Notes copied (chart unavailable)'
-                        : 'Notes copied!';
-                    withTemporaryLabel(copyEmailNoteButton, fallbackLabel);
-                    return;
+                if (emailSummaryField) {
+                    emailSummaryField.focus();
+                    emailSummaryField.select();
                 }
-
-                selectEmailNoteText();
-                withTemporaryLabel(copyEmailNoteButton, 'Copy failed');
+                withTemporaryLabel(copyEmailSummaryButton, 'Copy failed');
             });
         }
     }

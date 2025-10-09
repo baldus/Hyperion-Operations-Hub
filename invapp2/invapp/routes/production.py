@@ -381,6 +381,12 @@ def _format_decimal(value: Decimal | int | float | str | None) -> str:
     return format(decimal_value.quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP), "f")
 
 
+def _format_integer(value: int | None) -> str:
+    if not value:
+        return "0"
+    return format(value, ",")
+
+
 def _format_optional_decimal(value: Decimal | None) -> str:
     if value is None:
         return ""
@@ -1030,6 +1036,33 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
         series["key"]: [] for series in LINE_SERIES
     }
 
+    def _decimal_from(value: Decimal | int | float | None) -> Decimal:
+        if value is None:
+            return DECIMAL_ZERO
+        if isinstance(value, Decimal):
+            return value
+        return Decimal(str(value))
+
+    range_totals = {
+        "days": 0,
+        "produced": 0,
+        "packaged": 0,
+        "per_customer_produced": {customer.id: 0 for customer in table_customers},
+        "per_customer_packaged": {customer.id: 0 for customer in table_customers},
+        "gates_employees": 0,
+        "gates_hours_ot": DECIMAL_ZERO,
+        "gates_total_hours": DECIMAL_ZERO,
+        "additional_employees": 0,
+        "additional_hours_ot": DECIMAL_ZERO,
+        "additional_total_hours": DECIMAL_ZERO,
+        "controllers_4_stop": 0,
+        "controllers_6_stop": 0,
+        "door_locks_lh": 0,
+        "door_locks_rh": 0,
+        "operators": 0,
+        "cops": 0,
+    }
+
     for customer in stack_customers:
         stack_datasets.append(
             {
@@ -1101,6 +1134,16 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
                 )
             dataset["data"].append(packaged_value)
 
+        range_totals["days"] += 1
+        range_totals["produced"] += produced_sum
+        range_totals["packaged"] += packaged_sum
+        for customer in table_customers:
+            range_totals["per_customer_produced"][customer.id] += per_customer_produced.get(
+                customer.id, 0
+            )
+            range_totals["per_customer_packaged"][customer.id] += per_customer_packaged.get(
+                customer.id, 0
+            )
 
         controllers_total = (record.controllers_4_stop or 0) + (
             record.controllers_6_stop or 0
@@ -1174,6 +1217,25 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
         running_totals["door_locks"] += door_locks_total
         running_totals["operators"] += operators_total
         running_totals["cops"] += cops_total
+
+        range_totals["controllers_4_stop"] += record.controllers_4_stop or 0
+        range_totals["controllers_6_stop"] += record.controllers_6_stop or 0
+        range_totals["door_locks_lh"] += record.door_locks_lh or 0
+        range_totals["door_locks_rh"] += record.door_locks_rh or 0
+        range_totals["operators"] += operators_total
+        range_totals["cops"] += cops_total
+        range_totals["gates_employees"] += record.gates_employees or 0
+        range_totals["gates_hours_ot"] += _decimal_from(record.gates_hours_ot)
+        range_totals["gates_total_hours"] += _decimal_from(
+            record.gates_total_labor_hours
+        )
+        range_totals["additional_employees"] += record.additional_employees or 0
+        range_totals["additional_hours_ot"] += _decimal_from(
+            record.additional_hours_ot
+        )
+        range_totals["additional_total_hours"] += _decimal_from(
+            record.additional_total_labor_hours
+        )
 
         for series in LINE_SERIES:
             cumulative_series[series["key"]].append(running_totals[series["key"]])
@@ -1331,6 +1393,81 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
         },
     }
 
+    email_range_summary = None
+    if range_totals["days"] > 0:
+        range_controllers_total = (
+            range_totals["controllers_4_stop"] + range_totals["controllers_6_stop"]
+        )
+        range_door_locks_total = (
+            range_totals["door_locks_lh"] + range_totals["door_locks_rh"]
+        )
+        combined_output_total = range_totals["produced"] + range_totals["packaged"]
+        per_customer_totals = [
+            {
+                "name": customer.name,
+                "produced": range_totals["per_customer_produced"].get(customer.id, 0),
+                "produced_display": _format_integer(
+                    range_totals["per_customer_produced"].get(customer.id, 0)
+                ),
+                "packaged": range_totals["per_customer_packaged"].get(customer.id, 0),
+                "packaged_display": _format_integer(
+                    range_totals["per_customer_packaged"].get(customer.id, 0)
+                ),
+            }
+            for customer in table_customers
+        ]
+
+        email_range_summary = {
+            "start_iso": start_date.isoformat(),
+            "start_display": start_date.strftime("%B %d, %Y"),
+            "end_iso": end_date.isoformat(),
+            "end_display": end_date.strftime("%B %d, %Y"),
+            "day_count": range_totals["days"],
+            "day_count_display": str(range_totals["days"]),
+            "produced_total": range_totals["produced"],
+            "produced_total_display": _format_integer(range_totals["produced"]),
+            "packaged_total": range_totals["packaged"],
+            "packaged_total_display": _format_integer(range_totals["packaged"]),
+            "combined_total_display": _format_integer(combined_output_total),
+            "gates_labor": {
+                "employees": range_totals["gates_employees"],
+                "employees_display": _format_integer(range_totals["gates_employees"]),
+                "hours_ot": _format_decimal(range_totals["gates_hours_ot"]),
+                "total_hours": _format_decimal(range_totals["gates_total_hours"]),
+            },
+            "additional_labor": {
+                "employees": range_totals["additional_employees"],
+                "employees_display": _format_integer(range_totals["additional_employees"]),
+                "hours_ot": _format_decimal(range_totals["additional_hours_ot"]),
+                "total_hours": _format_decimal(range_totals["additional_total_hours"]),
+            },
+            "controllers": {
+                "total": range_controllers_total,
+                "total_display": _format_integer(range_controllers_total),
+                "four_stop": range_totals["controllers_4_stop"],
+                "four_stop_display": _format_integer(range_totals["controllers_4_stop"]),
+                "six_stop": range_totals["controllers_6_stop"],
+                "six_stop_display": _format_integer(range_totals["controllers_6_stop"]),
+            },
+            "door_locks": {
+                "total": range_door_locks_total,
+                "total_display": _format_integer(range_door_locks_total),
+                "lh": range_totals["door_locks_lh"],
+                "lh_display": _format_integer(range_totals["door_locks_lh"]),
+                "rh": range_totals["door_locks_rh"],
+                "rh_display": _format_integer(range_totals["door_locks_rh"]),
+            },
+            "operators": {
+                "total": range_totals["operators"],
+                "total_display": _format_integer(range_totals["operators"]),
+            },
+            "cops": {
+                "total": range_totals["cops"],
+                "total_display": _format_integer(range_totals["cops"]),
+            },
+            "per_customer_totals": per_customer_totals,
+        }
+
     preview_record = None
     if records:
         preview_record = next(
@@ -1341,12 +1478,114 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
     email_preview = None
     if preview_record:
         preview_date = preview_record.entry_date
+        preview_row = next(
+            (row for row in table_rows if row["record"].id == preview_record.id),
+            None,
+        )
+        per_customer_preview = []
+        if preview_row:
+            per_customer_preview = [
+                {
+                    "name": customer.name,
+                    "produced": preview_row["per_customer_produced"].get(
+                        customer.id, 0
+                    ),
+                    "produced_display": _format_integer(
+                        preview_row["per_customer_produced"].get(customer.id, 0)
+                    ),
+                    "packaged": preview_row["per_customer_packaged"].get(
+                        customer.id, 0
+                    ),
+                    "packaged_display": _format_integer(
+                        preview_row["per_customer_packaged"].get(customer.id, 0)
+                    ),
+                }
+                for customer in table_customers
+            ]
+        controllers_four_stop = preview_record.controllers_4_stop or 0
+        controllers_six_stop = preview_record.controllers_6_stop or 0
+        door_locks_lh = preview_record.door_locks_lh or 0
+        door_locks_rh = preview_record.door_locks_rh or 0
+        notes_lines = [
+            line.strip()
+            for line in (preview_record.daily_notes or "").splitlines()
+            if line.strip()
+        ]
         email_preview = {
             "date_iso": preview_date.isoformat(),
             "date_display": preview_date.strftime("%B %d, %Y"),
             "day_of_week": preview_record.day_of_week
             or preview_date.strftime("%A"),
             "notes": preview_record.daily_notes or "",
+            "notes_lines": notes_lines,
+            "produced_sum": preview_row["produced_sum"] if preview_row else 0,
+            "produced_sum_display": _format_integer(
+                preview_row["produced_sum"] if preview_row else 0
+            ),
+            "packaged_sum": preview_row["packaged_sum"] if preview_row else 0,
+            "packaged_sum_display": _format_integer(
+                preview_row["packaged_sum"] if preview_row else 0
+            ),
+            "combined_total_display": _format_integer(
+                preview_row["gates_combined_total"] if preview_row else 0
+            ),
+            "per_customer_totals": per_customer_preview,
+            "gates_labor": {
+                "employees": preview_row["gates_employees"] if preview_row else 0,
+                "employees_display": _format_integer(
+                    preview_row["gates_employees"] if preview_row else 0
+                ),
+                "hours_ot": preview_row["gates_hours_ot"] if preview_row else "0.00",
+                "total_hours": preview_row["gates_total_hours"] if preview_row else "0.00",
+            },
+            "output": {
+                "per_hour": preview_row["gates_output_per_hour"] if preview_row else None,
+                "variables": preview_row["output_variables"] if preview_row else [],
+            },
+            "controllers": {
+                "total": preview_row["controllers_total"] if preview_row else 0,
+                "total_display": _format_integer(
+                    preview_row["controllers_total"] if preview_row else 0
+                ),
+                "four_stop": controllers_four_stop,
+                "four_stop_display": _format_integer(controllers_four_stop),
+                "six_stop": controllers_six_stop,
+                "six_stop_display": _format_integer(controllers_six_stop),
+            },
+            "door_locks": {
+                "total": preview_row["door_locks_total"] if preview_row else 0,
+                "total_display": _format_integer(
+                    preview_row["door_locks_total"] if preview_row else 0
+                ),
+                "lh": door_locks_lh,
+                "lh_display": _format_integer(door_locks_lh),
+                "rh": door_locks_rh,
+                "rh_display": _format_integer(door_locks_rh),
+            },
+            "operators": {
+                "total": preview_row["operators_total"] if preview_row else 0,
+                "total_display": _format_integer(
+                    preview_row["operators_total"] if preview_row else 0
+                ),
+            },
+            "cops": {
+                "total": preview_row["cops_total"] if preview_row else 0,
+                "total_display": _format_integer(
+                    preview_row["cops_total"] if preview_row else 0
+                ),
+            },
+            "additional_labor": {
+                "employees": preview_row["additional_employees"] if preview_row else 0,
+                "employees_display": _format_integer(
+                    preview_row["additional_employees"] if preview_row else 0
+                ),
+                "hours_ot": preview_row["additional_hours_ot"] if preview_row else "0.00",
+                "total_hours": preview_row["additional_total_hours"] if preview_row else "0.00",
+            },
+            "additional_output": preview_row["additional_per_hour"] if preview_row else [],
+            "additional_output_total": _format_decimal(
+                preview_row["additional_output_total_value"] if preview_row else 0
+            ),
         }
 
     return {
@@ -1361,6 +1600,7 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
         "overlay_datasets": overlay_datasets,
         "chart_axis_settings": chart_axis_settings,
         "email_preview": email_preview,
+        "email_range_summary": email_range_summary,
     }
 
 
