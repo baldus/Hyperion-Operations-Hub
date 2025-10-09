@@ -123,6 +123,25 @@ def test_history_uses_custom_output_formula(client, app):
     assert "Hours: 17.00" in page
 
 
+def test_history_export_downloads_csv(client, app):
+    with app.app_context():
+        entry_date = _create_sample_record()
+
+    response = client.get(
+        "/production/history/export",
+        query_string={
+            "start_date": entry_date.isoformat(),
+            "end_date": entry_date.isoformat(),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.mimetype == "text/csv"
+    csv_body = response.data.decode()
+    assert "Gates Produced Total" in csv_body
+    assert entry_date.isoformat() in csv_body
+
+
 def test_final_process_entry_creates_completion(client, app):
     target_date = date.today()
     with app.app_context():
