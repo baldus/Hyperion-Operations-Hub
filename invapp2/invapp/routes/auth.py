@@ -10,9 +10,10 @@ from flask import (
     request,
     url_for,
 )
+from invapp.audit import record_login_event
 from invapp.extensions import db
 from invapp.login import current_user, login_required, login_user, logout_user
-from invapp.models import User
+from invapp.models import AccessLog, User
 
 bp = Blueprint("auth", __name__, url_prefix="/auth")
 
@@ -39,11 +40,23 @@ def login():
         user = User.query.filter_by(username=username).first()
         if user and user.check_password(password):
             login_user(user)
+            record_login_event(
+                event_type=AccessLog.EVENT_LOGIN_SUCCESS,
+                user_id=user.id,
+                username=user.username,
+                status_code=302,
+            )
             next_url = request.args.get("next")
             if next_url:
                 return redirect(next_url)
             flash("Logged in", "success")
             return redirect(url_for("home"))
+        record_login_event(
+            event_type=AccessLog.EVENT_LOGIN_FAILURE,
+            user_id=user.id if user else None,
+            username=username,
+            status_code=401,
+        )
         flash("Invalid credentials", "danger")
     return render_template("auth/login.html")
 
@@ -67,7 +80,15 @@ def _safe_redirect_target(target: str | None, *, default: str) -> str:
 @bp.route("/logout")
 @login_required
 def logout():
+    user_id = current_user.id if current_user.is_authenticated else None
+    username = current_user.username if current_user.is_authenticated else None
     logout_user()
+    record_login_event(
+        event_type=AccessLog.EVENT_LOGOUT,
+        user_id=user_id,
+        username=username,
+        status_code=302,
+    )
     flash("Logged out", "success")
 
     fallback = url_for("home")

@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Access Log</h2>
+<p class="page-intro">Review sign-ins, page visits, and the IP addresses used to reach the operations console.</p>
+
+<form method="get" class="form-grid log-filter-form">
+    <div>
+        <label for="filter-username">Username</label>
+        <input id="filter-username" name="username" value="{{ filters.username }}" placeholder="any user">
+    </div>
+    <div>
+        <label for="filter-ip">IP Address</label>
+        <input id="filter-ip" name="ip" value="{{ filters.ip }}" placeholder="127.0.0.1">
+    </div>
+    <div>
+        <label for="filter-event">Event Type</label>
+        <select id="filter-event" name="event_type">
+            <option value="">All activity</option>
+            {% for value, label in event_options %}
+            <option value="{{ value }}" {% if filters.event_type == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="form-actions">
+        <button type="submit" class="action-btn">Apply Filters</button>
+        <a class="action-btn secondary" href="{{ url_for('admin.access_log') }}">Clear</a>
+    </div>
+</form>
+
+<section class="card-section">
+    <h3>Recent Events</h3>
+    <p>Showing the {{ entries|length }} most recent records that match the selected filters.</p>
+    <div class="access-log-table">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th scope="col">When (UTC)</th>
+                    <th scope="col">Event</th>
+                    <th scope="col">Username</th>
+                    <th scope="col">IP Address</th>
+                    <th scope="col">Request</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">User Agent</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in entries %}
+                <tr>
+                    <td>{{ entry.occurred_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                    <td>{{ entry.label_for_event(entry.event_type) }}</td>
+                    <td>{{ entry.username or '—' }}</td>
+                    <td>{{ entry.ip_address or '—' }}</td>
+                    <td>
+                        <div class="log-request">
+                            <span class="log-method">{{ entry.method or '—' }}</span>
+                            <span class="log-path">{{ entry.path or '—' }}</span>
+                        </div>
+                    </td>
+                    <td>{% if entry.status_code is not none %}{{ entry.status_code }}{% else %}—{% endif %}</td>
+                    <td class="log-agent">{{ entry.user_agent or '—' }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7">No activity matches the selected filters.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="card-section">
+    <h3>IP Address Activity</h3>
+    <p>Recent sources hitting the console. Useful for spotting unusual traffic.</p>
+    <ul class="ip-summary">
+        {% for ip, total in ip_summary %}
+        <li>
+            <strong>{{ ip or 'Unknown' }}</strong>
+            <span>{{ total }} event{% if total != 1 %}s{% endif %}</span>
+        </li>
+        {% else %}
+        <li>No activity captured yet.</li>
+        {% endfor %}
+    </ul>
+</section>
+
+<section class="card-section">
+    <h3>Event Breakdown</h3>
+    <ul class="event-summary">
+        {% for event_type, total in event_summary %}
+        <li>
+            <strong>{{ entries[0].label_for_event(event_type) if entries else models.AccessLog.label_for_event(event_type) }}</strong>
+            <span>{{ total }} record{% if total != 1 %}s{% endif %}</span>
+        </li>
+        {% else %}
+        <li>No events recorded.</li>
+        {% endfor %}
+    </ul>
+</section>
+{% endblock %}
