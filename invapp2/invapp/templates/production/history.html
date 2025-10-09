@@ -88,6 +88,10 @@
                 <label for="emailDataSummary" class="email-modal-summary-label">Summary text</label>
                 <textarea id="emailDataSummary" class="email-modal-summary-field" rows="14" readonly spellcheck="false"></textarea>
             </div>
+            <div class="email-modal-visual">
+                <h4 id="emailDataChartTitle">Gates Packaged by Customer</h4>
+                <canvas id="emailDataChart" aria-labelledby="emailDataChartTitle"></canvas>
+            </div>
             <div class="email-modal-actions">
                 <button type="button" class="action-btn email-modal-copy-button" id="copyEmailSummaryButton">Copy Summary</button>
             </div>
@@ -643,6 +647,10 @@
             },
         };
 
+        const goalOverlayDataset = originalOverlayDatasets.find(
+            (dataset) => dataset && dataset.label === 'Gates Goal',
+        );
+
         const metricLabels = {
             produced: 'Gates Produced by Customer',
             packaged: 'Gates Packaged by Customer',
@@ -696,14 +704,36 @@
             };
         };
 
+        const buildEmailChartData = (includeWeekends) => {
+            const labels = includeWeekends
+                ? originalLabels.slice()
+                : originalLabels.filter((_, index) => !weekendMask[index]);
+
+            const stacked = datasetConfigs.packaged.stacked.map((dataset) =>
+                cloneAndFilterDataset(dataset, includeWeekends)
+            );
+
+            const overlays = [];
+            if (goalOverlayDataset) {
+                overlays.push(cloneAndFilterDataset(goalOverlayDataset, includeWeekends));
+            }
+
+            return {
+                labels,
+                datasets: stacked.concat(overlays),
+            };
+        };
+
         let currentIncludeWeekends = true;
         let currentMetric = 'produced';
         const collapseToggle = document.getElementById('collapseWeekendsToggle');
         const metricToggleInputs = Array.from(document.querySelectorAll('input[name="gatesMetric"]'));
         const barContext = document.getElementById('gatesProducedChart');
         const lineContext = document.getElementById('cumulativeChart');
+        const emailChartCanvas = document.getElementById('emailDataChart');
         let barChart = null;
         let lineChart = null;
+        let emailChart = null;
 
         if (collapseToggle) {
             collapseToggle.checked = !currentIncludeWeekends;
@@ -714,8 +744,7 @@
 
         const initialState = buildChartData(currentIncludeWeekends, currentMetric);
 
-        if (barContext) {
-            barContext.setAttribute('aria-label', canvasAriaLabels[currentMetric]);
+        const buildPrimaryScaleConfig = () => {
             const primaryScale = {
                 stacked: true,
                 beginAtZero: chartAxisSettings.primary.min === null,
@@ -737,6 +766,10 @@
                 });
             }
 
+            return primaryScale;
+        };
+
+        const buildSecondaryScaleConfig = () => {
             const secondaryScale = {
                 position: 'right',
                 beginAtZero: chartAxisSettings.secondary.min === null,
@@ -760,6 +793,11 @@
                 });
             }
 
+            return secondaryScale;
+        };
+
+        if (barContext) {
+            barContext.setAttribute('aria-label', canvasAriaLabels[currentMetric]);
             barChart = new Chart(barContext, {
 
                 type: 'bar',
@@ -795,8 +833,8 @@
                         x: {
                             stacked: true,
                         },
-                        y: primaryScale,
-                        'y-output': secondaryScale,
+                        y: buildPrimaryScaleConfig(),
+                        'y-output': buildSecondaryScaleConfig(),
                     },
                 },
             });
@@ -880,6 +918,16 @@
 
             if (collapseToggle) {
                 collapseToggle.checked = !includeWeekends;
+            }
+
+            if (emailChart) {
+                const emailState = buildEmailChartData(includeWeekends);
+                emailChart.data.labels = emailState.labels;
+                emailChart.data.datasets = emailState.datasets;
+                if (emailChart.options?.plugins?.weekendBackground) {
+                    emailChart.options.plugins.weekendBackground.enabled = includeWeekends;
+                }
+                emailChart.update();
             }
 
             currentMetric = resolvedMetric;
@@ -1019,6 +1067,64 @@
         const copyEmailSummaryButton = document.getElementById('copyEmailSummaryButton');
         const summaryFallbackMessage = 'No production summary is available for the selected date.';
 
+        const ensureEmailChart = (includeWeekends) => {
+            if (!emailChartCanvas || typeof Chart === 'undefined') {
+                return;
+            }
+
+            const emailState = buildEmailChartData(includeWeekends);
+
+            if (emailChart) {
+                emailChart.data.labels = emailState.labels;
+                emailChart.data.datasets = emailState.datasets;
+                if (emailChart.options?.plugins?.weekendBackground) {
+                    emailChart.options.plugins.weekendBackground.enabled = includeWeekends;
+                }
+                emailChart.update();
+                return;
+            }
+
+            emailChart = new Chart(emailChartCanvas, {
+                type: 'bar',
+                data: {
+                    labels: emailState.labels,
+                    datasets: emailState.datasets,
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        weekendBackground: {
+                            enabled: includeWeekends,
+                            color: 'rgba(0, 0, 0, 0.08)',
+                        },
+                        stackedTotals: {
+                            enabled: true,
+                            color: '#0f172a',
+                            font: {
+                                weight: '600',
+                            },
+                            yOffset: -8,
+                        },
+                        title: {
+                            display: true,
+                            text: 'Gates Packaged by Customer',
+                        },
+                        legend: {
+                            position: 'bottom',
+                        },
+                    },
+                    scales: {
+                        x: {
+                            stacked: true,
+                        },
+                        y: buildPrimaryScaleConfig(),
+                        'y-output': buildSecondaryScaleConfig(),
+                    },
+                },
+            });
+        };
+
         const renderEmailSummary = () => {
             if (!emailSummaryField) {
                 return;
@@ -1073,6 +1179,7 @@
                 return;
             }
 
+            ensureEmailChart(currentIncludeWeekends);
             renderEmailSummary();
 
             if (emailPreview) {
