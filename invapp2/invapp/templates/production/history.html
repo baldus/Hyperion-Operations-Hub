@@ -95,9 +95,9 @@
                 </div>
             </div>
             <div class="email-modal-actions">
-                <button type="button" class="action-btn email-modal-copy-button" id="copyEmailSummaryButton">Copy Summary</button>
+                <button type="button" class="action-btn email-modal-copy-button" id="copyEmailSummaryButton">Copy Summary &amp; Chart</button>
             </div>
-            <p class="email-modal-hint">Copy the summary to share the day's production details and selected date range in Outlook.</p>
+            <p class="email-modal-hint">Copy the summary to share the day's production details, date range, and packaged chart in Outlook.</p>
         </div>
     </div>
 
@@ -1069,6 +1069,36 @@
         const copyEmailSummaryButton = document.getElementById('copyEmailSummaryButton');
         const summaryFallbackMessage = 'No production summary is available for the selected date.';
 
+        const escapeHtml = (value) => {
+            if (value === null || value === undefined) {
+                return '';
+            }
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        };
+
+        const buildClipboardHtml = (summaryText, chartDataUrl) => {
+            const textLines = summaryText.split(/\r?\n/);
+            const textMarkup = textLines
+                .map((line) => `<div>${line.trim() ? escapeHtml(line) : '&nbsp;'}</div>`)
+                .join('');
+
+            const chartMarkup = chartDataUrl
+                ? `<div style="margin-top: 12px;"><img src="${chartDataUrl}" alt="Gates packaged by customer chart" style="max-width: 640px; width: 100%; height: auto;"></div>`
+                : '';
+
+            return `
+                <div style="font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; font-size: 14px; line-height: 1.4; color: #0f172a;">
+                    ${textMarkup}
+                    ${chartMarkup}
+                </div>
+            `.trim();
+        };
+
         const ensureEmailChart = (includeWeekends) => {
             if (!emailChartCanvas || typeof Chart === 'undefined') {
                 return;
@@ -1293,6 +1323,48 @@
             return succeeded;
         };
 
+        const fallbackCopyRichContent = (htmlContent) => {
+            if (!document.body || typeof document.execCommand !== 'function') {
+                return false;
+            }
+
+            const hiddenContainer = document.createElement('div');
+            hiddenContainer.innerHTML = htmlContent;
+            hiddenContainer.setAttribute('aria-hidden', 'true');
+            hiddenContainer.style.position = 'fixed';
+            hiddenContainer.style.top = '-1000px';
+            hiddenContainer.style.left = '-1000px';
+            hiddenContainer.style.opacity = '0';
+            hiddenContainer.style.pointerEvents = 'none';
+            hiddenContainer.style.maxWidth = '700px';
+
+            document.body.appendChild(hiddenContainer);
+
+            const selection = window.getSelection ? window.getSelection() : null;
+            const range = document.createRange ? document.createRange() : null;
+
+            if (!selection || !range) {
+                hiddenContainer.remove();
+                return false;
+            }
+
+            selection.removeAllRanges();
+            range.selectNodeContents(hiddenContainer);
+            selection.addRange(range);
+
+            let succeeded = false;
+            try {
+                succeeded = document.execCommand('copy');
+            } catch (error) {
+                succeeded = false;
+            }
+
+            selection.removeAllRanges();
+            hiddenContainer.remove();
+
+            return succeeded;
+        };
+
         const copyTextToClipboard = async (text) => {
             if (!text) {
                 return false;
@@ -1308,6 +1380,36 @@
             }
 
             return fallbackCopyToClipboard(text);
+        };
+
+        const copySummaryToClipboard = async (summaryText) => {
+            if (!summaryText) {
+                return false;
+            }
+
+            const chartDataUrl = emailChartCanvas ? emailChartCanvas.toDataURL('image/png') : null;
+            const htmlContent = chartDataUrl ? buildClipboardHtml(summaryText, chartDataUrl) : null;
+
+            if (htmlContent && navigator.clipboard && typeof navigator.clipboard.write === 'function' && window.ClipboardItem) {
+                try {
+                    const clipboardItems = {
+                        'text/plain': new Blob([summaryText], { type: 'text/plain' }),
+                        'text/html': new Blob([htmlContent], { type: 'text/html' }),
+                    };
+
+                    const clipboardItem = new ClipboardItem(clipboardItems);
+                    await navigator.clipboard.write([clipboardItem]);
+                    return true;
+                } catch (error) {
+                    // Fall through to legacy approaches if direct clipboard access fails.
+                }
+            }
+
+            if (htmlContent && fallbackCopyRichContent(htmlContent)) {
+                return true;
+            }
+
+            return copyTextToClipboard(summaryText);
         };
 
         const withTemporaryLabel = (button, label) => {
@@ -1337,10 +1439,10 @@
                     return;
                 }
 
-                const copiedSummary = await copyTextToClipboard(summaryText);
+                const copiedSummary = await copySummaryToClipboard(summaryText);
 
                 if (copiedSummary) {
-                    withTemporaryLabel(copyEmailSummaryButton, 'Summary copied!');
+                    withTemporaryLabel(copyEmailSummaryButton, 'Summary & chart copied!');
                     return;
                 }
 
