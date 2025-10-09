@@ -2769,6 +2769,12 @@ body.light .chart-modal-close {
     opacity: 0.75;
 }
 
+.email-modal-description {
+    margin: 0;
+    font-size: 0.9rem;
+    opacity: 0.75;
+}
+
 .email-modal-note {
     background: rgba(30, 41, 59, 0.6);
     border: 1px solid rgba(148, 163, 184, 0.25);
@@ -2776,6 +2782,8 @@ body.light .chart-modal-close {
     padding: 16px 18px;
     line-height: 1.5;
     font-size: 0.95rem;
+    max-height: 420px;
+    overflow-y: auto;
 }
 
 .email-modal-note p {
@@ -2789,6 +2797,15 @@ body.light .chart-modal-close {
 .email-modal-note-empty {
     font-style: italic;
     opacity: 0.75;
+}
+
+.email-modal-summary {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: 'Fira Code', 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace;
+    font-size: 0.88rem;
+    line-height: 1.6;
 }
 
 .email-modal-actions {
@@ -2862,6 +2879,15 @@ body.light .email-modal-dialog {
 body.light .email-modal-note {
     background: rgba(241, 245, 249, 0.9);
     border-color: rgba(148, 163, 184, 0.35);
+    color: #1f2937;
+}
+
+body.light .email-modal-description {
+    color: #475569;
+    opacity: 1;
+}
+
+body.light .email-modal-summary {
     color: #1f2937;
 }
 

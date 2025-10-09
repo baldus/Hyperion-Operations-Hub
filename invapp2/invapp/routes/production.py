@@ -6,7 +6,7 @@ import io
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import date
 from itertools import zip_longest
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 
 from flask import (
@@ -385,6 +385,229 @@ def _format_optional_decimal(value: Decimal | None) -> str:
     if value is None:
         return ""
     return format(value.quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP), "f")
+
+
+def _build_email_summary(
+    start_date: date,
+    end_date: date,
+    table_rows: List[Dict[str, Any]],
+    customers: List[ProductionCustomer],
+    range_totals: Dict[str, Any],
+    customer_totals: Dict[int, Dict[str, int]],
+    preview_record: ProductionDailyRecord | None,
+) -> str:
+    range_label = start_date.strftime("%B %d, %Y")
+    if end_date != start_date:
+        range_label = f"{range_label} – {end_date.strftime('%B %d, %Y')}"
+
+    header_lines = ["Production Summary", f"Date Range: {range_label}"]
+    if not table_rows:
+        header_lines.append("")
+        header_lines.append("No production records were found for the selected dates.")
+        return "\n".join(header_lines)
+
+    def format_count(value: int | Decimal | None) -> str:
+        numeric_value = value or 0
+        if isinstance(numeric_value, Decimal):
+            numeric_value = int(numeric_value)
+        return f"{numeric_value:,}"
+
+    def format_hours(value: Decimal | int | float | str | None) -> str:
+        return _format_decimal(value)
+
+    def customer_breakdown(row: Dict[str, Any], key: str) -> str:
+        per_customer: Dict[int, int] = row.get(key, {})
+        pieces: List[str] = []
+        for customer in customers:
+            value = per_customer.get(customer.id, 0)
+            if value:
+                pieces.append(f"{customer.name} {format_count(value)}")
+        return ", ".join(pieces) if pieces else "None"
+
+    def build_day_details(row: Dict[str, Any]) -> Tuple[str, List[Tuple[int, str]]]:
+        record: ProductionDailyRecord = row["record"]
+        day_label = record.day_of_week or record.entry_date.strftime("%A")
+        title = f"{day_label}, {record.entry_date.strftime('%B %d, %Y')}"
+        detail_items: List[Tuple[int, str]] = []
+
+        produced_line = f"Gates Produced: {format_count(row['produced_sum'])}"
+        produced_breakdown = customer_breakdown(row, "per_customer_produced")
+        if produced_breakdown != "None":
+            produced_line = f"{produced_line} ({produced_breakdown})"
+        detail_items.append((1, produced_line))
+
+        packaged_line = f"Gates Packaged: {format_count(row['packaged_sum'])}"
+        packaged_breakdown = customer_breakdown(row, "per_customer_packaged")
+        if packaged_breakdown != "None":
+            packaged_line = f"{packaged_line} ({packaged_breakdown})"
+        detail_items.append((1, packaged_line))
+
+        detail_items.append(
+            (
+                1,
+                "Gates Labor: "
+                f"Employees {format_count(row['gates_employees'])} | "
+                f"OT Hours {row['gates_hours_ot']} | "
+                f"Total Hours {row['gates_total_hours']}",
+            )
+        )
+
+        output_value = row.get("gates_output_per_hour")
+        if output_value:
+            output_line = f"Output per Labor Hour: {output_value}"
+            detail_items.append((1, output_line))
+            output_variables = row.get("output_variables") or []
+            if output_variables:
+                details_text = ", ".join(
+                    f"{metric['label']}: {metric['value']}" for metric in output_variables
+                )
+                if details_text:
+                    detail_items.append((2, f"Details: {details_text}"))
+        else:
+            detail_items.append((1, "Output per Labor Hour: N/A"))
+
+        detail_items.append(
+            (
+                1,
+                "Controllers: "
+                f"4 Stop {format_count(row['record'].controllers_4_stop or 0)} | "
+                f"6 Stop {format_count(row['record'].controllers_6_stop or 0)} | "
+                f"Total {format_count(row['controllers_total'])}",
+            )
+        )
+
+        detail_items.append(
+            (
+                1,
+                "Door Locks: "
+                f"LH {format_count(row['record'].door_locks_lh or 0)} | "
+                f"RH {format_count(row['record'].door_locks_rh or 0)} | "
+                f"Total {format_count(row['door_locks_total'])}",
+            )
+        )
+
+        detail_items.append(
+            (1, f"Operators: {format_count(row['operators_total'])} | COPs: {format_count(row['cops_total'])}")
+        )
+
+        detail_items.append(
+            (
+                1,
+                "Additional Labor: "
+                f"Employees {format_count(row['additional_employees'])} | "
+                f"OT Hours {row['additional_hours_ot']} | "
+                f"Total Hours {row['additional_total_hours']}",
+            )
+        )
+
+        additional_per_hour = row.get("additional_per_hour") or []
+        if additional_per_hour:
+            per_hour_details = ", ".join(
+                f"{metric['label']}: {metric['per_hour']} per hr" for metric in additional_per_hour
+            )
+            detail_items.append((1, f"Additional Output: {per_hour_details}"))
+        else:
+            detail_items.append((1, "Additional Output: N/A"))
+
+        note_text = (row["record"].daily_notes or "").strip()
+        if note_text:
+            detail_items.append((1, "Notes:"))
+            for line in note_text.splitlines():
+                stripped = line.strip()
+                if stripped:
+                    detail_items.append((2, stripped))
+        else:
+            detail_items.append((1, "Notes: None recorded."))
+
+        return title, detail_items
+
+    def append_with_indent(target: List[str], text: str, level: int) -> None:
+        indent = "  " * max(level, 0)
+        target.append(f"{indent}{text}".rstrip())
+
+    preview_row = None
+    if preview_record:
+        preview_row = next(
+            (row for row in table_rows if row["record"].entry_date == preview_record.entry_date),
+            None,
+        )
+    if preview_row is None:
+        preview_row = table_rows[-1]
+
+    lines: List[str] = header_lines + [""]
+
+    if preview_row:
+        title, detail_items = build_day_details(preview_row)
+        append_with_indent(lines, f"Most Recent Day: {title}", 0)
+        for level, detail_text in detail_items:
+            append_with_indent(lines, detail_text, level)
+        lines.append("")
+
+    lines.append("Date Range Totals")
+    append_with_indent(lines, f"Gates Produced: {format_count(range_totals['produced'])}", 1)
+    append_with_indent(lines, f"Gates Packaged: {format_count(range_totals['packaged'])}", 1)
+    append_with_indent(
+        lines,
+        "Gates Labor: "
+        f"Employees {format_count(range_totals['gates_employees'])} | "
+        f"OT Hours {format_hours(range_totals['gates_hours_ot'])} | "
+        f"Total Hours {format_hours(range_totals['gates_total_hours'])}",
+        1,
+    )
+    append_with_indent(
+        lines,
+        "Additional Labor: "
+        f"Employees {format_count(range_totals['additional_employees'])} | "
+        f"OT Hours {format_hours(range_totals['additional_hours_ot'])} | "
+        f"Total Hours {format_hours(range_totals['additional_total_hours'])}",
+        1,
+    )
+    controllers_total = range_totals["controllers_4_stop"] + range_totals["controllers_6_stop"]
+    append_with_indent(
+        lines,
+        "Controllers: "
+        f"4 Stop {format_count(range_totals['controllers_4_stop'])} | "
+        f"6 Stop {format_count(range_totals['controllers_6_stop'])} | "
+        f"Total {format_count(controllers_total)}",
+        1,
+    )
+    door_locks_total = range_totals["door_locks_lh"] + range_totals["door_locks_rh"]
+    append_with_indent(
+        lines,
+        "Door Locks: "
+        f"LH {format_count(range_totals['door_locks_lh'])} | "
+        f"RH {format_count(range_totals['door_locks_rh'])} | "
+        f"Total {format_count(door_locks_total)}",
+        1,
+    )
+    append_with_indent(
+        lines,
+        f"Operators: {format_count(range_totals['operators_produced'])}",
+        1,
+    )
+    append_with_indent(lines, f"COPs: {format_count(range_totals['cops_produced'])}", 1)
+
+    lines.append("")
+    lines.append("Customer Totals (Produced | Packaged)")
+    for customer in customers:
+        totals = customer_totals.get(customer.id, {"produced": 0, "packaged": 0})
+        append_with_indent(
+            lines,
+            f"{customer.name}: {format_count(totals['produced'])} | {format_count(totals['packaged'])}",
+            1,
+        )
+
+    lines.append("")
+    lines.append("Full Daily Breakdown")
+    for index, row in enumerate(table_rows):
+        title, detail_items = build_day_details(row)
+        append_with_indent(lines, title, 1)
+        for level, detail_text in detail_items:
+            append_with_indent(lines, detail_text, level + 1)
+        if index < len(table_rows) - 1:
+            lines.append("")
+
+    return "\n".join(lines)
 
 
 def _empty_form_values(customers: List[ProductionCustomer]) -> Dict[str, object]:
@@ -1029,6 +1252,25 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
     cumulative_series: Dict[str, List[int]] = {
         series["key"]: [] for series in LINE_SERIES
     }
+    range_totals: Dict[str, Any] = {
+        "produced": 0,
+        "packaged": 0,
+        "gates_employees": 0,
+        "gates_hours_ot": DECIMAL_ZERO,
+        "gates_total_hours": DECIMAL_ZERO,
+        "additional_employees": 0,
+        "additional_hours_ot": DECIMAL_ZERO,
+        "additional_total_hours": DECIMAL_ZERO,
+        "controllers_4_stop": 0,
+        "controllers_6_stop": 0,
+        "door_locks_lh": 0,
+        "door_locks_rh": 0,
+        "operators_produced": 0,
+        "cops_produced": 0,
+    }
+    customer_totals: Dict[int, Dict[str, int]] = {
+        customer.id: {"produced": 0, "packaged": 0} for customer in table_customers
+    }
 
     for customer in stack_customers:
         stack_datasets.append(
@@ -1082,6 +1324,9 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
             per_customer_packaged[customer.id] = packaged_value
             produced_sum += produced_value
             packaged_sum += packaged_value
+
+            customer_totals[customer.id]["produced"] += produced_value
+            customer_totals[customer.id]["packaged"] += packaged_value
 
         for dataset, customer in zip(stack_datasets, stack_customers):
             produced_value = per_customer_produced.get(customer.id, 0)
@@ -1174,6 +1419,21 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
         running_totals["door_locks"] += door_locks_total
         running_totals["operators"] += operators_total
         running_totals["cops"] += cops_total
+
+        range_totals["produced"] += produced_sum
+        range_totals["packaged"] += packaged_sum
+        range_totals["gates_employees"] += record.gates_employees or 0
+        range_totals["gates_hours_ot"] += record.gates_hours_ot or DECIMAL_ZERO
+        range_totals["gates_total_hours"] += gates_total_hours_value or DECIMAL_ZERO
+        range_totals["additional_employees"] += record.additional_employees or 0
+        range_totals["additional_hours_ot"] += record.additional_hours_ot or DECIMAL_ZERO
+        range_totals["additional_total_hours"] += additional_total_hours_value or DECIMAL_ZERO
+        range_totals["controllers_4_stop"] += record.controllers_4_stop or 0
+        range_totals["controllers_6_stop"] += record.controllers_6_stop or 0
+        range_totals["door_locks_lh"] += record.door_locks_lh or 0
+        range_totals["door_locks_rh"] += record.door_locks_rh or 0
+        range_totals["operators_produced"] += operators_total
+        range_totals["cops_produced"] += cops_total
 
         for series in LINE_SERIES:
             cumulative_series[series["key"]].append(running_totals[series["key"]])
@@ -1338,16 +1598,15 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
             records[-1],
         )
 
-    email_preview = None
-    if preview_record:
-        preview_date = preview_record.entry_date
-        email_preview = {
-            "date_iso": preview_date.isoformat(),
-            "date_display": preview_date.strftime("%B %d, %Y"),
-            "day_of_week": preview_record.day_of_week
-            or preview_date.strftime("%A"),
-            "notes": preview_record.daily_notes or "",
-        }
+    email_summary = _build_email_summary(
+        start_date,
+        end_date,
+        table_rows,
+        table_customers,
+        range_totals,
+        customer_totals,
+        preview_record,
+    )
 
     return {
         "customers": table_customers,
@@ -1360,7 +1619,7 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
         "line_datasets": line_datasets,
         "overlay_datasets": overlay_datasets,
         "chart_axis_settings": chart_axis_settings,
-        "email_preview": email_preview,
+        "email_summary": email_summary,
     }
 
 
