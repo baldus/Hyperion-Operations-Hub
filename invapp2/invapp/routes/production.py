@@ -1340,13 +1340,161 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
 
     email_preview = None
     if preview_record:
+        preview_row = next(
+            (row for row in table_rows if row["record"].id == preview_record.id),
+            None,
+        )
+
         preview_date = preview_record.entry_date
+        day_of_week = preview_record.day_of_week or preview_date.strftime("%A")
+        date_display = preview_date.strftime("%B %d, %Y")
+        range_start_display = start_date.strftime("%B %d, %Y")
+        range_end_display = end_date.strftime("%B %d, %Y")
+        range_display = f"{range_start_display} – {range_end_display}"
+
+        summary_text = None
+        if preview_row:
+            produced_total = preview_row.get("produced_sum", 0)
+            packaged_total = preview_row.get("packaged_sum", 0)
+            combined_total = preview_row.get("gates_combined_total", 0)
+
+            def _format_count(value: int | None) -> str:
+                return f"{int(value or 0):,}"
+
+            produced_breakdown: list[str] = []
+            packaged_breakdown: list[str] = []
+            per_customer_produced = preview_row.get("per_customer_produced", {})
+            per_customer_packaged = preview_row.get("per_customer_packaged", {})
+
+            for customer in table_customers:
+                customer_id = customer.id
+                produced_value = per_customer_produced.get(customer_id, 0)
+                packaged_value = per_customer_packaged.get(customer_id, 0)
+                if produced_value:
+                    produced_breakdown.append(
+                        f"    • {customer.name}: {_format_count(produced_value)}"
+                    )
+                if packaged_value:
+                    packaged_breakdown.append(
+                        f"    • {customer.name}: {_format_count(packaged_value)}"
+                    )
+
+            output_per_hour = preview_row.get("gates_output_per_hour")
+            output_variables = preview_row.get("output_variables", [])
+
+            additional_per_hour = preview_row.get("additional_per_hour", [])
+
+            gates_employees = preview_row.get("gates_employees", 0)
+            gates_hours_ot = preview_row.get("gates_hours_ot", "0")
+            gates_total_hours = preview_row.get("gates_total_hours", "0")
+
+            additional_employees = preview_row.get("additional_employees", 0)
+            additional_hours_ot = preview_row.get("additional_hours_ot", "0")
+            additional_total_hours = preview_row.get("additional_total_hours", "0")
+
+            summary_lines: list[str] = [
+                f"Production Summary: {day_of_week}, {date_display}",
+                f"Reporting Range: {range_display}",
+                "",
+                "Daily Production",
+                f"- Gates Produced: {_format_count(produced_total)}",
+            ]
+
+            if produced_breakdown:
+                summary_lines.append("  Customer Breakdown (Produced):")
+                summary_lines.extend(produced_breakdown)
+
+            summary_lines.append(
+                f"- Gates Packaged: {_format_count(packaged_total)}"
+            )
+            if packaged_breakdown:
+                summary_lines.append("  Customer Breakdown (Packaged):")
+                summary_lines.extend(packaged_breakdown)
+
+            summary_lines.append(
+                f"- Combined Output (Produced + Packaged): {_format_count(combined_total)}"
+            )
+            summary_lines.append(
+                "- Output per Labor Hour: "
+                + (output_per_hour if output_per_hour else "Not calculated")
+            )
+
+            summary_lines.append(
+                "- Controllers: "
+                f"{_format_count(preview_record.total_controllers)} "
+                f"(4 Stop: {_format_count(preview_record.controllers_4_stop)}, "
+                f"6 Stop: {_format_count(preview_record.controllers_6_stop)})"
+            )
+            summary_lines.append(
+                "- Door Locks: "
+                f"{_format_count(preview_record.total_door_locks)} "
+                f"(LH: {_format_count(preview_record.door_locks_lh)}, "
+                f"RH: {_format_count(preview_record.door_locks_rh)})"
+            )
+            summary_lines.append(
+                f"- Operators Produced: {_format_count(preview_record.operators_produced)}"
+            )
+            summary_lines.append(
+                f"- COPs Produced: {_format_count(preview_record.cops_produced)}"
+            )
+
+            summary_lines.extend(
+                [
+                    "",
+                    "Gates Labor",
+                    f"- Employees: {_format_count(gates_employees)}",
+                    f"- OT Hours: {gates_hours_ot}",
+                    f"- Total Hours: {gates_total_hours}",
+                ]
+            )
+
+            if output_variables:
+                summary_lines.append("- Output Inputs:")
+                for variable in output_variables:
+                    summary_lines.append(
+                        f"    • {variable.get('label')}: {variable.get('value')}"
+                    )
+
+            summary_lines.extend(
+                [
+                    "",
+                    "Additional Labor",
+                    f"- Employees: {_format_count(additional_employees)}",
+                    f"- OT Hours: {additional_hours_ot}",
+                    f"- Total Hours: {additional_total_hours}",
+                ]
+            )
+
+            if additional_per_hour:
+                summary_lines.append("- Output per Hour:")
+                for metric in additional_per_hour:
+                    summary_lines.append(
+                        f"    • {metric.get('label')}: {metric.get('per_hour')}"
+                    )
+
+            summary_lines.append("")
+            summary_lines.append("Notes")
+
+            notes_text = (preview_record.daily_notes or "").strip()
+            if notes_text:
+                summary_lines.extend(notes_text.splitlines())
+            else:
+                summary_lines.append("None recorded.")
+
+            summary_text = "\r\n".join(summary_lines)
+
+        if summary_text is None:
+            summary_text = "No production summary is available for the selected date."
+
         email_preview = {
             "date_iso": preview_date.isoformat(),
-            "date_display": preview_date.strftime("%B %d, %Y"),
-            "day_of_week": preview_record.day_of_week
-            or preview_date.strftime("%A"),
+            "date_display": date_display,
+            "day_of_week": day_of_week,
             "notes": preview_record.daily_notes or "",
+            "range_start_display": range_start_display,
+            "range_end_display": range_end_display,
+            "range_display": range_display,
+            "summary_text": summary_text,
         }
 
     return {

@@ -82,22 +82,21 @@
             <div class="email-modal-header">
                 <h3 id="emailDataTitle">Email Data Preview</h3>
                 <p id="emailDataSubtitle" class="email-modal-subtitle"></p>
+                <p id="emailDataRange" class="email-modal-subtitle"></p>
             </div>
-            <div class="email-modal-note" id="emailDataNote"></div>
+            <div class="email-modal-note">
+                <label for="emailDataSummary" class="email-modal-summary-label">Summary text</label>
+                <textarea id="emailDataSummary" class="email-modal-summary-field" rows="14" readonly spellcheck="false"></textarea>
+            </div>
+            <div class="email-modal-chart" id="emailDataChartContainer" hidden>
+                <h4 class="email-modal-chart-title" id="emailDataChartTitle">Gates Packaged by Customer</h4>
+                <canvas id="emailDataChart" aria-label="Stacked column chart showing gates packaged per customer"></canvas>
+                <p class="email-modal-chart-note">Goal line displays when enabled in Production Settings.</p>
+            </div>
             <div class="email-modal-actions">
-                <button type="button" class="action-btn email-modal-copy-button" id="copyEmailNoteButton">Copy Notes</button>
+                <button type="button" class="action-btn email-modal-copy-button" id="copyEmailSummaryButton">Copy Summary</button>
             </div>
-            <div class="email-modal-gallery">
-                <figure>
-                    <img id="emailDataBarImage" alt="Gates produced chart preview">
-                    <figcaption id="emailDataBarCaption">Gates Produced by Customer</figcaption>
-                </figure>
-                <figure>
-                    <img id="emailDataLineImage" alt="Cumulative production chart preview">
-                    <figcaption>Cumulative Production Totals</figcaption>
-                </figure>
-            </div>
-            <p class="email-modal-hint">Right-click an image to copy it into your email message.</p>
+            <p class="email-modal-hint">Copy the summary to share the day's production details and selected date range in Outlook.</p>
         </div>
     </div>
 
@@ -657,10 +656,6 @@
             produced: 'Stacked column chart showing gates produced per customer',
             packaged: 'Stacked column chart showing gates packaged per customer',
         };
-        const emailAltLabels = {
-            produced: 'Gates produced chart preview',
-            packaged: 'Gates packaged chart preview',
-        };
 
         const cloneAndFilterDataset = (dataset, includeWeekends) => {
             const clonedDataset = deepCloneDataset(dataset);
@@ -712,8 +707,6 @@
         const metricToggleInputs = Array.from(document.querySelectorAll('input[name="gatesMetric"]'));
         const barContext = document.getElementById('gatesProducedChart');
         const lineContext = document.getElementById('cumulativeChart');
-        const emailBarImage = document.getElementById('emailDataBarImage');
-        const emailBarCaption = document.getElementById('emailDataBarCaption');
         let barChart = null;
         let lineChart = null;
 
@@ -725,6 +718,167 @@
         });
 
         const initialState = buildChartData(currentIncludeWeekends, currentMetric);
+
+        const emailChartContainer = document.getElementById('emailDataChartContainer');
+        const emailChartCanvas = document.getElementById('emailDataChart');
+        const emailChartTitle = document.getElementById('emailDataChartTitle');
+        const baseEmailChartTitle = 'Gates Packaged by Customer';
+        let emailChart = null;
+
+        const parseAxisValue = (value) => {
+            if (value === null || value === undefined) {
+                return undefined;
+            }
+            const numeric = Number(value);
+            return Number.isFinite(numeric) ? numeric : undefined;
+        };
+
+        const buildEmailChartOptions = (stackedTotalsColor) => {
+            const primaryAxis = (chartAxisSettings && chartAxisSettings.primary) || {};
+            const resolvedMin = parseAxisValue(primaryAxis.min);
+            const resolvedMax = parseAxisValue(primaryAxis.max);
+            const resolvedStep = parseAxisValue(primaryAxis.step);
+
+            const yScaleConfig = {
+                stacked: true,
+                beginAtZero: resolvedMin === undefined,
+                ticks: {
+                    precision: 0,
+                },
+                title: {
+                    display: true,
+                    text: 'Units',
+                },
+            };
+
+            if (typeof resolvedMin === 'number') {
+                yScaleConfig.min = resolvedMin;
+            }
+            if (typeof resolvedMax === 'number') {
+                yScaleConfig.max = resolvedMax;
+            }
+            if (typeof resolvedStep === 'number') {
+                yScaleConfig.ticks.stepSize = resolvedStep;
+            }
+
+            return {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    stackedTotals: {
+                        enabled: true,
+                        color: stackedTotalsColor,
+                        font: { weight: '600' },
+                        yOffset: -8,
+                    },
+                    legend: {
+                        position: 'bottom',
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label(context) {
+                                const datasetLabel = context.dataset?.label || '';
+                                const value = typeof context.parsed?.y === 'number'
+                                    ? context.parsed.y
+                                    : context.parsed;
+                                const formatted = typeof value === 'number'
+                                    ? value.toLocaleString()
+                                    : value;
+                                return datasetLabel ? `${datasetLabel}: ${formatted}` : formatted;
+                            },
+                        },
+                    },
+                },
+                scales: {
+                    x: {
+                        stacked: true,
+                    },
+                    y: yScaleConfig,
+                },
+            };
+        };
+
+        const destroyEmailChart = () => {
+            if (emailChart) {
+                emailChart.destroy();
+                emailChart = null;
+            }
+            if (emailChartContainer) {
+                emailChartContainer.hidden = true;
+            }
+        };
+
+        const renderEmailChart = () => {
+            if (!emailChartCanvas) {
+                destroyEmailChart();
+                return;
+            }
+
+            if (!Array.isArray(packagedDatasetList) || !packagedDatasetList.length || !originalLabels.length) {
+                destroyEmailChart();
+                return;
+            }
+
+            const datasets = deepCloneDatasets(packagedDatasetList);
+            const goalDataset = overlayDatasetList.find(
+                (dataset) => dataset && (dataset.stack === 'gates-goal-line' || dataset.label === 'Gates Goal')
+            );
+            if (goalDataset) {
+                datasets.push(deepCloneDataset(goalDataset));
+            }
+
+            const hasVisibleValues = datasets.some((dataset) =>
+                Array.isArray(dataset.data) && dataset.data.some((value) => {
+                    const numericValue = Number(value);
+                    return Number.isFinite(numericValue) && numericValue > 0;
+                })
+            );
+
+            if (!hasVisibleValues) {
+                destroyEmailChart();
+                return;
+            }
+
+            if (emailChart) {
+                emailChart.destroy();
+                emailChart = null;
+            }
+
+            if (emailChartContainer) {
+                emailChartContainer.hidden = false;
+            }
+
+            const totalsColor = document.body && document.body.classList.contains('light')
+                ? '#0f172a'
+                : '#e2e8f0';
+
+            emailChart = new Chart(emailChartCanvas, {
+                type: 'bar',
+                data: {
+                    labels: originalLabels.slice(),
+                    datasets,
+                },
+                options: buildEmailChartOptions(totalsColor),
+            });
+
+            if (emailPreview) {
+                const labelParts = [
+                    'Stacked column chart showing gates packaged per customer',
+                    emailPreview.day_of_week,
+                    emailPreview.date_display,
+                ];
+                if (emailPreview.range_display) {
+                    labelParts.push(`Range ${emailPreview.range_display}`);
+                }
+                emailChartCanvas.setAttribute('aria-label', labelParts.filter(Boolean).join(' – '));
+            } else {
+                emailChartCanvas.setAttribute(
+                    'aria-label',
+                    'Stacked column chart showing gates packaged per customer',
+                );
+            }
+        };
 
         if (barContext) {
             barContext.setAttribute('aria-label', canvasAriaLabels[currentMetric]);
@@ -886,13 +1040,6 @@
                 lineChart.update();
             }
 
-            if (emailBarImage) {
-                emailBarImage.alt = emailAltLabels[resolvedMetric];
-            }
-            if (emailBarCaption) {
-                emailBarCaption.textContent = metricLabels[resolvedMetric];
-            }
-
             metricToggleInputs.forEach((input) => {
                 input.checked = input.value === resolvedMetric;
             });
@@ -1032,57 +1179,67 @@
         const emailModal = document.getElementById('emailDataModal');
         const emailModalDialog = emailModal ? emailModal.querySelector('.email-modal-dialog') : null;
         const emailCloseButtons = emailModal ? emailModal.querySelectorAll('[data-email-dismiss]') : [];
-        const emailLineImage = document.getElementById('emailDataLineImage');
-        const emailNoteContainer = document.getElementById('emailDataNote');
         const emailSubtitle = document.getElementById('emailDataSubtitle');
-        const copyEmailNoteButton = document.getElementById('copyEmailNoteButton');
-        let latestBarChartImageDataUrl = null;
+        const emailRange = document.getElementById('emailDataRange');
+        const emailSummaryField = document.getElementById('emailDataSummary');
+        const copyEmailSummaryButton = document.getElementById('copyEmailSummaryButton');
+        const summaryFallbackMessage = 'No production summary is available for the selected date.';
 
-        const renderEmailNote = () => {
-            if (!emailNoteContainer) {
+        const renderEmailSummary = () => {
+            if (!emailSummaryField) {
                 return;
             }
 
-            emailNoteContainer.innerHTML = '';
+            const hasPreview = Boolean(emailPreview && typeof emailPreview === 'object');
+            const summaryText = hasPreview && emailPreview.summary_text ? emailPreview.summary_text : '';
 
-            if (!emailPreview) {
-                const emptyMessage = document.createElement('p');
-                emptyMessage.classList.add('email-modal-note-empty');
-                emptyMessage.textContent = 'No notes are available for the selected date range.';
-                emailNoteContainer.appendChild(emptyMessage);
-                if (emailSubtitle) {
-                    emailSubtitle.textContent = '';
-                }
-                return;
-            }
-
-            const noteText = (emailPreview.notes || '').trim();
-            const noteDateParts = [emailPreview.day_of_week, emailPreview.date_display]
-                .filter(Boolean)
-                .join(', ');
             if (emailSubtitle) {
-                emailSubtitle.textContent = noteDateParts || '';
+                const noteDateParts = hasPreview
+                    ? [emailPreview.day_of_week, emailPreview.date_display].filter(Boolean).join(', ')
+                    : '';
+                emailSubtitle.textContent = noteDateParts;
             }
 
-            if (!noteText) {
-                const placeholder = document.createElement('p');
-                placeholder.classList.add('email-modal-note-empty');
-                placeholder.textContent = 'No notes were recorded for this day.';
-                emailNoteContainer.appendChild(placeholder);
-                return;
+            if (emailRange) {
+                emailRange.textContent = hasPreview && emailPreview.range_display
+                    ? emailPreview.range_display
+                    : '';
             }
 
-            noteText.split('\n').forEach((line) => {
-                const paragraph = document.createElement('p');
-                paragraph.textContent = line;
-                emailNoteContainer.appendChild(paragraph);
-            });
+            if (emailChartTitle) {
+                const titleSuffix = hasPreview
+                    ? [emailPreview.day_of_week, emailPreview.date_display].filter(Boolean).join(', ')
+                    : '';
+                emailChartTitle.textContent = titleSuffix
+                    ? `${baseEmailChartTitle} – ${titleSuffix}`
+                    : baseEmailChartTitle;
+            }
+
+            if (summaryText && summaryText.trim()) {
+                emailSummaryField.value = summaryText;
+                emailSummaryField.setAttribute(
+                    'aria-label',
+                    `Production summary text for ${hasPreview ? emailPreview.date_display : 'selected date'}`,
+                );
+                if (copyEmailSummaryButton) {
+                    copyEmailSummaryButton.disabled = false;
+                }
+            } else {
+                emailSummaryField.value = summaryFallbackMessage;
+                emailSummaryField.setAttribute('aria-label', 'No production summary available');
+                if (copyEmailSummaryButton) {
+                    copyEmailSummaryButton.disabled = true;
+                }
+            }
+
+            emailSummaryField.scrollTop = 0;
         };
 
         const closeEmailModal = () => {
             if (!emailModal) {
                 return;
             }
+            destroyEmailChart();
             emailModal.classList.add('is-hidden');
             emailModal.removeAttribute('aria-label');
         };
@@ -1092,43 +1249,39 @@
                 return;
             }
 
-            latestBarChartImageDataUrl = null;
-
-            if (emailBarImage && barChart) {
-                try {
-                    const chartImage = barChart.toBase64Image('image/png', 1);
-                    emailBarImage.src = chartImage;
-                    latestBarChartImageDataUrl = chartImage;
-                } catch (error) {
-                    emailBarImage.removeAttribute('src');
-                }
-            }
-            if (emailLineImage && lineChart) {
-                try {
-                    emailLineImage.src = lineChart.toBase64Image();
-                } catch (error) {
-                    emailLineImage.removeAttribute('src');
-                }
-            }
-
-            renderEmailNote();
+            renderEmailSummary();
 
             if (emailPreview) {
                 const labelParts = [
-                    'Email data preview',
+                    'Email summary preview',
                     emailPreview.day_of_week,
                     emailPreview.date_display,
-                ].filter(Boolean);
-                emailModal.setAttribute('aria-label', labelParts.join(': '));
+                ];
+                if (emailPreview.range_display) {
+                    labelParts.push(`Range ${emailPreview.range_display}`);
+                }
+                emailModal.setAttribute('aria-label', labelParts.filter(Boolean).join(': '));
+            } else {
+                emailModal.setAttribute('aria-label', 'Email summary preview');
             }
 
             emailModal.classList.remove('is-hidden');
             window.requestAnimationFrame(() => {
-                if (emailModalDialog) {
+                renderEmailChart();
+                if (emailSummaryField) {
+                    try {
+                        emailSummaryField.focus({ preventScroll: true });
+                    } catch (error) {
+                        emailSummaryField.focus();
+                    }
+                    emailSummaryField.select();
+                } else if (emailModalDialog) {
                     emailModalDialog.focus();
                 }
             });
         };
+
+        renderEmailSummary();
 
         if (emailButton && emailModal) {
             emailButton.addEventListener('click', openEmailModal);
@@ -1146,34 +1299,24 @@
             button.addEventListener('click', closeEmailModal);
         });
 
-        const selectEmailNoteText = () => {
-            if (!emailNoteContainer || !window.getSelection || !document.createRange) {
+        const selectSummaryText = () => {
+            if (!emailSummaryField) {
                 return;
-            }
-
-            const selection = window.getSelection();
-            if (!selection) {
-                return;
-            }
-
-            selection.removeAllRanges();
-            const range = document.createRange();
-            range.selectNodeContents(emailNoteContainer);
-            selection.addRange(range);
-        };
-
-        const dataUrlToBlob = async (dataUrl) => {
-            if (!dataUrl || typeof dataUrl !== 'string') {
-                return null;
             }
 
             try {
-                const response = await fetch(dataUrl);
-                return await response.blob();
+                emailSummaryField.focus({ preventScroll: true });
             } catch (error) {
-                return null;
+                emailSummaryField.focus();
             }
+            emailSummaryField.select();
         };
+
+        if (emailSummaryField) {
+            emailSummaryField.addEventListener('focus', () => {
+                emailSummaryField.select();
+            });
+        }
 
         const fallbackCopyToClipboard = (text) => {
             if (!document.body || typeof document.execCommand !== 'function') {
@@ -1218,7 +1361,11 @@
             return succeeded;
         };
 
-        const copyNoteToClipboard = async (text) => {
+        const copyTextToClipboard = async (text) => {
+            if (!text) {
+                return false;
+            }
+
             if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
                 try {
                     await navigator.clipboard.writeText(text);
@@ -1229,33 +1376,6 @@
             }
 
             return fallbackCopyToClipboard(text);
-        };
-
-        const copyChartAndNotesToClipboard = async (text) => {
-            if (!latestBarChartImageDataUrl) {
-                return false;
-            }
-
-            if (!navigator.clipboard || typeof navigator.clipboard.write !== 'function' || typeof ClipboardItem === 'undefined') {
-                return false;
-            }
-
-            const imageBlob = await dataUrlToBlob(latestBarChartImageDataUrl);
-            if (!imageBlob) {
-                return false;
-            }
-
-            const clipboardContents = {
-                'text/plain': new Blob([text], { type: 'text/plain' }),
-            };
-            clipboardContents[imageBlob.type || 'image/png'] = imageBlob;
-
-            try {
-                await navigator.clipboard.write([new ClipboardItem(clipboardContents)]);
-                return true;
-            } catch (error) {
-                return false;
-            }
         };
 
         const withTemporaryLabel = (button, label) => {
@@ -1273,30 +1393,27 @@
             }, 2000);
         };
 
-        if (copyEmailNoteButton) {
-            copyEmailNoteButton.addEventListener('click', async () => {
-                const noteText = emailPreview && emailPreview.notes
-                    ? emailPreview.notes.trim()
-                    : 'No notes were recorded for this day.';
-
-                const copiedChartAndNotes = await copyChartAndNotesToClipboard(noteText);
-                if (copiedChartAndNotes) {
-                    withTemporaryLabel(copyEmailNoteButton, 'Notes & chart copied!');
+        if (copyEmailSummaryButton) {
+            copyEmailSummaryButton.addEventListener('click', async () => {
+                if (!emailSummaryField) {
                     return;
                 }
 
-                const copiedNotes = await copyNoteToClipboard(noteText);
-
-                if (copiedNotes) {
-                    const fallbackLabel = latestBarChartImageDataUrl
-                        ? 'Notes copied (chart unavailable)'
-                        : 'Notes copied!';
-                    withTemporaryLabel(copyEmailNoteButton, fallbackLabel);
+                const summaryText = emailSummaryField.value.trim();
+                if (!summaryText || summaryText === summaryFallbackMessage) {
+                    withTemporaryLabel(copyEmailSummaryButton, 'Nothing to copy');
                     return;
                 }
 
-                selectEmailNoteText();
-                withTemporaryLabel(copyEmailNoteButton, 'Copy failed');
+                const copiedSummary = await copyTextToClipboard(summaryText);
+
+                if (copiedSummary) {
+                    withTemporaryLabel(copyEmailSummaryButton, 'Summary copied!');
+                    return;
+                }
+
+                selectSummaryText();
+                withTemporaryLabel(copyEmailSummaryButton, 'Copy failed');
             });
         }
     }
