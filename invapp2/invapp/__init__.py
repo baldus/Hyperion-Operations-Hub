@@ -1,8 +1,10 @@
 from datetime import date, timedelta
 
-from flask import Flask, render_template, url_for
+from flask import Flask, render_template, request, session, url_for
 from sqlalchemy import func, inspect, text
 from sqlalchemy.exc import NoSuchTableError, OperationalError
+from sqlalchemy.pool import StaticPool
+from sqlalchemy.orm.exc import DetachedInstanceError
 
 from .extensions import db, login_manager
 from .login import current_user
@@ -30,6 +32,7 @@ from .routes import (
 )
 from config import Config
 from . import models  # ensure models are registered with SQLAlchemy
+from .audit import record_access_event, resolve_client_ip
 
 
 NAVIGATION_PAGES: tuple[tuple[str, str, str], ...] = (
@@ -324,6 +327,13 @@ def create_app(config_override=None):
     if config_override:
         app.config.update(config_override)
 
+    database_uri = app.config.get("SQLALCHEMY_DATABASE_URI", "")
+    if database_uri.startswith("sqlite:///:memory:"):
+        engine_options = app.config.setdefault("SQLALCHEMY_ENGINE_OPTIONS", {})
+        connect_args = engine_options.setdefault("connect_args", {})
+        connect_args.setdefault("check_same_thread", False)
+        engine_options.setdefault("poolclass", StaticPool)
+
     # ✅ init db with app
     db.init_app(app)
     login_manager.init_app(app)
@@ -405,6 +415,64 @@ def create_app(config_override=None):
     app.register_blueprint(production.bp)
     app.register_blueprint(admin.bp)
     app.register_blueprint(users.bp)
+
+    def _should_log_request() -> bool:
+        if not request.endpoint:
+            return False
+        if request.method == "OPTIONS":
+            return False
+        if request.endpoint.startswith("static"):
+            return False
+        if request.path.startswith("/static/"):
+            return False
+        return True
+
+    def _active_user_identity() -> tuple[int | None, str | None]:
+        if not current_user.is_authenticated:
+            return None, None
+
+        user_id: int | None = None
+        username: str | None = None
+
+        raw_id = session.get("_user_id")
+        try:
+            user_id = int(raw_id) if raw_id is not None else None
+        except (TypeError, ValueError):
+            user_id = None
+
+        try:
+            username = getattr(current_user, "username", None)
+        except DetachedInstanceError:
+            username = None
+
+        if username is None and user_id is not None:
+            refreshed = models.User.query.get(user_id)
+            if refreshed is not None:
+                username = refreshed.username
+
+        return user_id, username
+
+    @app.after_request
+    def _record_request_log(response):
+        if _should_log_request():
+            path = request.full_path or request.path
+            if path.endswith("?"):
+                path = path[:-1]
+
+            user_id, username = _active_user_identity()
+            record_access_event(
+                event_type=models.AccessLog.EVENT_REQUEST,
+                user_id=user_id,
+                username=username,
+                ip_address=resolve_client_ip(),
+                user_agent=request.user_agent.string if request.user_agent else None,
+                method=request.method,
+                path=path,
+                endpoint=request.endpoint,
+                status_code=response.status_code,
+            )
+
+        return response
 
     @app.route("/")
     def home():

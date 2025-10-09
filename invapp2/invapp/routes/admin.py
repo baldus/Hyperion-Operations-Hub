@@ -17,13 +17,14 @@ from flask import (
     session,
     url_for,
 )
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, func, text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql.sqltypes import Date as SQLDate
 from sqlalchemy.sql.sqltypes import DateTime as SQLDateTime
 from sqlalchemy.sql.sqltypes import Numeric
 
+from invapp import models
 from invapp.extensions import db
 from invapp.login import current_user, login_required, logout_user
 from invapp.security import require_roles
@@ -264,6 +265,10 @@ def tools():
 
     quick_links = [
         {
+            "label": "Access Log",
+            "href": url_for("admin.access_log"),
+        },
+        {
             "label": "Reports Dashboard",
             "href": url_for("reports.reports_home"),
         },
@@ -281,6 +286,66 @@ def tools():
         "admin/tools.html",
         system_health=system_health,
         quick_links=quick_links,
+    )
+
+
+@bp.route("/access-log")
+@login_required
+@require_roles("admin")
+def access_log():
+    filters = {
+        "ip": (request.args.get("ip") or "").strip(),
+        "username": (request.args.get("username") or "").strip(),
+        "event_type": (request.args.get("event_type") or "").strip(),
+    }
+
+    query = models.AccessLog.query
+    if filters["ip"]:
+        query = query.filter(models.AccessLog.ip_address == filters["ip"])
+    if filters["username"]:
+        query = query.filter(models.AccessLog.username == filters["username"])
+    if filters["event_type"]:
+        query = query.filter(models.AccessLog.event_type == filters["event_type"])
+
+    entries = (
+        query.order_by(models.AccessLog.occurred_at.desc())
+        .limit(500)
+        .all()
+    )
+
+    ip_summary = (
+        db.session.query(
+            models.AccessLog.ip_address,
+            func.count(models.AccessLog.id).label("total"),
+        )
+        .group_by(models.AccessLog.ip_address)
+        .order_by(func.count(models.AccessLog.id).desc())
+        .limit(20)
+        .all()
+    )
+
+    event_summary = (
+        db.session.query(
+            models.AccessLog.event_type,
+            func.count(models.AccessLog.id).label("total"),
+        )
+        .group_by(models.AccessLog.event_type)
+        .all()
+    )
+
+    event_options = [
+        (key, label)
+        for key, label in models.AccessLog.EVENT_LABELS.items()
+    ]
+
+    return render_template(
+        "admin/access_log.html",
+        entries=entries,
+        filters=filters,
+        ip_summary=ip_summary,
+        event_summary=event_summary,
+        event_options=event_options,
+        models=models,
     )
 
 

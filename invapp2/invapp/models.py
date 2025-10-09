@@ -13,6 +13,47 @@ from invapp.extensions import db
 from invapp.login import UserMixin
 
 
+class AccessLog(db.Model):
+    __tablename__ = "access_log"
+
+    EVENT_REQUEST = "request"
+    EVENT_LOGIN_SUCCESS = "login_success"
+    EVENT_LOGIN_FAILURE = "login_failure"
+    EVENT_LOGOUT = "logout"
+
+    EVENT_LABELS = {
+        EVENT_REQUEST: "Request",
+        EVENT_LOGIN_SUCCESS: "Login Success",
+        EVENT_LOGIN_FAILURE: "Login Failure",
+        EVENT_LOGOUT: "Logout",
+    }
+
+    id = db.Column(db.Integer, primary_key=True)
+    occurred_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    event_type = db.Column(db.String(64), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="SET NULL"))
+    username = db.Column(db.String(255), nullable=True)
+    ip_address = db.Column(db.String(64), nullable=True)
+    user_agent = db.Column(db.String(512), nullable=True)
+    method = db.Column(db.String(16), nullable=True)
+    path = db.Column(db.String(512), nullable=True)
+    endpoint = db.Column(db.String(255), nullable=True)
+    status_code = db.Column(db.Integer, nullable=True)
+    details = db.Column(db.JSON, nullable=True)
+
+    user = db.relationship("User", backref=db.backref("access_logs", lazy="dynamic"))
+
+    __table_args__ = (
+        db.Index("ix_access_log_occurred_at", "occurred_at"),
+        db.Index("ix_access_log_event_type", "event_type"),
+    )
+
+    @classmethod
+    def label_for_event(cls, event_type: str) -> str:
+        return cls.EVENT_LABELS.get(event_type, event_type.title())
+
+
+
 class ProductionChartSettings(db.Model):
     __tablename__ = "production_chart_settings"
 
