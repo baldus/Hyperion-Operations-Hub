@@ -2796,9 +2796,19 @@ body.light .chart-modal-close {
     font-weight: 600;
 }
 
-.email-modal-visual canvas {
+
+.email-modal-chart-area {
+    position: relative;
     width: 100%;
-    min-height: 220px;
+    flex: 1;
+    min-height: 240px;
+}
+
+.email-modal-chart-area canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
 }
 
 .email-modal-summary-label {
