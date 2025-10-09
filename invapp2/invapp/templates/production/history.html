@@ -82,22 +82,22 @@
             <div class="email-modal-header">
                 <h3 id="emailDataTitle">Email Data Preview</h3>
                 <p id="emailDataSubtitle" class="email-modal-subtitle"></p>
+                <p id="emailDataRange" class="email-modal-subtitle"></p>
             </div>
-            <div class="email-modal-note" id="emailDataNote"></div>
+            <div class="email-modal-note">
+                <label for="emailDataSummary" class="email-modal-summary-label">Summary text</label>
+                <textarea id="emailDataSummary" class="email-modal-summary-field" rows="14" readonly spellcheck="false"></textarea>
+            </div>
+            <div class="email-modal-visual">
+                <h4 id="emailDataChartTitle">Gates Packaged by Customer</h4>
+                <div class="email-modal-chart-area">
+                    <canvas id="emailDataChart" aria-labelledby="emailDataChartTitle"></canvas>
+                </div>
+            </div>
             <div class="email-modal-actions">
-                <button type="button" class="action-btn email-modal-copy-button" id="copyEmailNoteButton">Copy Notes</button>
+                <button type="button" class="action-btn email-modal-copy-button" id="copyEmailSummaryButton">Copy Summary &amp; Chart</button>
             </div>
-            <div class="email-modal-gallery">
-                <figure>
-                    <img id="emailDataBarImage" alt="Gates produced chart preview">
-                    <figcaption id="emailDataBarCaption">Gates Produced by Customer</figcaption>
-                </figure>
-                <figure>
-                    <img id="emailDataLineImage" alt="Cumulative production chart preview">
-                    <figcaption>Cumulative Production Totals</figcaption>
-                </figure>
-            </div>
-            <p class="email-modal-hint">Right-click an image to copy it into your email message.</p>
+            <p class="email-modal-hint">Copy the summary to share the day's production details, date range, and packaged chart in Outlook.</p>
         </div>
     </div>
 
@@ -649,6 +649,10 @@
             },
         };
 
+        const goalOverlayDataset = originalOverlayDatasets.find(
+            (dataset) => dataset && dataset.label === 'Gates Goal',
+        );
+
         const metricLabels = {
             produced: 'Gates Produced by Customer',
             packaged: 'Gates Packaged by Customer',
@@ -656,10 +660,6 @@
         const canvasAriaLabels = {
             produced: 'Stacked column chart showing gates produced per customer',
             packaged: 'Stacked column chart showing gates packaged per customer',
-        };
-        const emailAltLabels = {
-            produced: 'Gates produced chart preview',
-            packaged: 'Gates packaged chart preview',
         };
 
         const cloneAndFilterDataset = (dataset, includeWeekends) => {
@@ -706,16 +706,36 @@
             };
         };
 
+        const buildEmailChartData = (includeWeekends) => {
+            const labels = includeWeekends
+                ? originalLabels.slice()
+                : originalLabels.filter((_, index) => !weekendMask[index]);
+
+            const stacked = datasetConfigs.packaged.stacked.map((dataset) =>
+                cloneAndFilterDataset(dataset, includeWeekends)
+            );
+
+            const overlays = [];
+            if (goalOverlayDataset) {
+                overlays.push(cloneAndFilterDataset(goalOverlayDataset, includeWeekends));
+            }
+
+            return {
+                labels,
+                datasets: stacked.concat(overlays),
+            };
+        };
+
         let currentIncludeWeekends = true;
         let currentMetric = 'produced';
         const collapseToggle = document.getElementById('collapseWeekendsToggle');
         const metricToggleInputs = Array.from(document.querySelectorAll('input[name="gatesMetric"]'));
         const barContext = document.getElementById('gatesProducedChart');
         const lineContext = document.getElementById('cumulativeChart');
-        const emailBarImage = document.getElementById('emailDataBarImage');
-        const emailBarCaption = document.getElementById('emailDataBarCaption');
+        const emailChartCanvas = document.getElementById('emailDataChart');
         let barChart = null;
         let lineChart = null;
+        let emailChart = null;
 
         if (collapseToggle) {
             collapseToggle.checked = !currentIncludeWeekends;
@@ -726,8 +746,7 @@
 
         const initialState = buildChartData(currentIncludeWeekends, currentMetric);
 
-        if (barContext) {
-            barContext.setAttribute('aria-label', canvasAriaLabels[currentMetric]);
+        const buildPrimaryScaleConfig = () => {
             const primaryScale = {
                 stacked: true,
                 beginAtZero: chartAxisSettings.primary.min === null,
@@ -749,6 +768,10 @@
                 });
             }
 
+            return primaryScale;
+        };
+
+        const buildSecondaryScaleConfig = () => {
             const secondaryScale = {
                 position: 'right',
                 beginAtZero: chartAxisSettings.secondary.min === null,
@@ -772,6 +795,11 @@
                 });
             }
 
+            return secondaryScale;
+        };
+
+        if (barContext) {
+            barContext.setAttribute('aria-label', canvasAriaLabels[currentMetric]);
             barChart = new Chart(barContext, {
 
                 type: 'bar',
@@ -807,8 +835,8 @@
                         x: {
                             stacked: true,
                         },
-                        y: primaryScale,
-                        'y-output': secondaryScale,
+                        y: buildPrimaryScaleConfig(),
+                        'y-output': buildSecondaryScaleConfig(),
                     },
                 },
             });
@@ -886,19 +914,22 @@
                 lineChart.update();
             }
 
-            if (emailBarImage) {
-                emailBarImage.alt = emailAltLabels[resolvedMetric];
-            }
-            if (emailBarCaption) {
-                emailBarCaption.textContent = metricLabels[resolvedMetric];
-            }
-
             metricToggleInputs.forEach((input) => {
                 input.checked = input.value === resolvedMetric;
             });
 
             if (collapseToggle) {
                 collapseToggle.checked = !includeWeekends;
+            }
+
+            if (emailChart) {
+                const emailState = buildEmailChartData(includeWeekends);
+                emailChart.data.labels = emailState.labels;
+                emailChart.data.datasets = emailState.datasets;
+                if (emailChart.options?.plugins?.weekendBackground) {
+                    emailChart.options.plugins.weekendBackground.enabled = includeWeekends;
+                }
+                emailChart.update();
             }
 
             currentMetric = resolvedMetric;
@@ -1032,51 +1063,139 @@
         const emailModal = document.getElementById('emailDataModal');
         const emailModalDialog = emailModal ? emailModal.querySelector('.email-modal-dialog') : null;
         const emailCloseButtons = emailModal ? emailModal.querySelectorAll('[data-email-dismiss]') : [];
-        const emailLineImage = document.getElementById('emailDataLineImage');
-        const emailNoteContainer = document.getElementById('emailDataNote');
         const emailSubtitle = document.getElementById('emailDataSubtitle');
-        const copyEmailNoteButton = document.getElementById('copyEmailNoteButton');
-        let latestBarChartImageDataUrl = null;
+        const emailRange = document.getElementById('emailDataRange');
+        const emailSummaryField = document.getElementById('emailDataSummary');
+        const copyEmailSummaryButton = document.getElementById('copyEmailSummaryButton');
+        const summaryFallbackMessage = 'No production summary is available for the selected date.';
 
-        const renderEmailNote = () => {
-            if (!emailNoteContainer) {
+        const escapeHtml = (value) => {
+            if (value === null || value === undefined) {
+                return '';
+            }
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        };
+
+        const buildClipboardHtml = (summaryText, chartDataUrl) => {
+            const textLines = summaryText.split(/\r?\n/);
+            const textMarkup = textLines
+                .map((line) => `<div>${line.trim() ? escapeHtml(line) : '&nbsp;'}</div>`)
+                .join('');
+
+            const chartMarkup = chartDataUrl
+                ? `<div style="margin-top: 12px;"><img src="${chartDataUrl}" alt="Gates packaged by customer chart" style="max-width: 640px; width: 100%; height: auto;"></div>`
+                : '';
+
+            return `
+                <div style="font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; font-size: 14px; line-height: 1.4; color: #0f172a;">
+                    ${textMarkup}
+                    ${chartMarkup}
+                </div>
+            `.trim();
+        };
+
+        const ensureEmailChart = (includeWeekends) => {
+            if (!emailChartCanvas || typeof Chart === 'undefined') {
                 return;
             }
 
-            emailNoteContainer.innerHTML = '';
+            const emailState = buildEmailChartData(includeWeekends);
 
-            if (!emailPreview) {
-                const emptyMessage = document.createElement('p');
-                emptyMessage.classList.add('email-modal-note-empty');
-                emptyMessage.textContent = 'No notes are available for the selected date range.';
-                emailNoteContainer.appendChild(emptyMessage);
-                if (emailSubtitle) {
-                    emailSubtitle.textContent = '';
+            if (emailChart) {
+                emailChart.data.labels = emailState.labels;
+                emailChart.data.datasets = emailState.datasets;
+                if (emailChart.options?.plugins?.weekendBackground) {
+                    emailChart.options.plugins.weekendBackground.enabled = includeWeekends;
                 }
+                emailChart.update();
                 return;
             }
 
-            const noteText = (emailPreview.notes || '').trim();
-            const noteDateParts = [emailPreview.day_of_week, emailPreview.date_display]
-                .filter(Boolean)
-                .join(', ');
-            if (emailSubtitle) {
-                emailSubtitle.textContent = noteDateParts || '';
-            }
-
-            if (!noteText) {
-                const placeholder = document.createElement('p');
-                placeholder.classList.add('email-modal-note-empty');
-                placeholder.textContent = 'No notes were recorded for this day.';
-                emailNoteContainer.appendChild(placeholder);
-                return;
-            }
-
-            noteText.split('\n').forEach((line) => {
-                const paragraph = document.createElement('p');
-                paragraph.textContent = line;
-                emailNoteContainer.appendChild(paragraph);
+            emailChart = new Chart(emailChartCanvas, {
+                type: 'bar',
+                data: {
+                    labels: emailState.labels,
+                    datasets: emailState.datasets,
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        weekendBackground: {
+                            enabled: includeWeekends,
+                            color: 'rgba(0, 0, 0, 0.08)',
+                        },
+                        stackedTotals: {
+                            enabled: true,
+                            color: '#0f172a',
+                            font: {
+                                weight: '600',
+                            },
+                            yOffset: -8,
+                        },
+                        title: {
+                            display: true,
+                            text: 'Gates Packaged by Customer',
+                        },
+                        legend: {
+                            position: 'bottom',
+                        },
+                    },
+                    scales: {
+                        x: {
+                            stacked: true,
+                        },
+                        y: buildPrimaryScaleConfig(),
+                        'y-output': buildSecondaryScaleConfig(),
+                    },
+                },
             });
+        };
+
+        const renderEmailSummary = () => {
+            if (!emailSummaryField) {
+                return;
+            }
+
+            const hasPreview = Boolean(emailPreview && typeof emailPreview === 'object');
+            const summaryText = hasPreview && emailPreview.summary_text ? emailPreview.summary_text : '';
+
+            if (emailSubtitle) {
+                const noteDateParts = hasPreview
+                    ? [emailPreview.day_of_week, emailPreview.date_display].filter(Boolean).join(', ')
+                    : '';
+                emailSubtitle.textContent = noteDateParts;
+            }
+
+            if (emailRange) {
+                emailRange.textContent = hasPreview && emailPreview.range_display
+                    ? emailPreview.range_display
+                    : '';
+            }
+
+            if (summaryText && summaryText.trim()) {
+                emailSummaryField.value = summaryText;
+                emailSummaryField.setAttribute(
+                    'aria-label',
+                    `Production summary text for ${hasPreview ? emailPreview.date_display : 'selected date'}`,
+                );
+                if (copyEmailSummaryButton) {
+                    copyEmailSummaryButton.disabled = false;
+                }
+            } else {
+                emailSummaryField.value = summaryFallbackMessage;
+                emailSummaryField.setAttribute('aria-label', 'No production summary available');
+                if (copyEmailSummaryButton) {
+                    copyEmailSummaryButton.disabled = true;
+                }
+            }
+
+            emailSummaryField.scrollTop = 0;
         };
 
         const closeEmailModal = () => {
@@ -1092,43 +1211,39 @@
                 return;
             }
 
-            latestBarChartImageDataUrl = null;
-
-            if (emailBarImage && barChart) {
-                try {
-                    const chartImage = barChart.toBase64Image('image/png', 1);
-                    emailBarImage.src = chartImage;
-                    latestBarChartImageDataUrl = chartImage;
-                } catch (error) {
-                    emailBarImage.removeAttribute('src');
-                }
-            }
-            if (emailLineImage && lineChart) {
-                try {
-                    emailLineImage.src = lineChart.toBase64Image();
-                } catch (error) {
-                    emailLineImage.removeAttribute('src');
-                }
-            }
-
-            renderEmailNote();
+            ensureEmailChart(currentIncludeWeekends);
+            renderEmailSummary();
 
             if (emailPreview) {
                 const labelParts = [
-                    'Email data preview',
+                    'Email summary preview',
                     emailPreview.day_of_week,
                     emailPreview.date_display,
-                ].filter(Boolean);
-                emailModal.setAttribute('aria-label', labelParts.join(': '));
+                ];
+                if (emailPreview.range_display) {
+                    labelParts.push(`Range ${emailPreview.range_display}`);
+                }
+                emailModal.setAttribute('aria-label', labelParts.filter(Boolean).join(': '));
+            } else {
+                emailModal.setAttribute('aria-label', 'Email summary preview');
             }
 
             emailModal.classList.remove('is-hidden');
             window.requestAnimationFrame(() => {
-                if (emailModalDialog) {
+                if (emailSummaryField) {
+                    try {
+                        emailSummaryField.focus({ preventScroll: true });
+                    } catch (error) {
+                        emailSummaryField.focus();
+                    }
+                    emailSummaryField.select();
+                } else if (emailModalDialog) {
                     emailModalDialog.focus();
                 }
             });
         };
+
+        renderEmailSummary();
 
         if (emailButton && emailModal) {
             emailButton.addEventListener('click', openEmailModal);
@@ -1146,34 +1261,24 @@
             button.addEventListener('click', closeEmailModal);
         });
 
-        const selectEmailNoteText = () => {
-            if (!emailNoteContainer || !window.getSelection || !document.createRange) {
+        const selectSummaryText = () => {
+            if (!emailSummaryField) {
                 return;
-            }
-
-            const selection = window.getSelection();
-            if (!selection) {
-                return;
-            }
-
-            selection.removeAllRanges();
-            const range = document.createRange();
-            range.selectNodeContents(emailNoteContainer);
-            selection.addRange(range);
-        };
-
-        const dataUrlToBlob = async (dataUrl) => {
-            if (!dataUrl || typeof dataUrl !== 'string') {
-                return null;
             }
 
             try {
-                const response = await fetch(dataUrl);
-                return await response.blob();
+                emailSummaryField.focus({ preventScroll: true });
             } catch (error) {
-                return null;
+                emailSummaryField.focus();
             }
+            emailSummaryField.select();
         };
+
+        if (emailSummaryField) {
+            emailSummaryField.addEventListener('focus', () => {
+                emailSummaryField.select();
+            });
+        }
 
         const fallbackCopyToClipboard = (text) => {
             if (!document.body || typeof document.execCommand !== 'function') {
@@ -1218,7 +1323,53 @@
             return succeeded;
         };
 
-        const copyNoteToClipboard = async (text) => {
+        const fallbackCopyRichContent = (htmlContent) => {
+            if (!document.body || typeof document.execCommand !== 'function') {
+                return false;
+            }
+
+            const hiddenContainer = document.createElement('div');
+            hiddenContainer.innerHTML = htmlContent;
+            hiddenContainer.setAttribute('aria-hidden', 'true');
+            hiddenContainer.style.position = 'fixed';
+            hiddenContainer.style.top = '-1000px';
+            hiddenContainer.style.left = '-1000px';
+            hiddenContainer.style.opacity = '0';
+            hiddenContainer.style.pointerEvents = 'none';
+            hiddenContainer.style.maxWidth = '700px';
+
+            document.body.appendChild(hiddenContainer);
+
+            const selection = window.getSelection ? window.getSelection() : null;
+            const range = document.createRange ? document.createRange() : null;
+
+            if (!selection || !range) {
+                hiddenContainer.remove();
+                return false;
+            }
+
+            selection.removeAllRanges();
+            range.selectNodeContents(hiddenContainer);
+            selection.addRange(range);
+
+            let succeeded = false;
+            try {
+                succeeded = document.execCommand('copy');
+            } catch (error) {
+                succeeded = false;
+            }
+
+            selection.removeAllRanges();
+            hiddenContainer.remove();
+
+            return succeeded;
+        };
+
+        const copyTextToClipboard = async (text) => {
+            if (!text) {
+                return false;
+            }
+
             if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
                 try {
                     await navigator.clipboard.writeText(text);
@@ -1231,31 +1382,34 @@
             return fallbackCopyToClipboard(text);
         };
 
-        const copyChartAndNotesToClipboard = async (text) => {
-            if (!latestBarChartImageDataUrl) {
+        const copySummaryToClipboard = async (summaryText) => {
+            if (!summaryText) {
                 return false;
             }
 
-            if (!navigator.clipboard || typeof navigator.clipboard.write !== 'function' || typeof ClipboardItem === 'undefined') {
-                return false;
+            const chartDataUrl = emailChartCanvas ? emailChartCanvas.toDataURL('image/png') : null;
+            const htmlContent = chartDataUrl ? buildClipboardHtml(summaryText, chartDataUrl) : null;
+
+            if (htmlContent && navigator.clipboard && typeof navigator.clipboard.write === 'function' && window.ClipboardItem) {
+                try {
+                    const clipboardItems = {
+                        'text/plain': new Blob([summaryText], { type: 'text/plain' }),
+                        'text/html': new Blob([htmlContent], { type: 'text/html' }),
+                    };
+
+                    const clipboardItem = new ClipboardItem(clipboardItems);
+                    await navigator.clipboard.write([clipboardItem]);
+                    return true;
+                } catch (error) {
+                    // Fall through to legacy approaches if direct clipboard access fails.
+                }
             }
 
-            const imageBlob = await dataUrlToBlob(latestBarChartImageDataUrl);
-            if (!imageBlob) {
-                return false;
-            }
-
-            const clipboardContents = {
-                'text/plain': new Blob([text], { type: 'text/plain' }),
-            };
-            clipboardContents[imageBlob.type || 'image/png'] = imageBlob;
-
-            try {
-                await navigator.clipboard.write([new ClipboardItem(clipboardContents)]);
+            if (htmlContent && fallbackCopyRichContent(htmlContent)) {
                 return true;
-            } catch (error) {
-                return false;
             }
+
+            return copyTextToClipboard(summaryText);
         };
 
         const withTemporaryLabel = (button, label) => {
@@ -1273,30 +1427,27 @@
             }, 2000);
         };
 
-        if (copyEmailNoteButton) {
-            copyEmailNoteButton.addEventListener('click', async () => {
-                const noteText = emailPreview && emailPreview.notes
-                    ? emailPreview.notes.trim()
-                    : 'No notes were recorded for this day.';
-
-                const copiedChartAndNotes = await copyChartAndNotesToClipboard(noteText);
-                if (copiedChartAndNotes) {
-                    withTemporaryLabel(copyEmailNoteButton, 'Notes & chart copied!');
+        if (copyEmailSummaryButton) {
+            copyEmailSummaryButton.addEventListener('click', async () => {
+                if (!emailSummaryField) {
                     return;
                 }
 
-                const copiedNotes = await copyNoteToClipboard(noteText);
-
-                if (copiedNotes) {
-                    const fallbackLabel = latestBarChartImageDataUrl
-                        ? 'Notes copied (chart unavailable)'
-                        : 'Notes copied!';
-                    withTemporaryLabel(copyEmailNoteButton, fallbackLabel);
+                const summaryText = emailSummaryField.value.trim();
+                if (!summaryText || summaryText === summaryFallbackMessage) {
+                    withTemporaryLabel(copyEmailSummaryButton, 'Nothing to copy');
                     return;
                 }
 
-                selectEmailNoteText();
-                withTemporaryLabel(copyEmailNoteButton, 'Copy failed');
+                const copiedSummary = await copySummaryToClipboard(summaryText);
+
+                if (copiedSummary) {
+                    withTemporaryLabel(copyEmailSummaryButton, 'Summary & chart copied!');
+                    return;
+                }
+
+                selectSummaryText();
+                withTemporaryLabel(copyEmailSummaryButton, 'Copy failed');
             });
         }
     }
