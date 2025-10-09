@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+import csv
+import io
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import date
 from itertools import zip_longest
@@ -9,6 +11,7 @@ from typing import Any, Dict, List
 
 from flask import (
     Blueprint,
+    Response,
     flash,
     redirect,
     render_template,
@@ -975,15 +978,8 @@ def daily_entry():
     )
 
 
-@bp.route("/history")
-def history():
+def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
     customers = _active_customers()
-
-    today = date.today()
-    start_date = _parse_date(request.args.get("start_date")) or today.replace(day=1)
-    end_date = _parse_date(request.args.get("end_date")) or today
-    if end_date < start_date:
-        start_date, end_date = end_date, start_date
 
     chart_settings = ProductionChartSettings.get_or_create()
 
@@ -1353,23 +1349,150 @@ def history():
             "notes": preview_record.daily_notes or "",
         }
 
+    return {
+        "customers": table_customers,
+        "chart_customers": stack_customers,
+        "grouped_customer_names": grouped_names,
+        "table_rows": table_rows,
+        "chart_labels": chart_labels,
+        "stacked_datasets": stack_datasets,
+        "packaged_datasets": packaged_stack_datasets,
+        "line_datasets": line_datasets,
+        "overlay_datasets": overlay_datasets,
+        "chart_axis_settings": chart_axis_settings,
+        "email_preview": email_preview,
+    }
+
+
+@bp.route("/history")
+def history():
+    today = date.today()
+    start_date = _parse_date(request.args.get("start_date")) or today.replace(day=1)
+    end_date = _parse_date(request.args.get("end_date")) or today
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+
+    context = _build_history_context(start_date, end_date)
     return render_template(
         "production/history.html",
-        customers=table_customers,
-        chart_customers=stack_customers,
-        grouped_customer_names=grouped_names,
-
-        table_rows=table_rows,
-        chart_labels=chart_labels,
-        stacked_datasets=stack_datasets,
-        packaged_datasets=packaged_stack_datasets,
-        line_datasets=line_datasets,
-        overlay_datasets=overlay_datasets,
-        chart_axis_settings=chart_axis_settings,
         start_date=start_date,
         end_date=end_date,
-        email_preview=email_preview,
+        **context,
     )
+
+
+@bp.route("/history/export")
+def history_export():
+    today = date.today()
+    start_date = _parse_date(request.args.get("start_date")) or today.replace(day=1)
+    end_date = _parse_date(request.args.get("end_date")) or today
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+
+    context = _build_history_context(start_date, end_date)
+    customers = context["customers"]
+    table_rows = context["table_rows"]
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    header = [
+        "Date",
+        "Day",
+        "Gates Produced Total",
+        "Gates Packaged Total",
+        "Gates Combined Total",
+    ]
+    for customer in customers:
+        header.append(f"Gates Produced - {customer.name}")
+    for customer in customers:
+        header.append(f"Gates Packaged - {customer.name}")
+    header.extend(
+        [
+            "Gate Employees",
+            "Gate OT Hours",
+            "Gate Total Hours",
+            "Output per Labor Hour",
+            "Output Variables",
+            "Controllers Total",
+            "Controllers (4 Stop)",
+            "Controllers (6 Stop)",
+            "Door Locks Total",
+            "Door Locks (LH)",
+            "Door Locks (RH)",
+            "Operators Produced",
+            "COPs Produced",
+            "Additional Employees",
+            "Additional OT Hours",
+            "Additional Total Hours",
+            "Additional Output Details",
+            "Additional Output Total",
+            "Notes",
+        ]
+    )
+    writer.writerow(header)
+
+    for row in table_rows:
+        record: ProductionDailyRecord = row["record"]
+        produced_breakdown = row["per_customer_produced"]
+        packaged_breakdown = row["per_customer_packaged"]
+        csv_row = [
+            record.entry_date.strftime("%Y-%m-%d"),
+            record.day_of_week or record.entry_date.strftime("%A"),
+            row["produced_sum"],
+            row["packaged_sum"],
+            row["gates_combined_total"],
+        ]
+        for customer in customers:
+            csv_row.append(produced_breakdown.get(customer.id, 0))
+        for customer in customers:
+            csv_row.append(packaged_breakdown.get(customer.id, 0))
+        output_variables = "; ".join(
+            f"{variable['label']}: {variable['value']}"
+            for variable in row["output_variables"]
+        )
+        additional_details = "; ".join(
+            f"{metric['label']}: {metric['per_hour']}"
+            for metric in row["additional_per_hour"]
+        )
+        additional_total = (
+            _format_decimal(row["additional_output_total_value"])
+            if row["additional_per_hour"]
+            else ""
+        )
+        csv_row.extend(
+            [
+                row["gates_employees"],
+                row["gates_hours_ot"],
+                row["gates_total_hours"],
+                row["gates_output_per_hour"] or "",
+                output_variables,
+                row["controllers_total"],
+                record.controllers_4_stop or 0,
+                record.controllers_6_stop or 0,
+                row["door_locks_total"],
+                record.door_locks_lh or 0,
+                record.door_locks_rh or 0,
+                row["operators_total"],
+                row["cops_total"],
+                row["additional_employees"],
+                row["additional_hours_ot"],
+                row["additional_total_hours"],
+                additional_details,
+                additional_total,
+                record.daily_notes or "",
+            ]
+        )
+        writer.writerow(csv_row)
+
+    filename = (
+        f"production_history_{start_date.isoformat()}_{end_date.isoformat()}.csv"
+    )
+    response = Response(output.getvalue(), mimetype="text/csv")
+    response.headers["Content-Disposition"] = (
+        f"attachment; filename={filename}"
+    )
+    return response
 
 
 @bp.route("/settings", methods=["GET", "POST"])
