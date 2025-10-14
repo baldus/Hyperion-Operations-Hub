@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 from flask import Flask, render_template, request, session, url_for
 from sqlalchemy import func, inspect, text
-from sqlalchemy.exc import NoSuchTableError, OperationalError
+from sqlalchemy.exc import IntegrityError, NoSuchTableError, OperationalError
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm.exc import DetachedInstanceError
 
@@ -51,23 +51,30 @@ def _ensure_superuser_account(admin_username: str, admin_password: str) -> None:
     if not admin_username:
         return
 
-    admin_role = models.Role.query.filter_by(name="admin").first()
-    if admin_role is None:
-        admin_role = models.Role(name="admin", description="Administrator")
-        db.session.add(admin_role)
+    for attempt in range(3):
+        try:
+            admin_role = models.Role.query.filter_by(name="admin").first()
+            if admin_role is None:
+                admin_role = models.Role(name="admin", description="Administrator")
+                db.session.add(admin_role)
 
-    user = models.User.query.filter_by(username=admin_username).first()
-    if user is None:
-        user = models.User(username=admin_username)
-        db.session.add(user)
+            user = models.User.query.filter_by(username=admin_username).first()
+            if user is None:
+                user = models.User(username=admin_username)
+                db.session.add(user)
 
-    if admin_password:
-        user.set_password(admin_password)
+            if admin_password:
+                user.set_password(admin_password)
 
-    if admin_role not in user.roles:
-        user.roles.append(admin_role)
+            if admin_role not in user.roles:
+                user.roles.append(admin_role)
 
-    db.session.commit()
+            db.session.commit()
+            return
+        except IntegrityError:
+            db.session.rollback()
+            if attempt == 2:
+                raise
 
 
 def _ensure_core_roles() -> None:
