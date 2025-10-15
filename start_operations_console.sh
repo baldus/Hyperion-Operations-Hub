@@ -35,7 +35,7 @@ else
 fi
 
 if [ -z "${DB_URL:-}" ]; then
-    export DB_URL="postgresql+psycopg2://inv:change_me@localhost/invdb"
+    export DB_URL="postgresql+psycopg://inv:change_me@localhost/invdb"
     echo "⚠️ DB_URL not found; defaulting to $DB_URL"
 else
     echo "✅ Using DB_URL=$DB_URL"

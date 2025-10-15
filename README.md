@@ -45,7 +45,7 @@ It supports tracking items, locations, stock balances, receiving, cycle counts, 
 |------------|------------|
 | Backend    | Flask, SQLAlchemy |
 | Frontend   | Jinja2 templates (dark-friendly theme) |
-| Database   | PostgreSQL (via `psycopg2`) |
+| Database   | PostgreSQL (via `psycopg`) |
 | Platform   | Linux edge hardware (Raspberry Pi recommended) |
 
 Project layout highlights:
@@ -86,7 +86,7 @@ network wedge barcode scanners for the smoothest operator experience.
 ### Software
 - Python 3.10+
 - PostgreSQL 13 or newer
-- `libpq` client libraries (for compiling/installing `psycopg2` on Debian/Raspberry Pi)
+- (Optional) PostgreSQL client libraries if building `psycopg` from source on Debian/Raspberry Pi
 - `pip`, `setuptools`, and `wheel`
 
 ### Recommended Hardware
@@ -119,13 +119,13 @@ For a reliable shop-floor deployment, start with the following baseline. See the
    pip install -r requirements.txt
    ```
 
-   > The application expects PostgreSQL connectivity via `psycopg2-binary`. On Debian/Raspberry Pi systems ensure the `libpq` client libraries are installed (`sudo apt install libpq5 libpq-dev`).
+   > The application expects PostgreSQL connectivity via `psycopg[binary,pool]`. The binary wheel ships with its own libpq; if you need to build from source install `libpq5 libpq-dev` first.
 
 3. Set up your database and environment variables (see [`config.py`](invapp2/config.py) for all available options):
 
    | Variable | Description | Example |
    |----------|-------------|---------|
-   | `DB_URL` | SQLAlchemy connection string for PostgreSQL. | `postgresql+psycopg2://USER:PASSWORD@localhost/invdb` |
+   | `DB_URL` | SQLAlchemy connection string for PostgreSQL. | `postgresql+psycopg://USER:PASSWORD@localhost/invdb` |
    | `SECRET_KEY` | Flask secret used for sessions and CSRF protection. | `export SECRET_KEY="change_me"` |
    | `ADMIN_USER` | Username for the default superuser created on startup. | `export ADMIN_USER="superuser"` |
    | `ADMIN_PASSWORD` | Password applied to the default superuser account. | `export ADMIN_PASSWORD="change_me"` |
@@ -135,7 +135,7 @@ For a reliable shop-floor deployment, start with the following baseline. See the
    Export the values and initialize the schema:
 
    ```bash
-   export DB_URL="postgresql+psycopg2://USER:PASSWORD@localhost/invdb"
+   export DB_URL="postgresql+psycopg://USER:PASSWORD@localhost/invdb"
    export SECRET_KEY="change_me"
    export ADMIN_USER="superuser"
    export ADMIN_PASSWORD="change_me"
@@ -196,7 +196,7 @@ All configuration values are read from environment variables with sane defaults 
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `DB_URL` | SQLAlchemy connection string for PostgreSQL | `postgresql+psycopg2://inv:change_me@localhost/invdb` |
+| `DB_URL` | SQLAlchemy connection string for PostgreSQL | `postgresql+psycopg://inv:change_me@localhost/invdb` |
 | `SECRET_KEY` | Flask session secret | `supersecret` |
 | `ADMIN_USER` | Username for the seed superuser created at startup | `superuser` |
 | `ADMIN_PASSWORD` | Password applied to the seed superuser | `joshbaldus` |

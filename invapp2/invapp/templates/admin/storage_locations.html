@@ -37,7 +37,7 @@
     <form method="post" class="storage-form">
         <div class="form-field">
             <label class="field-label" for="new-database-url">New database URL</label>
-            <input id="new-database-url" type="text" name="new_database_url" placeholder="postgresql+psycopg2://user:pass@host/dbname" value="{{ request.form.get('new_database_url', '') }}" required>
+            <input id="new-database-url" type="text" name="new_database_url" placeholder="postgresql+psycopg://user:pass@host/dbname" value="{{ request.form.get('new_database_url', '') }}" required>
         </div>
         <div class="form-field">
             <label class="field-label" for="confirm-phrase">Confirmation</label>

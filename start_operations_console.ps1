@@ -39,19 +39,19 @@ else {
 }
 
 if (-not $env:DB_URL) {
-    $env:DB_URL = 'postgresql+psycopg2://inv:change_me@localhost/invdb'
+    $env:DB_URL = 'postgresql+psycopg://inv:change_me@localhost/invdb'
     Write-Warning "DB_URL not found; defaulting to $($env:DB_URL)"
 }
 else {
     Write-Host "✅ Using DB_URL=$($env:DB_URL)"
 }
 
-$host = if ($env:HOST) { $env:HOST } else { '0.0.0.0' }
+$bindHost = if ($env:HOST) { $env:HOST } else { '0.0.0.0' }
 $port = if ($env:PORT) { $env:PORT } else { '8000' }
 $threads = if ($env:WAITRESS_THREADS) { $env:WAITRESS_THREADS } else { '4' }
 
-Write-Host "🔹 Starting Hyperion Operations Console via Waitress ($host`:$port)"
+Write-Host "🔹 Starting Hyperion Operations Console via Waitress ($bindHost`:$port)"
 
-$waitressArgs = @("--listen=$host`:$port", "--threads=$threads", $appModule)
+$waitressArgs = @("--listen=$bindHost`:$port", "--threads=$threads", $appModule)
 
 & waitress-serve @waitressArgs

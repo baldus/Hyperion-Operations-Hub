@@ -90,7 +90,7 @@ Back up the credentials in a secure location.
 3. **Configure environment variables:**
    Create `/opt/invapp2/.env` (if you use `direnv` or `systemd` EnvironmentFile) with values:
    ```bash
-   DB_URL=postgresql+psycopg2://inv:change_me@localhost/invdb
+   DB_URL=postgresql+psycopg://inv:change_me@localhost/invdb
    SECRET_KEY=super-secret
    ADMIN_SESSION_TIMEOUT=600
    ZEBRA_PRINTER_HOST=printer.local

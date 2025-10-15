@@ -7,7 +7,7 @@ waitress==2.1.2
 # Database integration
 Flask-SQLAlchemy==2.5.1
 SQLAlchemy==1.4.52
-psycopg2-binary==2.9.9
+psycopg[binary,pool]==3.2.10
 
 # Authentication
 Flask-Login==0.6.3
