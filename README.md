@@ -161,6 +161,15 @@ For a reliable shop-floor deployment, start with the following baseline. See the
 
    > Need a quick development server? You can still run `flask --app app run --debug` locally, but avoid using it in production.
 
+   On Windows hosts you can run the PowerShell helper, which provisions a virtual environment and starts Waitress (a cross-platform WSGI server):
+
+   ```powershell
+   Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+   .\start_operations_console.ps1
+   ```
+
+   The script honors the same environment variables (`APP_DIR`, `VENV_DIR`, `REQUIREMENTS_FILE`, `APP_MODULE`, `HOST`, `PORT`) and adds `WAITRESS_THREADS` for thread tuning.
+
 5. **Access the UI** at `http://<host-or-pi-ip>:8000`.
 
 6. **Run automated tests** (optional):
