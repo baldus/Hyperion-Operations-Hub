@@ -161,14 +161,16 @@ For a reliable shop-floor deployment, start with the following baseline. See the
 
 ### 🪟 Windows bootstrap
 
-Run the PowerShell helper script once from an elevated prompt to install Python,
-PostgreSQL (via `winget`), create a virtual environment, and install the required
-Python packages:
+Run the bootstrapper from an elevated Command Prompt (right-click → **Run as administrator**) to install Python, PostgreSQL (via `winget`), create a virtual environment, and install the required Python packages:
 
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass -Force
-./setup_windows.ps1
+```bat
+setup_windows.cmd
 ```
+
+> Prefer PowerShell? Launch it as administrator and run:
+> ```powershell
+> powershell -ExecutionPolicy Bypass -File ./setup_windows.ps1
+> ```
 
 > If PostgreSQL is already installed or you prefer to manage it manually, append
 > the `-SkipPostgres` flag when invoking the script. The script also produces an
