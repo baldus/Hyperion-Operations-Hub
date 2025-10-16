@@ -1,20 +1,20 @@
 # Database Schema Overview
 
-This guide summarizes the structure of the Hyperion Operations Hub database. It highlights the core tables, their key fields, and how the different areas of the system (inventory, production, work orders, and authentication) link together.
+This document summarizes the database structure that powers the Hyperion
+Operations Hub. It highlights the core tables, their key fields, and how the
+inventory, production, workstation, and access-control domains intersect.
+
+---
 
 ## Entity-Relationship Diagram
 
 ```mermaid
 erDiagram
-    ProductionDailyRecord ||--o{ ProductionDailyCustomerTotal : includes
-    ProductionCustomer ||--o{ ProductionDailyCustomerTotal : aggregates
-
     Item ||--o{ Batch : has
     Item ||--o{ Movement : tracked_in
     Item ||--o{ OrderLine : fulfills
     Item ||--o{ OrderComponent : component
     Item ||--o{ BillOfMaterialComponent : referenced
-    Item ||--o| BillOfMaterial : may_define
     BillOfMaterial ||--o{ BillOfMaterialComponent : contains
 
     Location ||--o{ Movement : stores
@@ -31,240 +31,113 @@ erDiagram
     RoutingStepComponent ||--o{ RoutingStepConsumption : issues
     Movement ||--o{ RoutingStepConsumption : referenced
 
-    User ||--o{ user_role : memberships
-    Role ||--o{ user_role : memberships
-    PageAccessRule ||--o{ page_access_role : grants_view
-    PageAccessRule ||--o{ page_edit_role : grants_edit
-    Role ||--o{ page_access_role : view_role
-    Role ||--o{ page_edit_role : edit_role
-    LabelTemplate ||--o{ LabelProcessAssignment : mapped_to
+    Printer ||--o{ LabelProcessAssignment : mapped_to
+    LabelTemplate ||--o{ LabelProcessAssignment : uses
+
+    User ||--o{ UserRole : memberships
+    Role ||--o{ UserRole : memberships
+    PageAccessRule ||--o{ PageAccessRole : grants_view
+    PageAccessRule ||--o{ PageEditRole : grants_edit
+    Role ||--o{ PageAccessRole : view_role
+    Role ||--o{ PageEditRole : edit_role
+
+    ProductionDailyRecord ||--o{ ProductionDailyCustomerTotal : includes
+    ProductionCustomer ||--o{ ProductionDailyCustomerTotal : aggregates
 ```
 
-> **Note:** `user_role`, `page_access_role`, and `page_edit_role` are association tables that link access rules and roles in many-to-many relationships.
+> **Note:** Association tables such as `user_role`, `page_access_role`, and
+> `page_edit_role` enable many-to-many relationships between users, roles, and page
+> permissions.
+
+---
 
 ## Table Reference
 
-### Production & Reporting
-
-- **`production_chart_settings`**
-  - `id` (PK)
-  - `primary_min`, `primary_max`, `primary_step` – numeric range configuration for the primary axis.
-  - `secondary_min`, `secondary_max`, `secondary_step` – numeric range configuration for the secondary axis.
-  - `goal_value` – optional numeric goal indicator.
-  - `show_goal` – flag indicating whether the goal line is displayed.
-
-- **`production_daily_record`**
-  - `id` (PK)
-  - `entry_date` – unique production date.
-  - `day_of_week` – localized weekday label.
-  - Labor and throughput metrics: `gates_employees`, `gates_hours_ot`, `controllers_4_stop`, `controllers_6_stop`, `door_locks_lh`, `door_locks_rh`, `operators_produced`, `cops_produced`, `additional_employees`, `additional_hours_ot`.
-  - `daily_notes` – optional commentary field.
-  - Timestamps: `created_at`, `updated_at`.
-  - Relationships: one-to-many `customer_totals`.
-
-- **`production_daily_customer_total`**
-  - `id` (PK)
-  - `record_id` – FK to `production_daily_record.id`.
-  - `customer_id` – FK to `production_customer.id`.
-  - Metrics: `gates_produced`, `gates_packaged`.
-  - Unique constraint per record/customer pair.
-
-- **`production_customer`**
-  - `id` (PK)
-  - `name` – unique label.
-  - `color` – hex code for charting.
-  - Flags: `is_active`, `is_other_bucket`, `lump_into_other`.
-  - Relationships: one-to-many `totals`.
-
-- **`production_output_formula`**
-  - `id` (PK)
-  - `formula` – textual expression used for dashboards.
-  - `variables` – JSON array of required inputs.
-  - Audit fields: `created_at`, `updated_at`.
-
 ### Inventory Management
 
-- **`item`**
-  - `id` (PK)
-  - `sku` – unique part number.
-  - `name`
-  - `type`
-  - `unit` – defaults to `"ea"`.
-  - `description`
-  - `min_stock`
-  - `notes`
-  - Pricing: `list_price`, `last_unit_cost`.
-  - Classification: `item_class`.
+- **`item`** – Core catalog entry storing SKU, description, min stock, pricing,
+  and classification data.
+- **`item_attachment`** – Uploaded documents or drawings linked to an item.
+- **`location`** – Warehouse/bin codes and descriptions.
+- **`batch`** – Lot-controlled inventory details (quantity, supplier, dates,
+  notes) per item.
+- **`movement`** – Full audit trail of receipts, issues, adjustments, and
+  transfers. References the item, batch, location, quantity, and metadata such as
+  `movement_type`, `person`, and `po_number`.
+- **`work_instruction`** – Uploaded documents surfaced on workstation pages.
 
-- **`location`**
-  - `id` (PK)
-  - `code` – unique warehouse location identifier.
-  - `description`
+### Orders, Reservations & Workflows
 
-- **`batch`**
-  - `id` (PK)
-  - `item_id` – FK to `item.id`.
-  - `lot_number`
-  - `quantity`
-  - `received_date`
-  - `expiration_date`
-  - `supplier_name`
-  - `supplier_code`
-  - `purchase_order`
-  - `notes`
+- **`order`** – High-level manufacturing order header (customer, promised dates,
+  notes, status).
+- **`order_item`** – Order line referencing an item, requested quantity, and
+  schedule dates.
+- **`order_bom_component`** – Bill of material requirement per order line.
+- **`item_bom`** / **`item_bom_component`** – Master BOMs linked to catalog items.
+- **`order_step`** – Routing steps, sequence numbers, work cells, and completion
+  timestamps.
+- **`order_step_component`** – Junction mapping BOM components to routing steps.
+- **`order_step_consumption`** – Records of actual material movements that satisfy
+  a routing step component requirement.
+- **`reservation`** – Allocations of inventory to specific order lines.
 
-- **`movement`**
-  - `id` (PK)
-  - `item_id` – FK to `item.id`.
-  - `batch_id` – optional FK to `batch.id`.
-  - `location_id` – FK to `location.id`.
-  - `quantity`
-  - `movement_type` – e.g., receipt, issue, move, adjust.
-  - `person`
-  - `po_number`
-  - `reference`
-  - `date`
+### Production & Reporting
 
-- **`work_instruction`**
-  - `id` (PK)
-  - `filename` – stored file reference.
-  - `original_name` – upload name.
-  - `uploaded_at`
+- **`production_daily_record`** – Daily throughput metrics (labor, counts,
+  notes) for dashboards and reports.
+- **`production_daily_customer_total`** – Per-customer rollups tied to a daily
+  record.
+- **`production_customer`** – Customer definitions with chart colors and
+  rollup flags.
+- **`production_chart_settings`** – Axis ranges and goal lines for dashboard
+  visualizations.
+- **`production_output_formula`** – Custom expressions powering production
+  dashboards.
 
 ### Printing & Labeling
 
-- **`printer`**
-  - `id` (PK)
-  - `name` – unique printer identifier shown in the UI.
-  - `printer_type` – optional make/model notes.
-  - `location` – optional physical location description.
-  - `host`, `port` – connection target for the networked Zebra printer.
-  - `notes` – operator guidance or service details.
-  - Timestamps: `created_at`, `updated_at`.
+- **`printer`** – Zebra or network printer definitions (host, port, notes).
+- **`label_template`** – ZPL/JSON templates describing label layout and fields.
+- **`label_process_assignment`** – Maps manufacturing processes to label
+  templates.
 
-- **`label_template`**
-  - `id` (PK)
-  - `name` – unique template name.
-  - `description` – optional summary of usage.
-  - `trigger` – optional string used for automatic selection.
-  - `layout` – JSON payload describing label geometry.
-  - `fields` – JSON payload describing available data fields.
-  - Timestamps: `created_at`, `updated_at`.
+### Quality & Purchasing
 
-- **`label_process_assignment`**
-  - `id` (PK)
-  - `process` – unique manufacturing process key.
-  - `template_id` – FK to `label_template.id`.
-  - Timestamps: `created_at`, `updated_at`.
+- **`purchase_request`** – Tracks status, quantity, supplier details, ETA, and
+  notes for purchase requests raised from inventory or purchasing workflows.
+- **`rma_request`** – Captures product issues, status, and priority for quality
+  follow-up.
+- **`rma_attachment`** – Supporting documents linked to an RMA (images, PDFs,
+  spreadsheets, etc.).
+- **`rma_status_event`** – Audit trail of status transitions for each RMA.
 
-### Work Orders & Manufacturing
+### Authentication, Authorization & Auditing
 
-- **`order`**
-  - `id` (PK)
-  - `order_number` – unique external reference.
-  - `status` – tracked via `OrderStatus` enum.
-  - `customer_name`
-  - `created_by`
-  - `general_notes`
-  - Schedule fields: `promised_date`, `scheduled_start_date`, `scheduled_completion_date` (with validation constraints).
-  - Audit fields: `created_at`, `updated_at`.
-  - Relationships: one-to-many `order_lines` and `routing_steps`.
+- **`user`** – Local application accounts (username, password hash, timestamps).
+- **`role`** – Role definitions used across the platform (viewer, editor, admin,
+  quality, purchasing, etc.).
+- **`user_role`** – Association table connecting users and roles.
+- **`page_access_rule`** – Defines per-page view/edit permissions.
+- **`page_access_role`** / **`page_edit_role`** – Many-to-many relationships that
+  grant view/edit privileges to roles.
+- **`access_log`** – Audits logins, logouts, requests, and failures for security
+  investigations.
 
-- **`order_item` (OrderLine)**
-  - `id` (PK)
-  - `order_id` – FK to `order.id`.
-  - `item_id` – FK to `item.id`.
-  - `quantity`
-  - Schedule dates: `promised_date`, `scheduled_start_date`, `scheduled_completion_date` (with validation constraints).
-  - Relationships: one-to-many `components` and `reservations`.
-
-- **`order_bom_component` (OrderComponent)**
-  - `id` (PK)
-  - `order_item_id` – FK to `order_item.id`.
-  - `component_item_id` – FK to `item.id`.
-  - `quantity`
-  - Unique per order line/component pair.
-
-- **`item_bom` (BillOfMaterial)**
-  - `id` (PK)
-  - `item_id` – FK to `item.id` (unique one-to-zero/one association).
-  - Audit fields: `created_at`, `updated_at`.
-
-- **`item_bom_component` (BillOfMaterialComponent)**
-  - `id` (PK)
-  - `bom_id` – FK to `item_bom.id`.
-  - `component_item_id` – FK to `item.id`.
-  - `quantity`
-  - Unique per BOM/component pair.
-
-- **`order_step` (RoutingStep)**
-  - `id` (PK)
-  - `order_id` – FK to `order.id`.
-  - `sequence` – step ordering (unique per order).
-  - `work_cell`
-  - `description`
-  - `completed`
-  - `completed_at`
-
-- **`order_step_component` (RoutingStepComponent)**
-  - `id` (PK)
-  - `order_step_id` – FK to `order_step.id`.
-  - `order_bom_component_id` – FK to `order_bom_component.id`.
-  - Unique per routing step / component pair.
-
-- **`order_step_consumption` (RoutingStepConsumption)**
-  - `id` (PK)
-  - `order_step_component_id` – FK to `order_step_component.id`.
-  - `movement_id` – FK to `movement.id`.
-  - `quantity`
-  - `created_at`
-
-- **`reservation`**
-  - `id` (PK)
-  - `order_item_id` – FK to `order_item.id`.
-  - `item_id` – FK to `item.id`.
-  - `quantity`
-  - `created_at`
-
-### Authentication & Authorization
-
-- **`user`**
-  - `id` (PK)
-  - `username` – unique login name.
-  - `password_hash`
-  - `created_at`, `updated_at`
-
-- **`role`**
-  - `id` (PK)
-  - `name` – unique role identifier.
-  - `description`
-
-- **`user_role`** (association table)
-  - `user_id` – FK to `user.id`, part of composite PK.
-  - `role_id` – FK to `role.id`, part of composite PK.
-
-- **`page_access_rule`**
-  - `id` (PK)
-  - `page_name` – unique identifier for a navigable page or blueprint.
-  - Relationships: many-to-many `view_roles` and `edit_roles` via the association tables below.
-
-- **`page_access_role`** (association table)
-  - `access_rule_id` – FK to `page_access_rule.id`, part of composite PK.
-  - `role_id` – FK to `role.id`, part of composite PK.
-  - Defines which roles can view the page.
-
-- **`page_edit_role`** (association table)
-  - `access_rule_id` – FK to `page_access_rule.id`, part of composite PK.
-  - `role_id` – FK to `role.id`, part of composite PK.
-  - Defines which roles can perform edit actions on the page.
+---
 
 ## Relationship Summary
 
-- Inventory items flow from receipts (`movement`) into tracked batches and storage locations, and are referenced by work orders, BOMs, and reservations.
-- Production records capture daily throughput per customer and roll up into chart settings and optional output formulas.
-- Work orders (`order`) are composed of line items, which may reserve stock and consume BOM components across routing steps.
-- Routing components reference both the BOM-defined requirements and the actual material movements that fulfill them.
-- Printers and label templates provide process-specific label definitions that can be mapped to shop-floor workflows.
-- User and role tables enforce access control through `user_role`, while `page_access_rule` defines per-page view/edit rights.
+- Inventory items flow from receipts into tracked batches and storage locations.
+  Movements reference orders and routing consumption when materials are issued to
+  production.
+- Work orders connect BOM requirements to routing steps, enabling reservation
+  workflows and ensuring actual consumption is linked to specific movements.
+- Production records supply dashboard metrics and customer-level reporting while
+  chart settings and formulas drive visualization behavior.
+- Printers, label templates, and process assignments ensure the right label is
+  available at each workstation.
+- User and role tables enforce access control, while access logs capture the
+  history of interactions for compliance.
 
-Use this document alongside the application code to understand how data moves through the system during receiving, production scheduling, and execution.
+Use this reference alongside the codebase when extending the Hub or integrating
+with external systems.
