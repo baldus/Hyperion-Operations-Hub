@@ -450,11 +450,38 @@ def bom_library():
     )
 
     form_data = {"finished_good_sku": "", "bom": []}
+    editing_template = None
     if request.method == "POST":
         action = (request.form.get("action") or "create").strip()
         errors = []
         finished_good_sku = (request.form.get("finished_good_sku") or "").strip()
         form_data["finished_good_sku"] = finished_good_sku
+
+        if action == "delete":
+            if not finished_good_sku:
+                flash("Select a finished good to delete its BOM template.", "danger")
+                return redirect(url_for("orders.bom_library"))
+
+            template = (
+                BillOfMaterial.query.options(joinedload(BillOfMaterial.item))
+                .join(Item)
+                .filter(Item.sku == finished_good_sku)
+                .first()
+            )
+            if template is None:
+                flash(
+                    f"No BOM template was found for finished good {finished_good_sku}.",
+                    "warning",
+                )
+                return redirect(url_for("orders.bom_library"))
+
+            db.session.delete(template)
+            db.session.commit()
+            flash(
+                f"BOM template for {template.item.sku} was deleted successfully.",
+                "success",
+            )
+            return redirect(url_for("orders.bom_library"))
 
         bom_payload = []
         if action == "import_csv":
@@ -519,6 +546,16 @@ def bom_library():
             if finished_good is None:
                 errors.append(
                     f"Finished good part number '{finished_good_sku}' was not found."
+                )
+            else:
+                editing_template = (
+                    BillOfMaterial.query.options(
+                        joinedload(BillOfMaterial.components).joinedload(
+                            BillOfMaterialComponent.component_item
+                        )
+                    )
+                    .filter_by(item_id=finished_good.id)
+                    .first()
                 )
 
         bom_components = []
@@ -586,9 +623,41 @@ def bom_library():
                 "info",
             )
         return redirect(url_for("orders.bom_library"))
+    else:
+        editing_sku = (request.args.get("sku") or "").strip()
+        if editing_sku:
+            editing_template = (
+                BillOfMaterial.query.options(
+                    joinedload(BillOfMaterial.item),
+                    joinedload(BillOfMaterial.components).joinedload(
+                        BillOfMaterialComponent.component_item
+                    ),
+                )
+                .join(Item)
+                .filter(Item.sku == editing_sku)
+                .first()
+            )
+            if editing_template:
+                form_data["finished_good_sku"] = editing_template.item.sku
+                form_data["bom"] = [
+                    {
+                        "sku": component.component_item.sku,
+                        "quantity": component.quantity,
+                    }
+                    for component in editing_template.components
+                ]
+            else:
+                flash(
+                    f"No BOM template was found for finished good {editing_sku}.",
+                    "warning",
+                )
 
     return render_template(
-        "orders/bom_library.html", items=items, templates=templates, form_data=form_data
+        "orders/bom_library.html",
+        items=items,
+        templates=templates,
+        form_data=form_data,
+        editing_template=editing_template,
     )
 
 

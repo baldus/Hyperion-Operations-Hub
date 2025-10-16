@@ -2342,6 +2342,15 @@ body.light .form-table thead th {
     color: #c6d6ff;
 }
 
+.link-btn.danger {
+    color: #ff6b6b;
+}
+
+.link-btn.danger:hover,
+.link-btn.danger:focus {
+    color: #ff9a9a;
+}
+
 body.light .link-btn {
     color: #1d4ed8;
 }
@@ -2349,6 +2358,15 @@ body.light .link-btn {
 body.light .link-btn:hover,
 body.light .link-btn:focus {
     color: #345fe0;
+}
+
+body.light .link-btn.danger {
+    color: #b91c1c;
+}
+
+body.light .link-btn.danger:hover,
+body.light .link-btn.danger:focus {
+    color: #dc2626;
 }
 
 .form-actions {
