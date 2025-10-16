@@ -161,19 +161,28 @@ For a reliable shop-floor deployment, start with the following baseline. See the
 
 ### 🪟 Windows bootstrap
 
-Run the bootstrapper from an elevated Command Prompt (right-click → **Run as administrator**) to install Python, PostgreSQL (via `winget`), create a virtual environment, and install the required Python packages:
+Run the bootstrapper from **Command Prompt**&nbsp;— the wrapper will request administrator rights (UAC) and relax the execution policy just for the session so you do not have to change any global settings:
 
 ```bat
 setup_windows.cmd
 ```
 
-> Prefer PowerShell? Launch it as administrator and run:
-> ```powershell
-> powershell -ExecutionPolicy Bypass -File ./setup_windows.ps1
-> ```
+If Windows reports that the file came from the internet, right-click the script, choose **Properties**, and select **Unblock** before launching it. The wrapper will also attempt to unblock the script automatically.
+
+Prefer PowerShell? Launch it as administrator and run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ./setup_windows.ps1
+```
+
+If your organization enforces a strict execution policy, temporarily allow scripts in the current session with:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
 
 > If PostgreSQL is already installed or you prefer to manage it manually, append
-> the `-SkipPostgres` flag when invoking the script. The script also produces an
+> the `-SkipPostgres` flag when invoking the script. The bootstrapper also produces an
 > `invapp2/.env.local` file with starter environment variables—rename it to `.env`
 > (or export the variables) before launching the application.
 

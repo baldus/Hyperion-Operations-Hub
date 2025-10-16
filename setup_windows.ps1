@@ -64,6 +64,7 @@ function Install-WithWinget {
 
 if (-not (Test-IsAdministrator)) {
     Write-Warning 'It is recommended to run this script from an elevated PowerShell prompt to allow package installation.'
+    Write-Warning 'Tip: launch setup_windows.cmd from Command Prompt to automatically request elevation and bypass execution-policy checks.'
 }
 
 $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
