@@ -503,6 +503,65 @@ def inventory_home():
     )
 
 
+def _create_purchase_request_for_item(
+    item: Item,
+    description: str,
+    success_message: str,
+    quantity: Optional[int] = None,
+):
+    quantity_value = None
+    if quantity is not None:
+        try:
+            quantity_int = int(quantity)
+        except (TypeError, ValueError):
+            quantity_int = 0
+        if quantity_int > 0:
+            quantity_value = Decimal(quantity_int)
+
+    requester = (
+        current_user.username
+        if current_user.is_authenticated and getattr(current_user, "username", None)
+        else "inventory"
+    )
+
+    title = f"{item.sku} – {item.name}"
+    existing_request = (
+        PurchaseRequest.query.filter(
+            PurchaseRequest.title == title,
+            ~PurchaseRequest.status.in_(
+                (PurchaseRequest.STATUS_RECEIVED, PurchaseRequest.STATUS_CANCELLED)
+            ),
+        )
+        .order_by(PurchaseRequest.created_at.desc())
+        .first()
+    )
+    if existing_request:
+        flash(
+            "An open purchase request already exists for this item. Redirecting to the existing request.",
+            "info",
+        )
+        return redirect(url_for("purchasing.view_request", request_id=existing_request.id))
+
+    purchase_request = PurchaseRequest(
+        title=title,
+        description=description,
+        quantity=quantity_value,
+        unit=item.unit,
+        requested_by=requester,
+        notes="Update with supplier details and ordering information as needed.",
+    )
+    try:
+        PurchaseRequest.commit_with_sequence_retry(purchase_request)
+    except Exception:
+        current_app.logger.exception(
+            "Failed to create purchase request from dashboard shortcut"
+        )
+        raise
+
+    flash(success_message, "success")
+    return redirect(url_for("purchasing.view_request", request_id=purchase_request.id))
+
+
 @bp.route("/low-stock/<int:item_id>/purchase-request", methods=["POST"])
 def create_purchase_request_from_low_stock(item_id: int):
     """Convert a dashboard low stock alert into a purchase request."""
@@ -524,58 +583,106 @@ def create_purchase_request_from_low_stock(item_id: int):
         total_on_hand = int(total_on_hand)
         min_stock = int(item.min_stock or 0)
         recommended_quantity = max(min_stock - total_on_hand, 0)
-        quantity_value = Decimal(recommended_quantity) if recommended_quantity > 0 else None
-
-        requester = (
-            current_user.username
-            if current_user.is_authenticated and getattr(current_user, "username", None)
-            else "inventory"
-        )
-
-        title = f"{item.sku} – {item.name}"
-        existing_request = (
-            PurchaseRequest.query.filter(
-                PurchaseRequest.title == title,
-                ~PurchaseRequest.status.in_(
-                    (PurchaseRequest.STATUS_RECEIVED, PurchaseRequest.STATUS_CANCELLED)
-                ),
-            )
-            .order_by(PurchaseRequest.created_at.desc())
-            .first()
-        )
-        if existing_request:
-            flash(
-                "An open purchase request already exists for this item. Redirecting to the existing request.",
-                "info",
-            )
-            return redirect(
-                url_for("purchasing.view_request", request_id=existing_request.id)
-            )
 
         description = (
             "Generated from the low stock alert on the inventory dashboard. "
             f"On-hand balance: {total_on_hand}. Minimum stock: {min_stock}."
         )
 
-        purchase_request = PurchaseRequest(
-            title=title,
-            description=description,
-            quantity=quantity_value,
-            unit=item.unit,
-            requested_by=requester,
-            notes="Update with supplier details and ordering information as needed.",
+        return _create_purchase_request_for_item(
+            item,
+            description,
+            "Purchase request created from low stock alert.",
+            recommended_quantity,
         )
-        try:
-            PurchaseRequest.commit_with_sequence_retry(purchase_request)
-        except Exception:
-            current_app.logger.exception(
-                "Failed to create purchase request from low stock alert"
-            )
-            raise
 
-        flash("Purchase request created from low stock alert.", "success")
-        return redirect(
-            url_for("purchasing.view_request", request_id=purchase_request.id)
+    return _create_request()
+
+
+@bp.route("/waiting/<int:item_id>/purchase-request", methods=["POST"])
+def create_purchase_request_from_waiting(item_id: int):
+    """Create a purchase request for items delaying orders."""
+
+    edit_roles = resolve_edit_roles(
+        "purchasing", default_roles=("editor", "admin", "purchasing")
+    )
+    guard = require_any_role(edit_roles)
+
+    @guard
+    def _create_request():
+        item = Item.query.get_or_404(item_id)
+
+        total_on_hand = (
+            db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+            .filter(Movement.item_id == item.id)
+            .scalar()
+        ) or 0
+        total_on_hand = int(total_on_hand)
+
+        reserved_total = (
+            db.session.query(func.coalesce(func.sum(Reservation.quantity), 0))
+            .join(OrderLine)
+            .join(Order)
+            .filter(
+                Reservation.item_id == item.id,
+                Order.status.in_(OrderStatus.RESERVABLE_STATES),
+            )
+            .scalar()
+        ) or 0
+        reserved_total = int(reserved_total)
+        available_after_reservations = max(total_on_hand - reserved_total, 0)
+
+        waiting_orders = (
+            Order.query.options(
+                joinedload(Order.order_lines)
+                .joinedload(OrderLine.components)
+                .joinedload(OrderComponent.component_item)
+            )
+            .filter(Order.status == OrderStatus.WAITING_MATERIAL)
+            .all()
+        )
+
+        total_required = 0
+        for order in waiting_orders:
+            for line in order.order_lines:
+                line_quantity = int(line.quantity or 0)
+                if line_quantity <= 0:
+                    continue
+                for component in line.components:
+                    if component.component_item_id != item.id:
+                        continue
+                    component_quantity = int(component.quantity or 0)
+                    if component_quantity <= 0:
+                        continue
+                    total_required += component_quantity * line_quantity
+
+        if total_required <= 0:
+            flash(
+                "No outstanding waiting material requirements were found for this item.",
+                "info",
+            )
+            return redirect(url_for("inventory.inventory_home"))
+
+        shortage = total_required - available_after_reservations
+        if shortage <= 0:
+            flash(
+                "This item no longer has a shortage after accounting for current availability.",
+                "info",
+            )
+            return redirect(url_for("inventory.inventory_home"))
+
+        description = (
+            "Generated from the Waiting on Material list on the inventory dashboard. "
+            f"Required for waiting orders: {total_required}. "
+            f"Available after reservations: {available_after_reservations}. "
+            f"Calculated shortage: {shortage}."
+        )
+
+        return _create_purchase_request_for_item(
+            item,
+            description,
+            "Purchase request created for waiting material shortage.",
+            shortage,
         )
 
     return _create_request()
