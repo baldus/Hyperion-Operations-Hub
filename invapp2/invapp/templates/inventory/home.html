@@ -59,6 +59,7 @@
           <th>Available</th>
           <th>Shortage</th>
           <th>Orders</th>
+          <th>Action</th>
         </tr>
       </thead>
       <tbody>
@@ -82,6 +83,19 @@
                 (needs {{ order.required }})
               </div>
             {% endfor %}
+          </td>
+          <td>
+            {% if entry.item %}
+              {% if can_edit_page('purchasing') %}
+              <form method="post" class="inline-form" action="{{ url_for('inventory.create_purchase_request_from_waiting', item_id=entry.item.id) }}">
+                <button type="submit" class="bubble-btn">Create Purchase Request</button>
+              </form>
+              {% else %}
+              <span class="field-note">Requires purchasing access</span>
+              {% endif %}
+            {% else %}
+            <span class="field-note">Item record unavailable</span>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
