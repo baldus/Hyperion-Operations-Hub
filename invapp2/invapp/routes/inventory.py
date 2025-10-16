@@ -59,6 +59,28 @@ bp.before_request(blueprint_page_guard("inventory"))
 UNASSIGNED_LOCATION_CODE = "UNASSIGNED"
 
 
+AUTO_SKU_START = 100000
+
+
+def _next_auto_sku_value() -> int:
+    """Return the next auto-generated SKU as an integer.
+
+    Ensures SKUs are at least six digits by starting at ``AUTO_SKU_START`` when
+    no numeric SKUs exist or when legacy numeric SKUs are below that threshold.
+    """
+
+    max_sku_val = db.session.query(db.func.max(Item.sku.cast(db.Integer))).scalar()
+    highest_numeric = int(max_sku_val) if max_sku_val else 0
+    baseline = AUTO_SKU_START - 1
+    return max(highest_numeric, baseline) + 1
+
+
+def _next_auto_sku() -> str:
+    """Return the next auto-generated SKU as a string."""
+
+    return str(_next_auto_sku_value())
+
+
 ITEM_IMPORT_FIELDS = [
     {"field": "sku", "label": "SKU", "required": False},
     {"field": "name", "label": "Name", "required": True},
@@ -930,8 +952,7 @@ def list_items():
 @bp.route("/item/add", methods=["GET", "POST"])
 def add_item():
     if request.method == "POST":
-        max_sku = db.session.query(db.func.max(Item.sku.cast(db.Integer))).scalar()
-        next_sku = str(int(max_sku) + 1) if max_sku else "1"
+        next_sku = _next_auto_sku()
 
         min_stock_raw = request.form.get("min_stock", 0)
         try:
@@ -985,9 +1006,7 @@ def add_item():
         )
         return redirect(url_for("inventory.list_items"))
 
-    max_sku = db.session.query(db.func.max(Item.sku.cast(db.Integer))).scalar()
-    next_sku = str(int(max_sku) + 1) if max_sku else "1"
-    return render_template("inventory/add_item.html", next_sku=next_sku)
+    return render_template("inventory/add_item.html", next_sku=_next_auto_sku())
 
 
 @bp.route("/item/<int:item_id>/edit", methods=["GET", "POST"])
@@ -1360,8 +1379,7 @@ def import_items():
                 return render_template("inventory/import_mapping.html", **context)
 
 
-            max_sku_val = db.session.query(db.func.max(Item.sku.cast(db.Integer))).scalar()
-            next_sku = int(max_sku_val) + 1 if max_sku_val else 1
+            next_sku = _next_auto_sku_value()
 
             def extract(row, field):
                 header = selected_mappings.get(field)

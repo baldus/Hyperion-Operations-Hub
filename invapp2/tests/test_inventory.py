@@ -294,10 +294,26 @@ def test_add_item_with_notes(client, app):
 
     with app.app_context():
         item = Item.query.filter_by(name="Widget").one()
+        assert item.sku == "100000"
         assert item.notes == "Handle with care"
         assert item.list_price == Decimal("12.34")
         assert item.last_unit_cost == Decimal("9.87")
         assert item.item_class == "Hardware"
+
+
+def test_auto_assigned_sku_sequence(client, app):
+    first = client.post("/inventory/item/add", data={"name": "First"})
+    assert first.status_code == 302
+
+    second = client.post("/inventory/item/add", data={"name": "Second"})
+    assert second.status_code == 302
+
+    with app.app_context():
+        first_item = Item.query.filter_by(name="First").one()
+        second_item = Item.query.filter_by(name="Second").one()
+
+        assert first_item.sku == "100000"
+        assert second_item.sku == "100001"
 
 
 def test_edit_item_updates_notes(client, app):
@@ -909,6 +925,7 @@ def test_import_export_items_with_notes(client, app):
     # new SKU is auto-generated; grab its notes from the remaining row
     new_rows = [row for sku, row in rows.items() if sku != "300"]
     assert len(new_rows) == 1
+    assert int(new_rows[0][0]) >= 100000
     assert new_rows[0][6] == "Fresh notes"
     assert new_rows[0][7] == "6.60"
     assert new_rows[0][8] == "5.50"
