@@ -161,13 +161,13 @@ For a reliable shop-floor deployment, start with the following baseline. See the
 
 ### 🪟 Windows bootstrap
 
-Run the bootstrapper from **Command Prompt**&nbsp;— the wrapper will request administrator rights (UAC) and relax the execution policy just for the session so you do not have to change any global settings:
+Run the bootstrapper from **Command Prompt** (or simply double-click it from File Explorer). The script is implemented purely in batch, so Windows execution policies never get in the way. It will prompt for administrator rights (UAC) when packages need to be installed:
 
 ```bat
 setup_windows.cmd
 ```
 
-If Windows reports that the file came from the internet, right-click the script, choose **Properties**, and select **Unblock** before launching it. The wrapper will also attempt to unblock the script automatically.
+If Windows reports that the file came from the internet, right-click the script, choose **Properties**, and select **Unblock** before launching it.
 
 Prefer PowerShell? Launch it as administrator and run:
 
@@ -182,7 +182,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
 > If PostgreSQL is already installed or you prefer to manage it manually, append
-> the `-SkipPostgres` flag when invoking the script. The bootstrapper also produces an
+> the `--skip-postgres` flag (`-SkipPostgres` when using PowerShell) when invoking the script. The bootstrapper also produces an
 > `invapp2/.env.local` file with starter environment variables—rename it to `.env`
 > (or export the variables) before launching the application.
 
