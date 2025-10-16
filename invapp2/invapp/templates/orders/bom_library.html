@@ -12,6 +12,7 @@
                         <th>Finished Good</th>
                         <th>Components</th>
                         <th>Last Updated</th>
+                        <th class="actions-col">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -37,6 +38,14 @@
                             <td>
                                 {{ template.updated_at.strftime('%Y-%m-%d %H:%M') if template.updated_at else '—' }}
                             </td>
+                            <td class="row-actions">
+                                <a href="{{ url_for('orders.bom_library', sku=template.item.sku) }}" class="link-btn">Edit</a>
+                                <form method="post" class="inline-form" onsubmit="return confirm('Delete the BOM template for {{ template.item.sku }}?');">
+                                    <input type="hidden" name="action" value="delete">
+                                    <input type="hidden" name="finished_good_sku" value="{{ template.item.sku }}">
+                                    <button type="submit" class="link-btn danger">Delete</button>
+                                </form>
+                            </td>
                         </tr>
                     {% endfor %}
                 </tbody>
@@ -49,6 +58,13 @@
 
 <section class="form-section">
     <h3>Create or Update a Template</h3>
+    {% if editing_template %}
+        <p class="section-help">
+            Editing stored template for <strong>{{ editing_template.item.sku }}</strong>.
+            <a href="{{ url_for('orders.bom_library') }}">Start a new template</a>
+            to create a different BOM.
+        </p>
+    {% endif %}
     <form method="post" id="bom-template-form" class="form-stack">
         <input type="hidden" name="action" value="create">
         <div class="form-grid">
@@ -80,7 +96,7 @@
         </div>
         <input type="hidden" name="bom_data" id="library-bom-data">
         <div class="form-actions">
-            <button type="submit" class="action-btn">Save Template</button>
+            <button type="submit" class="action-btn">{{ 'Save Changes' if editing_template else 'Save Template' }}</button>
         </div>
     </form>
 </section>
