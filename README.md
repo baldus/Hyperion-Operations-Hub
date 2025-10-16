@@ -159,6 +159,22 @@ For a reliable shop-floor deployment, start with the following baseline. See the
    ./start_inventory.sh
    ```
 
+### 🪟 Windows bootstrap
+
+Run the PowerShell helper script once from an elevated prompt to install Python,
+PostgreSQL (via `winget`), create a virtual environment, and install the required
+Python packages:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass -Force
+./setup_windows.ps1
+```
+
+> If PostgreSQL is already installed or you prefer to manage it manually, append
+> the `-SkipPostgres` flag when invoking the script. The script also produces an
+> `invapp2/.env.local` file with starter environment variables—rename it to `.env`
+> (or export the variables) before launching the application.
+
    > Need a quick development server? You can still run `flask --app app run --debug` locally, but avoid using it in production.
 
 5. **Access the UI** at `http://<host-or-pi-ip>:8000`.
