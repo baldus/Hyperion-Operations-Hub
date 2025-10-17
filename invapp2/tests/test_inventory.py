@@ -9,6 +9,7 @@ import tempfile
 from decimal import Decimal
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -28,7 +29,12 @@ from invapp.models import (
     RoutingStepComponent,
     RoutingStepConsumption,
 )
-from invapp.routes.inventory import UNASSIGNED_LOCATION_CODE
+import invapp.routes.inventory as inventory
+from invapp.routes.inventory import (
+    AUTO_SKU_START,
+    UNASSIGNED_LOCATION_CODE,
+    _ensure_placeholder_location,
+)
 
 
 @pytest.fixture
@@ -991,7 +997,7 @@ def test_import_items_creates_records_with_mapping(client, app):
         generated = Item.query.filter(Item.sku != "100").one()
         assert generated.name == "NoSku"
         assert generated.min_stock == 3
-        assert generated.sku == "1"
+        assert generated.sku == str(AUTO_SKU_START)
 
 
 
@@ -1097,3 +1103,106 @@ def test_import_stock_mapping_flow(client, app):
         placeholder = Location.query.filter_by(code=UNASSIGNED_LOCATION_CODE).one()
         assert placeholder.description == "Unassigned staging location"
 
+
+def test_import_stock_placeholder_race_condition(client, app, monkeypatch):
+    with app.app_context():
+        item = Item(sku="SKU-1", name="Widget")
+        main = Location(code="MAIN", description="Main")
+        db.session.add_all([item, main])
+        db.session.commit()
+
+    csv_text = (
+        "sku,location_code,quantity,lot_number,person,reference\n"
+        "SKU-1,MAIN,5,BATCH-1,Alex,Initial\n"
+    )
+
+    upload_response = client.post(
+        "/inventory/stock/import",
+        data={"file": (io.BytesIO(csv_text.encode("utf-8")), "stock.csv")},
+        content_type="multipart/form-data",
+    )
+    assert upload_response.status_code == 200
+
+    upload_page = upload_response.get_data(as_text=True)
+    token_match = re.search(r'name="import_token" value="([^"]+)"', upload_page)
+    assert token_match
+    import_token = token_match.group(1)
+
+    original_flush = db.session.flush
+
+    def flaky_flush(*args, **kwargs):
+        should_raise = any(
+            isinstance(obj, Location) and obj.code == UNASSIGNED_LOCATION_CODE
+            for obj in db.session.new
+        )
+        if should_raise and not getattr(flaky_flush, "triggered", False):
+            flaky_flush.triggered = True
+            with db.engine.begin() as conn:
+                conn.execute(
+                    Location.__table__.insert().values(
+                        code=UNASSIGNED_LOCATION_CODE,
+                        description="Concurrent placeholder",
+                    )
+                )
+            raise IntegrityError("", {}, Exception("duplicate"))
+        return original_flush(*args, **kwargs)
+
+    flaky_flush.triggered = False
+    monkeypatch.setattr(db.session, "flush", flaky_flush)
+
+    mapping_payload = {
+        "step": "mapping",
+        "import_token": import_token,
+        "mapping_sku": "sku",
+        "mapping_location_code": "location_code",
+        "mapping_quantity": "quantity",
+        "mapping_lot_number": "lot_number",
+        "mapping_person": "person",
+        "mapping_reference": "reference",
+    }
+
+    response = client.post("/inventory/stock/import", data=mapping_payload)
+    assert response.status_code == 302
+
+    with app.app_context():
+        placeholder = Location.query.filter_by(code=UNASSIGNED_LOCATION_CODE).one()
+        assert placeholder.description == "Concurrent placeholder"
+        assert Location.query.filter_by(code=UNASSIGNED_LOCATION_CODE).count() == 1
+
+
+def test_ensure_placeholder_location_retries_until_visible(app, monkeypatch):
+    with app.app_context():
+        loc_map: dict[str, Location] = {}
+
+        original_flush = db.session.flush
+
+        def flaky_flush(*args, **kwargs):
+            should_raise = any(
+                isinstance(obj, Location) and obj.code == UNASSIGNED_LOCATION_CODE
+                for obj in db.session.new
+            )
+            if should_raise and flaky_flush.attempts < 2:
+                attempt = flaky_flush.attempts
+                flaky_flush.attempts += 1
+                if attempt == 1:
+                    with db.engine.begin() as conn:
+                        conn.execute(
+                            Location.__table__.insert().values(
+                                code=UNASSIGNED_LOCATION_CODE,
+                                description="Eventually committed",
+                            )
+                        )
+                raise IntegrityError("", {}, Exception("duplicate"))
+            return original_flush(*args, **kwargs)
+
+        flaky_flush.attempts = 0
+
+        monkeypatch.setattr(db.session, "flush", flaky_flush)
+        monkeypatch.setattr(inventory.time, "sleep", lambda *_: None)
+
+        placeholder = _ensure_placeholder_location(loc_map)
+
+        assert placeholder.code == UNASSIGNED_LOCATION_CODE
+        assert placeholder.description == "Eventually committed"
+        assert loc_map[UNASSIGNED_LOCATION_CODE] is placeholder
+        assert Location.query.filter_by(code=UNASSIGNED_LOCATION_CODE).count() == 1
