@@ -9,6 +9,7 @@ import tempfile
 from decimal import Decimal
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -1096,4 +1097,62 @@ def test_import_stock_mapping_flow(client, app):
 
         placeholder = Location.query.filter_by(code=UNASSIGNED_LOCATION_CODE).one()
         assert placeholder.description == "Unassigned staging location"
+
+
+def test_import_stock_placeholder_race_condition(client, app, monkeypatch):
+    with app.app_context():
+        item = Item(sku="SKU-2", name="Widget 2")
+        db.session.add(item)
+        db.session.commit()
+        item_id = item.id
+        engine = db.engine
+
+    csv_text = "sku,location_code,quantity\nSKU-2,,7\n"
+
+    upload_response = client.post(
+        "/inventory/stock/import",
+        data={"file": (io.BytesIO(csv_text.encode("utf-8")), "stock.csv")},
+        content_type="multipart/form-data",
+    )
+    assert upload_response.status_code == 200
+
+    upload_page = upload_response.get_data(as_text=True)
+    token_match = re.search(r'name="import_token" value="([^"]+)"', upload_page)
+    assert token_match
+    import_token = token_match.group(1)
+
+    original_flush = db.session.flush
+    triggered = {"value": False}
+
+    def flaky_flush(*args, **kwargs):
+        if not triggered["value"]:
+            triggered["value"] = True
+            with engine.begin() as connection:
+                connection.execute(
+                    Location.__table__.insert().values(
+                        code=UNASSIGNED_LOCATION_CODE,
+                        description="Unassigned staging location",
+                    )
+                )
+            raise IntegrityError("duplicate", params=None, orig=Exception("duplicate"))
+        return original_flush(*args, **kwargs)
+
+    monkeypatch.setattr(db.session, "flush", flaky_flush)
+
+    mapping_payload = {
+        "step": "mapping",
+        "import_token": import_token,
+        "mapping_sku": "sku",
+        "mapping_quantity": "quantity",
+    }
+
+    response = client.post("/inventory/stock/import", data=mapping_payload)
+    assert response.status_code == 302
+
+    with app.app_context():
+        placeholders = Location.query.filter_by(code=UNASSIGNED_LOCATION_CODE).all()
+        assert len(placeholders) == 1
+        movement = Movement.query.filter_by(item_id=item_id).one()
+        assert movement.location.code == UNASSIGNED_LOCATION_CODE
+        assert movement.quantity == 7
 

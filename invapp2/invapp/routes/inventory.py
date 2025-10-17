@@ -26,6 +26,7 @@ from flask import (
     url_for,
 )
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, load_only
 
 from invapp.auth import blueprint_page_guard
@@ -2107,7 +2108,16 @@ def import_stock():
                     description="Unassigned staging location",
                 )
                 db.session.add(placeholder_location)
-                db.session.flush()
+                try:
+                    db.session.flush()
+                except IntegrityError:
+                    db.session.rollback()
+                    placeholder_location = (
+                        Location.query.filter_by(code=UNASSIGNED_LOCATION_CODE)
+                        .first()
+                    )
+                    if not placeholder_location:
+                        raise
                 loc_map[UNASSIGNED_LOCATION_CODE] = placeholder_location
 
             def extract(row, field):
