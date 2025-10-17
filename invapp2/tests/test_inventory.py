@@ -29,7 +29,12 @@ from invapp.models import (
     RoutingStepComponent,
     RoutingStepConsumption,
 )
-from invapp.routes.inventory import AUTO_SKU_START, UNASSIGNED_LOCATION_CODE
+import invapp.routes.inventory as inventory
+from invapp.routes.inventory import (
+    AUTO_SKU_START,
+    UNASSIGNED_LOCATION_CODE,
+    _ensure_placeholder_location,
+)
 
 
 @pytest.fixture
@@ -1162,4 +1167,42 @@ def test_import_stock_placeholder_race_condition(client, app, monkeypatch):
     with app.app_context():
         placeholder = Location.query.filter_by(code=UNASSIGNED_LOCATION_CODE).one()
         assert placeholder.description == "Concurrent placeholder"
+        assert Location.query.filter_by(code=UNASSIGNED_LOCATION_CODE).count() == 1
+
+
+def test_ensure_placeholder_location_retries_until_visible(app, monkeypatch):
+    with app.app_context():
+        loc_map: dict[str, Location] = {}
+
+        original_flush = db.session.flush
+
+        def flaky_flush(*args, **kwargs):
+            should_raise = any(
+                isinstance(obj, Location) and obj.code == UNASSIGNED_LOCATION_CODE
+                for obj in db.session.new
+            )
+            if should_raise and flaky_flush.attempts < 2:
+                attempt = flaky_flush.attempts
+                flaky_flush.attempts += 1
+                if attempt == 1:
+                    with db.engine.begin() as conn:
+                        conn.execute(
+                            Location.__table__.insert().values(
+                                code=UNASSIGNED_LOCATION_CODE,
+                                description="Eventually committed",
+                            )
+                        )
+                raise IntegrityError("", {}, Exception("duplicate"))
+            return original_flush(*args, **kwargs)
+
+        flaky_flush.attempts = 0
+
+        monkeypatch.setattr(db.session, "flush", flaky_flush)
+        monkeypatch.setattr(inventory.time, "sleep", lambda *_: None)
+
+        placeholder = _ensure_placeholder_location(loc_map)
+
+        assert placeholder.code == UNASSIGNED_LOCATION_CODE
+        assert placeholder.description == "Eventually committed"
+        assert loc_map[UNASSIGNED_LOCATION_CODE] is placeholder
         assert Location.query.filter_by(code=UNASSIGNED_LOCATION_CODE).count() == 1

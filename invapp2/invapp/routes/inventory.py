@@ -58,6 +58,53 @@ bp.before_request(blueprint_page_guard("inventory"))
 
 
 UNASSIGNED_LOCATION_CODE = "UNASSIGNED"
+PLACEHOLDER_CREATION_MAX_RETRIES = 5
+PLACEHOLDER_CREATION_INITIAL_BACKOFF = 0.05
+
+
+def _ensure_placeholder_location(loc_map: dict[str, "Location"]) -> "Location":
+    """Return the shared placeholder location, creating it if necessary.
+
+    When multiple workers attempt to insert the placeholder concurrently the
+    losing workers may not see the new row immediately because the winning
+    transaction has not committed yet. We therefore retry a few times with a
+    short backoff before surfacing the original integrity error.
+    """
+
+    placeholder = loc_map.get(UNASSIGNED_LOCATION_CODE)
+    if placeholder:
+        return placeholder
+
+    attempts = 0
+    backoff = PLACEHOLDER_CREATION_INITIAL_BACKOFF
+
+    while True:
+        placeholder = Location(
+            code=UNASSIGNED_LOCATION_CODE,
+            description="Unassigned staging location",
+        )
+        db.session.add(placeholder)
+        try:
+            db.session.flush()
+        except IntegrityError as exc:  # pragma: no cover - exercised in tests
+            db.session.rollback()
+            existing = Location.query.filter_by(
+                code=UNASSIGNED_LOCATION_CODE
+            ).one_or_none()
+            if existing:
+                loc_map[UNASSIGNED_LOCATION_CODE] = existing
+                return existing
+
+            attempts += 1
+            if attempts > PLACEHOLDER_CREATION_MAX_RETRIES:
+                raise exc
+
+            time.sleep(backoff)
+            backoff *= 2
+            continue
+
+        loc_map[UNASSIGNED_LOCATION_CODE] = placeholder
+        return placeholder
 
 
 AUTO_SKU_START = 100000
@@ -2101,23 +2148,7 @@ def import_stock():
             item_map = {i.sku: i for i in Item.query.all()}
             loc_map = {l.code: l for l in Location.query.all()}
 
-            placeholder_location = loc_map.get(UNASSIGNED_LOCATION_CODE)
-            if not placeholder_location:
-                placeholder_location = Location(
-                    code=UNASSIGNED_LOCATION_CODE,
-                    description="Unassigned staging location",
-                )
-                db.session.add(placeholder_location)
-                try:
-                    db.session.flush()
-                except IntegrityError:
-                    db.session.rollback()
-                    placeholder_location = Location.query.filter_by(
-                        code=UNASSIGNED_LOCATION_CODE
-                    ).one_or_none()
-                    if not placeholder_location:
-                        raise
-                loc_map[UNASSIGNED_LOCATION_CODE] = placeholder_location
+            placeholder_location = _ensure_placeholder_location(loc_map)
 
             def extract(row, field):
                 header = selected_mappings.get(field)
