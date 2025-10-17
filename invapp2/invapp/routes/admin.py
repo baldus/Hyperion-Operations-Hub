@@ -1,3 +1,4 @@
+import gzip
 import io
 import json
 import os
@@ -349,6 +350,48 @@ def access_log():
     )
 
 
+def _chunked(iterable, size: int):
+    """Yield items from *iterable* in lists of length *size*."""
+
+    chunk: list[dict] = []
+    for item in iterable:
+        chunk.append(item)
+        if len(chunk) >= size:
+            yield chunk
+            chunk = []
+    if chunk:
+        yield chunk
+
+
+def _prepare_rows(table, rows):
+    """Convert raw JSON rows into SQLAlchemy-ready dictionaries."""
+
+    for row in rows:
+        prepared = {}
+        for column in table.columns:
+            prepared[column.name] = _parse_value(column, row.get(column.name))
+        yield prepared
+
+
+def _decode_backup_payload(upload):
+    """Return the textual JSON payload from an uploaded backup file."""
+
+    raw_bytes = upload.read()
+    if not raw_bytes:
+        raise ValueError("empty upload")
+
+    looks_gzip = upload.filename.lower().endswith(".gz") or raw_bytes.startswith(b"\x1f\x8b")
+    if looks_gzip:
+        try:
+            with gzip.GzipFile(fileobj=io.BytesIO(raw_bytes)) as gz:
+                return gz.read().decode("utf-8")
+        except OSError:
+            # Fall back to treating the payload as a plain JSON document.
+            pass
+
+    return raw_bytes.decode("utf-8")
+
+
 @bp.route("/data-backup")
 @login_required
 @require_roles("admin")
@@ -369,12 +412,16 @@ def export_data():
             for row in result
         ]
 
-    payload = json.dumps(data, indent=2).encode("utf-8")
+    payload = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    buffer = io.BytesIO()
+    with gzip.GzipFile(fileobj=buffer, mode="wb") as gz:
+        gz.write(payload)
+    buffer.seek(0)
     timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    filename = f"hyperion-backup-{timestamp}.json"
+    filename = f"hyperion-backup-{timestamp}.json.gz"
     return send_file(
-        io.BytesIO(payload),
-        mimetype="application/json",
+        buffer,
+        mimetype="application/gzip",
         as_attachment=True,
         download_name=filename,
     )
@@ -390,9 +437,9 @@ def import_data():
         return redirect(url_for("admin.data_backup"))
 
     try:
-        payload = upload.read()
-        raw_data = json.loads(payload)
-    except (UnicodeDecodeError, json.JSONDecodeError):
+        payload_text = _decode_backup_payload(upload)
+        raw_data = json.loads(payload_text)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
         flash("The uploaded file is not a valid backup.", "danger")
         return redirect(url_for("admin.data_backup"))
 
@@ -402,18 +449,15 @@ def import_data():
         for table in reversed(metadata.sorted_tables):
             db.session.execute(table.delete())
 
+        batch_size = current_app.config.get("DATA_BACKUP_INSERT_BATCH_SIZE", 500)
         for table in metadata.sorted_tables:
-            table_name = table.name
-            rows = raw_data.get(table_name, [])
-            prepared_rows = []
-            for row in rows:
-                prepared = {}
-                for column in table.columns:
-                    value = row.get(column.name)
-                    prepared[column.name] = _parse_value(column, value)
-                prepared_rows.append(prepared)
-            if prepared_rows:
-                db.session.execute(table.insert(), prepared_rows)
+            rows = raw_data.get(table.name, [])
+            if not rows:
+                continue
+
+            prepared_iter = _prepare_rows(table, rows)
+            for chunk in _chunked(prepared_iter, batch_size):
+                db.session.execute(table.insert(), chunk)
 
         db.session.commit()
     except Exception as exc:  # pragma: no cover - defensive rollback

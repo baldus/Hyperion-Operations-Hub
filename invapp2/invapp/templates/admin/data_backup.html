@@ -6,7 +6,7 @@
 
 <section aria-labelledby="export-title" class="card-section">
     <h3 id="export-title">Export Data</h3>
-    <p>Download a JSON backup of every table in the system.</p>
+    <p>Download a compressed JSON backup of every table in the system.</p>
     <form method="post" action="{{ url_for('admin.export_data') }}">
         <button type="submit" class="action-btn">Download Backup</button>
     </form>
@@ -14,10 +14,10 @@
 
 <section aria-labelledby="import-title" class="card-section">
     <h3 id="import-title">Import Data</h3>
-    <p>Upload a JSON backup file created by this tool to restore the system state.</p>
+    <p>Upload a backup file created by this tool to restore the system state. Both <code>.json</code> and <code>.json.gz</code> files are supported.</p>
     <form method="post" action="{{ url_for('admin.import_data') }}" enctype="multipart/form-data">
         <label for="backup-file" class="sr-only">Backup file</label>
-        <input id="backup-file" type="file" name="backup_file" accept="application/json" required>
+        <input id="backup-file" type="file" name="backup_file" accept=".json,.json.gz,application/json,application/gzip" required>
         <button type="submit" class="action-btn">Upload Backup</button>
     </form>
 </section>
