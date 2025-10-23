@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, List, Mapping, Sequence
 
-from flask import abort, request
+from flask import abort, current_app, request
 
 
 from invapp.extensions import login_manager
@@ -110,6 +110,15 @@ DEFAULT_PAGE_ACCESS: Mapping[str, Mapping[str, Sequence[str] | str]] = {
 }
 
 
+def _database_available() -> bool:
+    """Return True when the configured database can be queried."""
+
+    try:
+        return current_app.config.get("DATABASE_AVAILABLE", True)
+    except RuntimeError:  # pragma: no cover - outside an application context
+        return True
+
+
 def _default_permissions_for(page_name: str) -> PagePermissionSpec:
     config = DEFAULT_PAGE_ACCESS.get(page_name, {})
     label = config.get("label", page_name.replace("_", " ").title())
@@ -123,6 +132,8 @@ def _default_permissions_for(page_name: str) -> PagePermissionSpec:
 
 
 def lookup_page_label(page_name: str) -> str:
+    if not _database_available():
+        return _default_permissions_for(page_name).label
     rule = PageAccessRule.query.filter_by(page_name=page_name).first()
     if rule and rule.label:
         return rule.label
@@ -135,8 +146,18 @@ def resolve_page_permissions(
     default_view_roles: Sequence[str] | None = None,
     default_edit_roles: Sequence[str] | None = None,
 ) -> PagePermissionSpec:
-    rule = PageAccessRule.query.filter_by(page_name=page_name).first()
     default_spec = _default_permissions_for(page_name)
+    if not _database_available():
+        view_roles = _normalize_roles(default_view_roles or default_spec.view_roles)
+        edit_roles = _normalize_roles(default_edit_roles or default_spec.edit_roles)
+        return PagePermissionSpec(
+            page_name=page_name,
+            label=default_spec.label,
+            view_roles=view_roles,
+            edit_roles=edit_roles,
+        )
+
+    rule = PageAccessRule.query.filter_by(page_name=page_name).first()
 
     if rule is None:
         view_roles = _normalize_roles(default_view_roles or default_spec.view_roles)
@@ -245,6 +266,10 @@ def get_known_pages() -> List[dict[str, object]]:
             "default_edit_roles": spec.edit_roles,
         }
 
+    if not _database_available():
+        ordered_pages = sorted(pages.values(), key=lambda entry: entry["label"].lower())
+        return ordered_pages
+
     db_pages = PageAccessRule.query.order_by(PageAccessRule.page_name).all()
     for rule in db_pages:
         spec = resolve_page_permissions(rule.page_name)
@@ -269,6 +294,9 @@ def update_page_permissions(
     label: str | None = None,
 ) -> None:
     """Persist role assignments for a page."""
+
+    if not _database_available():  # pragma: no cover - defensive guard
+        raise RuntimeError("Cannot update page permissions while the database is unavailable.")
 
     view_role_id_set = set(view_role_ids)
     edit_role_id_set = set(edit_role_ids)
@@ -310,5 +338,8 @@ def update_page_roles(
     label: str | None = None,
 ) -> None:
     """Backward-compatible alias for legacy callers."""
+
+    if not _database_available():  # pragma: no cover - defensive guard
+        raise RuntimeError("Cannot update page roles while the database is unavailable.")
 
     update_page_permissions(page_name, role_ids, [], label=label)

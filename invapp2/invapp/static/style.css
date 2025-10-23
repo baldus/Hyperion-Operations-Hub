@@ -507,6 +507,61 @@ body.light .link-item:hover {
     opacity: 0.85;
 }
 
+.home-alert {
+    border: 1px solid #f44336;
+    background: rgba(244, 67, 54, 0.12);
+    color: #ffdddd;
+    padding: 16px;
+    border-radius: 8px;
+    margin-bottom: 24px;
+    line-height: 1.5;
+}
+
+.home-alert-title {
+    margin: 0 0 8px 0;
+    font-size: 1.2rem;
+}
+
+.home-alert-message {
+    margin: 0 0 8px 0;
+}
+
+.home-alert-details {
+    margin-top: 12px;
+    background: rgba(244, 67, 54, 0.08);
+    padding: 12px;
+    border-radius: 6px;
+}
+
+.home-alert-details summary {
+    cursor: pointer;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.home-alert-details ol {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.home-alert code {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 2px 6px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    font-size: 0.9em;
+}
+
+body.light .home-alert {
+    background: #ffebee;
+    color: #b71c1c;
+}
+
+body.light .home-alert-details {
+    background: #ffcdd2;
+}
+
 .home-summary-grid {
     display: grid;
     gap: 24px;

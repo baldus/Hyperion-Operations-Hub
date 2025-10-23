@@ -141,7 +141,16 @@ flask --app app run --debug
 
 The helper script [`start_inventory.sh`](invapp2/start_inventory.sh) bundles
 virtual environment creation, dependency installation, and gunicorn startup with
-sensible defaults—ideal for first-time provisioning.
+sensible defaults—ideal for first-time provisioning. For the full operations
+console, use [`start_operations_console.sh`](start_operations_console.sh); it
+applies the same provisioning steps and launches gunicorn pointed at
+`app:app`.
+
+> **Heads-up:** The application now boots even if PostgreSQL is offline. When
+> this happens, the home page renders an alert that lists recovery commands
+> (checking the PostgreSQL service, starting it, confirming `DB_URL`, and
+> rerunning `./start_operations_console.sh`). This allows you to verify that the
+> web layer is healthy before tackling database connectivity.
 
 ---
 
