@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>{{ title }}</h2>
+{% if description %}
+<p class="page-intro">{{ description }}</p>
+{% else %}
+<p class="page-intro">This tool depends on the database connection and is paused while the console is running in emergency mode.</p>
+{% endif %}
+
+<div class="offline-card">
+    <h3>Bring the database back online</h3>
+    <p>Follow these steps, then refresh the page to resume using this tool.</p>
+    <ol class="recovery-steps">
+        {% for step in recovery_steps %}
+        <li>
+            <strong>{{ step.title }}</strong>
+            {% if step.command %}
+            <code>{{ step.command }}</code>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ol>
+</div>
+{% endblock %}

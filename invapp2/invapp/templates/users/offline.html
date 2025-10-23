@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>User Administration Unavailable</h2>
+<p class="page-intro">User accounts and page permissions require the database. These tools are read-only while the console is operating in emergency mode.</p>
+
+<div class="offline-card">
+    <h3>Restore connectivity</h3>
+    <p>Follow the steps below to bring the database back online, then refresh this page to resume user management.</p>
+    <ol class="recovery-steps">
+        {% for step in recovery_steps %}
+        <li>
+            <strong>{{ step.title }}</strong>
+            {% if step.command %}
+            <code>{{ step.command }}</code>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ol>
+</div>
+{% endblock %}

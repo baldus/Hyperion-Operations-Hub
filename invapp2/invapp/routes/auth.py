@@ -13,6 +13,7 @@ from flask import (
 from invapp.audit import record_login_event
 from invapp.extensions import db
 from invapp.login import current_user, login_required, login_user, logout_user
+from invapp.offline import is_emergency_mode_active
 from invapp.models import AccessLog, User
 
 bp = Blueprint("auth", __name__, url_prefix="/auth")
@@ -22,6 +23,13 @@ bp = Blueprint("auth", __name__, url_prefix="/auth")
 @login_required
 def register():
     admin_username = current_app.config.get("ADMIN_USER", "superuser")
+    if is_emergency_mode_active():
+        flash(
+            "User registration is unavailable while the database connection is offline.",
+            "warning",
+        )
+        return redirect(url_for("home"))
+
     if current_user.username != admin_username:
         abort(404)
 
@@ -106,6 +114,13 @@ def logout():
 @bp.route("/reset-password", methods=["GET", "POST"])
 @login_required
 def reset_password():
+    if is_emergency_mode_active() or getattr(current_user, "is_emergency_user", False):
+        flash(
+            "Password changes are disabled while emergency access is active.",
+            "warning",
+        )
+        return redirect(url_for("home"))
+
     if request.method == "POST":
         old = request.form["old_password"].strip()
         new = request.form["new_password"].strip()

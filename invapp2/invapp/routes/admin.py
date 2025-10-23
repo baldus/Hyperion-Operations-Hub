@@ -27,10 +27,24 @@ from sqlalchemy.sql.sqltypes import Numeric
 from invapp import models
 from invapp.extensions import db
 from invapp.login import current_user, login_required, logout_user
+from invapp.offline import is_emergency_mode_active
 from invapp.security import require_roles
 
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
+
+
+def _database_available() -> bool:
+    return not is_emergency_mode_active()
+
+
+def _render_offline_page(title: str, *, description: str | None = None):
+    return render_template(
+        "admin/offline.html",
+        title=title,
+        description=description,
+        recovery_steps=current_app.config.get("DATABASE_RECOVERY_STEPS", ()),
+    )
 
 
 def _get_safe_redirect_target(default: str = "home") -> str:
@@ -202,6 +216,8 @@ def _status_level(value: float, *, warn: float, alert: float) -> str:
 @login_required
 @require_roles("admin")
 def tools():
+    database_online = _database_available()
+
     uptime_seconds = _read_uptime_seconds()
     boot_time_display = None
     if uptime_seconds is not None:
@@ -266,19 +282,27 @@ def tools():
     quick_links = [
         {
             "label": "Access Log",
-            "href": url_for("admin.access_log"),
+            "href": url_for("admin.access_log") if database_online else None,
+            "disabled": not database_online,
+            "note": "Requires the database to be online.",
         },
         {
             "label": "Reports Dashboard",
             "href": url_for("reports.reports_home"),
+            "disabled": False,
+            "note": None,
         },
         {
             "label": "Data Backup",
-            "href": url_for("admin.data_backup"),
+            "href": url_for("admin.data_backup") if database_online else None,
+            "disabled": not database_online,
+            "note": "Unavailable while PostgreSQL is offline.",
         },
         {
             "label": "Data Storage Locations",
-            "href": url_for("admin.storage_locations"),
+            "href": url_for("admin.storage_locations") if database_online else None,
+            "disabled": not database_online,
+            "note": "Requires database access to list folders.",
         },
     ]
 
@@ -286,6 +310,7 @@ def tools():
         "admin/tools.html",
         system_health=system_health,
         quick_links=quick_links,
+        database_online=database_online,
     )
 
 
@@ -293,6 +318,12 @@ def tools():
 @login_required
 @require_roles("admin")
 def access_log():
+    if not _database_available():
+        return _render_offline_page(
+            "Access Log",
+            description="Reviewing authentication and request history requires database connectivity.",
+        )
+
     filters = {
         "ip": (request.args.get("ip") or "").strip(),
         "username": (request.args.get("username") or "").strip(),
@@ -353,6 +384,12 @@ def access_log():
 @login_required
 @require_roles("admin")
 def data_backup():
+    if not _database_available():
+        return _render_offline_page(
+            "Data Backup",
+            description="Exporting or importing backups is paused until the database connection is restored.",
+        )
+
     table_names = [table.name for table in db.Model.metadata.sorted_tables]
     return render_template("admin/data_backup.html", table_names=table_names)
 
@@ -361,6 +398,10 @@ def data_backup():
 @login_required
 @require_roles("admin")
 def export_data():
+    if not _database_available():
+        flash("Backups cannot be exported while the database is offline.", "warning")
+        return redirect(url_for("admin.data_backup"))
+
     data = {}
     for table in db.Model.metadata.sorted_tables:
         result = db.session.execute(table.select()).mappings()
@@ -384,6 +425,10 @@ def export_data():
 @login_required
 @require_roles("admin")
 def import_data():
+    if not _database_available():
+        flash("Backups cannot be imported while the database is offline.", "warning")
+        return redirect(url_for("admin.data_backup"))
+
     upload = request.files.get("backup_file")
     if not upload or not upload.filename:
         flash("Please choose a backup file to upload.", "warning")
@@ -430,6 +475,12 @@ def import_data():
 @login_required
 @require_roles("admin")
 def storage_locations():
+    if not _database_available():
+        return _render_offline_page(
+            "Data Storage Locations",
+            description="Update these settings once the database is reachable again.",
+        )
+
     current_url = current_app.config.get("SQLALCHEMY_DATABASE_URI", "")
     display_current_url = _display_database_url(current_url)
     engine = db.get_engine()

@@ -101,3 +101,24 @@ class OfflineAdminUser(AnonymousUserMixin):
         """Expose whether the implicit emergency access is active."""
 
         return self._emergency_mode_active()
+
+    # -- Compatibility helpers -------------------------------------------------
+
+    def check_password(self, _password: str) -> bool:  # pragma: no cover - defensive
+        """Mirror the user interface without ever treating a password as valid."""
+
+        return False
+
+    def set_password(self, _password: str) -> None:  # pragma: no cover - defensive
+        """Deny password mutations for the synthetic emergency principal."""
+
+        raise RuntimeError("Emergency access sessions cannot change passwords.")
+
+
+def is_emergency_mode_active() -> bool:
+    """Return ``True`` when the console is running without a database."""
+
+    try:
+        return not current_app.config.get("DATABASE_AVAILABLE", True)
+    except RuntimeError:  # pragma: no cover - outside application context
+        return False

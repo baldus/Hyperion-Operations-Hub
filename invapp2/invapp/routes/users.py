@@ -23,11 +23,27 @@ from invapp.permissions import (
     resolve_page_permissions,
     update_page_permissions,
 )
+from invapp.offline import is_emergency_mode_active
 
 bp = Blueprint("users", __name__, url_prefix="/users")
 
 
+def _database_available() -> bool:
+    return not is_emergency_mode_active()
+
+
+def _offline_user_admin_response():
+    recovery_steps = current_app.config.get("DATABASE_RECOVERY_STEPS", ())
+    return render_template(
+        "users/offline.html",
+        recovery_steps=recovery_steps,
+    )
+
+
 def _is_superuser() -> bool:
+    if getattr(current_user, "is_emergency_user", False):
+        return True
+
     if not current_user.is_authenticated:
         return False
 
@@ -60,6 +76,9 @@ def superuser_required(view):
 @bp.route("/")
 @superuser_required
 def list_users():
+    if not _database_available():
+        return _offline_user_admin_response()
+
     users = User.query.order_by(User.username).all()
     return render_template("users/list.html", users=users)
 
@@ -94,6 +113,9 @@ def _selected_roles(role_ids: list[int]) -> list[Role]:
 @bp.route("/create", methods=["GET", "POST"])
 @superuser_required
 def create():
+    if not _database_available():
+        return _offline_user_admin_response()
+
     roles = Role.query.order_by(Role.name).all()
     selected_roles = set(request.form.getlist("roles")) if request.method == "POST" else set()
     username_value = request.form.get("username", "").strip()
@@ -161,6 +183,9 @@ def create():
 @bp.route("/<int:user_id>/edit", methods=["GET", "POST"])
 @superuser_required
 def edit(user_id: int):
+    if not _database_available():
+        return _offline_user_admin_response()
+
     user = User.query.get_or_404(user_id)
     admin_username = current_app.config.get("ADMIN_USER", "superuser")
     roles = Role.query.order_by(Role.name).all()
@@ -250,6 +275,9 @@ def edit(user_id: int):
 @bp.route("/page-permissions", methods=["GET", "POST"])
 @superuser_required
 def page_permissions():
+    if not _database_available():
+        return _offline_user_admin_response()
+
     roles = Role.query.order_by(Role.name).all()
     pages = get_known_pages()
 
@@ -343,6 +371,9 @@ def _build_page_entries(pages, roles):
 @bp.route("/<int:user_id>/reset-password", methods=["GET", "POST"])
 @superuser_required
 def reset_password(user_id: int):
+    if not _database_available():
+        return _offline_user_admin_response()
+
     user = User.query.get_or_404(user_id)
 
     if request.method == "POST":
@@ -362,6 +393,10 @@ def reset_password(user_id: int):
 @bp.route("/<int:user_id>/delete", methods=["POST"])
 @superuser_required
 def delete(user_id: int):
+    if not _database_available():
+        flash("User management requires the database to be online.", "warning")
+        return redirect(url_for("admin.tools"))
+
     user = User.query.get_or_404(user_id)
     admin_username = current_app.config.get("ADMIN_USER", "superuser")
 

@@ -52,7 +52,20 @@ def test_emergency_access_allows_admin_tools(monkeypatch):
     tools_response = client.get("/admin/tools")
     assert tools_response.status_code == 200
     assert b"System Uptime" in tools_response.data
+    assert b"Database-dependent shortcuts" in tools_response.data
 
     home_response = client.get("/")
     assert b"Emergency access" in home_response.data
     assert b"admin tools" in home_response.data
+
+    access_log_response = client.get("/admin/access-log")
+    assert access_log_response.status_code == 200
+    assert b"Bring the database back online" in access_log_response.data
+
+    users_response = client.get("/users/")
+    assert users_response.status_code == 200
+    assert b"User Administration Unavailable" in users_response.data
+
+    reset_response = client.get("/auth/reset-password", follow_redirects=True)
+    assert reset_response.status_code == 200
+    assert b"Password changes are disabled" in reset_response.data
