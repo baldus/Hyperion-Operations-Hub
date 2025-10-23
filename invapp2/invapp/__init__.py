@@ -7,6 +7,7 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm.exc import DetachedInstanceError
 
 from .extensions import db, login_manager
+from .offline import OfflineAdminUser
 from .login import current_user
 from .permissions import (
     current_principal_roles,
@@ -377,6 +378,7 @@ def create_app(config_override=None):
     # ✅ init db with app
     db.init_app(app)
     login_manager.init_app(app)
+    login_manager.anonymous_user = OfflineAdminUser
     login_manager.login_view = "auth.login"
 
     @login_manager.user_loader
@@ -489,6 +491,9 @@ def create_app(config_override=None):
             "database_error_message": current_app.config.get("DATABASE_ERROR"),
             "database_recovery_steps": current_app.config.get(
                 "DATABASE_RECOVERY_STEPS", ()
+            ),
+            "emergency_access_active": bool(
+                getattr(current_user, "is_emergency_user", False)
             ),
         }
 

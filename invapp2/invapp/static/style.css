@@ -49,6 +49,34 @@ header {
     gap: 12px;
 }
 
+.access-indicator {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background-color: rgba(255, 255, 255, 0.1);
+    font-size: 0.9rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.access-indicator--emergency {
+    background-color: rgba(255, 94, 94, 0.2);
+    color: #ff9b9b;
+    border: 1px solid rgba(255, 94, 94, 0.6);
+}
+
+body.light .access-indicator {
+    background-color: rgba(0, 0, 0, 0.05);
+    color: #333;
+}
+
+body.light .access-indicator--emergency {
+    background-color: rgba(214, 65, 65, 0.15);
+    color: #a62828;
+    border-color: rgba(214, 65, 65, 0.45);
+}
+
 .theme-toggle-form {
     margin: 0;
 }

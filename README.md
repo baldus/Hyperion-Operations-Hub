@@ -150,7 +150,10 @@ applies the same provisioning steps and launches gunicorn pointed at
 > this happens, the home page renders an alert that lists recovery commands
 > (checking the PostgreSQL service, starting it, confirming `DB_URL`, and
 > rerunning `./start_operations_console.sh`). This allows you to verify that the
-> web layer is healthy before tackling database connectivity.
+> web layer is healthy before tackling database connectivity. During this
+> degraded mode the console automatically enables *emergency offline access* so
+> you can open the admin diagnostics pages and restart services without logging
+> in.
 
 ---
 

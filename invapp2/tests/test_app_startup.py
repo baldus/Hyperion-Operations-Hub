@@ -36,3 +36,23 @@ def test_create_app_handles_database_outage(monkeypatch):
     assert "Unable to connect" in (app.config["DATABASE_ERROR"] or "")
     assert "database offline" in (app.config["DATABASE_ERROR"] or "")
     assert create_all_called is False
+
+
+def test_emergency_access_allows_admin_tools(monkeypatch):
+    """Emergency mode should surface admin tooling without authentication."""
+
+    def fake_ping() -> None:
+        raise OperationalError("SELECT 1", {}, Exception("database offline"))
+
+    monkeypatch.setattr(invapp_module, "_ping_database", fake_ping)
+
+    app = create_app({"TESTING": True})
+    client = app.test_client()
+
+    tools_response = client.get("/admin/tools")
+    assert tools_response.status_code == 200
+    assert b"System Uptime" in tools_response.data
+
+    home_response = client.get("/")
+    assert b"Emergency access" in home_response.data
+    assert b"admin tools" in home_response.data

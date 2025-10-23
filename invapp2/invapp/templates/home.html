@@ -23,6 +23,12 @@
     </ol>
   </details>
   {% endif %}
+  {% if emergency_access_active %}
+  <p class="home-alert-message">
+    You're using emergency offline access. Open the <a href="{{ url_for('admin.tools') }}">admin tools</a> to review
+    system diagnostics or restart services once the database is available.
+  </p>
+  {% endif %}
 </div>
 {% endif %}
 {% if not current_user.is_authenticated %}
