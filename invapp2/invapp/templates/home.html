@@ -25,8 +25,9 @@
   {% endif %}
   {% if emergency_access_active %}
   <p class="home-alert-message">
-    You're using emergency offline access. Open the <a href="{{ url_for('admin.tools') }}">admin tools</a> to review
-    system diagnostics or restart services once the database is available.
+    You're using emergency offline access. Open the <a href="{{ url_for('admin.tools') }}">admin tools</a> or launch the
+    <a href="{{ url_for('admin.emergency_console') }}">emergency command console</a> to restart PostgreSQL, rebuild the
+    database, or reinstall dependencies directly from the browser.
   </p>
   {% endif %}
 </div>

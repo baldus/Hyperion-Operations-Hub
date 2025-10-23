@@ -152,8 +152,8 @@ applies the same provisioning steps and launches gunicorn pointed at
 > rerunning `./start_operations_console.sh`). This allows you to verify that the
 > web layer is healthy before tackling database connectivity. During this
 > degraded mode the console automatically enables *emergency offline access* so
-> you can open the admin diagnostics pages and restart services without logging
-> in.
+> you can open the admin diagnostics pages, launch the browser-based emergency
+> command console, restart PostgreSQL, or reinstall packages without logging in.
 
 ---
 

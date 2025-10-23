@@ -10,8 +10,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import invapp as invapp_module
+from invapp import routes as routes_package  # noqa: F401 - ensures package import side effects
 from invapp import create_app
 from invapp.extensions import db
+from invapp.routes import admin as admin_routes
 
 
 def test_create_app_handles_database_outage(monkeypatch):
@@ -69,3 +71,55 @@ def test_emergency_access_allows_admin_tools(monkeypatch):
     reset_response = client.get("/auth/reset-password", follow_redirects=True)
     assert reset_response.status_code == 200
     assert b"Password changes are disabled" in reset_response.data
+
+
+def test_emergency_console_runs_curated_command(monkeypatch):
+    def fake_ping() -> None:
+        raise OperationalError("SELECT 1", {}, Exception("database offline"))
+
+    monkeypatch.setattr(invapp_module, "_ping_database", fake_ping)
+
+    executed: dict[str, tuple[str, ...]] = {}
+
+    def fake_run(parts, capture_output, text, timeout, check):  # type: ignore[no-untyped-def]
+        executed["parts"] = tuple(parts)
+
+        class _Result:
+            returncode = 0
+            stdout = "postgresql restarted"
+            stderr = ""
+
+        return _Result()
+
+    monkeypatch.setattr(admin_routes.subprocess, "run", fake_run)
+
+    app = create_app({"TESTING": True})
+    client = app.test_client()
+
+    response = client.post("/admin/emergency-console", data={"command_id": "pg-restart"})
+    assert response.status_code == 200
+    assert b"Command output" in response.data
+    assert b"postgresql restarted" in response.data
+    assert executed["parts"] == (
+        "sudo",
+        "systemctl",
+        "restart",
+        "postgresql",
+    )
+
+
+def test_emergency_console_rejects_disallowed_custom_command(monkeypatch):
+    def fake_ping() -> None:
+        raise OperationalError("SELECT 1", {}, Exception("database offline"))
+
+    monkeypatch.setattr(invapp_module, "_ping_database", fake_ping)
+
+    app = create_app({"TESTING": True})
+    client = app.test_client()
+
+    response = client.post(
+        "/admin/emergency-console",
+        data={"custom_command": "rm -rf /"},
+    )
+    assert response.status_code == 200
+    assert b"not allowed in emergency mode" in response.data

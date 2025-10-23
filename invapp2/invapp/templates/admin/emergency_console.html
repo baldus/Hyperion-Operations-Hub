@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Emergency Command Console</h2>
+<p class="page-intro">Run curated recovery commands while the operations console is in emergency mode. Results are captured below so you can validate each step without leaving the browser.</p>
+
+{% if not database_online %}
+<div class="offline-card emergency-card" role="status">
+    <h3>Emergency access active</h3>
+    <p>The database connection is offline. Commands will run on the application host using the console service account.</p>
+</div>
+{% else %}
+<div class="offline-card emergency-card emergency-card--online" role="status">
+    <h3>Database connected</h3>
+    <p>You can still use these helpers to restart services or install packages as needed.</p>
+</div>
+{% endif %}
+
+{% if error_message %}
+<div class="alert alert-danger">{{ error_message }}</div>
+{% endif %}
+
+<form method="post" class="emergency-command-form">
+    <div class="emergency-grid">
+        {% for group in command_groups %}
+        <section class="emergency-panel">
+            <header class="emergency-panel-header">
+                <h3>{{ group.title }}</h3>
+                <p>{{ group.description }}</p>
+            </header>
+            <ul class="emergency-command-list">
+                {% for command in group.commands %}
+                <li class="emergency-command-item">
+                    <button type="submit" name="command_id" value="{{ command.id }}" class="emergency-command-button"{% if selected_command_id == command.id %} aria-current="true"{% endif %}>
+                        <span class="command-label">{{ command.label }}</span>
+                        <span class="command-meta">{{ command.command | join(' ') }}</span>
+                    </button>
+                    {% if command.note %}
+                    <p class="command-note">{{ command.note }}</p>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+        </section>
+        {% endfor %}
+    </div>
+</form>
+
+<section class="custom-command-section">
+    <h3>Run a custom command</h3>
+    <p>Need something else? Enter a command that starts with one of the approved binaries below. Commands run with a 10 minute timeout.</p>
+    <p class="approved-commands">Allowed starters: {{ allowed_custom_binaries | join(', ') }}</p>
+    <form method="post" class="custom-command-form">
+        <label for="custom_command" class="sr-only">Custom command</label>
+        <textarea id="custom_command" name="custom_command" rows="3" placeholder="sudo systemctl status postgresql" required>{{ custom_command }}</textarea>
+        <div class="custom-command-actions">
+            <button type="submit" class="action-btn">Run custom command</button>
+        </div>
+    </form>
+</section>
+
+{% if command_result %}
+<section class="command-output" aria-live="polite">
+    <h3>Command output</h3>
+    <p class="command-output-summary">
+        <strong>{{ command_result.label }}</strong>
+        ran as <code>{{ command_result.command }}</code>
+        and exited with code <code>{{ command_result.exit_code }}</code>.
+        {% if command_result.note %}
+        <span class="command-output-note">{{ command_result.note }}</span>
+        {% endif %}
+    </p>
+    <div class="command-output-columns">
+        <article>
+            <h4>Standard output</h4>
+            <pre><code>{{ command_result.stdout or '—' }}</code></pre>
+        </article>
+        <article>
+            <h4>Standard error</h4>
+            <pre><code>{{ command_result.stderr or '—' }}</code></pre>
+        </article>
+    </div>
+</section>
+{% endif %}
+{% endblock %}
