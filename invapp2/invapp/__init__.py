@@ -326,6 +326,13 @@ def _ensure_production_schema(engine):
                     )
 
 
+def _ping_database() -> None:
+    """Raise :class:`OperationalError` when the configured database is unreachable."""
+
+    with db.engine.connect() as connection:
+        connection.execute(text("SELECT 1"))
+
+
 def create_app(config_override=None):
     app = Flask(__name__)
 
@@ -392,22 +399,11 @@ def create_app(config_override=None):
     # create tables if they do not exist and ensure legacy schema
     with app.app_context():
         try:
-            db.create_all()
-            _ensure_inventory_schema(db.engine)
-            _ensure_order_schema(db.engine)
-            _ensure_production_schema(db.engine)
-            # ✅ ensure default production customers at startup
-            production._ensure_default_customers()
-            production._ensure_output_formula()
-            _ensure_superuser_account(
-                app.config.get("ADMIN_USER", "superuser"),
-                app.config.get("ADMIN_PASSWORD", "joshbaldus"),
-            )
-            _ensure_core_roles()
+            _ping_database()
         except OperationalError as exc:
             database_available = False
             root_cause = getattr(exc, "orig", exc)
-            details = str(root_cause)
+            details = str(root_cause).strip()
             database_error_message = (
                 "Unable to connect to the configured database. Start the "
                 "PostgreSQL service or update the DB_URL setting, then restart "
@@ -415,16 +411,39 @@ def create_app(config_override=None):
             )
             if details:
                 database_error_message += f" (Error: {details})"
-            current_app.logger.exception("Database connection failed during startup")
-            db.session.remove()
-        except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
-            database_available = False
-            database_error_message = (
-                "The database schema could not be initialized. Review the logs "
-                "for details and re-run the startup script once resolved."
+            message_suffix = f": {details}" if details else ""
+            current_app.logger.error(
+                "Database connection unavailable during startup%s",
+                message_suffix,
+                exc_info=current_app.debug,
             )
-            current_app.logger.exception("Database initialization error")
             db.session.remove()
+            try:
+                db.engine.dispose()
+            except Exception:  # pragma: no cover - best-effort cleanup
+                pass
+        else:
+            try:
+                db.create_all()
+                _ensure_inventory_schema(db.engine)
+                _ensure_order_schema(db.engine)
+                _ensure_production_schema(db.engine)
+                # ✅ ensure default production customers at startup
+                production._ensure_default_customers()
+                production._ensure_output_formula()
+                _ensure_superuser_account(
+                    app.config.get("ADMIN_USER", "superuser"),
+                    app.config.get("ADMIN_PASSWORD", "joshbaldus"),
+                )
+                _ensure_core_roles()
+            except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
+                database_available = False
+                database_error_message = (
+                    "The database schema could not be initialized. Review the logs "
+                    "for details and re-run the startup script once resolved."
+                )
+                current_app.logger.exception("Database initialization error")
+                db.session.remove()
 
     app.config["DATABASE_AVAILABLE"] = database_available
     app.config["DATABASE_ERROR"] = database_error_message
