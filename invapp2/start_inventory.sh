@@ -27,7 +27,13 @@ fi
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 WORKERS="${GUNICORN_WORKERS:-2}"
-TIMEOUT="${GUNICORN_TIMEOUT:-120}"
+TIMEOUT="${GUNICORN_TIMEOUT:-600}"
+
+if [ -z "${GUNICORN_TIMEOUT:-}" ]; then
+  echo "[info] GUNICORN_TIMEOUT not provided; defaulting to ${TIMEOUT}s for large uploads"
+else
+  echo "[info] Using GUNICORN_TIMEOUT=${TIMEOUT}s"
+fi
 
 cd "$PROJECT_ROOT"
 
