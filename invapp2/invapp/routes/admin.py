@@ -1,3 +1,4 @@
+import gzip
 import io
 import json
 import os
@@ -751,6 +752,9 @@ def export_data():
     )
 
 
+_IMPORT_BATCH_SIZE = 500
+
+
 @bp.route("/data-backup/import", methods=["POST"])
 @login_required
 @require_roles("admin")
@@ -765,9 +769,10 @@ def import_data():
         return redirect(url_for("admin.data_backup"))
 
     try:
-        payload = upload.read()
-        raw_data = json.loads(payload)
-    except (UnicodeDecodeError, json.JSONDecodeError):
+        stream = _open_backup_stream(upload)
+        with stream:
+            raw_data = json.load(stream)
+    except (UnicodeDecodeError, json.JSONDecodeError, OSError):
         flash("The uploaded file is not a valid backup.", "danger")
         return redirect(url_for("admin.data_backup"))
 
@@ -780,15 +785,14 @@ def import_data():
         for table in metadata.sorted_tables:
             table_name = table.name
             rows = raw_data.get(table_name, [])
-            prepared_rows = []
-            for row in rows:
-                prepared = {}
-                for column in table.columns:
-                    value = row.get(column.name)
-                    prepared[column.name] = _parse_value(column, value)
-                prepared_rows.append(prepared)
-            if prepared_rows:
-                db.session.execute(table.insert(), prepared_rows)
+            if not rows:
+                continue
+
+            prepared_rows = _prepare_table_rows(table, rows)
+            for batch in _batched(prepared_rows, _IMPORT_BATCH_SIZE):
+                db.session.execute(table.insert(), batch)
+
+            raw_data.pop(table_name, None)
 
         db.session.commit()
     except Exception as exc:  # pragma: no cover - defensive rollback
@@ -799,6 +803,40 @@ def import_data():
 
     flash("Backup imported successfully.", "success")
     return redirect(url_for("admin.data_backup"))
+
+
+def _open_backup_stream(upload):
+    """Return a text stream for a JSON or gzipped backup upload."""
+
+    stream = upload.stream
+    stream.seek(0)
+    magic = stream.read(2)
+    stream.seek(0)
+
+    if magic == b"\x1f\x8b":
+        gzip_file = gzip.GzipFile(fileobj=stream)
+        return io.TextIOWrapper(gzip_file, encoding="utf-8")
+
+    return io.TextIOWrapper(stream, encoding="utf-8")
+
+
+def _batched(iterable, batch_size):
+    batch = []
+    for item in iterable:
+        batch.append(item)
+        if len(batch) == batch_size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
+
+
+def _prepare_table_rows(table, rows):
+    for row in rows:
+        yield {
+            column.name: _parse_value(column, row.get(column.name))
+            for column in table.columns
+        }
 
 
 @bp.route("/storage-locations", methods=["GET", "POST"])
