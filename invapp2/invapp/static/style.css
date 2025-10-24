@@ -183,6 +183,50 @@ body.light .icon-btn:hover {
     display: inline;
 }
 
+.upload-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 16px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+body.light .upload-status {
+    background-color: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.12);
+}
+
+.upload-status__spinner {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 3px solid rgba(255, 255, 255, 0.25);
+    border-top-color: #4aa3ff;
+    animation: upload-spin 0.9s linear infinite;
+}
+
+body.light .upload-status__spinner {
+    border: 3px solid rgba(0, 0, 0, 0.2);
+    border-top-color: #1d6fd8;
+}
+
+.upload-status__message {
+    margin: 0;
+    font-weight: 600;
+}
+
+@keyframes upload-spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 
 .admin-delete-callout {
     margin-top: 16px;

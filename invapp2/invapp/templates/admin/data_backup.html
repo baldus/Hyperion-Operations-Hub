@@ -15,11 +15,21 @@
 <section aria-labelledby="import-title" class="card-section">
     <h3 id="import-title">Import Data</h3>
     <p>Upload a JSON backup file created by this tool to restore the system state.</p>
-    <form method="post" action="{{ url_for('admin.import_data') }}" enctype="multipart/form-data">
+    <form id="backup-import-form" method="post" action="{{ url_for('admin.import_data') }}" enctype="multipart/form-data">
         <label for="backup-file" class="sr-only">Backup file</label>
-        <input id="backup-file" type="file" name="backup_file" accept="application/json" required>
-        <button type="submit" class="action-btn">Upload Backup</button>
+        <input
+            id="backup-file"
+            type="file"
+            name="backup_file"
+            accept="application/json,application/gzip,.json,.gz"
+            required
+        >
+        <button type="submit" class="action-btn" data-default-label="Upload Backup">Upload Backup</button>
     </form>
+    <div id="backup-upload-status" class="upload-status" role="status" aria-live="polite" hidden>
+        <div class="upload-status__spinner" aria-hidden="true"></div>
+        <p class="upload-status__message">Uploading backup&hellip; Large files may take several minutes to process.</p>
+    </div>
 </section>
 
 <section aria-labelledby="tables-title" class="card-section">
@@ -30,4 +40,46 @@
         {% endfor %}
     </ul>
 </section>
+{% endblock %}
+
+{% block extra_scripts %}
+{{ super() }}
+<script>
+    document.addEventListener("DOMContentLoaded", () => {
+        const form = document.getElementById("backup-import-form");
+        if (!form) {
+            return;
+        }
+
+        const status = document.getElementById("backup-upload-status");
+        const submitButton = form.querySelector("button[type='submit']");
+        const fileInput = form.querySelector("#backup-file");
+
+        form.addEventListener("submit", () => {
+            if (form.checkValidity() && status) {
+                status.hidden = false;
+            }
+
+            if (submitButton) {
+                const defaultLabel = submitButton.dataset.defaultLabel || submitButton.textContent;
+                submitButton.dataset.defaultLabel = defaultLabel;
+                submitButton.textContent = "Uploading…";
+                submitButton.disabled = true;
+            }
+        });
+
+        if (fileInput) {
+            fileInput.addEventListener("change", () => {
+                if (submitButton && submitButton.disabled) {
+                    submitButton.disabled = false;
+                    submitButton.textContent = submitButton.dataset.defaultLabel || "Upload Backup";
+                }
+
+                if (status) {
+                    status.hidden = true;
+                }
+            });
+        }
+    });
+</script>
 {% endblock %}

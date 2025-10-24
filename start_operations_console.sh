@@ -133,7 +133,13 @@ fi
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 WORKERS="${GUNICORN_WORKERS:-2}"
-TIMEOUT="${GUNICORN_TIMEOUT:-120}"
+TIMEOUT="${GUNICORN_TIMEOUT:-600}"
+
+if [ -z "${GUNICORN_TIMEOUT:-}" ]; then
+    echo "⚠️ GUNICORN_TIMEOUT not provided; defaulting to ${TIMEOUT}s to accommodate large data backups"
+else
+    echo "✅ Using GUNICORN_TIMEOUT=${TIMEOUT}s"
+fi
 
 echo "🔹 Starting Hyperion Operations Console via Gunicorn ($HOST:$PORT)"
 exec gunicorn --bind "$HOST:$PORT" --workers "$WORKERS" --timeout "$TIMEOUT" "$APP_MODULE"
