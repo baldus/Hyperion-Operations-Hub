@@ -86,12 +86,25 @@ cd "$APP_DIR"
 
 ensure_python_tooling
 
-if [ ! -d "$VENV_DIR" ]; then
+create_virtualenv() {
+    local target_dir="$1"
+
+    python3 -m venv "$target_dir"
+
+    if [ ! -f "$target_dir/bin/activate" ]; then
+        echo "❌ Virtual environment at $target_dir was not created correctly." >&2
+        return 1
+    fi
+}
+
+if [ ! -f "$VENV_DIR/bin/activate" ]; then
     echo "🔹 Creating virtual environment at $VENV_DIR"
-    if ! python3 -m venv "$VENV_DIR"; then
+    rm -rf "$VENV_DIR"
+    if ! create_virtualenv "$VENV_DIR"; then
         echo "⚠️ python3 -m venv failed; attempting to install python3-venv and retry"
         ensure_apt_packages python3 python3-venv python3-pip
-        python3 -m venv "$VENV_DIR"
+        rm -rf "$VENV_DIR"
+        create_virtualenv "$VENV_DIR"
     fi
 fi
 
@@ -99,7 +112,9 @@ echo "🔹 Activating virtual environment"
 source "$VENV_DIR/bin/activate"
 
 echo "🔹 Ensuring tooling is up to date"
-python -m pip install --upgrade pip setuptools wheel >/dev/null
+if ! python -m pip install --upgrade pip setuptools wheel; then
+    echo "⚠️ Unable to upgrade pip tooling automatically; continuing with existing versions" >&2
+fi
 
 if [ -f "$REQUIREMENTS_FILE" ]; then
     echo "🔹 Installing Python dependencies from $(realpath "$REQUIREMENTS_FILE")"
