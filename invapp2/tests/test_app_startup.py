@@ -73,20 +73,21 @@ def test_emergency_access_allows_admin_tools(monkeypatch):
     assert b"Password changes are disabled" in reset_response.data
 
 
-def test_emergency_console_runs_curated_command(monkeypatch):
+def test_emergency_console_runs_recovery_sequence(monkeypatch):
     def fake_ping() -> None:
         raise OperationalError("SELECT 1", {}, Exception("database offline"))
 
     monkeypatch.setattr(invapp_module, "_ping_database", fake_ping)
 
-    executed: dict[str, tuple[str, ...]] = {}
+    executed: list[tuple[str, ...]] = []
 
     def fake_run(parts, capture_output, text, timeout, check):  # type: ignore[no-untyped-def]
-        executed["parts"] = tuple(parts)
+        executed.append(tuple(parts))
+        index = len(executed)
 
         class _Result:
             returncode = 0
-            stdout = "postgresql restarted"
+            stdout = f"step {index} completed"
             stderr = ""
 
         return _Result()
@@ -96,16 +97,17 @@ def test_emergency_console_runs_curated_command(monkeypatch):
     app = create_app({"TESTING": True})
     client = app.test_client()
 
-    response = client.post("/admin/emergency-console", data={"command_id": "pg-restart"})
-    assert response.status_code == 200
-    assert b"Command output" in response.data
-    assert b"postgresql restarted" in response.data
-    assert executed["parts"] == (
-        "sudo",
-        "systemctl",
-        "restart",
-        "postgresql",
+    response = client.post(
+        "/admin/emergency-console",
+        data={"action_id": admin_routes._AUTOMATED_RECOVERY_ACTION_ID},
     )
+    assert response.status_code == 200
+    assert b"Automated recovery sequence" in response.data
+    assert b"steps succeeded" in response.data
+    assert len(executed) == len(admin_routes._RECOVERY_SEQUENCE)
+    assert executed[0][:3] == ("sudo", "apt-get", "update")
+    assert executed[-1][0] == "bash"
+    assert executed[-1][1].endswith("support/run_diagnostics.sh")
 
 
 def test_emergency_console_resolves_restart_script(monkeypatch):
@@ -131,7 +133,10 @@ def test_emergency_console_resolves_restart_script(monkeypatch):
     app = create_app({"TESTING": True})
     client = app.test_client()
 
-    response = client.post("/admin/emergency-console", data={"command_id": "console-restart"})
+    response = client.post(
+        "/admin/emergency-console",
+        data={"action_id": admin_routes._CONSOLE_RESTART_ACTION_ID},
+    )
     assert response.status_code == 200
     assert executed["parts"][0] == "bash"
     assert executed["parts"][1].endswith("start_operations_console.sh")

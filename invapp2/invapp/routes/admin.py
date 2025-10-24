@@ -37,123 +37,122 @@ from invapp.security import require_roles
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
 
-_EMERGENCY_COMMAND_GROUPS = (
+_AUTOMATED_RECOVERY_ACTION_ID = "automated-recovery"
+_CONSOLE_RESTART_ACTION_ID = "console-restart"
+
+
+_RECOVERY_SEQUENCE = (
     {
-        "id": "postgresql",
-        "title": "PostgreSQL service control",
-        "description": "Check the database service and bring it online without leaving the console.",
-        "commands": (
-            {
-                "id": "pg-status",
-                "label": "Check service status",
-                "command": ("sudo", "systemctl", "status", "postgresql"),
-                "note": "Inspect whether PostgreSQL is running and review recent log output.",
-            },
-            {
-                "id": "pg-start",
-                "label": "Start PostgreSQL",
-                "command": ("sudo", "systemctl", "start", "postgresql"),
-                "note": "Launch the database service if it is currently stopped.",
-            },
-            {
-                "id": "pg-restart",
-                "label": "Restart PostgreSQL",
-                "command": ("sudo", "systemctl", "restart", "postgresql"),
-                "note": "Restart the service after configuration or package updates.",
-            },
-        ),
+        "label": "Refresh apt package index",
+        "command": ("sudo", "apt-get", "update"),
+        "note": "Fetch the latest package metadata before installing or upgrading components.",
     },
     {
-        "id": "database",
-        "title": "Database bootstrap helpers",
-        "description": "Create or reset the application database after provisioning a new PostgreSQL instance.",
-        "commands": (
-            {
-                "id": "db-create",
-                "label": "Create application database",
-                "command": ("sudo", "-u", "postgres", "createdb", "invdb"),
-                "note": "Provision the expected \"invdb\" database if it does not already exist.",
-            },
-            {
-                "id": "db-owner",
-                "label": "Ensure database owner",
-                "command": (
-                    "sudo",
-                    "-u",
-                    "postgres",
-                    "psql",
-                    "-c",
-                    "ALTER DATABASE invdb OWNER TO inv;",
-                ),
-                "note": "Grant ownership of the application database to the \"inv\" role.",
-            },
-            {
-                "id": "db-user",
-                "label": "Create application user",
-                "command": (
-                    "sudo",
-                    "-u",
-                    "postgres",
-                    "psql",
-                    "-c",
-                    "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'inv') THEN CREATE USER inv WITH PASSWORD 'change_me'; END IF; END $$;",
-                ),
-                "note": "Create the default \"inv\" role with the documented password if it is missing.",
-            },
-            {
-                "id": "db-grant",
-                "label": "Grant privileges",
-                "command": (
-                    "sudo",
-                    "-u",
-                    "postgres",
-                    "psql",
-                    "-c",
-                    "GRANT ALL PRIVILEGES ON DATABASE invdb TO inv;",
-                ),
-                "note": "Ensure the application role can connect once the database is online.",
-            },
+        "label": "Install PostgreSQL server",
+        "command": (
+            "sudo",
+            "apt-get",
+            "install",
+            "-y",
+            "postgresql",
+            "postgresql-contrib",
         ),
+        "note": "Ensure the database server and extensions are present on the host.",
     },
     {
-        "id": "packages",
-        "title": "System package helpers",
-        "description": "Download or upgrade prerequisites that PostgreSQL depends on.",
-        "commands": (
-            {
-                "id": "apt-update",
-                "label": "Update apt package lists",
-                "command": ("sudo", "apt-get", "update"),
-                "note": "Refresh repositories before installing or upgrading packages.",
-            },
-            {
-                "id": "apt-install-postgres",
-                "label": "Install PostgreSQL server",
-                "command": ("sudo", "apt-get", "install", "-y", "postgresql", "postgresql-contrib"),
-                "note": "Install the database server and common extensions.",
-            },
-            {
-                "id": "pip-upgrade",
-                "label": "Upgrade Python dependencies",
-                "command": ("pip", "install", "--upgrade", "-r", "requirements.txt"),
-                "note": "Reinstall console Python packages inside the active virtual environment.",
-            },
-        ),
+        "label": "Start PostgreSQL service",
+        "command": ("sudo", "systemctl", "start", "postgresql"),
+        "note": "Bring PostgreSQL online if it is currently stopped.",
     },
     {
-        "id": "service",
-        "title": "Console utilities",
-        "description": "Relaunch the operations console after completing recovery tasks.",
-        "commands": (
-            {
-                "id": "console-restart",
-                "label": "Restart operations console",
-                "command": ("bash", "start_operations_console.sh"),
-                "note": "Apply changes and restart the Gunicorn service using the helper script.",
-            },
+        "label": "Restart PostgreSQL service",
+        "command": ("sudo", "systemctl", "restart", "postgresql"),
+        "note": "Reload the database service to pick up configuration or package updates.",
+    },
+    {
+        "label": "Ensure application database exists",
+        "command": (
+            "sudo",
+            "-u",
+            "postgres",
+            "createdb",
+            "--if-not-exists",
+            "invdb",
         ),
+        "note": "Create the expected invdb database when provisioning a new environment.",
+    },
+    {
+        "label": "Ensure application user exists",
+        "command": (
+            "sudo",
+            "-u",
+            "postgres",
+            "psql",
+            "-c",
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'inv') THEN CREATE USER inv WITH PASSWORD 'change_me'; END IF; END $$;",
+        ),
+        "note": "Provision the documented inv role when it is missing.",
+    },
+    {
+        "label": "Ensure database owner",
+        "command": (
+            "sudo",
+            "-u",
+            "postgres",
+            "psql",
+            "-c",
+            "ALTER DATABASE invdb OWNER TO inv;",
+        ),
+        "note": "Guarantee the application role owns the database.",
+    },
+    {
+        "label": "Grant database privileges",
+        "command": (
+            "sudo",
+            "-u",
+            "postgres",
+            "psql",
+            "-c",
+            "GRANT ALL PRIVILEGES ON DATABASE invdb TO inv;",
+        ),
+        "note": "Allow the application role to connect once PostgreSQL is online.",
+    },
+    {
+        "label": "Upgrade console dependencies",
+        "command": ("pip", "install", "--upgrade", "-r", "requirements.txt"),
+        "note": "Reinstall Python packages inside the active virtual environment.",
+    },
+    {
+        "label": "Capture diagnostics snapshot",
+        "command": ("bash", "support/run_diagnostics.sh"),
+        "note": "Collect system status information for troubleshooting.",
     },
 )
+
+
+_EMERGENCY_ACTIONS = (
+    {
+        "id": _AUTOMATED_RECOVERY_ACTION_ID,
+        "title": "Automated recovery",
+        "button_label": "Diagnose and repair",
+        "description": "Run every recovery helper in sequence and surface the results in one place.",
+        "note": "Includes package refresh, PostgreSQL maintenance, and a diagnostics snapshot.",
+    },
+    {
+        "id": _CONSOLE_RESTART_ACTION_ID,
+        "title": "Restart console services",
+        "button_label": "Restart console",
+        "description": "Launch the helper script to reload Gunicorn and re-apply configuration.",
+        "note": "Invokes start_operations_console.sh on the application host.",
+    },
+)
+
+
+_APPROVED_HELPER_SCRIPTS = {
+    "start_operations_console.sh",
+    "start_inventory.sh",
+    "support/run_diagnostics.sh",
+}
 
 
 _ALLOWED_CUSTOM_BINARIES = {
@@ -173,15 +172,8 @@ _ALLOWED_CUSTOM_BINARIES = {
     "apt",
     "apt-get",
     "docker",
+    "support/run_diagnostics.sh",
 }
-
-
-def _all_emergency_commands() -> dict[str, dict[str, object]]:
-    lookup: dict[str, dict[str, object]] = {}
-    for group in _EMERGENCY_COMMAND_GROUPS:
-        for command in group["commands"]:
-            lookup[command["id"]] = command
-    return lookup
 
 
 def _quote_command(parts: tuple[str, ...]) -> str:
@@ -206,7 +198,7 @@ def _validate_custom_command(raw_command: str) -> tuple[str, ...]:
 
     if binary in {"bash", "sh"} and len(parts) > 1:
         script_name = parts[1]
-        if script_name not in {"start_operations_console.sh", "start_inventory.sh"}:
+        if script_name not in _APPROVED_HELPER_SCRIPTS:
             raise ValueError("Only approved helper scripts may be launched from the console.")
 
     return parts
@@ -263,7 +255,7 @@ def _normalize_command(parts: tuple[str, ...]) -> tuple[str, ...]:
 
     if normalized[index] in {"bash", "sh"} and len(normalized) > index + 1:
         script_name = normalized[index + 1]
-        if script_name in {"start_operations_console.sh", "start_inventory.sh"}:
+        if script_name in _APPROVED_HELPER_SCRIPTS:
             normalized[index + 1] = _resolve_helper_script(script_name)
 
     return tuple(normalized)
@@ -283,6 +275,29 @@ def _run_emergency_command(parts: tuple[str, ...]) -> dict[str, object]:
         "exit_code": completed.returncode,
         "stdout": (completed.stdout or "").strip(),
         "stderr": (completed.stderr or "").strip(),
+    }
+
+
+def _run_recovery_sequence() -> dict[str, object]:
+    steps: list[dict[str, object]] = []
+    failures = 0
+
+    for step in _RECOVERY_SEQUENCE:
+        result = _run_emergency_command(step["command"])
+        result["label"] = step["label"]
+        result["note"] = step.get("note")
+        steps.append(result)
+        if result["exit_code"] != 0:
+            failures += 1
+
+    total = len(steps)
+    summary = f"{total - failures} of {total} steps succeeded" if total else "No recovery steps were executed."
+
+    return {
+        "label": "Automated recovery sequence",
+        "exit_code": 0 if failures == 0 else 1,
+        "note": summary,
+        "steps": steps,
     }
 
 
@@ -576,30 +591,38 @@ def tools():
 @login_required
 @require_roles("admin")
 def emergency_console():
-    command_lookup = _all_emergency_commands()
-    command_groups = _EMERGENCY_COMMAND_GROUPS
+    actions = _EMERGENCY_ACTIONS
+    action_lookup = {action["id"]: action for action in actions}
     command_result: dict[str, object] | None = None
     error_message: str | None = None
-    selected_command_id: str | None = None
+    selected_action_id: str | None = None
     custom_command = (request.form.get("custom_command") or "").strip()
 
     if request.method == "POST":
-        command_id = (request.form.get("command_id") or "").strip()
+        action_id = (request.form.get("action_id") or "").strip()
         try:
-            if command_id:
-                command = command_lookup.get(command_id)
-                if not command:
-                    raise ValueError("Unknown command requested.")
-                selected_command_id = command_id
-                command_result = _run_emergency_command(command["command"])
-                command_result["label"] = command["label"]
-                command_result["note"] = command.get("note")
+            if action_id:
+                action = action_lookup.get(action_id)
+                if not action:
+                    raise ValueError("Unknown action requested.")
+
+                selected_action_id = action_id
+
+                if action_id == _AUTOMATED_RECOVERY_ACTION_ID:
+                    command_result = _run_recovery_sequence()
+                elif action_id == _CONSOLE_RESTART_ACTION_ID:
+                    command_result = _run_emergency_command(("bash", "start_operations_console.sh"))
+                    command_result["label"] = action["title"]
+                    if action.get("note"):
+                        command_result["note"] = action["note"]
+                else:
+                    raise ValueError("Unknown action requested.")
             elif custom_command:
                 parts = _validate_custom_command(custom_command)
                 command_result = _run_emergency_command(parts)
                 command_result["label"] = "Custom command"
             else:
-                raise ValueError("Select a command or enter a custom command to run.")
+                raise ValueError("Run an automated action or enter a custom command to continue.")
         except ValueError as exc:
             error_message = str(exc)
         except subprocess.TimeoutExpired:
@@ -611,10 +634,10 @@ def emergency_console():
 
     return render_template(
         "admin/emergency_console.html",
-        command_groups=command_groups,
+        actions=actions,
         command_result=command_result,
         error_message=error_message,
-        selected_command_id=selected_command_id,
+        selected_action_id=selected_action_id,
         custom_command=custom_command,
         allowed_custom_binaries=sorted(_ALLOWED_CUSTOM_BINARIES),
         database_online=_database_available(),
