@@ -194,18 +194,27 @@ body.light .icon-btn:hover {
     border: 1px solid rgba(255, 255, 255, 0.15);
 }
 
+.upload-status[hidden] {
+    display: none !important;
+}
+
 body.light .upload-status {
     background-color: rgba(0, 0, 0, 0.05);
     border-color: rgba(0, 0, 0, 0.12);
 }
 
 .upload-status__spinner {
+    display: none;
     width: 28px;
     height: 28px;
     border-radius: 50%;
     border: 3px solid rgba(255, 255, 255, 0.25);
     border-top-color: #4aa3ff;
     animation: upload-spin 0.9s linear infinite;
+}
+
+.upload-status--active .upload-status__spinner {
+    display: inline-block;
 }
 
 body.light .upload-status__spinner {

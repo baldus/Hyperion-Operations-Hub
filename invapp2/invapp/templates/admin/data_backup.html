@@ -26,9 +26,16 @@
         >
         <button type="submit" class="action-btn" data-default-label="Upload Backup">Upload Backup</button>
     </form>
-    <div id="backup-upload-status" class="upload-status" role="status" aria-live="polite" hidden>
+    <div
+        id="backup-upload-status"
+        class="upload-status"
+        role="status"
+        aria-live="polite"
+        hidden
+        data-uploading-message="Uploading backup&hellip; Large files may take several minutes to process."
+    >
         <div class="upload-status__spinner" aria-hidden="true"></div>
-        <p class="upload-status__message">Uploading backup&hellip; Large files may take several minutes to process.</p>
+        <p class="upload-status__message" data-default-message=""></p>
     </div>
 </section>
 
@@ -55,9 +62,34 @@
         const submitButton = form.querySelector("button[type='submit']");
         const fileInput = form.querySelector("#backup-file");
 
+        const message = status ? status.querySelector(".upload-status__message") : null;
+        const defaultStatusMessage = message
+            ? (message.dataset.defaultMessage !== undefined
+                ? message.dataset.defaultMessage
+                : message.textContent || "")
+            : "";
+        const uploadingMessage = status ? status.dataset.uploadingMessage : "";
+
+        const resetStatus = () => {
+            if (status) {
+                status.hidden = true;
+                status.classList.remove("upload-status--active");
+            }
+
+            if (message) {
+                message.textContent = defaultStatusMessage;
+            }
+        };
+
+        resetStatus();
+
         form.addEventListener("submit", () => {
             if (form.checkValidity() && status) {
+                if (message) {
+                    message.textContent = uploadingMessage || "Uploading backup…";
+                }
                 status.hidden = false;
+                status.classList.add("upload-status--active");
             }
 
             if (submitButton) {
@@ -75,11 +107,11 @@
                     submitButton.textContent = submitButton.dataset.defaultLabel || "Upload Backup";
                 }
 
-                if (status) {
-                    status.hidden = true;
-                }
+                resetStatus();
             });
         }
+
+        form.addEventListener("reset", resetStatus);
     });
 </script>
 {% endblock %}
