@@ -20,27 +20,18 @@
 <div class="alert alert-danger">{{ error_message }}</div>
 {% endif %}
 
-<form method="post" class="emergency-command-form">
-    <div class="emergency-grid">
-        {% for group in command_groups %}
-        <section class="emergency-panel">
-            <header class="emergency-panel-header">
-                <h3>{{ group.title }}</h3>
-                <p>{{ group.description }}</p>
+<form method="post" class="emergency-actions-form">
+    <div class="emergency-actions-grid">
+        {% for action in actions %}
+        <section class="emergency-action-card">
+            <header class="emergency-action-header">
+                <h3>{{ action.title }}</h3>
+                <p>{{ action.description }}</p>
             </header>
-            <ul class="emergency-command-list">
-                {% for command in group.commands %}
-                <li class="emergency-command-item">
-                    <button type="submit" name="command_id" value="{{ command.id }}" class="emergency-command-button"{% if selected_command_id == command.id %} aria-current="true"{% endif %}>
-                        <span class="command-label">{{ command.label }}</span>
-                        <span class="command-meta">{{ command.command | join(' ') }}</span>
-                    </button>
-                    {% if command.note %}
-                    <p class="command-note">{{ command.note }}</p>
-                    {% endif %}
-                </li>
-                {% endfor %}
-            </ul>
+            <button type="submit" name="action_id" value="{{ action.id }}" class="emergency-action-button"{% if selected_action_id == action.id %} aria-current="true"{% endif %}>{{ action.button_label }}</button>
+            {% if action.note %}
+            <p class="action-note">{{ action.note }}</p>
+            {% endif %}
         </section>
         {% endfor %}
     </div>
@@ -49,6 +40,7 @@
 <section class="custom-command-section">
     <h3>Run a custom command</h3>
     <p>Need something else? Enter a command that starts with one of the approved binaries below. Commands run with a 10 minute timeout.</p>
+    <p>Try <code>bash support/run_diagnostics.sh</code> to collect a troubleshooting snapshot.</p>
     <p class="approved-commands">Allowed starters: {{ allowed_custom_binaries | join(', ') }}</p>
     <form method="post" class="custom-command-form">
         <label for="custom_command" class="sr-only">Custom command</label>
@@ -61,15 +53,41 @@
 
 {% if command_result %}
 <section class="command-output" aria-live="polite">
-    <h3>Command output</h3>
+    <h3>{{ command_result.label }}</h3>
     <p class="command-output-summary">
-        <strong>{{ command_result.label }}</strong>
-        ran as <code>{{ command_result.command }}</code>
-        and exited with code <code>{{ command_result.exit_code }}</code>.
-        {% if command_result.note %}
-        <span class="command-output-note">{{ command_result.note }}</span>
+        {% if command_result.steps %}
+        Overall exit code <code>{{ command_result.exit_code }}</code>.
+        {% if command_result.note %}<span class="command-output-note">{{ command_result.note }}</span>{% endif %}
+        {% else %}
+        Ran as <code>{{ command_result.command }}</code> and exited with code <code>{{ command_result.exit_code }}</code>.
+        {% if command_result.note %}<span class="command-output-note">{{ command_result.note }}</span>{% endif %}
         {% endif %}
     </p>
+    {% if command_result.steps %}
+    <ol class="command-output-steps">
+        {% for step in command_result.steps %}
+        <li class="command-step">
+            <header class="command-step-header">
+                <h4>{{ loop.index }}. {{ step.label }}</h4>
+                <p class="command-step-meta">
+                    Ran <code>{{ step.command }}</code> • Exit code <code>{{ step.exit_code }}</code>
+                    {% if step.note %}<span class="command-step-note">{{ step.note }}</span>{% endif %}
+                </p>
+            </header>
+            <div class="command-output-columns">
+                <article>
+                    <h5>Standard output</h5>
+                    <pre><code>{{ step.stdout or '—' }}</code></pre>
+                </article>
+                <article>
+                    <h5>Standard error</h5>
+                    <pre><code>{{ step.stderr or '—' }}</code></pre>
+                </article>
+            </div>
+        </li>
+        {% endfor %}
+    </ol>
+    {% else %}
     <div class="command-output-columns">
         <article>
             <h4>Standard output</h4>
@@ -80,6 +98,7 @@
             <pre><code>{{ command_result.stderr or '—' }}</code></pre>
         </article>
     </div>
+    {% endif %}
 </section>
 {% endif %}
 {% endblock %}

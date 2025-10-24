@@ -232,100 +232,74 @@ body.light .icon-btn:hover {
     color: #a62828;
 }
 
-.emergency-command-form {
+.emergency-actions-form {
     margin-top: 24px;
 }
 
-.emergency-grid {
+.emergency-actions-grid {
     display: grid;
     gap: 20px;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
-.emergency-panel {
+.emergency-action-card {
     background: rgba(255, 255, 255, 0.04);
     border-radius: 12px;
-    padding: 18px;
+    padding: 20px;
     border: 1px solid rgba(255, 255, 255, 0.08);
     display: flex;
     flex-direction: column;
     gap: 12px;
 }
 
-body.light .emergency-panel {
+body.light .emergency-action-card {
     background: rgba(0, 0, 0, 0.02);
     border-color: rgba(0, 0, 0, 0.08);
 }
 
-.emergency-panel-header h3 {
-    margin: 0;
+.emergency-action-header h3 {
+    margin: 0 0 4px;
 }
 
-.emergency-panel-header p {
-    margin: 4px 0 0;
+.emergency-action-header p {
+    margin: 0;
     font-size: 0.95rem;
     color: rgba(255, 255, 255, 0.85);
 }
 
-body.light .emergency-panel-header p {
+body.light .emergency-action-header p {
     color: rgba(0, 0, 0, 0.7);
 }
 
-.emergency-command-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.emergency-command-item {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.emergency-command-button {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
-    width: 100%;
-    border-radius: 10px;
-    padding: 12px 16px;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
-    border: 1px solid rgba(255, 255, 255, 0.12);
-}
-
-.emergency-command-button[aria-current="true"] {
-    border-color: rgba(214, 65, 65, 0.55);
-    box-shadow: 0 0 0 2px rgba(214, 65, 65, 0.25);
-}
-
-body.light .emergency-command-button {
-    background: linear-gradient(135deg, rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.015));
-    border-color: rgba(0, 0, 0, 0.08);
-}
-
-.command-label {
-    font-size: 1rem;
+.emergency-action-button {
+    align-self: flex-start;
+    border-radius: 999px;
+    padding: 10px 20px;
     font-weight: 600;
+    background: linear-gradient(135deg, rgba(214, 65, 65, 0.9), rgba(214, 65, 65, 0.6));
+    border: none;
+    color: #fff;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
-.command-meta {
-    font-family: "Fira Code", "Courier New", monospace;
-    font-size: 0.85rem;
-    opacity: 0.85;
+.emergency-action-button:hover,
+.emergency-action-button:focus-visible {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px rgba(214, 65, 65, 0.35);
 }
 
-.command-note {
+.emergency-action-button[aria-current="true"] {
+    box-shadow: 0 0 0 3px rgba(214, 65, 65, 0.35);
+}
+
+.action-note {
     margin: 0;
     font-size: 0.9rem;
-    color: rgba(255, 255, 255, 0.7);
+    color: rgba(255, 255, 255, 0.75);
 }
 
-body.light .command-note {
+body.light .action-note {
     color: rgba(0, 0, 0, 0.6);
 }
 
@@ -391,6 +365,44 @@ body.light .command-output {
     display: block;
     margin-top: 6px;
     font-size: 0.9rem;
+}
+
+.command-output-steps {
+    list-style: none;
+    margin: 18px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.command-step {
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.15);
+}
+
+body.light .command-step {
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(0, 0, 0, 0.08);
+}
+
+.command-step-header h4 {
+    margin: 0 0 6px;
+}
+
+.command-step-meta {
+    margin: 0;
+    font-size: 0.9rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.command-step-note {
+    font-style: italic;
 }
 
 .command-output-columns {
