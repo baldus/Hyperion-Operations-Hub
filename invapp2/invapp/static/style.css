@@ -1459,6 +1459,145 @@ body.light .progress-track {
     margin: 20px 0;
 }
 
+.field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.gemba-filter-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: flex-end;
+    margin-bottom: 24px;
+}
+
+.gemba-filter-form select,
+.gemba-filter-form input[type="date"],
+.gemba-filter-form input[type="text"],
+.gemba-filter-form input[type="url"] {
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.08);
+    color: inherit;
+    font: inherit;
+}
+
+body.light .gemba-filter-form select,
+body.light .gemba-filter-form input[type="date"],
+body.light .gemba-filter-form input[type="text"],
+body.light .gemba-filter-form input[type="url"] {
+    background: #fff;
+    border-color: rgba(0, 0, 0, 0.18);
+}
+
+.gemba-custom-field.is-disabled {
+    opacity: 0.6;
+}
+
+.gemba-custom-field.is-disabled input {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+body.light .gemba-custom-field.is-disabled input {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+.gemba-inline-fields {
+    display: grid;
+    gap: 12px 16px;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    margin: 12px 0;
+}
+
+.gemba-category-section {
+    margin-top: 32px;
+}
+
+.gemba-category-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.gemba-category-title h3 {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.gemba-category-description {
+    margin: 6px 0 0;
+    opacity: 0.8;
+    max-width: 640px;
+}
+
+.gemba-chart-card,
+.gemba-chart-wrapper {
+    margin-top: 16px;
+}
+
+.gemba-chart-wrapper {
+    min-height: 260px;
+}
+
+.gemba-metric-grid {
+    margin-top: 20px;
+}
+
+.gemba-card-meta {
+    margin: 6px 0 0;
+    font-size: 0.9rem;
+    opacity: 0.75;
+}
+
+.gemba-card-notes {
+    margin: 10px 0 0;
+    font-size: 0.95rem;
+    line-height: 1.4;
+}
+
+.gemba-card-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.gemba-link-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+}
+
+.gemba-edit-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 14px;
+    align-items: center;
+}
+
+.gemba-edit-form {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+body.light .gemba-edit-form {
+    border-top-color: rgba(0, 0, 0, 0.1);
+}
+
+.gemba-empty {
+    margin-top: 12px;
+}
+
 .menu-grid .action-btn {
     display: inline-flex;
     justify-content: center;

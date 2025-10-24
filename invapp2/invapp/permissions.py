@@ -77,6 +77,11 @@ DEFAULT_PAGE_ACCESS: Mapping[str, Mapping[str, Sequence[str] | str]] = {
         "view_roles": ("viewer", "editor", "admin", "production", "user"),
         "edit_roles": ("editor", "admin", "production"),
     },
+    "gemba": {
+        "label": "Gemba / MDI Dashboard",
+        "view_roles": ("admin",),
+        "edit_roles": ("admin",),
+    },
     "reports": {
         "label": "Reports",
         "view_roles": ("viewer", "editor", "admin", "reports", "user"),

@@ -5,13 +5,15 @@ import os
 import shlex
 import shutil
 import subprocess
+from collections import defaultdict
 from pathlib import Path
 from datetime import date, datetime, time as time_type, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from urllib.parse import urljoin
 
 from flask import (
     Blueprint,
+    abort,
     current_app,
     flash,
     redirect,
@@ -36,6 +38,566 @@ from invapp.security import require_roles
 
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
+
+
+_DECIMAL_ZERO = Decimal("0")
+_DECIMAL_PERCENT = Decimal("100")
+_DECIMAL_QUANT = Decimal("0.01")
+
+SQDPM_CATEGORY_DEFINITIONS: dict[str, dict[str, object]] = {
+    "Safety": {
+        "label": "Safety",
+        "icon": "🛡️",
+        "description": "Keep teammates protected and equipment ready.",
+        "chart_color": "#22c55e",
+        "links": (
+            {
+                "label": "View Incidents",
+                "endpoint": "reports.reports_home",
+                "icon": "⚠️",
+            },
+            {
+                "label": "Maintenance Board",
+                "endpoint": "work.station_overview",
+                "icon": "🛠️",
+            },
+        ),
+    },
+    "Quality": {
+        "label": "Quality",
+        "icon": "✅",
+        "description": "Monitor complaints, defects, and corrective actions.",
+        "chart_color": "#3b82f6",
+        "links": (
+            {
+                "label": "Quality Dashboard",
+                "endpoint": "quality.quality_home",
+                "icon": "🧪",
+            },
+            {
+                "label": "Production History",
+                "endpoint": "production.history",
+                "icon": "🏭",
+            },
+        ),
+    },
+    "Delivery": {
+        "label": "Delivery",
+        "icon": "🚚",
+        "description": "Track order flow and schedule attainment.",
+        "chart_color": "#f97316",
+        "links": (
+            {
+                "label": "Orders Workspace",
+                "endpoint": "orders.orders_home",
+                "icon": "📦",
+            },
+            {
+                "label": "Production Schedule",
+                "endpoint": "production.history",
+                "icon": "🗓️",
+            },
+        ),
+    },
+    "People": {
+        "label": "People",
+        "icon": "👥",
+        "description": "Support attendance, engagement, and training needs.",
+        "chart_color": "#8b5cf6",
+        "links": (
+            {
+                "label": "Attendance & Stations",
+                "endpoint": "work.station_overview",
+                "icon": "📋",
+            },
+            {
+                "label": "Training & Reports",
+                "endpoint": "reports.reports_home",
+                "icon": "📈",
+            },
+        ),
+    },
+    "Material": {
+        "label": "Material",
+        "icon": "📦",
+        "description": "Ensure material availability and purchasing flow.",
+        "chart_color": "#0ea5e9",
+        "links": (
+            {
+                "label": "Inventory Dashboard",
+                "endpoint": "inventory.inventory_home",
+                "icon": "📦",
+            },
+            {
+                "label": "Open Purchase Requests",
+                "endpoint": "purchasing.purchasing_home",
+                "icon": "🛒",
+            },
+        ),
+    },
+}
+
+SQDPM_CATEGORY_SEQUENCE: tuple[str, ...] = tuple(SQDPM_CATEGORY_DEFINITIONS.keys())
+
+
+def _slugify_category(category: str) -> str:
+    return category.lower().replace("/", "-").replace(" ", "-")
+
+
+def _normalize_gemba_category(value: str | None) -> str | None:
+    text = (value or "").strip().lower()
+    if not text:
+        return None
+    for category in SQDPM_CATEGORY_SEQUENCE:
+        if text == category.lower():
+            return category
+    return None
+
+
+def _decimal_to_float(value: Decimal | None) -> float | None:
+    if value is None:
+        return None
+    return float(value.quantize(_DECIMAL_QUANT, rounding=ROUND_HALF_UP))
+
+
+def _safe_parse_date(value: str | None, *, field_label: str) -> date | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").date()
+    except ValueError:
+        flash(f"{field_label} must be provided in YYYY-MM-DD format.", "warning")
+        return None
+
+
+def _resolve_category_links(category: str) -> list[dict[str, object]]:
+    definition = SQDPM_CATEGORY_DEFINITIONS.get(category)
+    if not definition:
+        return []
+    resolved: list[dict[str, object]] = []
+    for link in definition.get("links", ()):  # type: ignore[assignment]
+        endpoint = link.get("endpoint")
+        href = link.get("href")
+        if endpoint and not href:
+            try:
+                href = url_for(endpoint)
+            except Exception:
+                href = None
+        if not href:
+            continue
+        resolved.append(
+            {
+                "label": link.get("label", "Open"),
+                "href": href,
+                "icon": link.get("icon"),
+                "external": bool(link.get("external")),
+            }
+        )
+    return resolved
+
+
+def _parse_decimal_field(
+    value: str | None, *, field_label: str, required: bool = False
+) -> tuple[Decimal | None, str | None]:
+    text = (value or "").strip()
+    if not text:
+        if required:
+            return None, f"{field_label} is required."
+        return None, None
+    try:
+        decimal_value = Decimal(text)
+    except (InvalidOperation, ValueError):
+        return None, f"{field_label} must be a valid number."
+    return decimal_value.quantize(_DECIMAL_QUANT, rounding=ROUND_HALF_UP), None
+
+
+def _gemba_metric_status(
+    metric_value: Decimal, target_value: Decimal | None
+) -> tuple[str, Decimal | None]:
+    if target_value is None or target_value == _DECIMAL_ZERO:
+        return "ok", None
+    if target_value == _DECIMAL_ZERO:
+        return "ok", None
+    try:
+        ratio = metric_value / target_value
+    except (InvalidOperation, ZeroDivisionError):
+        return "warn", None
+    if ratio >= Decimal("1"):
+        status = "ok"
+    elif ratio >= Decimal("0.9"):
+        status = "warn"
+    else:
+        status = "alert"
+    return status, ratio
+
+
+def _gemba_metric_form_data(form) -> tuple[dict[str, object] | None, list[str]]:
+    errors: list[str] = []
+    category_input = form.get("category")
+    category = _normalize_gemba_category(category_input)
+    if not category:
+        errors.append("Select a valid SQDPM category.")
+
+    name = (form.get("metric_name") or "").strip()
+    if not name:
+        errors.append("Metric name is required.")
+
+    department = (form.get("department") or "").strip() or None
+
+    metric_value, error = _parse_decimal_field(
+        form.get("metric_value"), field_label="Metric value", required=True
+    )
+    if error:
+        errors.append(error)
+
+    target_value, error = _parse_decimal_field(
+        form.get("target_value"), field_label="Target value", required=False
+    )
+    if error:
+        errors.append(error)
+
+    unit = (form.get("unit") or "").strip() or None
+
+    metric_date = _safe_parse_date(form.get("date"), field_label="Metric date")
+    if metric_date is None:
+        errors.append("Metric date is required.")
+
+    notes = (form.get("notes") or "").strip() or None
+    linked_record_url = (form.get("linked_record_url") or "").strip() or None
+
+    if errors:
+        return None, errors
+
+    data = {
+        "category": category,
+        "metric_name": name,
+        "department": department,
+        "metric_value": metric_value or _DECIMAL_ZERO,
+        "target_value": target_value,
+        "unit": unit,
+        "date": metric_date,
+        "notes": notes,
+        "linked_record_url": linked_record_url,
+    }
+    return data, []
+
+
+@bp.route("/gemba")
+@login_required
+@require_roles("admin")
+def gemba_dashboard():
+    today = date.today()
+    range_key = request.args.get("range", "7")
+    department_filter = (request.args.get("department") or "").strip() or None
+    start_input = request.args.get("start_date")
+    end_input = request.args.get("end_date")
+
+    end_date = _safe_parse_date(end_input, field_label="End date") or today
+
+    start_date = None
+    if start_input:
+        parsed_start = _safe_parse_date(start_input, field_label="Start date")
+        if parsed_start is not None:
+            start_date = parsed_start
+            range_key = "custom"
+
+    if start_date is None:
+        if range_key not in {"7", "30"}:
+            range_key = "7"
+        try:
+            days = int(range_key)
+        except ValueError:
+            days = 7
+            range_key = "7"
+        start_date = end_date - timedelta(days=max(days - 1, 0))
+    else:
+        range_key = "custom"
+
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+
+    department_rows = (
+        db.session.query(models.GembaMetric.department)
+        .filter(models.GembaMetric.department.isnot(None))
+        .filter(models.GembaMetric.department != "")
+        .distinct()
+        .order_by(models.GembaMetric.department.asc())
+        .all()
+    )
+    departments = [row[0] for row in department_rows if row[0]]
+
+    metric_query = models.GembaMetric.query.filter(
+        models.GembaMetric.date >= start_date,
+        models.GembaMetric.date <= end_date,
+        models.GembaMetric.category.in_(SQDPM_CATEGORY_SEQUENCE),
+    )
+
+    if department_filter:
+        metric_query = metric_query.filter(
+            models.GembaMetric.department == department_filter
+        )
+
+    metrics = metric_query.order_by(
+        models.GembaMetric.date.desc(), models.GembaMetric.id.desc()
+    ).all()
+
+    category_links_map = {
+        category: _resolve_category_links(category)
+        for category in SQDPM_CATEGORY_SEQUENCE
+    }
+
+    category_cards: dict[str, list[dict[str, object]]] = {
+        category: [] for category in SQDPM_CATEGORY_SEQUENCE
+    }
+
+    category_daily: dict[str, defaultdict[date, dict[str, object]]] = {
+        category: defaultdict(
+            lambda: {
+                "actual_sum": _DECIMAL_ZERO,
+                "actual_count": 0,
+                "target_sum": _DECIMAL_ZERO,
+                "target_count": 0,
+            }
+        )
+        for category in SQDPM_CATEGORY_SEQUENCE
+    }
+
+    overview_totals: dict[str, dict[str, object]] = {
+        category: {
+            "actual_sum": _DECIMAL_ZERO,
+            "target_sum": _DECIMAL_ZERO,
+            "target_count": 0,
+        }
+        for category in SQDPM_CATEGORY_SEQUENCE
+    }
+
+    for metric in metrics:
+        category = _normalize_gemba_category(metric.category)
+        if not category:
+            continue
+
+        status, ratio = _gemba_metric_status(metric.metric_value, metric.target_value)
+        performance_percent = None
+        ratio_display = None
+        if ratio is not None:
+            ratio_display = float(ratio)
+            performance_percent = float(
+                (ratio * _DECIMAL_PERCENT).quantize(
+                    _DECIMAL_QUANT, rounding=ROUND_HALF_UP
+                )
+            )
+
+        variance = None
+        if metric.target_value is not None:
+            variance = metric.metric_value - metric.target_value
+
+        metric_links = [dict(link) for link in category_links_map.get(category, [])]
+        if metric.linked_record_url:
+            external = metric.linked_record_url.startswith(("http://", "https://"))
+            metric_links.append(
+                {
+                    "label": "Linked Record",
+                    "href": metric.linked_record_url,
+                    "icon": "🔗",
+                    "external": external,
+                }
+            )
+
+        category_cards[category].append(
+            {
+                "id": metric.id,
+                "category": category,
+                "name": metric.metric_name,
+                "department": metric.department,
+                "value": metric.metric_value,
+                "target": metric.target_value,
+                "unit": metric.unit,
+                "date": metric.date,
+                "notes": metric.notes,
+                "status": status,
+                "performance_percent": performance_percent,
+                "ratio": ratio_display,
+                "variance": variance,
+                "links": metric_links,
+                "linked_record_url": metric.linked_record_url,
+            }
+        )
+
+        bucket = category_daily[category][metric.date]
+        bucket["actual_sum"] += metric.metric_value
+        bucket["actual_count"] += 1
+        if metric.target_value is not None:
+            bucket["target_sum"] += metric.target_value
+            bucket["target_count"] += 1
+
+        totals = overview_totals[category]
+        totals["actual_sum"] += metric.metric_value
+        if metric.target_value is not None:
+            totals["target_sum"] += metric.target_value
+            totals["target_count"] += 1
+
+    category_trends: dict[str, dict[str, list[float | None]]] = {}
+    for category in SQDPM_CATEGORY_SEQUENCE:
+        daily_entries = category_daily[category]
+        labels: list[str] = []
+        actual_points: list[float | None] = []
+        target_points: list[float | None] = []
+        for day_key in sorted(daily_entries.keys()):
+            entry = daily_entries[day_key]
+            actual_avg = None
+            if entry["actual_count"]:
+                actual_avg = entry["actual_sum"] / entry["actual_count"]
+            target_avg = None
+            if entry["target_count"]:
+                target_avg = entry["target_sum"] / entry["target_count"]
+            labels.append(day_key.isoformat())
+            actual_points.append(_decimal_to_float(actual_avg))
+            target_points.append(_decimal_to_float(target_avg))
+        category_trends[category] = {
+            "labels": labels,
+            "actual": actual_points,
+            "target": target_points,
+        }
+
+    overview_series: list[dict[str, object]] = []
+    for category in SQDPM_CATEGORY_SEQUENCE:
+        totals = overview_totals[category]
+        actual_total: Decimal = totals["actual_sum"]
+        target_total = None
+        if totals["target_count"]:
+            target_total = totals["target_sum"]
+        ratio_value = None
+        if target_total not in (None, _DECIMAL_ZERO):
+            try:
+                ratio_value = actual_total / target_total
+            except (InvalidOperation, ZeroDivisionError):
+                ratio_value = None
+        overview_series.append(
+            {
+                "category": category,
+                "slug": _slugify_category(category),
+                "actual": _decimal_to_float(actual_total) or 0.0,
+                "target": _decimal_to_float(target_total)
+                if target_total is not None
+                else None,
+                "ratio": float(ratio_value) if ratio_value is not None else None,
+                "chart_color": SQDPM_CATEGORY_DEFINITIONS[category]["chart_color"],
+            }
+        )
+
+    categories = [
+        {
+            "key": category,
+            "slug": _slugify_category(category),
+            "label": definition.get("label", category),
+            "icon": definition.get("icon"),
+            "description": definition.get("description"),
+            "chart_color": definition.get("chart_color"),
+        }
+        for category, definition in SQDPM_CATEGORY_DEFINITIONS.items()
+    ]
+
+    has_metrics = any(category_cards[category] for category in SQDPM_CATEGORY_SEQUENCE)
+
+    range_options = (
+        ("7", "Last 7 days"),
+        ("30", "Last 30 days"),
+        ("custom", "Custom range"),
+    )
+
+    next_url = request.full_path if request.query_string else request.path
+
+    return render_template(
+        "admin/gemba.html",
+        categories=categories,
+        category_cards=category_cards,
+        category_trends=category_trends,
+        overview_series=overview_series,
+        range_options=range_options,
+        selected_range=range_key,
+        selected_department=department_filter,
+        departments=departments,
+        start_date_value=start_date.isoformat(),
+        end_date_value=end_date.isoformat(),
+        has_metrics=has_metrics,
+        total_metrics=len(metrics),
+        next_url=next_url,
+    )
+
+
+@bp.route("/gemba/create", methods=["POST"])
+@login_required
+@require_roles("admin")
+def create_gemba_metric():
+    data, errors = _gemba_metric_form_data(request.form)
+    next_url = request.form.get("next") or url_for("admin.gemba_dashboard")
+    if not data or errors:
+        for message in errors:
+            flash(message, "warning")
+        return redirect(next_url)
+
+    metric = models.GembaMetric(**data)
+    db.session.add(metric)
+    try:
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        flash("The metric could not be saved. Try again.", "danger")
+    else:
+        flash("Gemba metric recorded.", "success")
+
+    return redirect(next_url)
+
+
+@bp.route("/gemba/<int:metric_id>/update", methods=["POST"])
+@login_required
+@require_roles("admin")
+def update_gemba_metric(metric_id: int):
+    metric = db.session.get(models.GembaMetric, metric_id)
+    if metric is None:
+        abort(404)
+
+    data, errors = _gemba_metric_form_data(request.form)
+    next_url = request.form.get("next") or url_for("admin.gemba_dashboard")
+    if not data or errors:
+        for message in errors:
+            flash(message, "warning")
+        return redirect(next_url)
+
+    for field, value in data.items():
+        setattr(metric, field, value)
+
+    try:
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        flash("Unable to update the metric. Try again.", "danger")
+    else:
+        flash("Metric updated.", "success")
+
+    return redirect(next_url)
+
+
+@bp.route("/gemba/<int:metric_id>/delete", methods=["POST"])
+@login_required
+@require_roles("admin")
+def delete_gemba_metric(metric_id: int):
+    metric = db.session.get(models.GembaMetric, metric_id)
+    if metric is None:
+        abort(404)
+
+    db.session.delete(metric)
+    next_url = request.form.get("next") or url_for("admin.gemba_dashboard")
+    try:
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        flash("Unable to delete the metric. Try again.", "danger")
+    else:
+        flash("Metric deleted.", "success")
+
+    return redirect(next_url)
 
 
 _AUTOMATED_RECOVERY_ACTION_ID = "automated-recovery"
@@ -553,6 +1115,12 @@ def tools():
             "href": url_for("admin.emergency_console"),
             "disabled": False,
             "note": "Run curated recovery commands directly from the browser.",
+        },
+        {
+            "label": "Gemba / MDI Dashboard",
+            "href": url_for("admin.gemba_dashboard") if database_online else None,
+            "disabled": not database_online,
+            "note": "Review SQDPM performance trends and drill into related modules.",
         },
         {
             "label": "Access Log",

@@ -54,6 +54,29 @@ class AccessLog(db.Model):
 
 
 
+class GembaMetric(db.Model):
+    __tablename__ = "gemba_metric"
+
+    id = db.Column(db.Integer, primary_key=True)
+    category = db.Column(db.String(32), nullable=False, index=True)
+    department = db.Column(db.String(120), nullable=True, index=True)
+    metric_name = db.Column(db.String(255), nullable=False)
+    metric_value = db.Column(db.Numeric(12, 2), nullable=False)
+    target_value = db.Column(db.Numeric(12, 2), nullable=True)
+    unit = db.Column(db.String(32), nullable=True)
+    date = db.Column(db.Date, nullable=False, index=True)
+    notes = db.Column(db.Text, nullable=True)
+    linked_record_url = db.Column(db.String(512), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    __table_args__ = (
+        db.Index("ix_gemba_metric_category_date", "category", "date"),
+    )
+
+
 class ProductionChartSettings(db.Model):
     __tablename__ = "production_chart_settings"
 

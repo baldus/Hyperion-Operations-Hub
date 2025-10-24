@@ -1,0 +1,373 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Gemba / MDI Dashboard</h2>
+<p class="page-intro">Monitor daily SQDPM performance, track trends by department, and jump directly into the underlying workflow modules.</p>
+
+<form method="get" class="gemba-filter-form" aria-label="Filter Gemba metrics">
+    <div class="field-group">
+        <label for="gemba-department">Department</label>
+        <select id="gemba-department" name="department">
+            <option value="" {% if not selected_department %}selected{% endif %}>All departments</option>
+            {% for department in departments %}
+            <option value="{{ department }}" {% if department == selected_department %}selected{% endif %}>{{ department }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="field-group">
+        <label for="gemba-range">Date range</label>
+        <select id="gemba-range" name="range">
+            {% for value, label in range_options %}
+            <option value="{{ value }}" {% if value == selected_range %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="field-group gemba-custom-field">
+        <label for="gemba-start-date">Start date</label>
+        <input type="date" id="gemba-start-date" name="start_date" value="{{ start_date_value }}">
+    </div>
+    <div class="field-group gemba-custom-field">
+        <label for="gemba-end-date">End date</label>
+        <input type="date" id="gemba-end-date" name="end_date" value="{{ end_date_value }}">
+    </div>
+    <button type="submit" class="bubble-btn">Apply Filters</button>
+    <a href="{{ url_for('admin.gemba_dashboard') }}" class="action-btn">Reset</a>
+</form>
+
+<section class="card-section">
+    <h3>Add Daily Metric</h3>
+    <p class="section-lead">Capture today's SQDPM performance and link directly to the record that provides supporting detail.</p>
+    <form method="post" action="{{ url_for('admin.create_gemba_metric') }}" class="stacked-form gemba-create-form">
+        <input type="hidden" name="next" value="{{ next_url }}">
+        <label for="gemba-category" class="field-label">Category</label>
+        <select id="gemba-category" name="category" required>
+            <option value="">Select category</option>
+            {% for category in categories %}
+            <option value="{{ category.key }}">{{ category.label }}</option>
+            {% endfor %}
+        </select>
+
+        <label for="gemba-metric-name" class="field-label">Metric name</label>
+        <input id="gemba-metric-name" name="metric_name" type="text" required>
+
+        <label for="gemba-dept-input" class="field-label">Department</label>
+        <input id="gemba-dept-input" name="department" type="text" placeholder="e.g. Gates Assembly">
+
+        <div class="gemba-inline-fields">
+            <div class="field-group">
+                <label for="gemba-metric-value" class="field-label">Metric value</label>
+                <input id="gemba-metric-value" name="metric_value" type="number" step="0.01" required>
+            </div>
+            <div class="field-group">
+                <label for="gemba-target-value" class="field-label">Target</label>
+                <input id="gemba-target-value" name="target_value" type="number" step="0.01">
+            </div>
+            <div class="field-group">
+                <label for="gemba-unit" class="field-label">Unit</label>
+                <input id="gemba-unit" name="unit" type="text" placeholder="Units, %">
+            </div>
+            <div class="field-group">
+                <label for="gemba-date" class="field-label">Date</label>
+                <input id="gemba-date" name="date" type="date" value="{{ end_date_value }}" required>
+            </div>
+        </div>
+
+        <label for="gemba-notes" class="field-label">Notes</label>
+        <textarea id="gemba-notes" name="notes" rows="3" placeholder="Highlights, countermeasures, or key takeaways"></textarea>
+
+        <label for="gemba-link" class="field-label">Linked record URL</label>
+        <input id="gemba-link" name="linked_record_url" type="url" placeholder="https://...">
+
+        <button type="submit" class="bubble-btn">Save Metric</button>
+    </form>
+</section>
+
+<section class="card-section">
+    <h3>MDI Overview</h3>
+    <p class="section-lead">Actual vs. target across SQDPM pillars for the selected window ({{ start_date_value }} &rarr; {{ end_date_value }}).</p>
+    <div class="chart-card gemba-chart-card">
+        <canvas id="gemba-overview-chart" aria-label="MDI overview comparison chart"></canvas>
+    </div>
+</section>
+
+{% for category in categories %}
+<section class="card-section gemba-category-section" id="gemba-{{ category.slug }}">
+    <div class="gemba-category-header">
+        <div class="gemba-category-title">
+            <h3>{% if category.icon %}<span aria-hidden="true">{{ category.icon }}</span>{% endif %} {{ category.label }}</h3>
+            {% if category.description %}
+            <p class="gemba-category-description">{{ category.description }}</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="chart-card gemba-chart-wrapper">
+        <canvas id="gemba-trend-{{ category.slug }}" class="chart-expandable" aria-label="{{ category.label }} trend chart"></canvas>
+    </div>
+
+    {% set metrics = category_cards[category.key] %}
+    {% if metrics %}
+    <div class="status-grid gemba-metric-grid">
+        {% for metric in metrics %}
+        <article class="status-card status-{{ metric.status }}">
+            <p class="status-title">{{ metric.department or 'All departments' }}</p>
+            <p class="status-metric">{{ metric.value|round(2) }}{% if metric.unit %} {{ metric.unit }}{% endif %}</p>
+            <p class="gemba-card-meta">Recorded {{ metric.date.isoformat() }}
+                {% if metric.target is not none %}
+                &bull; Target {{ metric.target|round(2) }}{% if metric.unit %} {{ metric.unit }}{% endif %}
+                {% endif %}
+                {% if metric.performance_percent is not none %}
+                &bull; {{ metric.performance_percent|round(1) }}% of target
+                {% endif %}
+                {% if metric.variance is not none %}
+                &bull; Δ {{ metric.variance|round(2) }}{% if metric.unit %} {{ metric.unit }}{% endif %}
+                {% endif %}
+            </p>
+            {% if metric.notes %}
+            <p class="gemba-card-notes">{{ metric.notes }}</p>
+            {% endif %}
+            {% if metric.links %}
+            <div class="gemba-card-links">
+                {% for link in metric.links %}
+                {% if link.href %}
+                <a href="{{ link.href }}" class="action-btn gemba-link-btn"{% if link.external %} target="_blank" rel="noopener noreferrer"{% endif %}>
+                    {% if link.icon %}<span aria-hidden="true">{{ link.icon }}</span>{% endif %}
+                    <span>{{ link.label }}</span>
+                </a>
+                {% endif %}
+                {% endfor %}
+            </div>
+            {% endif %}
+            <div class="gemba-edit-actions">
+                <button type="button" class="bubble-btn" data-edit-toggle="metric-{{ metric.id }}">Edit</button>
+                <form method="post" action="{{ url_for('admin.delete_gemba_metric', metric_id=metric.id) }}" class="inline-form" onsubmit="return confirm('Delete this metric?');">
+                    <input type="hidden" name="next" value="{{ next_url }}">
+                    <button type="submit" class="bubble-btn danger">Delete</button>
+                </form>
+            </div>
+            <form id="metric-{{ metric.id }}" class="stacked-form gemba-edit-form" method="post" action="{{ url_for('admin.update_gemba_metric', metric_id=metric.id) }}" hidden>
+                <input type="hidden" name="next" value="{{ next_url }}">
+                <label class="field-label" for="metric-category-{{ metric.id }}">Category</label>
+                <select id="metric-category-{{ metric.id }}" name="category" required>
+                    {% for option in categories %}
+                    <option value="{{ option.key }}" {% if option.key == metric.category %}selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                </select>
+
+                <label class="field-label" for="metric-name-{{ metric.id }}">Metric name</label>
+                <input id="metric-name-{{ metric.id }}" name="metric_name" type="text" value="{{ metric.name }}" required>
+
+                <label class="field-label" for="metric-dept-{{ metric.id }}">Department</label>
+                <input id="metric-dept-{{ metric.id }}" name="department" type="text" value="{{ metric.department or '' }}">
+
+                <div class="gemba-inline-fields">
+                    <div class="field-group">
+                        <label class="field-label" for="metric-value-{{ metric.id }}">Metric value</label>
+                        <input id="metric-value-{{ metric.id }}" name="metric_value" type="number" step="0.01" value="{{ metric.value }}" required>
+                    </div>
+                    <div class="field-group">
+                        <label class="field-label" for="metric-target-{{ metric.id }}">Target</label>
+                        <input id="metric-target-{{ metric.id }}" name="target_value" type="number" step="0.01" value="{{ metric.target if metric.target is not none else '' }}">
+                    </div>
+                    <div class="field-group">
+                        <label class="field-label" for="metric-unit-{{ metric.id }}">Unit</label>
+                        <input id="metric-unit-{{ metric.id }}" name="unit" type="text" value="{{ metric.unit or '' }}">
+                    </div>
+                    <div class="field-group">
+                        <label class="field-label" for="metric-date-{{ metric.id }}">Date</label>
+                        <input id="metric-date-{{ metric.id }}" name="date" type="date" value="{{ metric.date.isoformat() }}" required>
+                    </div>
+                </div>
+
+                <label class="field-label" for="metric-notes-{{ metric.id }}">Notes</label>
+                <textarea id="metric-notes-{{ metric.id }}" name="notes" rows="3">{{ metric.notes or '' }}</textarea>
+
+                <label class="field-label" for="metric-link-{{ metric.id }}">Linked record URL</label>
+                <input id="metric-link-{{ metric.id }}" name="linked_record_url" type="url" value="{{ metric.linked_record_url or '' }}">
+
+                <div class="gemba-edit-actions">
+                    <button type="submit" class="bubble-btn">Save Changes</button>
+                    <button type="button" class="action-btn" data-cancel-edit="metric-{{ metric.id }}">Cancel</button>
+                </div>
+            </form>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="field-note gemba-empty">No {{ category.label.lower() }} metrics recorded for this period.</p>
+    {% endif %}
+</section>
+{% endfor %}
+
+{% if not has_metrics %}
+<div class="info-callout">
+    <p>No metrics have been captured yet. Add your first SQDPM metric above to populate the dashboard.</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+    const rangeSelect = document.getElementById('gemba-range');
+    const customFields = Array.from(document.querySelectorAll('.gemba-custom-field'));
+    const updateCustomVisibility = () => {
+        const isCustom = rangeSelect.value === 'custom';
+        customFields.forEach((group) => {
+            const input = group.querySelector('input');
+            group.classList.toggle('is-disabled', !isCustom);
+            if (input) {
+                input.disabled = !isCustom;
+            }
+        });
+    };
+    rangeSelect.addEventListener('change', updateCustomVisibility);
+    updateCustomVisibility();
+
+    const editButtons = document.querySelectorAll('[data-edit-toggle]');
+    editButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+            const targetId = button.getAttribute('data-edit-toggle');
+            const form = document.getElementById(targetId);
+            if (!form) {
+                return;
+            }
+            const isHidden = form.hasAttribute('hidden');
+            if (isHidden) {
+                form.removeAttribute('hidden');
+                const firstInput = form.querySelector('input, select, textarea');
+                if (firstInput) {
+                    firstInput.focus();
+                }
+            } else {
+                form.setAttribute('hidden', 'hidden');
+            }
+        });
+    });
+
+    const cancelButtons = document.querySelectorAll('[data-cancel-edit]');
+    cancelButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+            const targetId = button.getAttribute('data-cancel-edit');
+            const form = document.getElementById(targetId);
+            if (form) {
+                form.setAttribute('hidden', 'hidden');
+            }
+        });
+    });
+
+    if (typeof Chart === 'undefined') {
+        return;
+    }
+
+    const categoryTrends = {{ category_trends | tojson }};
+    const overviewSeries = {{ overview_series | tojson }};
+
+    const overviewCanvas = document.getElementById('gemba-overview-chart');
+    if (overviewCanvas) {
+        const labels = overviewSeries.map((entry) => entry.category);
+        const actualData = overviewSeries.map((entry) => entry.actual ?? 0);
+        const targetData = overviewSeries.map((entry) => entry.target);
+        const colors = overviewSeries.map((entry) => entry.chart_color || '#2563eb');
+        new Chart(overviewCanvas, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: 'Actual',
+                        data: actualData,
+                        backgroundColor: colors,
+                    },
+                    {
+                        label: 'Target',
+                        data: targetData,
+                        backgroundColor: 'rgba(148, 163, 184, 0.6)',
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                    },
+                },
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                },
+            },
+        });
+    }
+
+    const targetSeriesColor = 'rgba(148, 163, 184, 0.75)';
+
+    const buildTrendChart = (categoryKey, slug, chartColor) => {
+        const canvas = document.getElementById(`gemba-trend-${slug}`);
+        if (!canvas) {
+            return;
+        }
+        const trend = categoryTrends[categoryKey] || categoryTrends[slug];
+        if (!trend) {
+            return;
+        }
+        const datasets = [];
+        if (trend.actual && trend.actual.some((value) => value !== null)) {
+            datasets.push({
+                label: 'Actual',
+                data: trend.actual,
+                borderColor: chartColor || '#2563eb',
+                backgroundColor: chartColor || '#2563eb',
+                tension: 0.25,
+                fill: false,
+            });
+        }
+        if (trend.target && trend.target.some((value) => value !== null)) {
+            datasets.push({
+                label: 'Target',
+                data: trend.target,
+                borderColor: targetSeriesColor,
+                borderDash: [6, 6],
+                fill: false,
+            });
+        }
+        new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels: trend.labels,
+                datasets,
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    intersect: false,
+                    mode: 'index',
+                },
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                    },
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                    },
+                },
+            },
+        });
+    };
+
+    const categoryMeta = {{ categories | tojson }};
+    categoryMeta.forEach((category) => buildTrendChart(category.key, category.slug, category.chart_color));
+})();
+</script>
+{% endblock %}
