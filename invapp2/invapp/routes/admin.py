@@ -4,6 +4,7 @@ import os
 import shlex
 import shutil
 import subprocess
+from pathlib import Path
 from datetime import date, datetime, time as time_type, timedelta
 from decimal import Decimal
 from urllib.parse import urljoin
@@ -211,16 +212,74 @@ def _validate_custom_command(raw_command: str) -> tuple[str, ...]:
     return parts
 
 
+def _resolve_helper_script(script_name: str) -> str:
+    """Return an absolute path to a bundled helper script."""
+
+    script_path = Path(script_name)
+    if script_path.is_absolute():
+        if script_path.is_file():
+            return str(script_path)
+        raise FileNotFoundError(script_name)
+
+    search_roots: list[Path] = []
+    cwd = Path.cwd().resolve()
+    search_roots.append(cwd)
+    parent = cwd.parent
+    if parent not in search_roots:
+        search_roots.append(parent)
+
+    try:
+        app_root = Path(current_app.root_path).resolve()
+    except RuntimeError:
+        app_root = None
+
+    if app_root is not None:
+        for candidate in (app_root, app_root.parent, app_root.parent.parent):
+            if candidate not in search_roots:
+                search_roots.append(candidate)
+
+    module_root = Path(__file__).resolve()
+    for candidate in module_root.parents:
+        if candidate not in search_roots:
+            search_roots.append(candidate)
+
+    for base in search_roots:
+        candidate = (base / script_path).resolve()
+        if candidate.is_file():
+            return str(candidate)
+
+    raise FileNotFoundError(script_name)
+
+
+def _normalize_command(parts: tuple[str, ...]) -> tuple[str, ...]:
+    if not parts:
+        return parts
+
+    normalized = list(parts)
+
+    index = 0
+    if normalized[0] == "sudo" and len(normalized) > 1:
+        index = 1
+
+    if normalized[index] in {"bash", "sh"} and len(normalized) > index + 1:
+        script_name = normalized[index + 1]
+        if script_name in {"start_operations_console.sh", "start_inventory.sh"}:
+            normalized[index + 1] = _resolve_helper_script(script_name)
+
+    return tuple(normalized)
+
+
 def _run_emergency_command(parts: tuple[str, ...]) -> dict[str, object]:
+    resolved_parts = _normalize_command(parts)
     completed = subprocess.run(
-        parts,
+        resolved_parts,
         capture_output=True,
         text=True,
         timeout=600,
         check=False,
     )
     return {
-        "command": _quote_command(parts),
+        "command": _quote_command(resolved_parts),
         "exit_code": completed.returncode,
         "stdout": (completed.stdout or "").strip(),
         "stderr": (completed.stderr or "").strip(),

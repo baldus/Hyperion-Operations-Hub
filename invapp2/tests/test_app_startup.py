@@ -108,6 +108,36 @@ def test_emergency_console_runs_curated_command(monkeypatch):
     )
 
 
+def test_emergency_console_resolves_restart_script(monkeypatch):
+    def fake_ping() -> None:
+        raise OperationalError("SELECT 1", {}, Exception("database offline"))
+
+    monkeypatch.setattr(invapp_module, "_ping_database", fake_ping)
+
+    executed: dict[str, tuple[str, ...]] = {}
+
+    def fake_run(parts, capture_output, text, timeout, check):  # type: ignore[no-untyped-def]
+        executed["parts"] = tuple(parts)
+
+        class _Result:
+            returncode = 0
+            stdout = "console restarted"
+            stderr = ""
+
+        return _Result()
+
+    monkeypatch.setattr(admin_routes.subprocess, "run", fake_run)
+
+    app = create_app({"TESTING": True})
+    client = app.test_client()
+
+    response = client.post("/admin/emergency-console", data={"command_id": "console-restart"})
+    assert response.status_code == 200
+    assert executed["parts"][0] == "bash"
+    assert executed["parts"][1].endswith("start_operations_console.sh")
+    assert Path(executed["parts"][1]).is_file()
+
+
 def test_emergency_console_rejects_disallowed_custom_command(monkeypatch):
     def fake_ping() -> None:
         raise OperationalError("SELECT 1", {}, Exception("database offline"))
