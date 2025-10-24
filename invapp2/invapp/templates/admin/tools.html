@@ -32,10 +32,18 @@
 <section class="card-section">
     <h3>Operations Shortcuts</h3>
     <p>Jump directly to the tools administrators use most often.</p>
+    {% if not database_online %}
+    <div class="offline-card">
+        <p>Database-dependent shortcuts are temporarily paused while the console runs in emergency mode. Restore connectivity to unlock the full toolkit.</p>
+    </div>
+    {% endif %}
     <div class="link-list">
         {% for link in quick_links %}
         <a href="{{ link.href if link.href else '#' }}" class="link-item{% if link.disabled %} is-disabled{% endif %}" {% if link.disabled %}aria-disabled="true"{% endif %}>
-            {{ link.label }}{% if link.disabled %} (coming soon){% endif %}
+            <span class="link-label">{{ link.label }}</span>
+            {% if link.note %}
+            <span class="link-note">{{ link.note }}</span>
+            {% endif %}
         </a>
         {% endfor %}
     </div>

@@ -19,7 +19,9 @@
                 </nav>
             </div>
             <div class="header-actions">
-                {% if not current_user.is_authenticated %}
+                {% if emergency_access_active %}
+                <span class="access-indicator access-indicator--emergency" role="status" aria-live="polite">Emergency access</span>
+                {% elif not current_user.is_authenticated %}
                 <span class="access-indicator" role="status" aria-live="polite">Public view</span>
                 {% endif %}
                 {% set next_target = request.full_path if request.query_string else request.path %}
@@ -34,7 +36,9 @@
                     &#9881;
                 </a>
                 {% endif %}
-                {% if current_user.is_authenticated %}
+                {% if emergency_access_active %}
+                <a href="{{ url_for('auth.login') }}" class="nav-btn">Login</a>
+                {% elif current_user.is_authenticated %}
                 <a href="{{ url_for('auth.logout') }}" class="nav-btn">Logout</a>
                 {% else %}
                 <a href="{{ url_for('auth.login') }}" class="nav-btn">Login</a>

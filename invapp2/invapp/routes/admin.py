@@ -1,7 +1,10 @@
 import io
 import json
 import os
+import shlex
 import shutil
+import subprocess
+from pathlib import Path
 from datetime import date, datetime, time as time_type, timedelta
 from decimal import Decimal
 from urllib.parse import urljoin
@@ -27,10 +30,273 @@ from sqlalchemy.sql.sqltypes import Numeric
 from invapp import models
 from invapp.extensions import db
 from invapp.login import current_user, login_required, logout_user
+from invapp.offline import is_emergency_mode_active
 from invapp.security import require_roles
 
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
+
+
+_EMERGENCY_COMMAND_GROUPS = (
+    {
+        "id": "postgresql",
+        "title": "PostgreSQL service control",
+        "description": "Check the database service and bring it online without leaving the console.",
+        "commands": (
+            {
+                "id": "pg-status",
+                "label": "Check service status",
+                "command": ("sudo", "systemctl", "status", "postgresql"),
+                "note": "Inspect whether PostgreSQL is running and review recent log output.",
+            },
+            {
+                "id": "pg-start",
+                "label": "Start PostgreSQL",
+                "command": ("sudo", "systemctl", "start", "postgresql"),
+                "note": "Launch the database service if it is currently stopped.",
+            },
+            {
+                "id": "pg-restart",
+                "label": "Restart PostgreSQL",
+                "command": ("sudo", "systemctl", "restart", "postgresql"),
+                "note": "Restart the service after configuration or package updates.",
+            },
+        ),
+    },
+    {
+        "id": "database",
+        "title": "Database bootstrap helpers",
+        "description": "Create or reset the application database after provisioning a new PostgreSQL instance.",
+        "commands": (
+            {
+                "id": "db-create",
+                "label": "Create application database",
+                "command": ("sudo", "-u", "postgres", "createdb", "invdb"),
+                "note": "Provision the expected \"invdb\" database if it does not already exist.",
+            },
+            {
+                "id": "db-owner",
+                "label": "Ensure database owner",
+                "command": (
+                    "sudo",
+                    "-u",
+                    "postgres",
+                    "psql",
+                    "-c",
+                    "ALTER DATABASE invdb OWNER TO inv;",
+                ),
+                "note": "Grant ownership of the application database to the \"inv\" role.",
+            },
+            {
+                "id": "db-user",
+                "label": "Create application user",
+                "command": (
+                    "sudo",
+                    "-u",
+                    "postgres",
+                    "psql",
+                    "-c",
+                    "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'inv') THEN CREATE USER inv WITH PASSWORD 'change_me'; END IF; END $$;",
+                ),
+                "note": "Create the default \"inv\" role with the documented password if it is missing.",
+            },
+            {
+                "id": "db-grant",
+                "label": "Grant privileges",
+                "command": (
+                    "sudo",
+                    "-u",
+                    "postgres",
+                    "psql",
+                    "-c",
+                    "GRANT ALL PRIVILEGES ON DATABASE invdb TO inv;",
+                ),
+                "note": "Ensure the application role can connect once the database is online.",
+            },
+        ),
+    },
+    {
+        "id": "packages",
+        "title": "System package helpers",
+        "description": "Download or upgrade prerequisites that PostgreSQL depends on.",
+        "commands": (
+            {
+                "id": "apt-update",
+                "label": "Update apt package lists",
+                "command": ("sudo", "apt-get", "update"),
+                "note": "Refresh repositories before installing or upgrading packages.",
+            },
+            {
+                "id": "apt-install-postgres",
+                "label": "Install PostgreSQL server",
+                "command": ("sudo", "apt-get", "install", "-y", "postgresql", "postgresql-contrib"),
+                "note": "Install the database server and common extensions.",
+            },
+            {
+                "id": "pip-upgrade",
+                "label": "Upgrade Python dependencies",
+                "command": ("pip", "install", "--upgrade", "-r", "requirements.txt"),
+                "note": "Reinstall console Python packages inside the active virtual environment.",
+            },
+        ),
+    },
+    {
+        "id": "service",
+        "title": "Console utilities",
+        "description": "Relaunch the operations console after completing recovery tasks.",
+        "commands": (
+            {
+                "id": "console-restart",
+                "label": "Restart operations console",
+                "command": ("bash", "start_operations_console.sh"),
+                "note": "Apply changes and restart the Gunicorn service using the helper script.",
+            },
+        ),
+    },
+)
+
+
+_ALLOWED_CUSTOM_BINARIES = {
+    "systemctl",
+    "service",
+    "psql",
+    "createdb",
+    "dropdb",
+    "pip",
+    "pip3",
+    "python",
+    "python3",
+    "bash",
+    "sh",
+    "curl",
+    "wget",
+    "apt",
+    "apt-get",
+    "docker",
+}
+
+
+def _all_emergency_commands() -> dict[str, dict[str, object]]:
+    lookup: dict[str, dict[str, object]] = {}
+    for group in _EMERGENCY_COMMAND_GROUPS:
+        for command in group["commands"]:
+            lookup[command["id"]] = command
+    return lookup
+
+
+def _quote_command(parts: tuple[str, ...]) -> str:
+    return " ".join(shlex.quote(part) for part in parts)
+
+
+def _validate_custom_command(raw_command: str) -> tuple[str, ...]:
+    parts = tuple(shlex.split(raw_command))
+    if not parts:
+        raise ValueError("Enter a command to run.")
+
+    binary = parts[0]
+    if binary == "sudo":
+        if len(parts) < 2:
+            raise ValueError("Provide the command to run after sudo.")
+        if parts[1] not in _ALLOWED_CUSTOM_BINARIES:
+            raise ValueError("That command is not allowed in emergency mode.")
+        return parts
+
+    if binary not in _ALLOWED_CUSTOM_BINARIES:
+        raise ValueError("That command is not allowed in emergency mode.")
+
+    if binary in {"bash", "sh"} and len(parts) > 1:
+        script_name = parts[1]
+        if script_name not in {"start_operations_console.sh", "start_inventory.sh"}:
+            raise ValueError("Only approved helper scripts may be launched from the console.")
+
+    return parts
+
+
+def _resolve_helper_script(script_name: str) -> str:
+    """Return an absolute path to a bundled helper script."""
+
+    script_path = Path(script_name)
+    if script_path.is_absolute():
+        if script_path.is_file():
+            return str(script_path)
+        raise FileNotFoundError(script_name)
+
+    search_roots: list[Path] = []
+    cwd = Path.cwd().resolve()
+    search_roots.append(cwd)
+    parent = cwd.parent
+    if parent not in search_roots:
+        search_roots.append(parent)
+
+    try:
+        app_root = Path(current_app.root_path).resolve()
+    except RuntimeError:
+        app_root = None
+
+    if app_root is not None:
+        for candidate in (app_root, app_root.parent, app_root.parent.parent):
+            if candidate not in search_roots:
+                search_roots.append(candidate)
+
+    module_root = Path(__file__).resolve()
+    for candidate in module_root.parents:
+        if candidate not in search_roots:
+            search_roots.append(candidate)
+
+    for base in search_roots:
+        candidate = (base / script_path).resolve()
+        if candidate.is_file():
+            return str(candidate)
+
+    raise FileNotFoundError(script_name)
+
+
+def _normalize_command(parts: tuple[str, ...]) -> tuple[str, ...]:
+    if not parts:
+        return parts
+
+    normalized = list(parts)
+
+    index = 0
+    if normalized[0] == "sudo" and len(normalized) > 1:
+        index = 1
+
+    if normalized[index] in {"bash", "sh"} and len(normalized) > index + 1:
+        script_name = normalized[index + 1]
+        if script_name in {"start_operations_console.sh", "start_inventory.sh"}:
+            normalized[index + 1] = _resolve_helper_script(script_name)
+
+    return tuple(normalized)
+
+
+def _run_emergency_command(parts: tuple[str, ...]) -> dict[str, object]:
+    resolved_parts = _normalize_command(parts)
+    completed = subprocess.run(
+        resolved_parts,
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+    return {
+        "command": _quote_command(resolved_parts),
+        "exit_code": completed.returncode,
+        "stdout": (completed.stdout or "").strip(),
+        "stderr": (completed.stderr or "").strip(),
+    }
+
+
+def _database_available() -> bool:
+    return not is_emergency_mode_active()
+
+
+def _render_offline_page(title: str, *, description: str | None = None):
+    return render_template(
+        "admin/offline.html",
+        title=title,
+        description=description,
+        recovery_steps=current_app.config.get("DATABASE_RECOVERY_STEPS", ()),
+    )
 
 
 def _get_safe_redirect_target(default: str = "home") -> str:
@@ -202,6 +468,8 @@ def _status_level(value: float, *, warn: float, alert: float) -> str:
 @login_required
 @require_roles("admin")
 def tools():
+    database_online = _database_available()
+
     uptime_seconds = _read_uptime_seconds()
     boot_time_display = None
     if uptime_seconds is not None:
@@ -265,20 +533,34 @@ def tools():
 
     quick_links = [
         {
+            "label": "Emergency command console",
+            "href": url_for("admin.emergency_console"),
+            "disabled": False,
+            "note": "Run curated recovery commands directly from the browser.",
+        },
+        {
             "label": "Access Log",
-            "href": url_for("admin.access_log"),
+            "href": url_for("admin.access_log") if database_online else None,
+            "disabled": not database_online,
+            "note": "Requires the database to be online.",
         },
         {
             "label": "Reports Dashboard",
             "href": url_for("reports.reports_home"),
+            "disabled": False,
+            "note": None,
         },
         {
             "label": "Data Backup",
-            "href": url_for("admin.data_backup"),
+            "href": url_for("admin.data_backup") if database_online else None,
+            "disabled": not database_online,
+            "note": "Unavailable while PostgreSQL is offline.",
         },
         {
             "label": "Data Storage Locations",
-            "href": url_for("admin.storage_locations"),
+            "href": url_for("admin.storage_locations") if database_online else None,
+            "disabled": not database_online,
+            "note": "Requires database access to list folders.",
         },
     ]
 
@@ -286,6 +568,56 @@ def tools():
         "admin/tools.html",
         system_health=system_health,
         quick_links=quick_links,
+        database_online=database_online,
+    )
+
+
+@bp.route("/emergency-console", methods=["GET", "POST"])
+@login_required
+@require_roles("admin")
+def emergency_console():
+    command_lookup = _all_emergency_commands()
+    command_groups = _EMERGENCY_COMMAND_GROUPS
+    command_result: dict[str, object] | None = None
+    error_message: str | None = None
+    selected_command_id: str | None = None
+    custom_command = (request.form.get("custom_command") or "").strip()
+
+    if request.method == "POST":
+        command_id = (request.form.get("command_id") or "").strip()
+        try:
+            if command_id:
+                command = command_lookup.get(command_id)
+                if not command:
+                    raise ValueError("Unknown command requested.")
+                selected_command_id = command_id
+                command_result = _run_emergency_command(command["command"])
+                command_result["label"] = command["label"]
+                command_result["note"] = command.get("note")
+            elif custom_command:
+                parts = _validate_custom_command(custom_command)
+                command_result = _run_emergency_command(parts)
+                command_result["label"] = "Custom command"
+            else:
+                raise ValueError("Select a command or enter a custom command to run.")
+        except ValueError as exc:
+            error_message = str(exc)
+        except subprocess.TimeoutExpired:
+            error_message = "The command timed out. Try running it from the terminal for more control."
+        except FileNotFoundError as exc:
+            error_message = f"Command not found: {exc.filename or exc}"
+        except OSError as exc:
+            error_message = f"Unable to launch command: {exc}"
+
+    return render_template(
+        "admin/emergency_console.html",
+        command_groups=command_groups,
+        command_result=command_result,
+        error_message=error_message,
+        selected_command_id=selected_command_id,
+        custom_command=custom_command,
+        allowed_custom_binaries=sorted(_ALLOWED_CUSTOM_BINARIES),
+        database_online=_database_available(),
     )
 
 
@@ -293,6 +625,12 @@ def tools():
 @login_required
 @require_roles("admin")
 def access_log():
+    if not _database_available():
+        return _render_offline_page(
+            "Access Log",
+            description="Reviewing authentication and request history requires database connectivity.",
+        )
+
     filters = {
         "ip": (request.args.get("ip") or "").strip(),
         "username": (request.args.get("username") or "").strip(),
@@ -353,6 +691,12 @@ def access_log():
 @login_required
 @require_roles("admin")
 def data_backup():
+    if not _database_available():
+        return _render_offline_page(
+            "Data Backup",
+            description="Exporting or importing backups is paused until the database connection is restored.",
+        )
+
     table_names = [table.name for table in db.Model.metadata.sorted_tables]
     return render_template("admin/data_backup.html", table_names=table_names)
 
@@ -361,6 +705,10 @@ def data_backup():
 @login_required
 @require_roles("admin")
 def export_data():
+    if not _database_available():
+        flash("Backups cannot be exported while the database is offline.", "warning")
+        return redirect(url_for("admin.data_backup"))
+
     data = {}
     for table in db.Model.metadata.sorted_tables:
         result = db.session.execute(table.select()).mappings()
@@ -384,6 +732,10 @@ def export_data():
 @login_required
 @require_roles("admin")
 def import_data():
+    if not _database_available():
+        flash("Backups cannot be imported while the database is offline.", "warning")
+        return redirect(url_for("admin.data_backup"))
+
     upload = request.files.get("backup_file")
     if not upload or not upload.filename:
         flash("Please choose a backup file to upload.", "warning")
@@ -430,6 +782,12 @@ def import_data():
 @login_required
 @require_roles("admin")
 def storage_locations():
+    if not _database_available():
+        return _render_offline_page(
+            "Data Storage Locations",
+            description="Update these settings once the database is reachable again.",
+        )
+
     current_url = current_app.config.get("SQLALCHEMY_DATABASE_URI", "")
     display_current_url = _display_database_url(current_url)
     engine = db.get_engine()

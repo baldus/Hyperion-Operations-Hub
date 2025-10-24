@@ -1,12 +1,13 @@
 from datetime import date, timedelta
 
-from flask import Flask, render_template, request, session, url_for
+from flask import Flask, current_app, render_template, request, session, url_for
 from sqlalchemy import func, inspect, text
-from sqlalchemy.exc import IntegrityError, NoSuchTableError, OperationalError
+from sqlalchemy.exc import IntegrityError, NoSuchTableError, OperationalError, SQLAlchemyError
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm.exc import DetachedInstanceError
 
 from .extensions import db, login_manager
+from .offline import OfflineAdminUser
 from .login import current_user
 from .permissions import (
     current_principal_roles,
@@ -326,6 +327,13 @@ def _ensure_production_schema(engine):
                     )
 
 
+def _ping_database() -> None:
+    """Raise :class:`OperationalError` when the configured database is unreachable."""
+
+    with db.engine.connect() as connection:
+        connection.execute(text("SELECT 1"))
+
+
 def create_app(config_override=None):
     app = Flask(__name__)
 
@@ -333,6 +341,32 @@ def create_app(config_override=None):
     app.config.from_object(Config)
     if config_override:
         app.config.update(config_override)
+
+    # Track database health so the UI can surface meaningful guidance when the
+    # backing service is offline.
+    app.config.setdefault("DATABASE_AVAILABLE", True)
+    app.config.setdefault("DATABASE_ERROR", None)
+    app.config.setdefault(
+        "DATABASE_RECOVERY_STEPS",
+        (
+            {
+                "title": "Check PostgreSQL service status",
+                "command": "sudo systemctl status postgresql",
+            },
+            {
+                "title": "Start (or restart) the database",
+                "command": "sudo systemctl start postgresql",
+            },
+            {
+                "title": "Verify connection settings",
+                "command": "echo \"$DB_URL\"",
+            },
+            {
+                "title": "Relaunch the console",
+                "command": "./start_operations_console.sh",
+            },
+        ),
+    )
 
     database_uri = app.config.get("SQLALCHEMY_DATABASE_URI", "")
     if database_uri.startswith("sqlite:///:memory:"):
@@ -344,6 +378,7 @@ def create_app(config_override=None):
     # ✅ init db with app
     db.init_app(app)
     login_manager.init_app(app)
+    login_manager.anonymous_user = OfflineAdminUser
     login_manager.login_view = "auth.login"
 
     @login_manager.user_loader
@@ -354,21 +389,66 @@ def create_app(config_override=None):
             return models.User.query.get(int(user_id))
         except (TypeError, ValueError):
             return None
+        except OperationalError:
+            current_app.logger.warning(
+                "Skipped user lookup during login_manager load because the database is unavailable."
+            )
+            return None
+
+    database_available = True
+    database_error_message: str | None = None
 
     # create tables if they do not exist and ensure legacy schema
     with app.app_context():
-        db.create_all()
-        _ensure_inventory_schema(db.engine)
-        _ensure_order_schema(db.engine)
-        _ensure_production_schema(db.engine)
-        # ✅ ensure default production customers at startup
-        production._ensure_default_customers()
-        production._ensure_output_formula()
-        _ensure_superuser_account(
-            app.config.get("ADMIN_USER", "superuser"),
-            app.config.get("ADMIN_PASSWORD", "joshbaldus"),
-        )
-        _ensure_core_roles()
+        try:
+            _ping_database()
+        except OperationalError as exc:
+            database_available = False
+            root_cause = getattr(exc, "orig", exc)
+            details = str(root_cause).strip()
+            database_error_message = (
+                "Unable to connect to the configured database. Start the "
+                "PostgreSQL service or update the DB_URL setting, then restart "
+                "the console."
+            )
+            if details:
+                database_error_message += f" (Error: {details})"
+            message_suffix = f": {details}" if details else ""
+            current_app.logger.error(
+                "Database connection unavailable during startup%s",
+                message_suffix,
+                exc_info=current_app.debug,
+            )
+            db.session.remove()
+            try:
+                db.engine.dispose()
+            except Exception:  # pragma: no cover - best-effort cleanup
+                pass
+        else:
+            try:
+                db.create_all()
+                _ensure_inventory_schema(db.engine)
+                _ensure_order_schema(db.engine)
+                _ensure_production_schema(db.engine)
+                # ✅ ensure default production customers at startup
+                production._ensure_default_customers()
+                production._ensure_output_formula()
+                _ensure_superuser_account(
+                    app.config.get("ADMIN_USER", "superuser"),
+                    app.config.get("ADMIN_PASSWORD", "joshbaldus"),
+                )
+                _ensure_core_roles()
+            except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
+                database_available = False
+                database_error_message = (
+                    "The database schema could not be initialized. Review the logs "
+                    "for details and re-run the startup script once resolved."
+                )
+                current_app.logger.exception("Database initialization error")
+                db.session.remove()
+
+    app.config["DATABASE_AVAILABLE"] = database_available
+    app.config["DATABASE_ERROR"] = database_error_message
 
     @app.context_processor
     def inject_permission_helpers():
@@ -407,6 +487,14 @@ def create_app(config_override=None):
             "can_edit_page": can_edit_page,
             "navigation_links": navigation_links,
             "current_principal_roles": current_principal_roles,
+            "database_online": current_app.config.get("DATABASE_AVAILABLE", True),
+            "database_error_message": current_app.config.get("DATABASE_ERROR"),
+            "database_recovery_steps": current_app.config.get(
+                "DATABASE_RECOVERY_STEPS", ()
+            ),
+            "emergency_access_active": bool(
+                getattr(current_user, "is_emergency_user", False)
+            ),
         }
 
     # register blueprints
@@ -486,6 +574,13 @@ def create_app(config_override=None):
         guard_response = ensure_page_access("home")
         if guard_response is not None:
             return guard_response
+
+        if not current_app.config.get("DATABASE_AVAILABLE", True):
+            return render_template(
+                "home.html",
+                order_summary=None,
+                inventory_summary=None,
+            )
 
         order_summary = None
         inventory_summary = None

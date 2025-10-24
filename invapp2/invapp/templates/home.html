@@ -1,6 +1,37 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Hyperion Operations Overview</h2>
+{% if not database_online %}
+<div class="home-alert" role="alert">
+  <h3 class="home-alert-title">Database connection unavailable</h3>
+  {% if database_error_message %}
+  <p class="home-alert-message">{{ database_error_message }}</p>
+  {% else %}
+  <p class="home-alert-message">The operations console is running without a live database connection. Dashboards and write actions are temporarily unavailable.</p>
+  {% endif %}
+  <p class="home-alert-message">Restore connectivity and relaunch the service to resume normal operation.</p>
+  {% if database_recovery_steps %}
+  <details class="home-alert-details">
+    <summary>Suggested recovery steps</summary>
+    <ol>
+      {% for step in database_recovery_steps %}
+      <li>
+        <strong>{{ step.title }}:</strong>
+        <code>{{ step.command }}</code>
+      </li>
+      {% endfor %}
+    </ol>
+  </details>
+  {% endif %}
+  {% if emergency_access_active %}
+  <p class="home-alert-message">
+    You're using emergency offline access. Open the <a href="{{ url_for('admin.tools') }}">admin tools</a> or launch the
+    <a href="{{ url_for('admin.emergency_console') }}">emergency command console</a> to restart PostgreSQL, rebuild the
+    database, or reinstall dependencies directly from the browser.
+  </p>
+  {% endif %}
+</div>
+{% endif %}
 {% if not current_user.is_authenticated %}
 <p class="home-lede">You're viewing the public dashboard. Log in with your assigned account to make updates or see additional pages.</p>
 {% else %}
