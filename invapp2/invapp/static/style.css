@@ -1586,6 +1586,25 @@ body.light .customer-chip {
     font-weight: 600;
 }
 
+.chart-metric-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 16px;
+    border-radius: 999px;
+    background: rgba(59, 130, 246, 0.2);
+    border: 1px solid rgba(59, 130, 246, 0.35);
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+body.light .chart-metric-pill {
+    background: rgba(59, 130, 246, 0.12);
+    color: #1d4ed8;
+    border-color: rgba(59, 130, 246, 0.25);
+}
+
 .chart-controls select {
     padding: 8px 14px;
     border-radius: 24px;
@@ -3017,6 +3036,129 @@ body.light .production-table input[type="number"],
 body.light .production-table input[type="date"] {
     background-color: #fff;
     border-color: #c5cad6;
+}
+
+.production-customer-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 18px;
+    margin-top: 18px;
+}
+
+.production-customer-card {
+    background: rgba(30, 41, 59, 0.55);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 16px;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 150px;
+    transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.production-customer-card:hover,
+.production-customer-card:focus-within {
+    border-color: rgba(129, 140, 248, 0.6);
+    transform: translateY(-2px);
+}
+
+body.light .production-customer-card {
+    background: rgba(248, 250, 252, 0.9);
+    border-color: rgba(148, 163, 184, 0.35);
+}
+
+.production-customer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.production-customer-name {
+    font-weight: 600;
+    font-size: 1.05rem;
+    letter-spacing: 0.01em;
+}
+
+.production-metric-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    opacity: 0.7;
+}
+
+.production-metric-input {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: rgba(15, 23, 42, 0.3);
+    color: inherit;
+    font-size: 1.25rem;
+    font-weight: 600;
+    text-align: right;
+}
+
+.production-metric-input:focus-visible {
+    outline: 2px solid rgba(59, 130, 246, 0.75);
+    outline-offset: 2px;
+}
+
+body.light .production-metric-input {
+    background: rgba(255, 255, 255, 0.9);
+    border-color: rgba(148, 163, 184, 0.45);
+}
+
+.production-customer-footer {
+    margin-top: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.production-total-card {
+    padding: 16px 20px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.35), rgba(14, 165, 233, 0.25));
+    border: 1px solid rgba(59, 130, 246, 0.4);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 220px;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.25);
+}
+
+.production-total-label {
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    opacity: 0.75;
+}
+
+.production-total-value {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+body.light .production-total-card {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.18), rgba(14, 165, 233, 0.22));
+    border-color: rgba(59, 130, 246, 0.35);
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+}
+
+.customer-chip--accent {
+    background: rgba(16, 185, 129, 0.35);
+    color: #bbf7d0;
+}
+
+body.light .customer-chip--accent {
+    background: rgba(16, 185, 129, 0.2);
+    color: #047857;
 }
 
 .chart-grid {

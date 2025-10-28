@@ -138,7 +138,7 @@ def test_history_export_downloads_csv(client, app):
     assert response.status_code == 200
     assert response.mimetype == "text/csv"
     csv_body = response.data.decode()
-    assert "Gates Produced Total" in csv_body
+    assert "Gates Packaged Total" in csv_body
     assert entry_date.isoformat() in csv_body
 
 

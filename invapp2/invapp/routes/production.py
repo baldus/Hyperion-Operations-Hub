@@ -51,8 +51,7 @@ DEFAULT_CUSTOMERS: List[tuple[str, str, bool]] = [
 ]
 
 LINE_SERIES: List[Dict[str, str]] = [
-    {"label": "Gates Produced", "key": "produced", "color": "#2563eb"},
-    {"label": "Gates Packaged", "key": "packaged", "color": "#dc2626"},
+    {"label": "Gates Packaged", "key": "packaged", "color": "#2563eb"},
     {"label": "Controllers", "key": "controllers", "color": "#16a34a"},
     {"label": "Door Locks", "key": "door_locks", "color": "#7c3aed"},
     {"label": "Operators", "key": "operators", "color": "#f97316"},
@@ -94,8 +93,8 @@ DEFAULT_OUTPUT_VARIABLES = [
 FORMULA_METRIC_HINTS: List[Dict[str, str]] = [
     {
         "key": "produced",
-        "label": "Gates Produced",
-        "description": "Total gates produced for the day.",
+        "label": "Gates Produced (legacy)",
+        "description": "Historical gates produced total (read-only).",
     },
     {
         "key": "packaged",
@@ -389,7 +388,6 @@ def _format_optional_decimal(value: Decimal | None) -> str:
 
 def _empty_form_values(customers: List[ProductionCustomer]) -> Dict[str, object]:
     return {
-        "gates_produced": {customer.id: "" for customer in customers},
         "gates_packaged": {customer.id: "" for customer in customers},
 
         "gates_employees": "",
@@ -422,7 +420,6 @@ def _form_values_from_record(
     for customer in customers:
         totals = totals_by_customer.get(customer.id)
         if totals:
-            values["gates_produced"][customer.id] = totals.gates_produced or 0
             values["gates_packaged"][customer.id] = totals.gates_packaged or 0
 
 
@@ -557,9 +554,6 @@ def _form_values_from_post(
     values = _empty_form_values(customers)
 
     for customer in customers:
-        values["gates_produced"][customer.id] = (
-            request.form.get(f"gates_produced_{customer.id}") or ""
-        ).strip()
         values["gates_packaged"][customer.id] = (
             request.form.get(f"gates_packaged_{customer.id}") or ""
         ).strip()
@@ -899,13 +893,14 @@ def daily_entry():
             total.customer_id: total for total in record.customer_totals
         }
         for customer in customers:
-            produced_value = _get_int(f"gates_produced_{customer.id}")
+            produced_field = f"gates_produced_{customer.id}"
             packaged_value = _get_int(f"gates_packaged_{customer.id}")
             totals = existing_totals.get(customer.id)
             if not totals:
                 totals = ProductionDailyCustomerTotal(customer=customer)
                 record.customer_totals.append(totals)
-            totals.gates_produced = produced_value
+            if produced_field in request.form:
+                totals.gates_produced = _get_int(produced_field)
             totals.gates_packaged = packaged_value
 
         record.gates_employees = _get_int("gates_employees")
@@ -1022,23 +1017,14 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
     table_rows = []
     chart_labels: List[str] = []
     chart_entry_dates: List[date] = []
-    stack_datasets: List[Dict[str, object]] = []
     packaged_stack_datasets: List[Dict[str, object]] = []
     overlay_values: List[float | None] = []
-    total_produced_values: List[int] = []
+    total_packaged_values: List[int] = []
     cumulative_series: Dict[str, List[int]] = {
         series["key"]: [] for series in LINE_SERIES
     }
 
     for customer in stack_customers:
-        stack_datasets.append(
-            {
-                "label": customer.name,
-                "data": [],
-                "backgroundColor": customer.color or "#3b82f6",
-                "stack": "gates-produced",
-            }
-        )
         packaged_stack_datasets.append(
             {
                 "label": customer.name,
@@ -1071,26 +1057,15 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
 
         produced_sum = 0
         packaged_sum = 0
-        per_customer_produced: Dict[int, int] = {}
         per_customer_packaged: Dict[int, int] = {}
 
         for customer in table_customers:
             totals = totals_by_customer.get(customer.id)
             produced_value = totals.gates_produced if totals else 0
             packaged_value = totals.gates_packaged if totals else 0
-            per_customer_produced[customer.id] = produced_value
             per_customer_packaged[customer.id] = packaged_value
             produced_sum += produced_value
             packaged_sum += packaged_value
-
-        for dataset, customer in zip(stack_datasets, stack_customers):
-            produced_value = per_customer_produced.get(customer.id, 0)
-            if customer.is_other_bucket:
-                produced_value += sum(
-                    per_customer_produced.get(grouped.id, 0)
-                    for grouped in grouped_customers
-                )
-            dataset["data"].append(produced_value)
 
         for dataset, customer in zip(packaged_stack_datasets, stack_customers):
             packaged_value = per_customer_packaged.get(customer.id, 0)
@@ -1143,7 +1118,7 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
             ]
 
         overlay_values.append(float(output_value) if output_value is not None else None)
-        total_produced_values.append(produced_sum)
+        total_packaged_values.append(packaged_sum)
 
 
         additional_total_hours_value = record.additional_total_labor_hours
@@ -1168,7 +1143,6 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
                     }
                 )
 
-        running_totals["produced"] += produced_sum
         running_totals["packaged"] += packaged_sum
         running_totals["controllers"] += controllers_total
         running_totals["door_locks"] += door_locks_total
@@ -1182,10 +1156,8 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
         table_rows.append(
             {
                 "record": record,
-                "produced_sum": produced_sum,
                 "packaged_sum": packaged_sum,
                 "gates_combined_total": gates_combined_total,
-                "per_customer_produced": per_customer_produced,
                 "per_customer_packaged": per_customer_packaged,
                 "controllers_total": controllers_total,
                 "door_locks_total": door_locks_total,
@@ -1232,7 +1204,7 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
 
     trendline_values: List[float] = []
     weekday_points = [
-        (index, total_produced_values[index])
+        (index, total_packaged_values[index])
         for index, entry_date in enumerate(chart_entry_dates)
         if entry_date.weekday() < 5
     ]
@@ -1254,7 +1226,7 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
     if trendline_values:
         overlay_datasets.append(
             {
-                "label": "Gates Produced Trend",
+                "label": "Gates Packaged Trend",
                 "data": trendline_values,
                 "type": "line",
                 "yAxisID": "y",
@@ -1354,26 +1326,18 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
 
         summary_text = None
         if preview_row:
-            produced_total = preview_row.get("produced_sum", 0)
             packaged_total = preview_row.get("packaged_sum", 0)
             combined_total = preview_row.get("gates_combined_total", 0)
 
             def _format_count(value: int | None) -> str:
                 return f"{int(value or 0):,}"
 
-            produced_breakdown: list[str] = []
             packaged_breakdown: list[str] = []
-            per_customer_produced = preview_row.get("per_customer_produced", {})
             per_customer_packaged = preview_row.get("per_customer_packaged", {})
 
             for customer in table_customers:
                 customer_id = customer.id
-                produced_value = per_customer_produced.get(customer_id, 0)
                 packaged_value = per_customer_packaged.get(customer_id, 0)
-                if produced_value:
-                    produced_breakdown.append(
-                        f"    • {customer.name}: {_format_count(produced_value)}"
-                    )
                 if packaged_value:
                     packaged_breakdown.append(
                         f"    • {customer.name}: {_format_count(packaged_value)}"
@@ -1397,12 +1361,7 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
                 f"Reporting Range: {range_display}",
                 "",
                 "Daily Production",
-                f"- Gates Produced: {_format_count(produced_total)}",
             ]
-
-            if produced_breakdown:
-                summary_lines.append("  Customer Breakdown (Produced):")
-                summary_lines.extend(produced_breakdown)
 
             summary_lines.append(
                 f"- Gates Packaged: {_format_count(packaged_total)}"
@@ -1412,7 +1371,7 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
                 summary_lines.extend(packaged_breakdown)
 
             summary_lines.append(
-                f"- Combined Output (Produced + Packaged): {_format_count(combined_total)}"
+                f"- Combined Output: {_format_count(combined_total)}"
             )
             summary_lines.append(
                 "- Output per Labor Hour: "
@@ -1503,8 +1462,7 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
         "grouped_customer_names": grouped_names,
         "table_rows": table_rows,
         "chart_labels": chart_labels,
-        "stacked_datasets": stack_datasets,
-        "packaged_datasets": packaged_stack_datasets,
+        "stacked_datasets": packaged_stack_datasets,
         "line_datasets": line_datasets,
         "overlay_datasets": overlay_datasets,
         "chart_axis_settings": chart_axis_settings,
@@ -1547,12 +1505,9 @@ def history_export():
     header = [
         "Date",
         "Day",
-        "Gates Produced Total",
         "Gates Packaged Total",
         "Gates Combined Total",
     ]
-    for customer in customers:
-        header.append(f"Gates Produced - {customer.name}")
     for customer in customers:
         header.append(f"Gates Packaged - {customer.name}")
     header.extend(
@@ -1582,17 +1537,13 @@ def history_export():
 
     for row in table_rows:
         record: ProductionDailyRecord = row["record"]
-        produced_breakdown = row["per_customer_produced"]
         packaged_breakdown = row["per_customer_packaged"]
         csv_row = [
             record.entry_date.strftime("%Y-%m-%d"),
             record.day_of_week or record.entry_date.strftime("%A"),
-            row["produced_sum"],
             row["packaged_sum"],
             row["gates_combined_total"],
         ]
-        for customer in customers:
-            csv_row.append(produced_breakdown.get(customer.id, 0))
         for customer in customers:
             csv_row.append(packaged_breakdown.get(customer.id, 0))
         output_variables = "; ".join(
