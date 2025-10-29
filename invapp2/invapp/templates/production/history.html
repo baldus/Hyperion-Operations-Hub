@@ -2,7 +2,9 @@
 
 {% block content %}
 <nav class="production-nav" aria-label="Production pages">
-    <a href="{{ url_for('production.daily_entry') }}" class="production-nav-link">Daily Entry</a>
+    <a href="{{ url_for('production.daily_entry') }}" class="production-nav-link">Daily Summary</a>
+    <a href="{{ url_for('production.gates_entry') }}" class="production-nav-link">Gates Packaged Entry</a>
+    <a href="{{ url_for('production.additional_entry') }}" class="production-nav-link">Additional Production Entry</a>
     <a href="{{ url_for('production.final_process_entry') }}" class="production-nav-link">Final Process Entry</a>
     <a href="{{ url_for('production.history') }}" class="production-nav-link is-active">History</a>
     <a href="{{ url_for('production.production_settings') }}" class="production-nav-link">Settings</a>
@@ -41,16 +43,7 @@
     <section class="dashboard-section">
         <h3>Visual Breakdown</h3>
         <div class="chart-controls">
-            <div class="chart-toggle-group" role="group" aria-label="Gates chart view">
-                <label class="chart-toggle">
-                    <input type="radio" id="gatesMetricProduced" name="gatesMetric" value="produced" checked>
-                    <span>Gates Produced</span>
-                </label>
-                <label class="chart-toggle">
-                    <input type="radio" id="gatesMetricPackaged" name="gatesMetric" value="packaged">
-                    <span>Gates Packaged</span>
-                </label>
-            </div>
+            <span class="chart-metric-pill" role="status">Metric: Gates Packaged</span>
             <label class="chart-toggle" for="collapseWeekendsToggle">
                 <input type="checkbox" id="collapseWeekendsToggle" name="collapse_weekends">
                 Collapse weekends
@@ -61,7 +54,7 @@
         </div>
         <div class="chart-grid">
             <div class="chart-card">
-                <canvas id="gatesProducedChart" aria-label="Stacked column chart showing gates produced per customer"></canvas>
+                <canvas id="gatesPackagedChart" aria-label="Stacked column chart showing gates packaged per customer"></canvas>
             </div>
             <div class="chart-card">
                 <canvas id="cumulativeChart" aria-label="Line chart showing cumulative month-to-date production totals"></canvas>
@@ -93,12 +86,6 @@
                 <div class="email-modal-gallery">
                     <figure>
                         <div class="email-modal-chart-area">
-                            <canvas id="emailDataProducedChart" aria-labelledby="emailDataProducedChartCaption"></canvas>
-                        </div>
-                        <figcaption id="emailDataProducedChartCaption">Gates Produced by Customer</figcaption>
-                    </figure>
-                    <figure>
-                        <div class="email-modal-chart-area">
                             <canvas id="emailDataPackagedChart" aria-labelledby="emailDataPackagedChartCaption"></canvas>
                         </div>
                         <figcaption id="emailDataPackagedChartCaption">Gates Packaged by Customer</figcaption>
@@ -126,7 +113,6 @@
                     <tr>
                         <th scope="col" class="sortable-header" aria-sort="none">Date</th>
                         <th scope="col" class="sortable-header" aria-sort="none">Day</th>
-                        <th scope="col" class="sortable-header" aria-sort="none">Gates Produced</th>
                         <th scope="col" class="sortable-header" aria-sort="none">Gates Packaged</th>
                         <th scope="col" class="sortable-header" aria-sort="none">Gates Labor<br><small>Employees / OT / Hours</small></th>
                         <th scope="col" class="sortable-header" aria-sort="none">Output per Labor Hour<br><small>Gates Combined</small></th>
@@ -136,7 +122,7 @@
                         <th scope="col" class="sortable-header" aria-sort="none">COPs</th>
                         <th scope="col" class="sortable-header" aria-sort="none">Additional Labor<br><small>Employees / OT / Hours</small></th>
                         <th scope="col" class="sortable-header" aria-sort="none">Additional Output<br><small>Units per Labor Hour</small></th>
-                        <th scope="col" class="sortable-header" aria-sort="none">Notes</th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Summaries &amp; Notes</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -144,15 +130,6 @@
                         <tr>
                             <td data-sort-value="{{ row.record.entry_date.strftime('%Y-%m-%d') }}">{{ row.record.entry_date.strftime('%Y-%m-%d') }}</td>
                             <td data-sort-value="{{ row.record.day_of_week }}">{{ row.record.day_of_week }}</td>
-                            <td data-sort-value="{{ row.produced_sum }}">
-                                <strong>{{ row.produced_sum }}</strong>
-                                <div class="totals-breakdown">
-                                    {% for customer in customers %}
-                                        <span>{{ customer.name }}: {{ row.per_customer_produced.get(customer.id, 0) }}</span>
-
-                                    {% endfor %}
-                                </div>
-                            </td>
                             <td data-sort-value="{{ row.packaged_sum }}">
                                 <strong>{{ row.packaged_sum }}</strong>
                                 <div class="totals-breakdown">
@@ -215,7 +192,14 @@
                                     —
                                 {% endif %}
                             </td>
-                            <td data-sort-value="{{ row.record.daily_notes or '' }}">{{ row.record.daily_notes or '—' }}</td>
+                            <td data-sort-value="{{ row.record.daily_notes or '' }}">
+                                <div class="totals-breakdown">
+                                    <span><strong>Gates Summary:</strong> {{ row.record.gates_summary or '—' }}</span>
+                                    <span><strong>Gates Notes:</strong> {{ row.record.gates_notes or '—' }}</span>
+                                    <span><strong>Additional Summary:</strong> {{ row.record.additional_summary or '—' }}</span>
+                                    <span><strong>Additional Notes:</strong> {{ row.record.additional_notes or '—' }}</span>
+                                </div>
+                            </td>
                         </tr>
                     {% endfor %}
                 </tbody>
@@ -230,7 +214,6 @@
 <script>
     const chartLabels = {{ chart_labels|tojson }};
     const stackedDatasets = {{ stacked_datasets|tojson }};
-    const packagedDatasets = {{ packaged_datasets|tojson }};
     const overlayDatasets = {{ overlay_datasets|tojson }};
     const lineDatasets = {{ line_datasets|tojson }};
     const chartAxisSettings = {{ chart_axis_settings|tojson }};
@@ -632,8 +615,7 @@
     }
 
     if (chartLabels.length) {
-        const producedDatasetList = Array.isArray(stackedDatasets) ? stackedDatasets : [];
-        const packagedDatasetList = Array.isArray(packagedDatasets) ? packagedDatasets : [];
+        const packagedDatasetList = Array.isArray(stackedDatasets) ? stackedDatasets : [];
         const overlayDatasetList = Array.isArray(overlayDatasets) ? overlayDatasets : [];
         const lineDatasetList = Array.isArray(lineDatasets) ? lineDatasets : [];
 
@@ -641,35 +623,22 @@
         const deepCloneDatasets = (datasets) => datasets.map((dataset) => deepCloneDataset(dataset));
 
         const originalLabels = chartLabels.slice();
-        const originalProducedStackedDatasets = deepCloneDatasets(producedDatasetList);
         const originalPackagedStackedDatasets = deepCloneDatasets(packagedDatasetList);
         const originalOverlayDatasets = deepCloneDatasets(overlayDatasetList);
         const originalLineDatasets = deepCloneDatasets(lineDatasetList);
         const weekendMask = originalLabels.map((label) => isWeekendLabel(label));
 
         const datasetConfigs = {
-            produced: {
-                stacked: originalProducedStackedDatasets,
-                overlays: originalOverlayDatasets,
-            },
             packaged: {
-                stacked: originalPackagedStackedDatasets.length
-                    ? originalPackagedStackedDatasets
-                    : deepCloneDatasets(producedDatasetList),
-                overlays: [],
+                stacked: originalPackagedStackedDatasets,
+                overlays: originalOverlayDatasets,
             },
         };
 
-        const goalOverlayDataset = originalOverlayDatasets.find(
-            (dataset) => dataset && dataset.label === 'Gates Goal',
-        );
-
         const metricLabels = {
-            produced: 'Gates Produced by Customer',
             packaged: 'Gates Packaged by Customer',
         };
         const canvasAriaLabels = {
-            produced: 'Stacked column chart showing gates produced per customer',
             packaged: 'Stacked column chart showing gates packaged per customer',
         };
 
@@ -696,7 +665,7 @@
         };
 
         const buildChartData = (includeWeekends, metric) => {
-            const resolvedMetric = datasetConfigs[metric] ? metric : 'produced';
+            const resolvedMetric = datasetConfigs[metric] ? metric : 'packaged';
             const labels = includeWeekends
                 ? originalLabels.slice()
                 : originalLabels.filter((_, index) => !weekendMask[index]);
@@ -717,43 +686,35 @@
             };
         };
 
-        const buildEmailChartData = (includeWeekends, metric) => {
-            const resolvedMetric = datasetConfigs[metric] ? metric : 'packaged';
+        const buildEmailChartData = (includeWeekends) => {
             const labels = includeWeekends
                 ? originalLabels.slice()
                 : originalLabels.filter((_, index) => !weekendMask[index]);
 
-            const stacked = datasetConfigs[resolvedMetric].stacked.map((dataset) =>
+            const stacked = originalPackagedStackedDatasets.map((dataset) =>
                 cloneAndFilterDataset(dataset, includeWeekends)
             );
 
-            const overlays = datasetConfigs[resolvedMetric].overlays.map((dataset) =>
+            const overlays = originalOverlayDatasets.map((dataset) =>
                 cloneAndFilterDataset(dataset, includeWeekends)
             );
-
-            if (resolvedMetric === 'packaged' && goalOverlayDataset) {
-                overlays.push(cloneAndFilterDataset(goalOverlayDataset, includeWeekends));
-            }
 
             return {
-                metric: resolvedMetric,
                 labels,
                 datasets: stacked.concat(overlays),
             };
         };
 
         let currentIncludeWeekends = true;
-        let currentMetric = 'produced';
+        let currentMetric = 'packaged';
         const collapseToggle = document.getElementById('collapseWeekendsToggle');
         const metricToggleInputs = Array.from(document.querySelectorAll('input[name="gatesMetric"]'));
-        const barContext = document.getElementById('gatesProducedChart');
+        const barContext = document.getElementById('gatesPackagedChart');
         const lineContext = document.getElementById('cumulativeChart');
         const emailChartCanvases = {
-            produced: document.getElementById('emailDataProducedChart'),
             packaged: document.getElementById('emailDataPackagedChart'),
         };
         const emailCharts = {
-            produced: null,
             packaged: null,
         };
         let barChart = null;
@@ -949,7 +910,7 @@
                     return;
                 }
 
-                const emailState = buildEmailChartData(includeWeekends, metricKey);
+                const emailState = buildEmailChartData(includeWeekends);
                 chartInstance.data.labels = emailState.labels;
                 chartInstance.data.datasets = emailState.datasets;
                 if (chartInstance.options?.plugins?.weekendBackground) {
@@ -1144,7 +1105,7 @@
                     return;
                 }
 
-                const emailState = buildEmailChartData(includeWeekends, metricKey);
+                const emailState = buildEmailChartData(includeWeekends);
                 const existingChart = emailCharts[metricKey];
 
                 if (existingChart) {

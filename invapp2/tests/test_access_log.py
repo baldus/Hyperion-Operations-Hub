@@ -2,12 +2,15 @@ import os
 import sys
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from invapp import create_app
 from invapp.extensions import db
 from invapp.models import AccessLog
+import invapp.audit as audit
+from invapp.audit import record_access_event
 
 DEFAULT_SUPERUSER_USERNAME = "superuser"
 DEFAULT_SUPERUSER_PASSWORD = "joshbaldus"
@@ -73,3 +76,50 @@ def test_admin_access_log_page(client):
     assert b"Access Log" in response.data
     assert b"Recent Events" in response.data
     assert b"IP Address Activity" in response.data
+
+
+def test_record_access_event_repairs_sequence_on_duplicate(app, monkeypatch):
+    attempts: dict[str, int] = {"commits": 0, "rollbacks": 0, "repairs": 0}
+
+    class FakeSession:
+        def __init__(self):
+            self._closed = False
+
+        def add(self, instance):
+            attempts.setdefault("adds", 0)
+            attempts["adds"] += 1
+
+        def commit(self):
+            attempts["commits"] += 1
+            if attempts["commits"] == 1:
+                raise IntegrityError(
+                    'duplicate key value violates unique constraint "access_log_pkey"',
+                    None,
+                    None,
+                )
+
+        def rollback(self):
+            attempts["rollbacks"] += 1
+
+        def close(self):
+            self._closed = True
+
+        def get_bind(self):
+            return db.engine
+
+    def fake_sessionmaker():
+        return FakeSession()
+
+    def fake_repair(bind):
+        attempts["repairs"] += 1
+        return True
+
+    monkeypatch.setattr(audit, "_sessionmaker", lambda: fake_sessionmaker)
+    monkeypatch.setattr(audit, "_repair_access_log_sequence", fake_repair)
+
+    with app.app_context():
+        record_access_event(event_type=AccessLog.EVENT_REQUEST, path="/", method="GET")
+
+    assert attempts["commits"] == 2
+    assert attempts["rollbacks"] == 1
+    assert attempts["repairs"] == 1

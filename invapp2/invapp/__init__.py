@@ -246,20 +246,36 @@ def _ensure_production_schema(engine):
             ):
                 numeric_columns_missing_default.append(column_name)
 
-        def _queue_column_add(column_name: str, column_type: str, default: str) -> None:
+        def _queue_column_add(
+            column_name: str,
+            column_type: str,
+            *,
+            default: str | None = None,
+            nullable: bool = True,
+        ) -> None:
             if column_name in existing_column_names:
                 return
 
             add_clause = (
                 "ALTER TABLE production_daily_record "
-                f"ADD COLUMN {column_name} {column_type} DEFAULT {default} NOT NULL"
+                f"ADD COLUMN {column_name} {column_type}"
             )
+            if default is not None:
+                add_clause += f" DEFAULT {default}"
+            if not nullable:
+                add_clause += " NOT NULL"
             columns_to_add.append(add_clause)
 
-        _queue_column_add("gates_employees", "INTEGER", "0")
-        _queue_column_add("gates_hours_ot", "NUMERIC(7, 2)", "0")
-        _queue_column_add("additional_employees", "INTEGER", "0")
-        _queue_column_add("additional_hours_ot", "NUMERIC(7, 2)", "0")
+        _queue_column_add("gates_employees", "INTEGER", default="0", nullable=False)
+        _queue_column_add("gates_hours_ot", "NUMERIC(7, 2)", default="0", nullable=False)
+        _queue_column_add("additional_employees", "INTEGER", default="0", nullable=False)
+        _queue_column_add(
+            "additional_hours_ot", "NUMERIC(7, 2)", default="0", nullable=False
+        )
+        _queue_column_add("gates_notes", "TEXT")
+        _queue_column_add("gates_summary", "TEXT")
+        _queue_column_add("additional_notes", "TEXT")
+        _queue_column_add("additional_summary", "TEXT")
 
         if columns_to_add:
             with engine.begin() as conn:

@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import Any, Mapping, MutableMapping
 
 from flask import current_app, request
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import text
+from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
 from invapp.extensions import db
@@ -47,6 +49,92 @@ def _sessionmaker():
     return sessionmaker(bind=db.engine, future=True)
 
 
+def _resolve_engine(bind: Connection | Engine | None) -> Engine | None:
+    if bind is None:
+        return getattr(db, "engine", None)
+
+    if isinstance(bind, Engine):
+        return bind
+
+    if isinstance(bind, Connection):
+        return bind.engine
+
+    return getattr(db, "engine", None)
+
+
+def _is_duplicate_primary_key(error: IntegrityError) -> bool:
+    if not isinstance(error, IntegrityError):
+        return False
+
+    original = getattr(error, "orig", None)
+    pgcode = getattr(original, "pgcode", None)
+    if pgcode == "23505":
+        diag = getattr(original, "diag", None)
+        constraint = getattr(diag, "constraint_name", None) if diag else None
+        if constraint:
+            return constraint == "access_log_pkey"
+
+    return "access_log_pkey" in str(error).lower()
+
+
+def _repair_access_log_sequence(bind: Connection | Engine | None) -> bool:
+    engine = _resolve_engine(bind)
+    if engine is None:
+        return False
+
+    dialect = engine.dialect.name
+
+    try:
+        with engine.begin() as connection:
+            max_identifier = connection.execute(
+                text("SELECT COALESCE(MAX(id), 0) FROM access_log")
+            ).scalar()
+
+            if dialect == "postgresql":
+                sequence_sql = text(
+                    "SELECT setval("
+                    "pg_get_serial_sequence(:table_name, 'id'), "
+                    ":value, :is_called)"
+                )
+                connection.execute(
+                    sequence_sql,
+                    {
+                        "table_name": "access_log",
+                        "value": max_identifier if max_identifier else 1,
+                        "is_called": bool(max_identifier),
+                    },
+                )
+                return True
+
+            if dialect == "sqlite":
+                has_sequence = connection.execute(
+                    text(
+                        "SELECT 1 FROM sqlite_master "
+                        "WHERE type = 'table' AND name = 'sqlite_sequence'"
+                    )
+                ).fetchone()
+                if not has_sequence:
+                    return False
+
+                connection.execute(
+                    text(
+                        "UPDATE sqlite_sequence "
+                        "SET seq = :value "
+                        "WHERE name = :table_name"
+                    ),
+                    {
+                        "table_name": "access_log",
+                        "value": max_identifier,
+                    },
+                )
+                return True
+    except Exception:
+        current_app.logger.exception("Failed to repair access log sequence")
+        return False
+
+    return False
+
+
 def record_access_event(
     *,
     event_type: str,
@@ -83,12 +171,27 @@ def record_access_event(
     if details:
         payload["details"] = dict(details)
 
+    session = Session()
     try:
-        with Session() as session:
+        session.add(models.AccessLog(**payload))
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        if _is_duplicate_primary_key(error) and _repair_access_log_sequence(
+            session.get_bind()
+        ):
             session.add(models.AccessLog(**payload))
-            session.commit()
-    except SQLAlchemyError:
+            try:
+                session.commit()
+                return
+            except SQLAlchemyError:
+                session.rollback()
         current_app.logger.exception("Failed to record access log entry")
+    except SQLAlchemyError:
+        session.rollback()
+        current_app.logger.exception("Failed to record access log entry")
+    finally:
+        session.close()
 
 
 def record_login_event(

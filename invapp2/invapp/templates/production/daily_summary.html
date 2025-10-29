@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+
+{% block content %}
+<nav class="production-nav" aria-label="Production pages">
+    <a href="{{ url_for('production.daily_entry', entry_date=selected_date.isoformat()) }}" class="production-nav-link is-active">Daily Summary</a>
+    <a href="{{ url_for('production.gates_entry', entry_date=selected_date.isoformat()) }}" class="production-nav-link">Gates Packaged Entry</a>
+    <a href="{{ url_for('production.additional_entry', entry_date=selected_date.isoformat()) }}" class="production-nav-link">Additional Production Entry</a>
+    <a href="{{ url_for('production.final_process_entry') }}" class="production-nav-link">Final Process Entry</a>
+    <a href="{{ url_for('production.history') }}" class="production-nav-link">History</a>
+    <a href="{{ url_for('production.production_settings') }}" class="production-nav-link">Settings</a>
+</nav>
+
+<h2>Daily Summary</h2>
+<p class="section-help">Review gates and supplemental production at a glance. Use the links above to update individual sheets.</p>
+
+<form method="get" class="date-selector" aria-label="Load production summary for a different day">
+    <label for="entry_date_lookup" class="field-label">Jump to Date</label>
+    <div class="date-selector-controls">
+        <input type="date" id="entry_date_lookup" name="entry_date" value="{{ selected_date.isoformat() }}">
+        <button type="submit" class="action-btn">Load</button>
+    </div>
+</form>
+
+{% if record %}
+<div class="daily-summary-grid">
+    <section class="summary-card">
+        <header class="summary-card__header">
+            <div>
+                <h3>Gates Packaged</h3>
+                <p class="summary-card__subtitle">{{ selected_date.strftime('%A, %B %d, %Y') }}</p>
+            </div>
+            <a href="{{ url_for('production.gates_entry', entry_date=selected_date.isoformat()) }}" class="action-btn secondary">Edit Gates Sheet</a>
+        </header>
+        <div class="summary-card__body">
+            <div class="summary-metric">
+                <span class="summary-metric__label">Total Packaged</span>
+                <span class="summary-metric__value">{{ total_packaged }}</span>
+            </div>
+            <div class="summary-metric-grid">
+                <div class="summary-metric">
+                    <span class="summary-metric__label">Employees</span>
+                    <span class="summary-metric__value">{{ form_values.gates_employees or 0 }}</span>
+                </div>
+                <div class="summary-metric">
+                    <span class="summary-metric__label">OT Hours</span>
+                    <span class="summary-metric__value">{{ form_values.gates_hours_ot or 0 }}</span>
+                </div>
+            </div>
+            <details class="summary-accordion">
+                <summary>Customer Breakdown</summary>
+                <ul class="summary-list">
+                    {% if has_packaged_data %}
+                        {% for item in packaged_totals if item.value %}
+                            <li><span class="summary-list__label">{{ item.customer.name }}</span> <span class="summary-list__value">{{ item.value }}</span></li>
+                        {% endfor %}
+                    {% else %}
+                        <li>No packaged totals recorded.</li>
+                    {% endif %}
+                </ul>
+            </details>
+            <div class="summary-text-group">
+                <div>
+                    <h4>Daily Summary</h4>
+                    <p>{{ form_values.gates_summary or '—' }}</p>
+                </div>
+                <div>
+                    <h4>Notes</h4>
+                    <p>{{ form_values.gates_notes or '—' }}</p>
+                </div>
+            </div>
+            <div class="summary-table-container">
+                <h4>Finished Gate Orders</h4>
+                {% if completions %}
+                    <div class="table-scroll">
+                        <table class="production-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Order #</th>
+                                    <th scope="col">Customer</th>
+                                    <th scope="col">Gates Completed</th>
+                                    <th scope="col">PO #</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for completion in completions %}
+                                    <tr>
+                                        <td>{{ completion.order_number }}</td>
+                                        <td>{{ completion.customer_name or '—' }}</td>
+                                        <td>{{ completion.gates_completed }}</td>
+                                        <td>{{ completion.po_number or '—' }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="summary-empty">No finished gate orders recorded.</p>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    <section class="summary-card">
+        <header class="summary-card__header">
+            <div>
+                <h3>Additional Production</h3>
+                <p class="summary-card__subtitle">{{ selected_date.strftime('%A, %B %d, %Y') }}</p>
+            </div>
+            <a href="{{ url_for('production.additional_entry', entry_date=selected_date.isoformat()) }}" class="action-btn secondary">Edit Additional Sheet</a>
+        </header>
+        <div class="summary-card__body">
+            <div class="summary-metric-grid">
+                <div class="summary-metric">
+                    <span class="summary-metric__label">Employees</span>
+                    <span class="summary-metric__value">{{ form_values.additional_employees or 0 }}</span>
+                </div>
+                <div class="summary-metric">
+                    <span class="summary-metric__label">OT Hours</span>
+                    <span class="summary-metric__value">{{ form_values.additional_hours_ot or 0 }}</span>
+                </div>
+                <div class="summary-metric">
+                    <span class="summary-metric__label">Controllers (4 Stop)</span>
+                    <span class="summary-metric__value">{{ form_values.controllers_4_stop or 0 }}</span>
+                </div>
+                <div class="summary-metric">
+                    <span class="summary-metric__label">Controllers (6 Stop)</span>
+                    <span class="summary-metric__value">{{ form_values.controllers_6_stop or 0 }}</span>
+                </div>
+                <div class="summary-metric">
+                    <span class="summary-metric__label">Door Locks (LH)</span>
+                    <span class="summary-metric__value">{{ form_values.door_locks_lh or 0 }}</span>
+                </div>
+                <div class="summary-metric">
+                    <span class="summary-metric__label">Door Locks (RH)</span>
+                    <span class="summary-metric__value">{{ form_values.door_locks_rh or 0 }}</span>
+                </div>
+                <div class="summary-metric">
+                    <span class="summary-metric__label">Operators Produced</span>
+                    <span class="summary-metric__value">{{ form_values.operators_produced or 0 }}</span>
+                </div>
+                <div class="summary-metric">
+                    <span class="summary-metric__label">COPs Produced</span>
+                    <span class="summary-metric__value">{{ form_values.cops_produced or 0 }}</span>
+                </div>
+            </div>
+            <div class="summary-text-group">
+                <div>
+                    <h4>Daily Summary</h4>
+                    <p>{{ form_values.additional_summary or '—' }}</p>
+                </div>
+                <div>
+                    <h4>Notes</h4>
+                    <p>{{ form_values.additional_notes or '—' }}</p>
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+{% else %}
+<div class="empty-state">
+    <p>No production data has been recorded for {{ selected_date.strftime('%B %d, %Y') }}.</p>
+    <p>
+        <a href="{{ url_for('production.gates_entry', entry_date=selected_date.isoformat()) }}" class="action-btn">Start Gates Sheet</a>
+        <a href="{{ url_for('production.additional_entry', entry_date=selected_date.isoformat()) }}" class="action-btn secondary">Start Additional Sheet</a>
+    </p>
+</div>
+{% endif %}
+{% endblock %}

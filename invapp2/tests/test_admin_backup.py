@@ -139,6 +139,10 @@ def test_export_includes_production_history(client, app):
             cops_produced=8,
             additional_employees=2,
             additional_hours_ot=Decimal("0.75"),
+            gates_summary="Gate recap",
+            gates_notes="Gate notes",
+            additional_summary="Additional recap",
+            additional_notes="Additional notes",
             daily_notes="Backed up",
         )
         customer_total = ProductionDailyCustomerTotal(
@@ -226,6 +230,10 @@ def test_export_includes_production_history(client, app):
         ]
         assert matching_records
         restored_record = matching_records[0]
+        assert restored_record.gates_summary == "Gate recap"
+        assert restored_record.gates_notes == "Gate notes"
+        assert restored_record.additional_summary == "Additional recap"
+        assert restored_record.additional_notes == "Additional notes"
         assert restored_record.daily_notes == "Backed up"
         assert restored_record.customer_totals[0].gates_produced == 11
         assert restored_record.gate_completions[0].order_number == "ORD-42"

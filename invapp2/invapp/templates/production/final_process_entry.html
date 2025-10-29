@@ -2,14 +2,16 @@
 
 {% block content %}
 <nav class="production-nav" aria-label="Production pages">
-    <a href="{{ url_for('production.daily_entry') }}" class="production-nav-link">Daily Entry</a>
+    <a href="{{ url_for('production.daily_entry') }}" class="production-nav-link">Daily Summary</a>
+    <a href="{{ url_for('production.gates_entry') }}" class="production-nav-link">Gates Packaged Entry</a>
+    <a href="{{ url_for('production.additional_entry') }}" class="production-nav-link">Additional Production Entry</a>
     <a href="{{ url_for('production.final_process_entry') }}" class="production-nav-link is-active">Final Process Entry</a>
     <a href="{{ url_for('production.history') }}" class="production-nav-link">History</a>
     <a href="{{ url_for('production.production_settings') }}" class="production-nav-link">Settings</a>
 </nav>
 
 <h2>Final Process Closeout</h2>
-<p class="section-help">Log finished gate orders as they are packaged to keep Production History up to date. Entries can be reviewed and edited from the Daily Entry page if adjustments are needed.</p>
+<p class="section-help">Log finished gate orders as they are packaged to keep Production History up to date. Entries can be reviewed from the Gates Packaged sheet or the Daily Summary if adjustments are needed.</p>
 
 <form method="post" class="form-stack production-entry-form">
     <div class="form-section">

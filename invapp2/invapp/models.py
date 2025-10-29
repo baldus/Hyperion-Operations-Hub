@@ -530,6 +530,10 @@ class ProductionDailyRecord(db.Model):
     cops_produced = db.Column(db.Integer, nullable=False, default=0)
     additional_employees = db.Column(db.Integer, nullable=False, default=0)
     additional_hours_ot = db.Column(db.Numeric(7, 2), nullable=False, default=0)
+    gates_notes = db.Column(db.Text, nullable=True)
+    gates_summary = db.Column(db.Text, nullable=True)
+    additional_notes = db.Column(db.Text, nullable=True)
+    additional_summary = db.Column(db.Text, nullable=True)
     daily_notes = db.Column(db.Text, nullable=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
