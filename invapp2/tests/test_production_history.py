@@ -229,15 +229,8 @@ def test_daily_entry_updates_gate_completion(client, app):
         "entry_date": target_date.isoformat(),
         "gates_employees": "0",
         "gates_hours_ot": "0",
-        "controllers_4_stop": "0",
-        "controllers_6_stop": "0",
-        "door_locks_lh": "0",
-        "door_locks_rh": "0",
-        "operators_produced": "0",
-        "cops_produced": "0",
-        "additional_employees": "0",
-        "additional_hours_ot": "0",
-        "daily_notes": "",
+        "gates_summary": "",
+        "gates_notes": "",
         "completion_id": str(completion.id),
         "completion_order_number": "G-54321",
         "completion_customer": "Updated Customer",
@@ -250,7 +243,7 @@ def test_daily_entry_updates_gate_completion(client, app):
         form_data[f"gates_packaged_{customer.id}"] = "0"
 
     response = client.post(
-        "/production/daily-entry",
+        "/production/daily-entry/gates",
         data=form_data,
         follow_redirects=True,
     )
@@ -319,15 +312,8 @@ def test_daily_entry_fill_packaged_from_gate_completions(client, app):
         ("entry_date", target_date.isoformat()),
         ("gates_employees", "0"),
         ("gates_hours_ot", "0"),
-        ("controllers_4_stop", "0"),
-        ("controllers_6_stop", "0"),
-        ("door_locks_lh", "0"),
-        ("door_locks_rh", "0"),
-        ("operators_produced", "0"),
-        ("cops_produced", "0"),
-        ("additional_employees", "0"),
-        ("additional_hours_ot", "0"),
-        ("daily_notes", ""),
+        ("gates_summary", ""),
+        ("gates_notes", ""),
     ]
 
     for customer in customers:
@@ -338,7 +324,7 @@ def test_daily_entry_fill_packaged_from_gate_completions(client, app):
     form_data.append(("fill_packaged_from_completions", "1"))
 
     response = client.post(
-        "/production/daily-entry",
+        "/production/daily-entry/gates",
         data=MultiDict(form_data),
     )
 

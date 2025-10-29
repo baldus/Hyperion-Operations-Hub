@@ -3567,3 +3567,129 @@ body.light .email-modal-hint {
 .production-history-table th.sortable-header[aria-sort='desc']::after {
     content: '▼';
 }
+
+.daily-summary-grid {
+    display: grid;
+    gap: 2rem;
+    margin-top: 2rem;
+}
+
+@media (min-width: 960px) {
+    .daily-summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.summary-card {
+    background: #ffffff;
+    border-radius: 16px;
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+    padding: 1.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.summary-card__header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.summary-card__subtitle {
+    margin: 0.25rem 0 0;
+    font-size: 0.9rem;
+    color: #64748b;
+}
+
+.summary-card__body {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+.summary-metric {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.summary-metric__label {
+    font-size: 0.9rem;
+    color: #64748b;
+}
+
+.summary-metric__value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.summary-metric-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.summary-accordion summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: #1e293b;
+}
+
+.summary-list {
+    list-style: none;
+    margin: 0.75rem 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.summary-list__label {
+    font-weight: 600;
+}
+
+.summary-list__value {
+    float: right;
+    color: #2563eb;
+}
+
+.summary-text-group {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.summary-text-group h4 {
+    margin-bottom: 0.35rem;
+}
+
+.summary-text-group p {
+    margin: 0;
+    color: #1f2937;
+    white-space: pre-wrap;
+}
+
+.summary-table-container h4 {
+    margin-bottom: 0.75rem;
+}
+
+.summary-empty {
+    margin: 0;
+    color: #64748b;
+}
+
+.empty-state {
+    margin-top: 2rem;
+    padding: 2rem;
+    border-radius: 16px;
+    background: linear-gradient(120deg, rgba(59, 130, 246, 0.1), rgba(96, 165, 250, 0.05));
+    text-align: center;
+}
+
+.empty-state p {
+    margin-bottom: 1rem;
+}

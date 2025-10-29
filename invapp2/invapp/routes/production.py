@@ -400,6 +400,10 @@ def _empty_form_values(customers: List[ProductionCustomer]) -> Dict[str, object]
         "cops_produced": "",
         "additional_employees": "",
         "additional_hours_ot": "",
+        "gates_notes": "",
+        "gates_summary": "",
+        "additional_notes": "",
+        "additional_summary": "",
         "daily_notes": "",
         "gate_completions": [],
     }
@@ -433,7 +437,13 @@ def _form_values_from_record(
     values["cops_produced"] = record.cops_produced or 0
     values["additional_employees"] = record.additional_employees or 0
     values["additional_hours_ot"] = _format_decimal(record.additional_hours_ot)
+    values["gates_notes"] = record.gates_notes or ""
+    values["gates_summary"] = record.gates_summary or ""
+    values["additional_notes"] = record.additional_notes or ""
+    values["additional_summary"] = record.additional_summary or ""
     values["daily_notes"] = record.daily_notes or ""
+    if not values["gates_summary"] and not values["gates_notes"] and values["daily_notes"]:
+        values["gates_notes"] = values["daily_notes"]
     values["gate_completions"] = [
         {
             "id": completion.id,
@@ -580,6 +590,10 @@ def _form_values_from_post(
     values["additional_hours_ot"] = (
         request.form.get("additional_hours_ot") or ""
     ).strip()
+    values["gates_notes"] = request.form.get("gates_notes") or ""
+    values["gates_summary"] = request.form.get("gates_summary") or ""
+    values["additional_notes"] = request.form.get("additional_notes") or ""
+    values["additional_summary"] = request.form.get("additional_summary") or ""
     values["daily_notes"] = request.form.get("daily_notes") or ""
 
     completion_values: list[dict[str, Any]] = []
@@ -803,8 +817,80 @@ def final_process_entry():
     )
 
 
-@bp.route("/daily-entry", methods=["GET", "POST"])
+def _fetch_daily_record(selected_date: date) -> ProductionDailyRecord | None:
+    return (
+        ProductionDailyRecord.query.options(
+            joinedload(ProductionDailyRecord.customer_totals),
+            joinedload(ProductionDailyRecord.gate_completions),
+        )
+        .filter_by(entry_date=selected_date)
+        .first()
+    )
+
+
+def _ensure_daily_record(selected_date: date) -> ProductionDailyRecord:
+    record = _fetch_daily_record(selected_date)
+    if record:
+        return record
+    record = ProductionDailyRecord(entry_date=selected_date)
+    record.day_of_week = selected_date.strftime("%A")
+    db.session.add(record)
+    db.session.flush()
+    return record
+
+
+def _synchronize_combined_notes(record: ProductionDailyRecord) -> None:
+    sections: list[str] = []
+
+    def _add_section(label: str, value: str | None) -> None:
+        if value:
+            stripped = value.strip()
+            if stripped:
+                sections.append(f"{label}: {stripped}")
+
+    _add_section("Gates Summary", record.gates_summary)
+    _add_section("Gates Notes", record.gates_notes)
+    _add_section("Additional Summary", record.additional_summary)
+    _add_section("Additional Notes", record.additional_notes)
+
+    record.daily_notes = "\n\n".join(sections) or None
+
+
+@bp.route("/daily-entry")
 def daily_entry():
+    customers = _active_customers()
+    today = date.today()
+    selected_date = _parse_date(request.values.get("entry_date")) or today
+    record = _fetch_daily_record(selected_date)
+
+    form_values = _form_values_from_record(record, customers)
+    packaged_totals: list[dict[str, object]] = []
+    total_packaged = 0
+    has_packaged_data = False
+    for customer in customers:
+        packaged_value = int(form_values["gates_packaged"].get(customer.id, 0) or 0)
+        packaged_totals.append({"customer": customer, "value": packaged_value})
+        total_packaged += packaged_value
+        if packaged_value:
+            has_packaged_data = True
+
+    completions = form_values["gate_completions"] if form_values else []
+
+    return render_template(
+        "production/daily_summary.html",
+        customers=customers,
+        selected_date=selected_date,
+        record=record,
+        form_values=form_values,
+        total_packaged=total_packaged,
+        packaged_totals=packaged_totals,
+        completions=completions,
+        has_packaged_data=has_packaged_data,
+    )
+
+
+@bp.route("/daily-entry/gates", methods=["GET", "POST"])
+def gates_entry():
     customers = _active_customers()
     grouped_customers = [
         customer
@@ -813,26 +899,14 @@ def daily_entry():
     ]
     today = date.today()
     selected_date = _parse_date(request.values.get("entry_date")) or today
-    record = (
-        ProductionDailyRecord.query.options(
-            joinedload(ProductionDailyRecord.customer_totals)
-        )
-        .filter_by(entry_date=selected_date)
-        .first()
-    )
+    record = _fetch_daily_record(selected_date)
     record_exists = record is not None
 
     if request.method == "POST":
         form_date = _parse_date(request.form.get("entry_date"))
         if form_date:
             selected_date = form_date
-        record = (
-            ProductionDailyRecord.query.options(
-                joinedload(ProductionDailyRecord.customer_totals)
-            )
-            .filter_by(entry_date=selected_date)
-            .first()
-        )
+        record = _fetch_daily_record(selected_date)
         record_exists = record is not None
 
         completion_rows, delete_ids = _completion_rows_from_request()
@@ -874,7 +948,7 @@ def daily_entry():
                 )
 
             return render_template(
-                "production/daily_entry.html",
+                "production/daily_entry_gates.html",
                 customers=customers,
                 grouped_customers=grouped_customers,
                 selected_date=selected_date,
@@ -883,10 +957,7 @@ def daily_entry():
                 extra_completion_rows=3,
             )
 
-        if not record:
-            record = ProductionDailyRecord(entry_date=selected_date)
-            db.session.add(record)
-
+        record = _ensure_daily_record(selected_date)
         record.day_of_week = selected_date.strftime("%A")
 
         existing_totals = {
@@ -905,15 +976,10 @@ def daily_entry():
 
         record.gates_employees = _get_int("gates_employees")
         record.gates_hours_ot = _get_decimal_value("gates_hours_ot")
-        record.controllers_4_stop = _get_int("controllers_4_stop")
-        record.controllers_6_stop = _get_int("controllers_6_stop")
-        record.door_locks_lh = _get_int("door_locks_lh")
-        record.door_locks_rh = _get_int("door_locks_rh")
-        record.operators_produced = _get_int("operators_produced")
-        record.cops_produced = _get_int("cops_produced")
-        record.additional_employees = _get_int("additional_employees")
-        record.additional_hours_ot = _get_decimal_value("additional_hours_ot")
-        record.daily_notes = request.form.get("daily_notes") or None
+        record.gates_notes = (request.form.get("gates_notes") or "").strip() or None
+        record.gates_summary = (
+            request.form.get("gates_summary") or ""
+        ).strip() or None
 
         existing_completions = {
             completion.id: completion for completion in record.gate_completions
@@ -952,24 +1018,74 @@ def daily_entry():
             if completion_id not in processed_ids and completion_id not in delete_ids:
                 db.session.delete(completion)
 
+        _synchronize_combined_notes(record)
         db.session.commit()
         flash(
-            f"Production totals saved for {selected_date.strftime('%B %d, %Y')}.",
+            f"Gates packaged totals saved for {selected_date.strftime('%B %d, %Y')}.",
             "success",
         )
         return redirect(
-            url_for("production.daily_entry", entry_date=selected_date.isoformat())
+            url_for("production.gates_entry", entry_date=selected_date.isoformat())
         )
 
     form_values = _form_values_from_record(record, customers)
     return render_template(
-        "production/daily_entry.html",
+        "production/daily_entry_gates.html",
         customers=customers,
         grouped_customers=grouped_customers,
         selected_date=selected_date,
         form_values=form_values,
         record_exists=record is not None,
         extra_completion_rows=3,
+    )
+
+
+@bp.route("/daily-entry/additional", methods=["GET", "POST"])
+def additional_entry():
+    customers = _active_customers()
+    today = date.today()
+    selected_date = _parse_date(request.values.get("entry_date")) or today
+    record = _fetch_daily_record(selected_date)
+
+    if request.method == "POST":
+        form_date = _parse_date(request.form.get("entry_date"))
+        if form_date:
+            selected_date = form_date
+        record = _ensure_daily_record(selected_date)
+        record.day_of_week = selected_date.strftime("%A")
+
+        record.controllers_4_stop = _get_int("controllers_4_stop")
+        record.controllers_6_stop = _get_int("controllers_6_stop")
+        record.door_locks_lh = _get_int("door_locks_lh")
+        record.door_locks_rh = _get_int("door_locks_rh")
+        record.operators_produced = _get_int("operators_produced")
+        record.cops_produced = _get_int("cops_produced")
+        record.additional_employees = _get_int("additional_employees")
+        record.additional_hours_ot = _get_decimal_value("additional_hours_ot")
+        record.additional_notes = (
+            request.form.get("additional_notes") or ""
+        ).strip() or None
+        record.additional_summary = (
+            request.form.get("additional_summary") or ""
+        ).strip() or None
+
+        _synchronize_combined_notes(record)
+        db.session.commit()
+        flash(
+            f"Additional production totals saved for {selected_date.strftime('%B %d, %Y')}.",
+            "success",
+        )
+        return redirect(
+            url_for("production.additional_entry", entry_date=selected_date.isoformat())
+        )
+
+    form_values = _form_values_from_record(record, customers)
+    return render_template(
+        "production/daily_entry_additional.html",
+        customers=customers,
+        selected_date=selected_date,
+        form_values=form_values,
+        record_exists=record is not None,
     )
 
 
@@ -1530,6 +1646,10 @@ def history_export():
             "Additional Total Hours",
             "Additional Output Details",
             "Additional Output Total",
+            "Gates Summary",
+            "Gates Notes",
+            "Additional Summary",
+            "Additional Notes",
             "Notes",
         ]
     )
@@ -1579,6 +1699,10 @@ def history_export():
                 row["additional_total_hours"],
                 additional_details,
                 additional_total,
+                record.gates_summary or "",
+                record.gates_notes or "",
+                record.additional_summary or "",
+                record.additional_notes or "",
                 record.daily_notes or "",
             ]
         )

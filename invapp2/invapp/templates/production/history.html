@@ -2,7 +2,9 @@
 
 {% block content %}
 <nav class="production-nav" aria-label="Production pages">
-    <a href="{{ url_for('production.daily_entry') }}" class="production-nav-link">Daily Entry</a>
+    <a href="{{ url_for('production.daily_entry') }}" class="production-nav-link">Daily Summary</a>
+    <a href="{{ url_for('production.gates_entry') }}" class="production-nav-link">Gates Packaged Entry</a>
+    <a href="{{ url_for('production.additional_entry') }}" class="production-nav-link">Additional Production Entry</a>
     <a href="{{ url_for('production.final_process_entry') }}" class="production-nav-link">Final Process Entry</a>
     <a href="{{ url_for('production.history') }}" class="production-nav-link is-active">History</a>
     <a href="{{ url_for('production.production_settings') }}" class="production-nav-link">Settings</a>
@@ -120,7 +122,7 @@
                         <th scope="col" class="sortable-header" aria-sort="none">COPs</th>
                         <th scope="col" class="sortable-header" aria-sort="none">Additional Labor<br><small>Employees / OT / Hours</small></th>
                         <th scope="col" class="sortable-header" aria-sort="none">Additional Output<br><small>Units per Labor Hour</small></th>
-                        <th scope="col" class="sortable-header" aria-sort="none">Notes</th>
+                        <th scope="col" class="sortable-header" aria-sort="none">Summaries &amp; Notes</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -190,7 +192,14 @@
                                     —
                                 {% endif %}
                             </td>
-                            <td data-sort-value="{{ row.record.daily_notes or '' }}">{{ row.record.daily_notes or '—' }}</td>
+                            <td data-sort-value="{{ row.record.daily_notes or '' }}">
+                                <div class="totals-breakdown">
+                                    <span><strong>Gates Summary:</strong> {{ row.record.gates_summary or '—' }}</span>
+                                    <span><strong>Gates Notes:</strong> {{ row.record.gates_notes or '—' }}</span>
+                                    <span><strong>Additional Summary:</strong> {{ row.record.additional_summary or '—' }}</span>
+                                    <span><strong>Additional Notes:</strong> {{ row.record.additional_notes or '—' }}</span>
+                                </div>
+                            </td>
                         </tr>
                     {% endfor %}
                 </tbody>
