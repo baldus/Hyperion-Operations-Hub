@@ -1220,7 +1220,7 @@ def _build_history_context(start_date: date, end_date: date) -> Dict[str, Any]:
         if denominator != 0:
             slope = ((count * sum_xy) - (sum_x * sum_y)) / denominator
             intercept = (sum_y - (slope * sum_x)) / count
-            trendline_values = [slope * x + intercept for x in range(len(total_produced_values))]
+            trendline_values = [slope * x + intercept for x in range(len(total_packaged_values))]
 
     overlay_datasets: List[Dict[str, object]] = []
     if trendline_values:
