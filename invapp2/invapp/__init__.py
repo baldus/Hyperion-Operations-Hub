@@ -384,9 +384,11 @@ def create_app(config_override=None):
         ),
     )
 
+    engine_options = app.config.setdefault("SQLALCHEMY_ENGINE_OPTIONS", {})
+    engine_options.setdefault("pool_pre_ping", True)
+
     database_uri = app.config.get("SQLALCHEMY_DATABASE_URI", "")
     if database_uri.startswith("sqlite:///:memory:"):
-        engine_options = app.config.setdefault("SQLALCHEMY_ENGINE_OPTIONS", {})
         connect_args = engine_options.setdefault("connect_args", {})
         connect_args.setdefault("check_same_thread", False)
         engine_options.setdefault("poolclass", StaticPool)
