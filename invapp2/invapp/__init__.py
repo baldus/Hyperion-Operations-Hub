@@ -228,6 +228,18 @@ def _ensure_production_schema(engine):
         desired_length = 32
         needs_day_of_week_alter = False
         numeric_columns_missing_default: list[str] = []
+        required_numeric_defaults = {
+            "gates_employees",
+            "gates_hours_ot",
+            "controllers_4_stop",
+            "controllers_6_stop",
+            "door_locks_lh",
+            "door_locks_rh",
+            "operators_produced",
+            "cops_produced",
+            "additional_employees",
+            "additional_hours_ot",
+        }
         existing_column_names = {column["name"] for column in production_daily_columns}
         columns_to_add: list[str] = []
 
@@ -240,7 +252,10 @@ def _ensure_production_schema(engine):
                     needs_day_of_week_alter = True
 
             if (
-                column_name.startswith(("gates_produced_", "gates_packaged_"))
+                (
+                    column_name.startswith(("gates_produced_", "gates_packaged_"))
+                    or column_name in required_numeric_defaults
+                )
                 and not column.get("nullable", True)
                 and column.get("default") is None
             ):
@@ -268,6 +283,12 @@ def _ensure_production_schema(engine):
 
         _queue_column_add("gates_employees", "INTEGER", default="0", nullable=False)
         _queue_column_add("gates_hours_ot", "NUMERIC(7, 2)", default="0", nullable=False)
+        _queue_column_add("controllers_4_stop", "INTEGER", default="0", nullable=False)
+        _queue_column_add("controllers_6_stop", "INTEGER", default="0", nullable=False)
+        _queue_column_add("door_locks_lh", "INTEGER", default="0", nullable=False)
+        _queue_column_add("door_locks_rh", "INTEGER", default="0", nullable=False)
+        _queue_column_add("operators_produced", "INTEGER", default="0", nullable=False)
+        _queue_column_add("cops_produced", "INTEGER", default="0", nullable=False)
         _queue_column_add("additional_employees", "INTEGER", default="0", nullable=False)
         _queue_column_add(
             "additional_hours_ot", "NUMERIC(7, 2)", default="0", nullable=False
@@ -276,6 +297,7 @@ def _ensure_production_schema(engine):
         _queue_column_add("gates_summary", "TEXT")
         _queue_column_add("additional_notes", "TEXT")
         _queue_column_add("additional_summary", "TEXT")
+        _queue_column_add("daily_notes", "TEXT")
 
         if columns_to_add:
             with engine.begin() as conn:
