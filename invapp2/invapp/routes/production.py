@@ -12,6 +12,7 @@ from typing import Any, Dict, List
 from flask import (
     Blueprint,
     Response,
+    current_app,
     flash,
     redirect,
     render_template,
@@ -19,6 +20,7 @@ from flask import (
     url_for,
 )
 from sqlalchemy import func
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import joinedload
 
 from invapp.extensions import db
@@ -1018,8 +1020,30 @@ def gates_entry():
             if completion_id not in processed_ids and completion_id not in delete_ids:
                 db.session.delete(completion)
 
-        _synchronize_combined_notes(record)
-        db.session.commit()
+        try:
+            _synchronize_combined_notes(record)
+            db.session.commit()
+        except SQLAlchemyError:
+            db.session.rollback()
+            current_app.logger.exception(
+                "Failed to save gates packaged totals due to a database error."
+            )
+            flash(
+                "Unable to save gates packaged totals because the database "
+                "connection was unavailable. Please try again.",
+                "error",
+            )
+            form_values = _form_values_from_post(customers, completion_rows)
+            return render_template(
+                "production/daily_entry_gates.html",
+                customers=customers,
+                grouped_customers=grouped_customers,
+                selected_date=selected_date,
+                form_values=form_values,
+                record_exists=record_exists,
+                extra_completion_rows=3,
+            )
+
         flash(
             f"Gates packaged totals saved for {selected_date.strftime('%B %d, %Y')}.",
             "success",
@@ -1035,7 +1059,7 @@ def gates_entry():
         grouped_customers=grouped_customers,
         selected_date=selected_date,
         form_values=form_values,
-        record_exists=record is not None,
+        record_exists=record_exists,
         extra_completion_rows=3,
     )
 
@@ -1046,11 +1070,14 @@ def additional_entry():
     today = date.today()
     selected_date = _parse_date(request.values.get("entry_date")) or today
     record = _fetch_daily_record(selected_date)
+    record_exists = record is not None
 
     if request.method == "POST":
         form_date = _parse_date(request.form.get("entry_date"))
         if form_date:
             selected_date = form_date
+            record = _fetch_daily_record(selected_date)
+        record_exists = record is not None
         record = _ensure_daily_record(selected_date)
         record.day_of_week = selected_date.strftime("%A")
 
@@ -1069,8 +1096,28 @@ def additional_entry():
             request.form.get("additional_summary") or ""
         ).strip() or None
 
-        _synchronize_combined_notes(record)
-        db.session.commit()
+        try:
+            _synchronize_combined_notes(record)
+            db.session.commit()
+        except SQLAlchemyError:
+            db.session.rollback()
+            current_app.logger.exception(
+                "Failed to save additional production totals due to a database error."
+            )
+            flash(
+                "Unable to save additional production totals because the database "
+                "connection was unavailable. Please try again.",
+                "error",
+            )
+            form_values = _form_values_from_post(customers, [])
+            return render_template(
+                "production/daily_entry_additional.html",
+                customers=customers,
+                selected_date=selected_date,
+                form_values=form_values,
+                record_exists=record_exists,
+            )
+
         flash(
             f"Additional production totals saved for {selected_date.strftime('%B %d, %Y')}.",
             "success",
@@ -1085,7 +1132,7 @@ def additional_entry():
         customers=customers,
         selected_date=selected_date,
         form_values=form_values,
-        record_exists=record is not None,
+        record_exists=record_exists,
     )
 
 
