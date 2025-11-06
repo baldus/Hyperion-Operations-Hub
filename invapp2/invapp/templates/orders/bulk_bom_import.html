@@ -24,7 +24,7 @@
         </div>
     </form>
 {% else %}
-    <form method="post" class="form-stack">
+    <form method="post" class="form-stack" data-import-form>
         <input type="hidden" name="step" value="import">
         <input type="hidden" name="data_json" value='{{ payload|tojson|safe }}'>
         {% for column in columns %}
@@ -103,11 +103,36 @@
             </table>
         </div>
 
+        <div id="import-progress-notice" class="section-help" hidden>
+            <strong>Please wait…</strong> Upload in progress. Large files may take a moment to finish.
+        </div>
+
         <div class="form-actions">
-            <button type="submit" class="action-btn">Import BOM Templates</button>
+            <button type="submit" class="action-btn" data-import-submit>Import BOM Templates</button>
             <a href="{{ url_for('orders.bom_library_bulk_import') }}" class="link-btn">Start Over</a>
             <a href="{{ url_for('orders.bom_library') }}" class="link-btn">Back to BOM Library</a>
         </div>
     </form>
 {% endif %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        var importForm = document.querySelector('form[data-import-form]');
+        if (!importForm) {
+            return;
+        }
+
+        var submitButton = importForm.querySelector('[data-import-submit]');
+        var notice = document.getElementById('import-progress-notice');
+
+        importForm.addEventListener('submit', function () {
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.textContent = 'Importing…';
+            }
+            if (notice) {
+                notice.hidden = false;
+            }
+        });
+    });
+</script>
 {% endblock %}

@@ -780,6 +780,32 @@ def test_bulk_bom_import_creates_templates(client, app, items):
         assert secondary_template.components[0].quantity == Decimal("4.7500")
 
 
+def test_bulk_bom_import_rejects_too_small_quantities(client, items):
+    finished, component, _ = items
+
+    payload_rows = [
+        {"Assembly": finished.sku, "Component": component.sku, "Qty": "0.00001"},
+    ]
+
+    data = {
+        "step": "import",
+        "data_json": json.dumps(payload_rows),
+        "columns": ["Assembly", "Component", "Qty"],
+        "assembly_field": "Assembly",
+        "component_field": "Component",
+        "quantity_field": "Qty",
+    }
+
+    resp = client.post(
+        "/orders/bom-library/bulk-import",
+        data=data,
+        follow_redirects=True,
+    )
+
+    assert resp.status_code == 200
+    assert b"Row 2: Quantity &#39;0.00001&#39; must be a positive number." in resp.data
+
+
 def test_bulk_bom_import_creates_missing_items(client, app):
     payload_rows = [
         {

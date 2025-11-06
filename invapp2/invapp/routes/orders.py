@@ -152,7 +152,11 @@ def _parse_positive_quantity(raw_value) -> Decimal:
     if candidate <= 0:
         raise InvalidOperation
 
-    return candidate.quantize(QUANTITY_STEP, rounding=ROUND_HALF_UP)
+    quantized = candidate.quantize(QUANTITY_STEP, rounding=ROUND_HALF_UP)
+    if quantized <= 0:
+        raise InvalidOperation
+
+    return quantized
 
 
 def _format_decimal(value: Decimal) -> str:
