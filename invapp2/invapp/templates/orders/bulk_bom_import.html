@@ -61,6 +61,24 @@
         </div>
 
         <div class="section-header">
+            <h4>Optional Item Columns</h4>
+            <p class="section-help">Map additional columns to populate new finished goods or components. Existing items are left unchanged.</p>
+        </div>
+        <div class="form-grid">
+            {% for field in optional_fields %}
+                <label class="form-field">
+                    <span class="field-label">{{ field.label }}</span>
+                    <select name="{{ field.key }}_field">
+                        <option value="">Ignore</option>
+                        {% for column in columns %}
+                            <option value="{{ column }}" {% if column == selected[field.key] %}selected{% endif %}>{{ column }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            {% endfor %}
+        </div>
+
+        <div class="section-header">
             <h4>Preview</h4>
             <p class="section-help">Showing up to the first 10 rows detected in the upload.</p>
         </div>

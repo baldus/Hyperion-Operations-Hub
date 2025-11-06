@@ -39,6 +39,52 @@ from invapp.models import (
 
 QUANTITY_STEP = Decimal("0.0001")
 
+
+def _normalize_header(name: str) -> str:
+    return "".join(ch for ch in (name or "").strip().lower() if ch.isalnum())
+
+
+ITEM_METADATA_FIELDS = [
+    ("name", "Name"),
+    ("description", "Description"),
+    ("type", "Type"),
+    ("unit", "Unit"),
+    ("item_class", "Item Class"),
+    ("notes", "Notes"),
+]
+
+
+def _build_optional_field_config():
+    config = []
+    for role, role_label in (("assembly", "Finished Good"), ("component", "Component")):
+        for attribute, attribute_label in ITEM_METADATA_FIELDS:
+            key = f"{role}_{attribute}"
+            label = f"{role_label} {attribute_label}"
+            config.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "role": role,
+                    "attribute": attribute,
+                    "default_keys": {
+                        _normalize_header(label),
+                        _normalize_header(attribute_label),
+                    },
+                }
+            )
+    return config
+
+
+OPTIONAL_ITEM_FIELD_CONFIG = _build_optional_field_config()
+OPTIONAL_FIELD_LOOKUP = {field["key"]: field for field in OPTIONAL_ITEM_FIELD_CONFIG}
+
+
+def _initial_bulk_import_selection():
+    selection = {"assembly": "", "component": "", "quantity": ""}
+    for field in OPTIONAL_ITEM_FIELD_CONFIG:
+        selection[field["key"]] = ""
+    return selection
+
 bp = Blueprint("orders", __name__, url_prefix="/orders")
 
 bp.before_request(blueprint_page_guard("orders"))
@@ -707,11 +753,8 @@ def bom_library_bulk_import():
         "columns": [],
         "preview_rows": [],
         "payload": [],
-        "selected": {
-            "assembly": "",
-            "component": "",
-            "quantity": "",
-        },
+        "selected": _initial_bulk_import_selection(),
+        "optional_fields": OPTIONAL_ITEM_FIELD_CONFIG,
     }
 
     if request.method == "POST":
@@ -750,24 +793,33 @@ def bom_library_bulk_import():
                             context["payload"] = rows
 
                             normalized_names = {
-                                (name or "").strip().lower(): name for name in reader.fieldnames
+                                _normalize_header(name): name for name in reader.fieldnames if name
                             }
                             context["selected"]["assembly"] = (
                                 normalized_names.get("assembly")
-                                or normalized_names.get("finished_good")
+                                or normalized_names.get("finishedgood")
+                                or normalized_names.get("finishedgoodsku")
                                 or ""
                             )
                             context["selected"]["component"] = (
                                 normalized_names.get("component")
-                                or normalized_names.get("component_sku")
+                                or normalized_names.get("componentsku")
                                 or normalized_names.get("sku")
                                 or ""
                             )
                             context["selected"]["quantity"] = (
                                 normalized_names.get("qty")
                                 or normalized_names.get("quantity")
+                                or normalized_names.get("componentqty")
                                 or ""
                             )
+
+                            for field in OPTIONAL_ITEM_FIELD_CONFIG:
+                                for key in field["default_keys"]:
+                                    column_name = normalized_names.get(key)
+                                    if column_name:
+                                        context["selected"][field["key"]] = column_name
+                                        break
 
         elif step == "import":
             data_json = request.form.get("data_json") or "[]"
@@ -779,21 +831,32 @@ def bom_library_bulk_import():
                 errors.append("Unable to read the uploaded CSV data. Please upload the file again.")
                 payload_rows = []
 
+            columns = request.form.getlist("columns")
+            column_set = set(columns)
+
             assembly_field = (request.form.get("assembly_field") or "").strip()
             component_field = (request.form.get("component_field") or "").strip()
             quantity_field = (request.form.get("quantity_field") or "").strip()
 
+            selected_map = _initial_bulk_import_selection()
+            selected_map["assembly"] = assembly_field
+            selected_map["component"] = component_field
+            selected_map["quantity"] = quantity_field
+
+            optional_field_map = {}
+            for field in OPTIONAL_ITEM_FIELD_CONFIG:
+                value = (request.form.get(f"{field['key']}_field") or "").strip()
+                if value:
+                    optional_field_map[field["key"]] = value
+                    selected_map[field["key"]] = value
+
             context.update(
                 {
                     "step": "map",
-                    "columns": request.form.getlist("columns"),
+                    "columns": columns,
                     "preview_rows": payload_rows[:10],
                     "payload": payload_rows,
-                    "selected": {
-                        "assembly": assembly_field,
-                        "component": component_field,
-                        "quantity": quantity_field,
-                    },
+                    "selected": selected_map,
                 }
             )
 
@@ -802,8 +865,27 @@ def bom_library_bulk_import():
                     "Select the columns that contain the finished good, component, and quantity values."
                 )
 
+            for required_field, field_name in (
+                (assembly_field, "Finished good"),
+                (component_field, "Component"),
+                (quantity_field, "Quantity"),
+            ):
+                if required_field and required_field not in column_set:
+                    errors.append(
+                        f"Column '{required_field}' was not included in the uploaded data."
+                    )
+
+            for key, column_name in optional_field_map.items():
+                if column_name not in column_set:
+                    errors.append(
+                        f"Column '{column_name}' was not included in the uploaded data."
+                    )
+
             bom_map = defaultdict(lambda: defaultdict(Decimal))
             row_errors = []
+            item_metadata = defaultdict(
+                lambda: {field[0]: None for field in ITEM_METADATA_FIELDS}
+            )
             for index, row in enumerate(payload_rows, start=2):
                 assembly = (row.get(assembly_field) or "").strip()
                 component = (row.get(component_field) or "").strip()
@@ -828,12 +910,34 @@ def bom_library_bulk_import():
 
                 bom_map[assembly][component] += quantity
 
+                for field_key, column_name in optional_field_map.items():
+                    definition = OPTIONAL_FIELD_LOOKUP.get(field_key)
+                    if definition is None:
+                        continue
+                    raw_value = row.get(column_name, "")
+                    if raw_value is None:
+                        continue
+                    value = raw_value.strip()
+                    if not value:
+                        continue
+                    target_sku = assembly if definition["role"] == "assembly" else component
+                    metadata = item_metadata[target_sku]
+                    attribute = definition["attribute"]
+                    existing_value = metadata.get(attribute)
+                    if existing_value and existing_value != value:
+                        row_errors.append(
+                            f"Row {index}: {definition['label']} for {target_sku} conflicts with previous value '{existing_value}'."
+                        )
+                        continue
+                    metadata[attribute] = value
+
             if row_errors:
                 errors.extend(row_errors[:50])
 
             if not bom_map and not errors:
                 errors.append("No BOM rows were found to import.")
 
+            created_items = []
             if not errors:
                 all_skus = set(bom_map.keys()) | {
                     component_sku for components in bom_map.values() for component_sku in components.keys()
@@ -844,7 +948,27 @@ def bom_library_bulk_import():
                     items = Item.query.filter(Item.sku.in_(all_skus)).all()
                     found = {item.sku: item for item in items}
                     missing = sorted(sku for sku in all_skus if sku not in found)
-                    if missing:
+                    if missing and not errors:
+                        for sku in missing:
+                            metadata = item_metadata.get(sku, {})
+                            name = (metadata.get("name") or sku).strip()
+                            new_item = Item(
+                                sku=sku,
+                                name=name,
+                                type=(metadata.get("type") or None),
+                                unit=(metadata.get("unit") or None) or "ea",
+                                description=(metadata.get("description") or None),
+                                item_class=(metadata.get("item_class") or None),
+                                notes=(metadata.get("notes") or None),
+                            )
+                            db.session.add(new_item)
+                            created_items.append(new_item)
+
+                        db.session.flush()
+                        for item in created_items:
+                            found[item.sku] = item
+
+                    if missing and not created_items:
                         errors.append(
                             "The following item part numbers were not found: " + ", ".join(missing)
                         )
@@ -852,6 +976,7 @@ def bom_library_bulk_import():
             if not errors:
                 created_count = 0
                 updated_count = 0
+                created_items_count = len(created_items)
 
                 for assembly_sku, components in bom_map.items():
                     component_entries = [
@@ -877,6 +1002,9 @@ def bom_library_bulk_import():
                 if not message_parts:
                     message_parts.append("Existing templates were replaced with the imported data")
 
+                if created_items_count:
+                    message_parts.append(f"{created_items_count} new item(s) added to the catalog")
+
                 flash(
                     "Bulk BOM import completed successfully: " + ", ".join(message_parts) + ".",
                     "success",
@@ -900,6 +1028,7 @@ def bom_library_bulk_import():
         preview_rows=context["preview_rows"],
         payload=context["payload"],
         selected=context["selected"],
+        optional_fields=context["optional_fields"],
     )
 
 

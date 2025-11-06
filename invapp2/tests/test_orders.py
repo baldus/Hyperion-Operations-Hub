@@ -778,3 +778,68 @@ def test_bulk_bom_import_creates_templates(client, app, items):
         )
         assert secondary_template.components[0].component_item.sku == component.sku
         assert secondary_template.components[0].quantity == Decimal("4.7500")
+
+
+def test_bulk_bom_import_creates_missing_items(client, app):
+    payload_rows = [
+        {
+            "Assembly": "FG-NEW-100",
+            "Component": "CMP-NEW-900",
+            "Qty": "1.5",
+            "Assembly Name": "Finished Good New",
+            "Component Name": "Component New",
+            "Component Type": "Raw Material",
+            "Component Unit": "ft",
+            "Component Notes": "Created via bulk import",
+        }
+    ]
+
+    data = {
+        "step": "import",
+        "data_json": json.dumps(payload_rows),
+        "columns": [
+            "Assembly",
+            "Component",
+            "Qty",
+            "Assembly Name",
+            "Component Name",
+            "Component Type",
+            "Component Unit",
+            "Component Notes",
+        ],
+        "assembly_field": "Assembly",
+        "component_field": "Component",
+        "quantity_field": "Qty",
+        "assembly_name_field": "Assembly Name",
+        "component_name_field": "Component Name",
+        "component_type_field": "Component Type",
+        "component_unit_field": "Component Unit",
+        "component_notes_field": "Component Notes",
+    }
+
+    resp = client.post(
+        "/orders/bom-library/bulk-import",
+        data=data,
+        follow_redirects=True,
+    )
+
+    assert resp.status_code == 200
+
+    with app.app_context():
+        finished = Item.query.filter_by(sku="FG-NEW-100").one()
+        component = Item.query.filter_by(sku="CMP-NEW-900").one()
+
+        assert finished.name == "Finished Good New"
+        assert component.name == "Component New"
+        assert component.type == "Raw Material"
+        assert component.unit == "ft"
+        assert component.notes == "Created via bulk import"
+
+        template = (
+            BillOfMaterial.query.join(Item)
+            .filter(Item.sku == "FG-NEW-100")
+            .options(joinedload(BillOfMaterial.components))
+            .one()
+        )
+        assert template.components[0].component_item.sku == "CMP-NEW-900"
+        assert template.components[0].quantity == Decimal("1.5000")
