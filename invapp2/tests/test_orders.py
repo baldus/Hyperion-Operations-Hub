@@ -700,3 +700,58 @@ def test_bom_library_csv_import_updates_template(client, app, items):
     with app.app_context():
         template = BillOfMaterial.query.filter_by(item_id=finished.id).one()
         assert template.components[0].quantity == 7
+
+
+def test_bom_library_bulk_import_creates_templates(client, app, items):
+    finished, component, _ = items
+    with app.app_context():
+        second_finished = Item(sku='FG-200', name='Widget Deluxe')
+        extra_component = Item(sku='CMP-300', name='Component B')
+        third_component = Item(sku='CMP-400', name='Component C')
+        db.session.add_all([second_finished, extra_component, third_component])
+        db.session.commit()
+
+    csv_content = (
+        "Assembly,Component,Qty\n"
+        f"{finished.sku},{component.sku},2\n"
+        f"{finished.sku},CMP-300,1\n"
+        "FG-200,CMP-200,4\n"
+        "FG-200,CMP-400,5\n"
+    )
+    data = {
+        'action': 'bulk_import',
+        'csv_file': (io.BytesIO(csv_content.encode('utf-8')), 'bulk.csv'),
+        'assembly_field': 'Assembly',
+        'component_field': 'Component',
+        'quantity_field': 'Qty',
+    }
+
+    resp = client.post(
+        '/orders/bom-library',
+        data=data,
+        content_type='multipart/form-data',
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+
+    with app.app_context():
+        first_template = BillOfMaterial.query.filter_by(item_id=finished.id).one()
+        assert sorted(
+            (comp.component_item.sku, comp.quantity)
+            for comp in first_template.components
+        ) == [
+            (component.sku, 2),
+            ('CMP-300', 1),
+        ]
+
+        second_finished = Item.query.filter_by(sku='FG-200').one()
+        second_template = BillOfMaterial.query.filter_by(
+            item_id=second_finished.id
+        ).one()
+        assert sorted(
+            (comp.component_item.sku, comp.quantity)
+            for comp in second_template.components
+        ) == [
+            ('CMP-200', 4),
+            ('CMP-400', 5),
+        ]

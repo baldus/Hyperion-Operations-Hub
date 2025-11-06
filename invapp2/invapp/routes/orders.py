@@ -451,6 +451,11 @@ def bom_library():
 
     form_data = {"finished_good_sku": "", "bom": []}
     editing_template = None
+    bulk_import_form = {
+        "assembly_field": "Assembly",
+        "component_field": "Component",
+        "quantity_field": "Qty",
+    }
     if request.method == "POST":
         action = (request.form.get("action") or "create").strip()
         errors = []
@@ -482,6 +487,207 @@ def bom_library():
                 "success",
             )
             return redirect(url_for("orders.bom_library"))
+
+        if action == "bulk_import":
+            bulk_import_form.update(
+                {
+                    "assembly_field": (
+                        request.form.get("assembly_field")
+                        or bulk_import_form["assembly_field"]
+                    ).strip()
+                    or bulk_import_form["assembly_field"],
+                    "component_field": (
+                        request.form.get("component_field")
+                        or bulk_import_form["component_field"]
+                    ).strip()
+                    or bulk_import_form["component_field"],
+                    "quantity_field": (
+                        request.form.get("quantity_field")
+                        or bulk_import_form["quantity_field"]
+                    ).strip()
+                    or bulk_import_form["quantity_field"],
+                }
+            )
+
+            upload = request.files.get("csv_file")
+            raw_content = None
+            if upload is None or not upload.filename:
+                errors.append("A CSV file is required to import BOMs.")
+            else:
+                try:
+                    raw_content = upload.read().decode("utf-8-sig")
+                except UnicodeDecodeError:
+                    errors.append("CSV import files must be UTF-8 encoded.")
+
+            if raw_content and not errors:
+                stream = io.StringIO(raw_content)
+                reader = csv.DictReader(stream)
+                if not reader.fieldnames:
+                    errors.append("CSV file is empty.")
+                else:
+                    normalized_headers = {
+                        (name or "").strip().lower(): name for name in reader.fieldnames
+                    }
+                    selected_columns = {}
+                    column_labels = {
+                        "assembly_field": "finished good",
+                        "component_field": "component",
+                        "quantity_field": "quantity",
+                    }
+                    for field_key, label in column_labels.items():
+                        requested = (bulk_import_form[field_key] or "").strip()
+                        if not requested:
+                            errors.append(
+                                f"Select a column to use for the {label} value."
+                            )
+                            continue
+                        header_name = normalized_headers.get(requested.lower())
+                        if header_name is None:
+                            available = ", ".join(reader.fieldnames)
+                            errors.append(
+                                f"CSV column '{requested}' for {label} values was not "
+                                f"found. Available columns: {available}."
+                            )
+                        else:
+                            selected_columns[field_key] = header_name
+
+                    aggregated_rows = {}
+                    if not errors:
+                        for row_index, row in enumerate(reader, start=2):
+                            assembly_value = (
+                                row.get(selected_columns["assembly_field"], "")
+                                or ""
+                            ).strip()
+                            component_value = (
+                                row.get(selected_columns["component_field"], "")
+                                or ""
+                            ).strip()
+                            quantity_raw = (
+                                row.get(selected_columns["quantity_field"], "") or ""
+                            ).strip()
+
+                            if not assembly_value and not component_value and not quantity_raw:
+                                continue
+
+                            if not assembly_value:
+                                errors.append(
+                                    f"Row {row_index}: Finished good value is required."
+                                )
+                                continue
+                            if not component_value:
+                                errors.append(
+                                    f"Row {row_index}: Component value is required."
+                                )
+                                continue
+                            try:
+                                quantity_value = int(quantity_raw)
+                                if quantity_value <= 0:
+                                    raise ValueError
+                            except (TypeError, ValueError):
+                                errors.append(
+                                    f"Row {row_index}: Quantity must be a positive integer."
+                                )
+                                continue
+
+                            component_map = aggregated_rows.setdefault(
+                                assembly_value, {}
+                            )
+                            component_map[component_value] = (
+                                component_map.get(component_value, 0) + quantity_value
+                            )
+
+                    if not errors and not aggregated_rows:
+                        errors.append(
+                            "CSV did not include any component rows to import."
+                        )
+
+                    if not errors:
+                        finished_skus = set(aggregated_rows.keys())
+                        component_skus = {
+                            sku
+                            for components in aggregated_rows.values()
+                            for sku in components.keys()
+                        }
+                        required_skus = finished_skus | component_skus
+                        if required_skus:
+                            found_items = {
+                                item.sku: item
+                                for item in Item.query.filter(Item.sku.in_(required_skus))
+                            }
+                        else:
+                            found_items = {}
+
+                        missing_skus = [
+                            sku for sku in sorted(required_skus) if sku not in found_items
+                        ]
+                        if missing_skus:
+                            errors.append(
+                                "The following part numbers were not found: "
+                                + ", ".join(missing_skus)
+                            )
+
+                    if errors:
+                        for error in errors:
+                            flash(error, "danger")
+                        return render_template(
+                            "orders/bom_library.html",
+                            items=items,
+                            templates=templates,
+                            form_data=form_data,
+                            editing_template=editing_template,
+                            bulk_import_form=bulk_import_form,
+                        )
+
+                    created = 0
+                    updated = 0
+                    for assembly_sku, components in aggregated_rows.items():
+                        finished_item = found_items[assembly_sku]
+                        bom = BillOfMaterial.query.filter_by(
+                            item_id=finished_item.id
+                        ).first()
+                        if bom is None:
+                            bom = BillOfMaterial(item=finished_item)
+                            db.session.add(bom)
+                            created += 1
+                        else:
+                            updated += 1
+                            bom.components[:] = []
+
+                        for component_sku, quantity_value in sorted(components.items()):
+                            component_item = found_items[component_sku]
+                            bom.components.append(
+                                BillOfMaterialComponent(
+                                    component_item_id=component_item.id,
+                                    quantity=quantity_value,
+                                )
+                            )
+
+                    db.session.commit()
+                    bulk_count = len(aggregated_rows)
+                    message = (
+                        f"Imported BOM templates for {bulk_count} finished goods."
+                    )
+                    if created and updated:
+                        message = (
+                            f"{message} ({created} created, {updated} updated)."
+                        )
+                    elif created:
+                        message = f"{message} ({created} created)."
+                    elif updated:
+                        message = f"{message} ({updated} updated)."
+                    flash(message, "success")
+                    return redirect(url_for("orders.bom_library"))
+
+            for error in errors:
+                flash(error, "danger")
+            return render_template(
+                "orders/bom_library.html",
+                items=items,
+                templates=templates,
+                form_data=form_data,
+                editing_template=editing_template,
+                bulk_import_form=bulk_import_form,
+            )
 
         bom_payload = []
         if action == "import_csv":
@@ -601,6 +807,8 @@ def bom_library():
                 items=items,
                 templates=templates,
                 form_data=form_data,
+                editing_template=editing_template,
+                bulk_import_form=bulk_import_form,
             )
 
         _, created, changed = _save_bom_template(
@@ -658,6 +866,7 @@ def bom_library():
         templates=templates,
         form_data=form_data,
         editing_template=editing_template,
+        bulk_import_form=bulk_import_form,
     )
 
 

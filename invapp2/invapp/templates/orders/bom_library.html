@@ -122,11 +122,45 @@
     </form>
 </section>
 
+<section class="form-section">
+    <h3>Bulk Import BOMs</h3>
+    <form method="post" enctype="multipart/form-data" class="form-stack" id="bulk-bom-import-form">
+        <input type="hidden" name="action" value="bulk_import">
+        <div class="form-grid">
+            <label class="form-field">
+                <span class="field-label">CSV File</span>
+                <input type="file" name="csv_file" id="bulk-import-file" accept=".csv" required>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Finished Good Column</span>
+                <input type="text" name="assembly_field" id="bulk-assembly-field" value="{{ bulk_import_form.assembly_field }}" list="bulk-import-column-options" required>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Component Column</span>
+                <input type="text" name="component_field" id="bulk-component-field" value="{{ bulk_import_form.component_field }}" list="bulk-import-column-options" required>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Quantity Column</span>
+                <input type="text" name="quantity_field" id="bulk-quantity-field" value="{{ bulk_import_form.quantity_field }}" list="bulk-import-column-options" required>
+            </label>
+        </div>
+        <p class="section-help">
+            Upload a CSV that lists finished goods and their components. Each row should include the finished good, component,
+            and quantity. Use the fields above to map the CSV columns to the appropriate values.
+        </p>
+        <div class="form-actions">
+            <button type="submit" class="action-btn">Import BOMs</button>
+        </div>
+    </form>
+</section>
+
 <datalist id="library-component-skus">
     {% for item in items %}
         <option value="{{ item.sku }}">{{ item.name }}</option>
     {% endfor %}
 </datalist>
+
+<datalist id="bulk-import-column-options"></datalist>
 
 <script>
 (function() {
@@ -189,6 +223,106 @@
             dataInput.value = JSON.stringify(payload);
         });
     }
+})();
+
+(function() {
+    const fileInput = document.getElementById('bulk-import-file');
+    const columnOptions = document.getElementById('bulk-import-column-options');
+    const assemblyInput = document.getElementById('bulk-assembly-field');
+    const componentInput = document.getElementById('bulk-component-field');
+    const quantityInput = document.getElementById('bulk-quantity-field');
+
+    if (!fileInput || !columnOptions) {
+        return;
+    }
+
+    const inputs = [assemblyInput, componentInput, quantityInput];
+    inputs.forEach(input => {
+        if (!input) {
+            return;
+        }
+        input.addEventListener('input', () => {
+            input.dataset.userEdited = 'true';
+        });
+    });
+
+    const defaultSuggestions = {
+        assembly: ['Assembly', 'Finished Good', 'FinishedGood', 'Parent'],
+        component: ['Component', 'Component SKU', 'ComponentSku', 'Child'],
+        quantity: ['Qty', 'Quantity', 'Qty Per']
+    };
+
+    function splitHeader(line) {
+        const headers = [];
+        let current = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i += 1) {
+            const char = line[i];
+            if (char === '"') {
+                if (inQuotes && line[i + 1] === '"') {
+                    current += '"';
+                    i += 1;
+                } else {
+                    inQuotes = !inQuotes;
+                }
+            } else if (char === ',' && !inQuotes) {
+                headers.push(current.trim());
+                current = '';
+            } else {
+                current += char;
+            }
+        }
+        headers.push(current.trim());
+        return headers.filter(value => value.length);
+    }
+
+    function setDefaultValue(input, candidates, headers) {
+        if (!input || input.dataset.userEdited === 'true') {
+            return;
+        }
+        const lowerHeaders = headers.map(value => value.toLowerCase());
+        for (const candidate of candidates) {
+            const index = lowerHeaders.indexOf(candidate.toLowerCase());
+            if (index !== -1) {
+                input.value = headers[index];
+                break;
+            }
+        }
+    }
+
+    function updateColumnOptions(headers) {
+        columnOptions.innerHTML = '';
+        headers.forEach(header => {
+            const option = document.createElement('option');
+            option.value = header;
+            columnOptions.appendChild(option);
+        });
+        setDefaultValue(assemblyInput, defaultSuggestions.assembly, headers);
+        setDefaultValue(componentInput, defaultSuggestions.component, headers);
+        setDefaultValue(quantityInput, defaultSuggestions.quantity, headers);
+    }
+
+    fileInput.addEventListener('change', () => {
+        const [file] = fileInput.files;
+        if (!file) {
+            columnOptions.innerHTML = '';
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = event => {
+            const text = (event.target && event.target.result) ? String(event.target.result) : '';
+            const lines = text.split(/\r?\n/);
+            const headerLine = lines.find(line => line.trim().length);
+            if (!headerLine) {
+                columnOptions.innerHTML = '';
+                return;
+            }
+            const headers = splitHeader(headerLine);
+            updateColumnOptions(headers);
+        };
+        reader.readAsText(file.slice(0, 65536));
+    });
 })();
 </script>
 {% endblock %}
