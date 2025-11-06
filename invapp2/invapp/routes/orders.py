@@ -3,6 +3,7 @@ import io
 import json
 from collections import defaultdict
 from datetime import datetime
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from flask import (
     Blueprint,
@@ -36,6 +37,8 @@ from invapp.models import (
     RoutingStepConsumption,
 )
 
+QUANTITY_STEP = Decimal("0.0001")
+
 bp = Blueprint("orders", __name__, url_prefix="/orders")
 
 bp.before_request(blueprint_page_guard("orders"))
@@ -55,14 +58,14 @@ def _search_filter(query, search_term):
     )
 
 
-def _available_quantity(item_id: int) -> int:
+def _available_quantity(item_id: int) -> Decimal:
     """Return on-hand inventory minus active reservations for an item."""
 
     total_on_hand = (
         db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
         .filter(Movement.item_id == item_id)
         .scalar()
-    ) or 0
+    )
 
     reserved_total = (
         db.session.query(func.coalesce(func.sum(Reservation.quantity), 0))
@@ -73,18 +76,47 @@ def _available_quantity(item_id: int) -> int:
             Order.status.in_(OrderStatus.RESERVABLE_STATES),
         )
         .scalar()
-    ) or 0
+    )
 
-    return max(0, int(total_on_hand) - int(reserved_total))
+    on_hand_value = Decimal(total_on_hand or 0)
+    reserved_value = Decimal(reserved_total or 0)
+    available = on_hand_value - reserved_value
+    return available if available > 0 else Decimal("0")
 
 
-def _component_requirement(usage: RoutingStepComponent) -> int:
+def _component_requirement(usage: RoutingStepComponent) -> Decimal:
     bom_component = usage.bom_component
     order_line = bom_component.order_line
-    return int(bom_component.quantity) * int(order_line.quantity)
+    return Decimal(bom_component.quantity) * Decimal(order_line.quantity)
 
 
-def _position_balance(item_id: int, batch_id: int | None, location_id: int) -> int:
+def _parse_positive_quantity(raw_value) -> Decimal:
+    """Parse a quantity value into a positive, rounded Decimal."""
+
+    if isinstance(raw_value, Decimal):
+        candidate = raw_value
+    elif isinstance(raw_value, (int, float)):
+        candidate = Decimal(str(raw_value))
+    else:
+        text_value = str(raw_value or "").strip()
+        if not text_value:
+            raise InvalidOperation
+        candidate = Decimal(text_value)
+
+    if candidate <= 0:
+        raise InvalidOperation
+
+    return candidate.quantize(QUANTITY_STEP, rounding=ROUND_HALF_UP)
+
+
+def _format_decimal(value: Decimal) -> str:
+    """Render a decimal quantity for display without unnecessary zeros."""
+
+    normalized = Decimal(value or 0).quantize(QUANTITY_STEP, rounding=ROUND_HALF_UP)
+    return format(normalized.normalize(), "f")
+
+
+def _position_balance(item_id: int, batch_id: int | None, location_id: int) -> Decimal:
     filters = [Movement.item_id == item_id, Movement.location_id == location_id]
     if batch_id is None:
         filters.append(Movement.batch_id.is_(None))
@@ -95,8 +127,8 @@ def _position_balance(item_id: int, batch_id: int | None, location_id: int) -> i
         db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
         .filter(*filters)
         .scalar()
-    ) or 0
-    return int(balance)
+    )
+    return Decimal(balance or 0)
 
 
 def _inventory_options(item_id: int):
@@ -126,6 +158,7 @@ def _inventory_options(item_id: int):
 
     options = []
     for batch_id, location_id, on_hand in rows:
+        available_quantity = Decimal(on_hand or 0)
         batch_label = "Unbatched"
         if batch_id is not None:
             batch = batches.get(batch_id)
@@ -140,8 +173,8 @@ def _inventory_options(item_id: int):
                 "value": f"{batch_id if batch_id is not None else 'none'}::{location_id}",
                 "batch_id": batch_id,
                 "location_id": location_id,
-                "label": f"{batch_label} @ {location_label} (avail {int(on_hand)})",
-                "available": int(on_hand),
+                "label": f"{batch_label} @ {location_label} (avail {_format_decimal(available_quantity)})",
+                "available": available_quantity,
             }
         )
 
@@ -242,7 +275,7 @@ def _prepare_order_detail(order: Order, *, pending_completed_ids=None, selected_
     }
 
 
-def _adjust_reservation(order_line: OrderLine, item_id: int, delta: int):
+def _adjust_reservation(order_line: OrderLine, item_id: int, delta):
     """Adjust a reservation quantity for an order line and component item."""
 
     reservation = next(
@@ -251,14 +284,14 @@ def _adjust_reservation(order_line: OrderLine, item_id: int, delta: int):
     )
 
     if reservation:
-        new_quantity = int(reservation.quantity) + int(delta)
+        new_quantity = Decimal(reservation.quantity) + Decimal(delta)
         if new_quantity <= 0:
             db.session.delete(reservation)
         else:
             reservation.quantity = new_quantity
     elif delta > 0:
         db.session.add(
-            Reservation(order_line=order_line, item_id=item_id, quantity=int(delta))
+            Reservation(order_line=order_line, item_id=item_id, quantity=Decimal(delta))
         )
 
 
@@ -408,7 +441,11 @@ def fetch_bom_template(sku: str):
         {
             "sku": component.component_item.sku,
             "name": component.component_item.name,
-            "quantity": component.quantity,
+            "quantity": float(
+                Decimal(component.quantity).quantize(
+                    QUANTITY_STEP, rounding=ROUND_HALF_UP
+                )
+            ),
         }
         for component in sorted(
             bom.components, key=lambda entry: entry.component_item.sku
@@ -580,12 +617,10 @@ def bom_library():
                     errors.append(f"BOM component SKU '{sku}' was not found.")
                     continue
                 try:
-                    component_quantity = int(quantity_value)
-                    if component_quantity <= 0:
-                        raise ValueError
-                except (TypeError, ValueError):
+                    component_quantity = _parse_positive_quantity(quantity_value)
+                except (InvalidOperation, TypeError):
                     errors.append(
-                        f"BOM component quantity for {sku} must be a positive integer."
+                        f"BOM component quantity for {sku} must be a positive number."
                     )
                     continue
                 bom_components.append(
@@ -767,7 +802,7 @@ def bom_library_bulk_import():
                     "Select the columns that contain the finished good, component, and quantity values."
                 )
 
-            bom_map = defaultdict(lambda: defaultdict(int))
+            bom_map = defaultdict(lambda: defaultdict(Decimal))
             row_errors = []
             for index, row in enumerate(payload_rows, start=2):
                 assembly = (row.get(assembly_field) or "").strip()
@@ -784,12 +819,10 @@ def bom_library_bulk_import():
                     row_errors.append(f"Row {index}: Component value is required.")
                     continue
                 try:
-                    quantity = int(quantity_raw)
-                    if quantity <= 0:
-                        raise ValueError
-                except (TypeError, ValueError):
+                    quantity = _parse_positive_quantity(quantity_raw)
+                except (InvalidOperation, TypeError):
                     row_errors.append(
-                        f"Row {index}: Quantity '{quantity_raw}' must be a positive integer."
+                        f"Row {index}: Quantity '{quantity_raw}' must be a positive number."
                     )
                     continue
 
@@ -1019,12 +1052,10 @@ def new_order():
                     errors.append(f"BOM component SKU '{sku}' was not found.")
                     continue
                 try:
-                    component_quantity = int(quantity_value)
-                    if component_quantity <= 0:
-                        raise ValueError
-                except (TypeError, ValueError):
+                    component_quantity = _parse_positive_quantity(quantity_value)
+                except (InvalidOperation, TypeError):
                     errors.append(
-                        f"BOM component quantity for {sku} must be a positive integer."
+                        f"BOM component quantity for {sku} must be a positive number."
                     )
                     continue
 

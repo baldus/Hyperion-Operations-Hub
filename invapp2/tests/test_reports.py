@@ -73,7 +73,7 @@ def test_summary_data(client, app):
     assert resp.status_code == 200
     data = resp.get_json()
     assert len(data['movement_trends']) == 2
-    assert data['movement_trends'][0]['quantity'] == 5
+    assert data['movement_trends'][0]['quantity'] == pytest.approx(5.0)
     aging = data['stock_aging'][0]
     assert aging['sku'] == 'SKU1'
     with app.app_context():

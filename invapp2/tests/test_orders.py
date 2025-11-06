@@ -1,5 +1,6 @@
 import io
 import json
+from decimal import Decimal
 import os
 import re
 import sys
@@ -202,9 +203,9 @@ def test_order_creation(client, app, items):
         assert primary_line.quantity == 5
         bom_component = primary_line.components[0]
         assert bom_component.component_item_id == component.id
-        assert bom_component.quantity == 2
+        assert bom_component.quantity == Decimal("2.0000")
         reservation = Reservation.query.filter_by(order_line_id=primary_line.id).one()
-        assert reservation.quantity == 10
+        assert reservation.quantity == Decimal("10.0000")
         assert len(order.routing_steps) == 1
         step = order.routing_steps[0]
         assert step.sequence == 1
@@ -275,7 +276,7 @@ def test_reservation_behavior(client, app, items):
         res = Reservation.query.filter_by(order_line_id=order.order_lines[0].id).first()
         assert res is not None
         assert res.item_id == component.id
-        assert res.quantity == 6
+        assert res.quantity == Decimal("6.0000")
 
 
 def test_waiting_status_when_inventory_insufficient(client, app, items):
@@ -651,7 +652,7 @@ def test_new_order_can_save_bom_template(client, app, items):
     with app.app_context():
         template = BillOfMaterial.query.filter_by(item_id=finished.id).one()
         assert template.components[0].component_item_id == component.id
-        assert template.components[0].quantity == 2
+        assert template.components[0].quantity == Decimal("2.0000")
 
 
 
@@ -673,7 +674,7 @@ def test_bom_library_manual_creation(client, app, items):
     with app.app_context():
         template = BillOfMaterial.query.filter_by(item_id=finished.id).one()
         assert template.components[0].component_item_id == component.id
-        assert template.components[0].quantity == 5
+        assert template.components[0].quantity == Decimal("5.0000")
 
 
 
@@ -700,7 +701,7 @@ def test_bom_library_csv_import_updates_template(client, app, items):
 
     with app.app_context():
         template = BillOfMaterial.query.filter_by(item_id=finished.id).one()
-        assert template.components[0].quantity == 7
+        assert template.components[0].quantity == Decimal("7.0000")
 
 
 def test_bulk_bom_import_upload_preview(client, app, items):
@@ -730,10 +731,10 @@ def test_bulk_bom_import_creates_templates(client, app, items):
         db.session.commit()
 
     payload_rows = [
-        {"Assembly": finished.sku, "Component": component.sku, "Qty": "2"},
-        {"Assembly": finished.sku, "Component": "CMP-201", "Qty": "3"},
+        {"Assembly": finished.sku, "Component": component.sku, "Qty": "2.5"},
+        {"Assembly": finished.sku, "Component": "CMP-201", "Qty": "3.25"},
         {"Assembly": finished.sku, "Component": component.sku, "Qty": "1"},
-        {"Assembly": "FG-200", "Component": component.sku, "Qty": "4"},
+        {"Assembly": "FG-200", "Component": component.sku, "Qty": "4.75"},
     ]
 
     data = {
@@ -766,8 +767,8 @@ def test_bulk_bom_import_creates_templates(client, app, items):
         component_quantities = {
             comp.component_item.sku: comp.quantity for comp in primary_template.components
         }
-        assert component_quantities[component.sku] == 3
-        assert component_quantities["CMP-201"] == 3
+        assert component_quantities[component.sku] == Decimal("3.5000")
+        assert component_quantities["CMP-201"] == Decimal("3.2500")
 
         secondary_template = (
             BillOfMaterial.query.join(Item)
@@ -776,4 +777,4 @@ def test_bulk_bom_import_creates_templates(client, app, items):
             .one()
         )
         assert secondary_template.components[0].component_item.sku == component.sku
-        assert secondary_template.components[0].quantity == 4
+        assert secondary_template.components[0].quantity == Decimal("4.7500")
