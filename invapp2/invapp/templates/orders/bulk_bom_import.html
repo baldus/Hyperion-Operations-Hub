@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Bulk BOM Import</h2>
+
+<p class="section-help">
+    Upload a CSV file containing finished goods and their component parts to create or update
+    multiple BOM templates at once. Each row should include the finished good part number,
+    component part number, and the quantity per assembly.
+</p>
+
+{% if step == 'upload' %}
+    <form method="post" enctype="multipart/form-data" class="form-stack">
+        <input type="hidden" name="step" value="upload">
+        <div class="form-grid">
+            <label class="form-field">
+                <span class="field-label">CSV File</span>
+                <input type="file" name="csv_file" accept=".csv" required>
+            </label>
+        </div>
+        <p class="section-help">Common column headers include <code>Assembly</code>, <code>Component</code>, and <code>Qty</code>. Other columns are ignored.</p>
+        <div class="form-actions">
+            <button type="submit" class="action-btn">Upload File</button>
+            <a href="{{ url_for('orders.bom_library') }}" class="link-btn">Back to BOM Library</a>
+        </div>
+    </form>
+{% else %}
+    <form method="post" class="form-stack">
+        <input type="hidden" name="step" value="import">
+        <input type="hidden" name="data_json" value='{{ payload|tojson|safe }}'>
+        {% for column in columns %}
+            <input type="hidden" name="columns" value="{{ column }}">
+        {% endfor %}
+        <div class="form-grid">
+            <label class="form-field">
+                <span class="field-label">Finished Good Column</span>
+                <select name="assembly_field" required>
+                    <option value="">Select a column…</option>
+                    {% for column in columns %}
+                        <option value="{{ column }}" {% if column == selected.assembly %}selected{% endif %}>{{ column }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Component Column</span>
+                <select name="component_field" required>
+                    <option value="">Select a column…</option>
+                    {% for column in columns %}
+                        <option value="{{ column }}" {% if column == selected.component %}selected{% endif %}>{{ column }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Quantity Column</span>
+                <select name="quantity_field" required>
+                    <option value="">Select a column…</option>
+                    {% for column in columns %}
+                        <option value="{{ column }}" {% if column == selected.quantity %}selected{% endif %}>{{ column }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+        </div>
+
+        <div class="section-header">
+            <h4>Preview</h4>
+            <p class="section-help">Showing up to the first 10 rows detected in the upload.</p>
+        </div>
+        <div class="table-scroll">
+            <table class="form-table">
+                <thead>
+                    <tr>
+                        {% for column in columns %}
+                            <th>{{ column }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in preview_rows %}
+                        <tr>
+                            {% for column in columns %}
+                                <td>{{ row.get(column, '') }}</td>
+                            {% endfor %}
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="action-btn">Import BOM Templates</button>
+            <a href="{{ url_for('orders.bom_library_bulk_import') }}" class="link-btn">Start Over</a>
+            <a href="{{ url_for('orders.bom_library') }}" class="link-btn">Back to BOM Library</a>
+        </div>
+    </form>
+{% endif %}
+{% endblock %}

@@ -661,6 +661,215 @@ def bom_library():
     )
 
 
+@bp.route("/bom-library/bulk-import", methods=["GET", "POST"])
+@require_roles("admin")
+def bom_library_bulk_import():
+    """Import multiple BOM templates from a single CSV file."""
+
+    step = (request.form.get("step") or "upload").strip()
+    context = {
+        "step": step,
+        "columns": [],
+        "preview_rows": [],
+        "payload": [],
+        "selected": {
+            "assembly": "",
+            "component": "",
+            "quantity": "",
+        },
+    }
+
+    if request.method == "POST":
+        errors = []
+
+        if step == "upload":
+            upload = request.files.get("csv_file")
+            if upload is None or not upload.filename:
+                errors.append("Select a CSV file to import.")
+            else:
+                try:
+                    raw_content = upload.read().decode("utf-8-sig")
+                except UnicodeDecodeError:
+                    errors.append("CSV import files must be UTF-8 encoded.")
+                else:
+                    stream = io.StringIO(raw_content)
+                    reader = csv.DictReader(stream)
+                    if not reader.fieldnames:
+                        errors.append("CSV file is empty.")
+                    else:
+                        rows = []
+                        for row in reader:
+                            normalized = {
+                                (key or "").strip(): (value or "").strip()
+                                for key, value in row.items()
+                            }
+                            if any(normalized.values()):
+                                rows.append(normalized)
+
+                        if not rows:
+                            errors.append("CSV did not include any component rows to import.")
+                        else:
+                            context["step"] = "map"
+                            context["columns"] = list(reader.fieldnames)
+                            context["preview_rows"] = rows[:10]
+                            context["payload"] = rows
+
+                            normalized_names = {
+                                (name or "").strip().lower(): name for name in reader.fieldnames
+                            }
+                            context["selected"]["assembly"] = (
+                                normalized_names.get("assembly")
+                                or normalized_names.get("finished_good")
+                                or ""
+                            )
+                            context["selected"]["component"] = (
+                                normalized_names.get("component")
+                                or normalized_names.get("component_sku")
+                                or normalized_names.get("sku")
+                                or ""
+                            )
+                            context["selected"]["quantity"] = (
+                                normalized_names.get("qty")
+                                or normalized_names.get("quantity")
+                                or ""
+                            )
+
+        elif step == "import":
+            data_json = request.form.get("data_json") or "[]"
+            try:
+                payload_rows = json.loads(data_json)
+                if not isinstance(payload_rows, list):
+                    raise ValueError
+            except ValueError:
+                errors.append("Unable to read the uploaded CSV data. Please upload the file again.")
+                payload_rows = []
+
+            assembly_field = (request.form.get("assembly_field") or "").strip()
+            component_field = (request.form.get("component_field") or "").strip()
+            quantity_field = (request.form.get("quantity_field") or "").strip()
+
+            context.update(
+                {
+                    "step": "map",
+                    "columns": request.form.getlist("columns"),
+                    "preview_rows": payload_rows[:10],
+                    "payload": payload_rows,
+                    "selected": {
+                        "assembly": assembly_field,
+                        "component": component_field,
+                        "quantity": quantity_field,
+                    },
+                }
+            )
+
+            if not assembly_field or not component_field or not quantity_field:
+                errors.append(
+                    "Select the columns that contain the finished good, component, and quantity values."
+                )
+
+            bom_map = defaultdict(lambda: defaultdict(int))
+            row_errors = []
+            for index, row in enumerate(payload_rows, start=2):
+                assembly = (row.get(assembly_field) or "").strip()
+                component = (row.get(component_field) or "").strip()
+                quantity_raw = (row.get(quantity_field) or "").strip()
+
+                if not assembly and not component and not quantity_raw:
+                    continue
+
+                if not assembly:
+                    row_errors.append(f"Row {index}: Finished good value is required.")
+                    continue
+                if not component:
+                    row_errors.append(f"Row {index}: Component value is required.")
+                    continue
+                try:
+                    quantity = int(quantity_raw)
+                    if quantity <= 0:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    row_errors.append(
+                        f"Row {index}: Quantity '{quantity_raw}' must be a positive integer."
+                    )
+                    continue
+
+                bom_map[assembly][component] += quantity
+
+            if row_errors:
+                errors.extend(row_errors[:50])
+
+            if not bom_map and not errors:
+                errors.append("No BOM rows were found to import.")
+
+            if not errors:
+                all_skus = set(bom_map.keys()) | {
+                    component_sku for components in bom_map.values() for component_sku in components.keys()
+                }
+                if not all_skus:
+                    errors.append("No items were found in the import data.")
+                else:
+                    items = Item.query.filter(Item.sku.in_(all_skus)).all()
+                    found = {item.sku: item for item in items}
+                    missing = sorted(sku for sku in all_skus if sku not in found)
+                    if missing:
+                        errors.append(
+                            "The following item part numbers were not found: " + ", ".join(missing)
+                        )
+
+            if not errors:
+                created_count = 0
+                updated_count = 0
+
+                for assembly_sku, components in bom_map.items():
+                    component_entries = [
+                        {"sku": sku, "item": found[sku], "quantity": quantity}
+                        for sku, quantity in components.items()
+                    ]
+
+                    template, created, changed = _save_bom_template(
+                        found[assembly_sku], component_entries, replace_existing=True
+                    )
+                    if created:
+                        created_count += 1
+                    elif changed:
+                        updated_count += 1
+
+                db.session.commit()
+
+                message_parts = []
+                if created_count:
+                    message_parts.append(f"{created_count} template(s) created")
+                if updated_count:
+                    message_parts.append(f"{updated_count} template(s) updated")
+                if not message_parts:
+                    message_parts.append("Existing templates were replaced with the imported data")
+
+                flash(
+                    "Bulk BOM import completed successfully: " + ", ".join(message_parts) + ".",
+                    "success",
+                )
+                return redirect(url_for("orders.bom_library"))
+
+        for error in errors:
+            flash(error, "danger")
+
+    if not context["columns"] and request.method == "POST":
+        upload = request.files.get("csv_file")
+        if upload and hasattr(upload, "seek"):
+            upload.seek(0)
+
+    context.setdefault("columns", [])
+
+    return render_template(
+        "orders/bulk_bom_import.html",
+        step=context["step"],
+        columns=context["columns"],
+        preview_rows=context["preview_rows"],
+        payload=context["payload"],
+        selected=context["selected"],
+    )
+
+
 @bp.route("/new", methods=["GET", "POST"])
 @require_roles("admin")
 def new_order():

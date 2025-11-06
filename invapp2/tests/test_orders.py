@@ -14,6 +14,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from invapp import create_app
 from invapp.extensions import db
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload
 
 from invapp.models import (
     BillOfMaterial,
@@ -700,3 +701,79 @@ def test_bom_library_csv_import_updates_template(client, app, items):
     with app.app_context():
         template = BillOfMaterial.query.filter_by(item_id=finished.id).one()
         assert template.components[0].quantity == 7
+
+
+def test_bulk_bom_import_upload_preview(client, app, items):
+    csv_content = "Assembly,Component,Qty\nFG-100,CMP-200,2\n"
+    data = {
+        "step": "upload",
+        "csv_file": (io.BytesIO(csv_content.encode("utf-8")), "bulk.csv"),
+    }
+
+    resp = client.post(
+        "/orders/bom-library/bulk-import",
+        data=data,
+        content_type="multipart/form-data",
+    )
+
+    assert resp.status_code == 200
+    assert b"Import BOM Templates" in resp.data
+    assert b"Assembly" in resp.data
+
+
+def test_bulk_bom_import_creates_templates(client, app, items):
+    finished, component, _ = items
+    with app.app_context():
+        other_finished = Item(sku="FG-200", name="Widget Deluxe")
+        extra_component = Item(sku="CMP-201", name="Component Plus")
+        db.session.add_all([other_finished, extra_component])
+        db.session.commit()
+
+    payload_rows = [
+        {"Assembly": finished.sku, "Component": component.sku, "Qty": "2"},
+        {"Assembly": finished.sku, "Component": "CMP-201", "Qty": "3"},
+        {"Assembly": finished.sku, "Component": component.sku, "Qty": "1"},
+        {"Assembly": "FG-200", "Component": component.sku, "Qty": "4"},
+    ]
+
+    data = {
+        "step": "import",
+        "data_json": json.dumps(payload_rows),
+        "columns": ["Assembly", "Component", "Qty"],
+        "assembly_field": "Assembly",
+        "component_field": "Component",
+        "quantity_field": "Qty",
+    }
+
+    resp = client.post(
+        "/orders/bom-library/bulk-import",
+        data=data,
+        follow_redirects=True,
+    )
+
+    assert resp.status_code == 200
+
+    with app.app_context():
+        templates = BillOfMaterial.query.all()
+        assert len(templates) == 2
+
+        primary_template = (
+            BillOfMaterial.query.join(Item)
+            .filter(Item.sku == finished.sku)
+            .options(joinedload(BillOfMaterial.components))
+            .one()
+        )
+        component_quantities = {
+            comp.component_item.sku: comp.quantity for comp in primary_template.components
+        }
+        assert component_quantities[component.sku] == 3
+        assert component_quantities["CMP-201"] == 3
+
+        secondary_template = (
+            BillOfMaterial.query.join(Item)
+            .filter(Item.sku == "FG-200")
+            .options(joinedload(BillOfMaterial.components))
+            .one()
+        )
+        assert secondary_template.components[0].component_item.sku == component.sku
+        assert secondary_template.components[0].quantity == 4
