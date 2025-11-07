@@ -89,7 +89,7 @@ def _initial_bulk_import_selection():
 def _ensure_identity_sequence(model):
     """Ensure the primary key sequence for ``model`` is aligned with existing rows."""
 
-    bind = db.session.get_bind(mapper=model.__mapper__)
+    bind = db.session.get_bind()
     if bind is None or bind.dialect.name != "postgresql":
         return
 
