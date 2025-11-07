@@ -34,6 +34,7 @@ from invapp.models import (
     RoutingStepComponent,
     RoutingStepConsumption,
 )
+from invapp.routes import orders
 
 
 @pytest.fixture
@@ -806,7 +807,14 @@ def test_bulk_bom_import_rejects_too_small_quantities(client, items):
     assert b"Row 2: Quantity &#39;0.00001&#39; must be a positive number." in resp.data
 
 
-def test_bulk_bom_import_creates_missing_items(client, app):
+def test_bulk_bom_import_creates_missing_items(client, app, monkeypatch):
+    calls = []
+
+    def recorder(model):
+        calls.append(model.__tablename__)
+
+    monkeypatch.setattr(orders, "_ensure_identity_sequence", recorder)
+
     payload_rows = [
         {
             "Assembly": "FG-NEW-100",
@@ -850,6 +858,7 @@ def test_bulk_bom_import_creates_missing_items(client, app):
     )
 
     assert resp.status_code == 200
+    assert "item" in calls
 
     with app.app_context():
         finished = Item.query.filter_by(sku="FG-NEW-100").one()

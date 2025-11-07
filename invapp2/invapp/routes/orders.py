@@ -14,7 +14,7 @@ from flask import (
     request,
     url_for,
 )
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import joinedload
 
 from invapp.extensions import db
@@ -84,6 +84,33 @@ def _initial_bulk_import_selection():
     for field in OPTIONAL_ITEM_FIELD_CONFIG:
         selection[field["key"]] = ""
     return selection
+
+
+def _ensure_identity_sequence(model):
+    """Ensure the primary key sequence for ``model`` is aligned with existing rows."""
+
+    bind = db.session.get_bind(mapper=model.__mapper__)
+    if bind is None or bind.dialect.name != "postgresql":
+        return
+
+    primary_key_columns = list(model.__table__.primary_key.columns)
+    if len(primary_key_columns) != 1:
+        return
+
+    pk_column = primary_key_columns[0]
+    column_name = pk_column.name
+    schema = model.__table__.schema
+    table_name = model.__table__.name
+    qualified_table_name = f"{schema}.{table_name}" if schema else table_name
+
+    sequence_sql = text(
+        f"SELECT setval(pg_get_serial_sequence(:table_name, :column_name), "
+        f"(SELECT COALESCE(MAX({column_name}), 0) FROM {qualified_table_name}))"
+    )
+
+    db.session.execute(
+        sequence_sql, {"table_name": qualified_table_name, "column_name": column_name}
+    )
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
 
@@ -968,9 +995,11 @@ def bom_library_bulk_import():
                             db.session.add(new_item)
                             created_items.append(new_item)
 
-                        db.session.flush()
-                        for item in created_items:
-                            found[item.sku] = item
+                        if created_items:
+                            _ensure_identity_sequence(Item)
+                            db.session.flush()
+                            for item in created_items:
+                                found[item.sku] = item
 
                     if missing and not created_items:
                         errors.append(
