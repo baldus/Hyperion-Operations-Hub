@@ -6,12 +6,16 @@ from decimal import Decimal
 from typing import Iterable, Optional
 
 from flask import Blueprint, Response, jsonify, render_template, request
+from decimal import Decimal, ROUND_HALF_UP
+
 from invapp.auth import blueprint_page_guard
 from sqlalchemy import case, func
 from sqlalchemy.orm import joinedload
 
 from invapp.extensions import db
 from invapp.models import Batch, Item, Location, Movement
+
+QUANTITY_STEP = Decimal("0.0001")
 
 bp = Blueprint("reports", __name__, url_prefix="/reports")
 
@@ -23,6 +27,10 @@ def _decimal_to_string(value):
     if value is None:
         return ""
     return f"{Decimal(value):.2f}"
+
+
+def _quantity_to_float(value) -> float:
+    return float(Decimal(value or 0).quantize(QUANTITY_STEP, rounding=ROUND_HALF_UP))
 
 
 def _parse_date_param(value: Optional[str]) -> Optional[datetime]:
@@ -64,7 +72,7 @@ def _movement_trends(
                 "sku": item.sku if item else None,
                 "item_name": item.name if item else None,
                 "movement_type": movement.movement_type,
-                "quantity": int(movement.quantity or 0),
+                "quantity": _quantity_to_float(movement.quantity),
                 "location": location_obj.code if location_obj else None,
             }
         )
@@ -86,7 +94,7 @@ def _stock_aging(sku: Optional[str]):
             {
                 "sku": item.sku if item else None,
                 "lot_number": batch.lot_number,
-                "quantity": int(batch.quantity or 0),
+                "quantity": _quantity_to_float(batch.quantity),
                 "days": days,
             }
         )
@@ -155,9 +163,9 @@ def reports_home():
         {
             "sku": sku,
             "name": name,
-            "usage_30": int(usage_30 or 0),
-            "usage_90": int(usage_90 or 0),
-            "usage_total": int(total_usage or 0),
+            "usage_30": _quantity_to_float(usage_30),
+            "usage_90": _quantity_to_float(usage_90),
+            "usage_total": _quantity_to_float(total_usage),
         }
         for sku, name, total_usage, usage_30, usage_90 in usage_query
     ]
