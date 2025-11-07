@@ -3,6 +3,7 @@ import io
 import json
 from collections import defaultdict
 from datetime import datetime
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from flask import (
     Blueprint,
@@ -13,7 +14,7 @@ from flask import (
     request,
     url_for,
 )
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import joinedload
 
 from invapp.extensions import db
@@ -36,6 +37,81 @@ from invapp.models import (
     RoutingStepConsumption,
 )
 
+QUANTITY_STEP = Decimal("0.0001")
+
+
+def _normalize_header(name: str) -> str:
+    return "".join(ch for ch in (name or "").strip().lower() if ch.isalnum())
+
+
+ITEM_METADATA_FIELDS = [
+    ("name", "Name"),
+    ("description", "Description"),
+    ("type", "Type"),
+    ("unit", "Unit"),
+    ("item_class", "Item Class"),
+    ("notes", "Notes"),
+]
+
+
+def _build_optional_field_config():
+    config = []
+    for role, role_label in (("assembly", "Finished Good"), ("component", "Component")):
+        for attribute, attribute_label in ITEM_METADATA_FIELDS:
+            key = f"{role}_{attribute}"
+            label = f"{role_label} {attribute_label}"
+            config.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "role": role,
+                    "attribute": attribute,
+                    "default_keys": {
+                        _normalize_header(label),
+                        _normalize_header(attribute_label),
+                    },
+                }
+            )
+    return config
+
+
+OPTIONAL_ITEM_FIELD_CONFIG = _build_optional_field_config()
+OPTIONAL_FIELD_LOOKUP = {field["key"]: field for field in OPTIONAL_ITEM_FIELD_CONFIG}
+
+
+def _initial_bulk_import_selection():
+    selection = {"assembly": "", "component": "", "quantity": ""}
+    for field in OPTIONAL_ITEM_FIELD_CONFIG:
+        selection[field["key"]] = ""
+    return selection
+
+
+def _ensure_identity_sequence(model):
+    """Ensure the primary key sequence for ``model`` is aligned with existing rows."""
+
+    bind = db.session.get_bind()
+    if bind is None or bind.dialect.name != "postgresql":
+        return
+
+    primary_key_columns = list(model.__table__.primary_key.columns)
+    if len(primary_key_columns) != 1:
+        return
+
+    pk_column = primary_key_columns[0]
+    column_name = pk_column.name
+    schema = model.__table__.schema
+    table_name = model.__table__.name
+    qualified_table_name = f"{schema}.{table_name}" if schema else table_name
+
+    sequence_sql = text(
+        f"SELECT setval(pg_get_serial_sequence(:table_name, :column_name), "
+        f"(SELECT COALESCE(MAX({column_name}), 0) FROM {qualified_table_name}))"
+    )
+
+    db.session.execute(
+        sequence_sql, {"table_name": qualified_table_name, "column_name": column_name}
+    )
+
 bp = Blueprint("orders", __name__, url_prefix="/orders")
 
 bp.before_request(blueprint_page_guard("orders"))
@@ -55,14 +131,14 @@ def _search_filter(query, search_term):
     )
 
 
-def _available_quantity(item_id: int) -> int:
+def _available_quantity(item_id: int) -> Decimal:
     """Return on-hand inventory minus active reservations for an item."""
 
     total_on_hand = (
         db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
         .filter(Movement.item_id == item_id)
         .scalar()
-    ) or 0
+    )
 
     reserved_total = (
         db.session.query(func.coalesce(func.sum(Reservation.quantity), 0))
@@ -73,18 +149,51 @@ def _available_quantity(item_id: int) -> int:
             Order.status.in_(OrderStatus.RESERVABLE_STATES),
         )
         .scalar()
-    ) or 0
+    )
 
-    return max(0, int(total_on_hand) - int(reserved_total))
+    on_hand_value = Decimal(total_on_hand or 0)
+    reserved_value = Decimal(reserved_total or 0)
+    available = on_hand_value - reserved_value
+    return available if available > 0 else Decimal("0")
 
 
-def _component_requirement(usage: RoutingStepComponent) -> int:
+def _component_requirement(usage: RoutingStepComponent) -> Decimal:
     bom_component = usage.bom_component
     order_line = bom_component.order_line
-    return int(bom_component.quantity) * int(order_line.quantity)
+    return Decimal(bom_component.quantity) * Decimal(order_line.quantity)
 
 
-def _position_balance(item_id: int, batch_id: int | None, location_id: int) -> int:
+def _parse_positive_quantity(raw_value) -> Decimal:
+    """Parse a quantity value into a positive, rounded Decimal."""
+
+    if isinstance(raw_value, Decimal):
+        candidate = raw_value
+    elif isinstance(raw_value, (int, float)):
+        candidate = Decimal(str(raw_value))
+    else:
+        text_value = str(raw_value or "").strip()
+        if not text_value:
+            raise InvalidOperation
+        candidate = Decimal(text_value)
+
+    if candidate <= 0:
+        raise InvalidOperation
+
+    quantized = candidate.quantize(QUANTITY_STEP, rounding=ROUND_HALF_UP)
+    if quantized <= 0:
+        raise InvalidOperation
+
+    return quantized
+
+
+def _format_decimal(value: Decimal) -> str:
+    """Render a decimal quantity for display without unnecessary zeros."""
+
+    normalized = Decimal(value or 0).quantize(QUANTITY_STEP, rounding=ROUND_HALF_UP)
+    return format(normalized.normalize(), "f")
+
+
+def _position_balance(item_id: int, batch_id: int | None, location_id: int) -> Decimal:
     filters = [Movement.item_id == item_id, Movement.location_id == location_id]
     if batch_id is None:
         filters.append(Movement.batch_id.is_(None))
@@ -95,8 +204,8 @@ def _position_balance(item_id: int, batch_id: int | None, location_id: int) -> i
         db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
         .filter(*filters)
         .scalar()
-    ) or 0
-    return int(balance)
+    )
+    return Decimal(balance or 0)
 
 
 def _inventory_options(item_id: int):
@@ -126,6 +235,7 @@ def _inventory_options(item_id: int):
 
     options = []
     for batch_id, location_id, on_hand in rows:
+        available_quantity = Decimal(on_hand or 0)
         batch_label = "Unbatched"
         if batch_id is not None:
             batch = batches.get(batch_id)
@@ -140,8 +250,8 @@ def _inventory_options(item_id: int):
                 "value": f"{batch_id if batch_id is not None else 'none'}::{location_id}",
                 "batch_id": batch_id,
                 "location_id": location_id,
-                "label": f"{batch_label} @ {location_label} (avail {int(on_hand)})",
-                "available": int(on_hand),
+                "label": f"{batch_label} @ {location_label} (avail {_format_decimal(available_quantity)})",
+                "available": available_quantity,
             }
         )
 
@@ -242,7 +352,7 @@ def _prepare_order_detail(order: Order, *, pending_completed_ids=None, selected_
     }
 
 
-def _adjust_reservation(order_line: OrderLine, item_id: int, delta: int):
+def _adjust_reservation(order_line: OrderLine, item_id: int, delta):
     """Adjust a reservation quantity for an order line and component item."""
 
     reservation = next(
@@ -251,14 +361,14 @@ def _adjust_reservation(order_line: OrderLine, item_id: int, delta: int):
     )
 
     if reservation:
-        new_quantity = int(reservation.quantity) + int(delta)
+        new_quantity = Decimal(reservation.quantity) + Decimal(delta)
         if new_quantity <= 0:
             db.session.delete(reservation)
         else:
             reservation.quantity = new_quantity
     elif delta > 0:
         db.session.add(
-            Reservation(order_line=order_line, item_id=item_id, quantity=int(delta))
+            Reservation(order_line=order_line, item_id=item_id, quantity=Decimal(delta))
         )
 
 
@@ -408,7 +518,11 @@ def fetch_bom_template(sku: str):
         {
             "sku": component.component_item.sku,
             "name": component.component_item.name,
-            "quantity": component.quantity,
+            "quantity": float(
+                Decimal(component.quantity).quantize(
+                    QUANTITY_STEP, rounding=ROUND_HALF_UP
+                )
+            ),
         }
         for component in sorted(
             bom.components, key=lambda entry: entry.component_item.sku
@@ -580,12 +694,10 @@ def bom_library():
                     errors.append(f"BOM component SKU '{sku}' was not found.")
                     continue
                 try:
-                    component_quantity = int(quantity_value)
-                    if component_quantity <= 0:
-                        raise ValueError
-                except (TypeError, ValueError):
+                    component_quantity = _parse_positive_quantity(quantity_value)
+                except (InvalidOperation, TypeError):
                     errors.append(
-                        f"BOM component quantity for {sku} must be a positive integer."
+                        f"BOM component quantity for {sku} must be a positive number."
                     )
                     continue
                 bom_components.append(
@@ -658,6 +770,298 @@ def bom_library():
         templates=templates,
         form_data=form_data,
         editing_template=editing_template,
+    )
+
+
+@bp.route("/bom-library/bulk-import", methods=["GET", "POST"])
+@require_roles("admin")
+def bom_library_bulk_import():
+    """Import multiple BOM templates from a single CSV file."""
+
+    step = (request.form.get("step") or "upload").strip()
+    context = {
+        "step": step,
+        "columns": [],
+        "preview_rows": [],
+        "payload": [],
+        "selected": _initial_bulk_import_selection(),
+        "optional_fields": OPTIONAL_ITEM_FIELD_CONFIG,
+    }
+
+    if request.method == "POST":
+        errors = []
+
+        if step == "upload":
+            upload = request.files.get("csv_file")
+            if upload is None or not upload.filename:
+                errors.append("Select a CSV file to import.")
+            else:
+                try:
+                    raw_content = upload.read().decode("utf-8-sig")
+                except UnicodeDecodeError:
+                    errors.append("CSV import files must be UTF-8 encoded.")
+                else:
+                    stream = io.StringIO(raw_content)
+                    reader = csv.DictReader(stream)
+                    if not reader.fieldnames:
+                        errors.append("CSV file is empty.")
+                    else:
+                        rows = []
+                        for row in reader:
+                            normalized = {
+                                (key or "").strip(): (value or "").strip()
+                                for key, value in row.items()
+                            }
+                            if any(normalized.values()):
+                                rows.append(normalized)
+
+                        if not rows:
+                            errors.append("CSV did not include any component rows to import.")
+                        else:
+                            context["step"] = "map"
+                            context["columns"] = list(reader.fieldnames)
+                            context["preview_rows"] = rows[:10]
+                            context["payload"] = rows
+
+                            normalized_names = {
+                                _normalize_header(name): name for name in reader.fieldnames if name
+                            }
+                            context["selected"]["assembly"] = (
+                                normalized_names.get("assembly")
+                                or normalized_names.get("finishedgood")
+                                or normalized_names.get("finishedgoodsku")
+                                or ""
+                            )
+                            context["selected"]["component"] = (
+                                normalized_names.get("component")
+                                or normalized_names.get("componentsku")
+                                or normalized_names.get("sku")
+                                or ""
+                            )
+                            context["selected"]["quantity"] = (
+                                normalized_names.get("qty")
+                                or normalized_names.get("quantity")
+                                or normalized_names.get("componentqty")
+                                or ""
+                            )
+
+                            for field in OPTIONAL_ITEM_FIELD_CONFIG:
+                                for key in field["default_keys"]:
+                                    column_name = normalized_names.get(key)
+                                    if column_name:
+                                        context["selected"][field["key"]] = column_name
+                                        break
+
+        elif step == "import":
+            data_json = request.form.get("data_json") or "[]"
+            try:
+                payload_rows = json.loads(data_json)
+                if not isinstance(payload_rows, list):
+                    raise ValueError
+            except ValueError:
+                errors.append("Unable to read the uploaded CSV data. Please upload the file again.")
+                payload_rows = []
+
+            columns = request.form.getlist("columns")
+            column_set = set(columns)
+
+            assembly_field = (request.form.get("assembly_field") or "").strip()
+            component_field = (request.form.get("component_field") or "").strip()
+            quantity_field = (request.form.get("quantity_field") or "").strip()
+
+            selected_map = _initial_bulk_import_selection()
+            selected_map["assembly"] = assembly_field
+            selected_map["component"] = component_field
+            selected_map["quantity"] = quantity_field
+
+            optional_field_map = {}
+            for field in OPTIONAL_ITEM_FIELD_CONFIG:
+                value = (request.form.get(f"{field['key']}_field") or "").strip()
+                if value:
+                    optional_field_map[field["key"]] = value
+                    selected_map[field["key"]] = value
+
+            context.update(
+                {
+                    "step": "map",
+                    "columns": columns,
+                    "preview_rows": payload_rows[:10],
+                    "payload": payload_rows,
+                    "selected": selected_map,
+                }
+            )
+
+            if not assembly_field or not component_field or not quantity_field:
+                errors.append(
+                    "Select the columns that contain the finished good, component, and quantity values."
+                )
+
+            for required_field, field_name in (
+                (assembly_field, "Finished good"),
+                (component_field, "Component"),
+                (quantity_field, "Quantity"),
+            ):
+                if required_field and required_field not in column_set:
+                    errors.append(
+                        f"Column '{required_field}' was not included in the uploaded data."
+                    )
+
+            for key, column_name in optional_field_map.items():
+                if column_name not in column_set:
+                    errors.append(
+                        f"Column '{column_name}' was not included in the uploaded data."
+                    )
+
+            bom_map = defaultdict(lambda: defaultdict(Decimal))
+            row_errors = []
+            item_metadata = defaultdict(
+                lambda: {field[0]: None for field in ITEM_METADATA_FIELDS}
+            )
+            for index, row in enumerate(payload_rows, start=2):
+                assembly = (row.get(assembly_field) or "").strip()
+                component = (row.get(component_field) or "").strip()
+                quantity_raw = (row.get(quantity_field) or "").strip()
+
+                if not assembly and not component and not quantity_raw:
+                    continue
+
+                if not assembly:
+                    row_errors.append(f"Row {index}: Finished good value is required.")
+                    continue
+                if not component:
+                    row_errors.append(f"Row {index}: Component value is required.")
+                    continue
+                try:
+                    quantity = _parse_positive_quantity(quantity_raw)
+                except (InvalidOperation, TypeError):
+                    row_errors.append(
+                        f"Row {index}: Quantity '{quantity_raw}' must be a positive number."
+                    )
+                    continue
+
+                bom_map[assembly][component] += quantity
+
+                for field_key, column_name in optional_field_map.items():
+                    definition = OPTIONAL_FIELD_LOOKUP.get(field_key)
+                    if definition is None:
+                        continue
+                    raw_value = row.get(column_name, "")
+                    if raw_value is None:
+                        continue
+                    value = raw_value.strip()
+                    if not value:
+                        continue
+                    target_sku = assembly if definition["role"] == "assembly" else component
+                    metadata = item_metadata[target_sku]
+                    attribute = definition["attribute"]
+                    existing_value = metadata.get(attribute)
+                    if existing_value and existing_value != value:
+                        row_errors.append(
+                            f"Row {index}: {definition['label']} for {target_sku} conflicts with previous value '{existing_value}'."
+                        )
+                        continue
+                    metadata[attribute] = value
+
+            if row_errors:
+                errors.extend(row_errors[:50])
+
+            if not bom_map and not errors:
+                errors.append("No BOM rows were found to import.")
+
+            created_items = []
+            if not errors:
+                all_skus = set(bom_map.keys()) | {
+                    component_sku for components in bom_map.values() for component_sku in components.keys()
+                }
+                if not all_skus:
+                    errors.append("No items were found in the import data.")
+                else:
+                    items = Item.query.filter(Item.sku.in_(all_skus)).all()
+                    found = {item.sku: item for item in items}
+                    missing = sorted(sku for sku in all_skus if sku not in found)
+                    if missing and not errors:
+                        for sku in missing:
+                            metadata = item_metadata.get(sku, {})
+                            name = (metadata.get("name") or sku).strip()
+                            new_item = Item(
+                                sku=sku,
+                                name=name,
+                                type=(metadata.get("type") or None),
+                                unit=(metadata.get("unit") or None) or "ea",
+                                description=(metadata.get("description") or None),
+                                item_class=(metadata.get("item_class") or None),
+                                notes=(metadata.get("notes") or None),
+                            )
+                            db.session.add(new_item)
+                            created_items.append(new_item)
+
+                        if created_items:
+                            _ensure_identity_sequence(Item)
+                            db.session.flush()
+                            for item in created_items:
+                                found[item.sku] = item
+
+                    if missing and not created_items:
+                        errors.append(
+                            "The following item part numbers were not found: " + ", ".join(missing)
+                        )
+
+            if not errors:
+                created_count = 0
+                updated_count = 0
+                created_items_count = len(created_items)
+
+                for assembly_sku, components in bom_map.items():
+                    component_entries = [
+                        {"sku": sku, "item": found[sku], "quantity": quantity}
+                        for sku, quantity in components.items()
+                    ]
+
+                    template, created, changed = _save_bom_template(
+                        found[assembly_sku], component_entries, replace_existing=True
+                    )
+                    if created:
+                        created_count += 1
+                    elif changed:
+                        updated_count += 1
+
+                db.session.commit()
+
+                message_parts = []
+                if created_count:
+                    message_parts.append(f"{created_count} template(s) created")
+                if updated_count:
+                    message_parts.append(f"{updated_count} template(s) updated")
+                if not message_parts:
+                    message_parts.append("Existing templates were replaced with the imported data")
+
+                if created_items_count:
+                    message_parts.append(f"{created_items_count} new item(s) added to the catalog")
+
+                flash(
+                    "Bulk BOM import completed successfully: " + ", ".join(message_parts) + ".",
+                    "success",
+                )
+                return redirect(url_for("orders.bom_library"))
+
+        for error in errors:
+            flash(error, "danger")
+
+    if not context["columns"] and request.method == "POST":
+        upload = request.files.get("csv_file")
+        if upload and hasattr(upload, "seek"):
+            upload.seek(0)
+
+    context.setdefault("columns", [])
+
+    return render_template(
+        "orders/bulk_bom_import.html",
+        step=context["step"],
+        columns=context["columns"],
+        preview_rows=context["preview_rows"],
+        payload=context["payload"],
+        selected=context["selected"],
+        optional_fields=context["optional_fields"],
     )
 
 
@@ -810,12 +1214,10 @@ def new_order():
                     errors.append(f"BOM component SKU '{sku}' was not found.")
                     continue
                 try:
-                    component_quantity = int(quantity_value)
-                    if component_quantity <= 0:
-                        raise ValueError
-                except (TypeError, ValueError):
+                    component_quantity = _parse_positive_quantity(quantity_value)
+                except (InvalidOperation, TypeError):
                     errors.append(
-                        f"BOM component quantity for {sku} must be a positive integer."
+                        f"BOM component quantity for {sku} must be a positive number."
                     )
                     continue
 
