@@ -14,6 +14,7 @@ from flask import (
     session,
     url_for,
 )
+from sqlalchemy.exc import IntegrityError
 
 from invapp.extensions import db
 from invapp.login import current_user, login_required
@@ -164,8 +165,23 @@ def create():
         user = User(username=username_value)
         user.set_password(password)
         user.roles = _selected_roles(role_ids)
-        db.session.add(user)
-        db.session.commit()
+
+        try:
+            User.commit_with_sequence_retry(user)
+        except IntegrityError:
+            current_app.logger.exception("Failed to create user")
+            flash("Unable to create user due to a database error.", "danger")
+            return render_template(
+                "users/form.html",
+                roles=roles,
+                selected_roles=selected_roles,
+                username_value=username_value,
+                form_action=url_for("users.create"),
+                title="Create User",
+                submit_label="Create",
+                include_password=True,
+            )
+
         flash("User created.", "success")
         return redirect(url_for("users.list_users"))
 
