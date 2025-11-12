@@ -913,13 +913,13 @@ def update_gemba_metric(metric_id: int):
 
     form_category = request.form.get("category")
     try:
-        metric.category = models.GembaMetric.normalize_category(form_category)
+        category = models.GembaMetric.normalize_category(form_category)
     except ValueError:
         flash("Select a valid SQDPM category for the metric.", "warning")
         return _redirect_to_gemba_dashboard()
 
-    metric.metric_name = (request.form.get("metric_name") or "").strip()
-    if not metric.metric_name:
+    metric_name = (request.form.get("metric_name") or "").strip()
+    if not metric_name:
         flash("Metric name cannot be empty.", "warning")
         return _redirect_to_gemba_dashboard()
 
@@ -937,8 +937,11 @@ def update_gemba_metric(metric_id: int):
     for message in errors:
         flash(message, "warning")
     if errors:
+        db.session.rollback()
         return _redirect_to_gemba_dashboard()
 
+    metric.category = category
+    metric.metric_name = metric_name
     metric.metric_value = metric_value
     metric.target_value = target_value
     metric.date = metric_date or metric.date
