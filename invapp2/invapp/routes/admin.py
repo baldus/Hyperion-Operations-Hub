@@ -29,6 +29,8 @@ from sqlalchemy.sql.sqltypes import Date as SQLDate
 from sqlalchemy.sql.sqltypes import DateTime as SQLDateTime
 from sqlalchemy.sql.sqltypes import Numeric
 
+from werkzeug.routing import BuildError
+
 from invapp import models
 from invapp.extensions import db
 from invapp.login import current_user, login_required, logout_user
@@ -587,40 +589,49 @@ def _status_level(value: float, *, warn: float, alert: float) -> str:
 
 
 def _category_shortcuts() -> dict[str, list[dict[str, str]]]:
-    return {
+    """Resolve related-module shortcuts for each SQDPM category."""
+
+    raw_shortcuts: dict[str, list[dict[str, str]]] = {
         "Safety": [
-            {
-                "label": "View Safety & Quality",
-                "href": url_for("quality.quality_home"),
-            }
+            {"label": "MDI Reports", "endpoint": "reports.reports_home"},
+            {"label": "Admin Tools", "endpoint": "admin.tools"},
         ],
         "Quality": [
-            {
-                "label": "Quality Dashboard",
-                "href": url_for("quality.quality_home"),
-            }
+            {"label": "Quality Dashboard", "endpoint": "quality.quality_home"},
         ],
         "Delivery": [
-            {"label": "Orders Workspace", "href": url_for("orders.orders_home")},
-            {"label": "Production History", "href": url_for("production.history")},
+            {"label": "Orders Workspace", "endpoint": "orders.orders_home"},
+            {"label": "Production History", "endpoint": "production.history"},
         ],
         "People": [
-            {
-                "label": "Workstations Overview",
-                "href": url_for("work.station_overview"),
-            }
+            {"label": "Workstations Overview", "endpoint": "work.station_overview"},
         ],
         "Material": [
-            {
-                "label": "Inventory Dashboard",
-                "href": url_for("inventory.inventory_home"),
-            },
-            {
-                "label": "Purchase Requests",
-                "href": url_for("purchasing.purchasing_home"),
-            },
+            {"label": "Inventory Dashboard", "endpoint": "inventory.inventory_home"},
+            {"label": "Purchase Requests", "endpoint": "purchasing.purchasing_home"},
         ],
     }
+
+    shortcuts: dict[str, list[dict[str, str]]] = {}
+    for category, entries in raw_shortcuts.items():
+        resolved: list[dict[str, str]] = []
+        for entry in entries:
+            endpoint = entry.get("endpoint")
+            if not endpoint:
+                continue
+            try:
+                href = url_for(endpoint)
+            except BuildError:
+                current_app.logger.debug(
+                    "Skipping shortcut for %s because endpoint %s is unavailable.",
+                    category,
+                    endpoint,
+                )
+                continue
+            resolved.append({"label": entry["label"], "href": href})
+        shortcuts[category] = resolved
+
+    return shortcuts
 
 
 def _category_definitions() -> dict[str, str]:
