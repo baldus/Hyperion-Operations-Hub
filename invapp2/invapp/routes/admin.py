@@ -5,9 +5,10 @@ import os
 import shlex
 import shutil
 import subprocess
+from collections import defaultdict
 from pathlib import Path
 from datetime import date, datetime, time as time_type, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from urllib.parse import urljoin
 
 from flask import (
@@ -358,6 +359,111 @@ def _parse_value(column, value):
     return value
 
 
+_GEMBA_QUANTIZE = Decimal("0.0001")
+
+
+def _parse_decimal_field(
+    value: str | None,
+    *,
+    field_label: str,
+    allow_empty: bool = False,
+) -> tuple[Decimal | None, str | None]:
+    text = (value or "").strip()
+    if not text:
+        if allow_empty:
+            return None, None
+        return None, f"{field_label} is required."
+
+    try:
+        number = Decimal(text)
+    except (InvalidOperation, ValueError):
+        return None, f"{field_label} must be a valid number."
+
+    try:
+        return number.quantize(_GEMBA_QUANTIZE), None
+    except InvalidOperation:
+        return number, None
+
+
+def _format_decimal_for_input(value: Decimal | float | int | None) -> str:
+    if value is None:
+        return ""
+
+    if not isinstance(value, Decimal):
+        try:
+            value = Decimal(value)
+        except (InvalidOperation, ValueError):
+            return str(value)
+
+    normalized = value.quantize(_GEMBA_QUANTIZE).normalize()
+    text = format(normalized, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
+def _parse_date_field(value: str | None, *, default: date | None = None) -> tuple[date | None, str | None]:
+    text = (value or "").strip()
+    if not text:
+        return default, None
+
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").date(), None
+    except ValueError:
+        return default, "Dates must use the YYYY-MM-DD format."
+
+
+def _metric_status_class(actual: Decimal | None, target: Decimal | None) -> str:
+    if actual is None:
+        return "status-warn"
+    if target in (None, Decimal(0)):
+        return "status-ok"
+
+    if actual >= target:
+        return "status-ok"
+    if target == 0:
+        return "status-ok"
+    ninety_percent = target * Decimal("0.90")
+    if actual >= ninety_percent:
+        return "status-warn"
+    return "status-alert"
+
+
+def _metric_delta_label(actual: Decimal | None, target: Decimal | None) -> str | None:
+    if actual is None or target is None:
+        return None
+
+    delta = actual - target
+    if delta == 0:
+        return "On target"
+
+    formatted = _format_decimal_for_input(delta)
+    if not formatted:
+        return None
+
+    sign = "+" if delta > 0 else ""
+    return f"{sign}{formatted}"
+
+
+def _decimal_to_float(value: Decimal | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _redirect_to_gemba_dashboard():
+    next_target = (request.form.get("next") or "").strip()
+    if next_target:
+        host_url = request.host_url
+        absolute_target = urljoin(host_url, next_target)
+        if absolute_target.startswith(host_url):
+            return redirect(next_target)
+    return redirect(url_for("admin.gemba_dashboard"))
+
+
 @bp.route("/login")
 def login():
     """Redirect users to proper authentication and surface admin shortcuts."""
@@ -480,6 +586,361 @@ def _status_level(value: float, *, warn: float, alert: float) -> str:
     return "ok"
 
 
+def _category_shortcuts() -> dict[str, list[dict[str, str]]]:
+    return {
+        "Safety": [
+            {
+                "label": "View Safety & Quality",
+                "href": url_for("quality.quality_home"),
+            }
+        ],
+        "Quality": [
+            {
+                "label": "Quality Dashboard",
+                "href": url_for("quality.quality_home"),
+            }
+        ],
+        "Delivery": [
+            {"label": "Orders Workspace", "href": url_for("orders.orders_home")},
+            {"label": "Production History", "href": url_for("production.history")},
+        ],
+        "People": [
+            {
+                "label": "Workstations Overview",
+                "href": url_for("work.station_overview"),
+            }
+        ],
+        "Material": [
+            {
+                "label": "Inventory Dashboard",
+                "href": url_for("inventory.inventory_home"),
+            },
+            {
+                "label": "Purchase Requests",
+                "href": url_for("purchasing.purchasing_home"),
+            },
+        ],
+    }
+
+
+def _category_definitions() -> dict[str, str]:
+    defaults = models.GembaCategory.DEFAULT_DEFINITIONS
+    definitions: dict[str, str] = {name: text for name, text in defaults.items()}
+    for category in models.GembaCategory.query.order_by(models.GembaCategory.name).all():
+        if category.description:
+            definitions[category.name] = category.description
+    return definitions
+
+
+@bp.route("/gemba")
+@login_required
+@require_roles("admin")
+def gemba_dashboard():
+    if not _database_available():
+        return _render_offline_page(
+            "Gemba / MDI",
+            description="Reviewing SQDPM metrics requires database connectivity.",
+        )
+
+    models.GembaCategory.ensure_defaults()
+
+    department_rows = (
+        db.session.query(models.GembaMetric.department)
+        .filter(models.GembaMetric.department.isnot(None))
+        .filter(models.GembaMetric.department != "")
+        .distinct()
+        .order_by(models.GembaMetric.department.asc())
+        .all()
+    )
+    departments = [row[0] for row in department_rows if row[0]]
+
+    selected_department = (request.args.get("department") or "").strip()
+
+    today = date.today()
+    default_start = today - timedelta(days=29)
+    default_end = today
+
+    start_date, start_error = _parse_date_field(
+        request.args.get("start_date"), default=default_start
+    )
+    end_date, end_error = _parse_date_field(request.args.get("end_date"), default=default_end)
+
+    redirect_args: dict[str, str] = {}
+    if selected_department:
+        redirect_args["department"] = selected_department
+
+    if start_error:
+        flash(start_error, "warning")
+    if end_error:
+        flash(end_error, "warning")
+    if start_error or end_error:
+        return redirect(url_for("admin.gemba_dashboard", **redirect_args))
+
+    start_date = start_date or default_start
+    end_date = end_date or default_end
+
+    if start_date > end_date:
+        flash("The start date must be on or before the end date.", "warning")
+        return redirect(url_for("admin.gemba_dashboard", **redirect_args))
+
+    metrics_query = models.GembaMetric.query.filter(
+        models.GembaMetric.date >= start_date,
+        models.GembaMetric.date <= end_date,
+    )
+    if selected_department:
+        metrics_query = metrics_query.filter(
+            models.GembaMetric.department == selected_department
+        )
+
+    metrics = (
+        metrics_query.order_by(
+            models.GembaMetric.date.desc(), models.GembaMetric.metric_name.asc()
+        ).all()
+    )
+
+    if selected_department and selected_department not in departments:
+        departments.append(selected_department)
+        departments.sort(key=lambda value: value.lower())
+
+    categories = models.GembaMetric.CATEGORIES
+    grouped: dict[str, dict[str, list[models.GembaMetric]]] = {
+        category: defaultdict(list) for category in categories
+    }
+    trend_data: dict[str, list[dict[str, object]]] = {category: [] for category in categories}
+
+    for metric in metrics:
+        category = metric.category or categories[0]
+        if category not in grouped:
+            grouped[category] = defaultdict(list)
+            trend_data.setdefault(category, [])
+        department_label = metric.department or "All Departments"
+        grouped[category][department_label].append(metric)
+        trend_data.setdefault(category, []).append(
+            {
+                "date": metric.date.isoformat(),
+                "actual": _decimal_to_float(metric.metric_value),
+                "target": _decimal_to_float(metric.target_value),
+                "department": department_label,
+                "metric": metric.metric_name,
+            }
+        )
+
+    for entries in trend_data.values():
+        entries.sort(key=lambda item: item["date"])
+
+    category_metrics: dict[str, list[dict[str, object]]] = {}
+    overview_data: dict[str, dict[str, float | None]] = {}
+
+    for category in categories:
+        department_sections: list[dict[str, object]] = []
+        category_metrics_list = []
+        department_map = grouped.get(category, {})
+
+        for department_label in sorted(department_map.keys(), key=lambda value: value.lower()):
+            metrics_for_department = sorted(
+                department_map[department_label],
+                key=lambda item: (item.date, item.metric_name.lower()),
+                reverse=True,
+            )
+
+            metric_cards: list[dict[str, object]] = []
+            for metric in metrics_for_department:
+                actual = metric.metric_value
+                target = metric.target_value
+                ratio_display = None
+                if actual is not None and target not in (None, Decimal(0)):
+                    try:
+                        ratio_value = (actual / target) * Decimal(100)
+                        ratio_display = f"{_format_decimal_for_input(ratio_value)}%"
+                    except (InvalidOperation, ZeroDivisionError):
+                        ratio_display = None
+
+                metric_cards.append(
+                    {
+                        "id": metric.id,
+                        "name": metric.metric_name,
+                        "value_display": _format_decimal_for_input(actual) or "0",
+                        "target_display": _format_decimal_for_input(target),
+                        "unit": metric.unit or "",
+                        "date_display": metric.date.strftime("%b %d, %Y"),
+                        "date_iso": metric.date.isoformat(),
+                        "notes": metric.notes or "",
+                        "linked_record_url": metric.linked_record_url or "",
+                        "status_class": _metric_status_class(actual, target),
+                        "delta_label": _metric_delta_label(actual, target),
+                        "ratio_display": ratio_display,
+                        "links": [
+                            {"label": link.label, "href": link.url}
+                            for link in getattr(metric, "links", [])
+                        ],
+                        "raw": {
+                            "metric_name": metric.metric_name,
+                            "metric_value": _format_decimal_for_input(actual),
+                            "target_value": _format_decimal_for_input(target),
+                            "unit": metric.unit or "",
+                            "department": metric.department or "",
+                            "category": metric.category,
+                            "date": metric.date.isoformat(),
+                            "notes": metric.notes or "",
+                            "linked_record_url": metric.linked_record_url or "",
+                        },
+                    }
+                )
+
+            department_sections.append(
+                {
+                    "department": department_label,
+                    "metrics": metric_cards,
+                }
+            )
+            category_metrics_list.extend(metrics_for_department)
+
+        category_metrics[category] = department_sections
+
+        actual_values = [metric.metric_value for metric in category_metrics_list if metric.metric_value is not None]
+        target_values = [
+            metric.target_value for metric in category_metrics_list if metric.target_value is not None
+        ]
+
+        actual_average: Decimal | None = None
+        target_average: Decimal | None = None
+        if actual_values:
+            actual_average = sum(actual_values, Decimal(0)) / Decimal(len(actual_values))
+        if target_values:
+            target_average = sum(target_values, Decimal(0)) / Decimal(len(target_values))
+
+        overview_data[category] = {
+            "actual": _decimal_to_float(actual_average),
+            "target": _decimal_to_float(target_average),
+        }
+
+    active_category = next(
+        (category for category in categories if category_metrics.get(category)),
+        categories[0],
+    )
+
+    return render_template(
+        "admin/gemba.html",
+        categories=categories,
+        category_metrics=category_metrics,
+        category_definitions=_category_definitions(),
+        category_shortcuts=_category_shortcuts(),
+        departments=sorted(departments, key=lambda value: value.lower()),
+        selected_department=selected_department,
+        start_date=start_date.isoformat(),
+        end_date=end_date.isoformat(),
+        trend_data=trend_data,
+        overview_data=overview_data,
+        active_category=active_category,
+        total_metrics=len(metrics),
+    )
+
+
+@bp.route("/gemba/metrics", methods=["POST"])
+@login_required
+@require_roles("admin")
+def create_gemba_metric():
+    if not _database_available():
+        flash("Database connectivity is required to record Gemba metrics.", "warning")
+        return redirect(url_for("admin.gemba_dashboard"))
+
+    form_category = request.form.get("category")
+    try:
+        category = models.GembaMetric.normalize_category(form_category)
+    except ValueError:
+        flash("Select a valid SQDPM category for the metric.", "warning")
+        return _redirect_to_gemba_dashboard()
+
+    metric_name = (request.form.get("metric_name") or "").strip()
+    if not metric_name:
+        flash("Provide a name for the metric.", "warning")
+        return _redirect_to_gemba_dashboard()
+
+    metric_value, value_error = _parse_decimal_field(
+        request.form.get("metric_value"), field_label="Metric value"
+    )
+    target_value, target_error = _parse_decimal_field(
+        request.form.get("target_value"), field_label="Target value", allow_empty=True
+    )
+    metric_date, date_error = _parse_date_field(
+        request.form.get("date"), default=date.today()
+    )
+
+    errors = [message for message in (value_error, target_error, date_error) if message]
+    for message in errors:
+        flash(message, "warning")
+    if errors:
+        return _redirect_to_gemba_dashboard()
+
+    metric = models.GembaMetric(
+        category=category,
+        department=(request.form.get("department") or "").strip() or None,
+        metric_name=metric_name,
+        metric_value=metric_value,
+        target_value=target_value,
+        unit=(request.form.get("unit") or "").strip() or None,
+        date=metric_date or date.today(),
+        notes=(request.form.get("notes") or "").strip() or None,
+        linked_record_url=(request.form.get("linked_record_url") or "").strip() or None,
+    )
+
+    db.session.add(metric)
+    db.session.commit()
+    flash("Gemba metric recorded.", "success")
+    return _redirect_to_gemba_dashboard()
+
+
+@bp.route("/gemba/metrics/<int:metric_id>/update", methods=["POST"])
+@login_required
+@require_roles("admin")
+def update_gemba_metric(metric_id: int):
+    if not _database_available():
+        flash("Updating metrics requires database connectivity.", "warning")
+        return redirect(url_for("admin.gemba_dashboard"))
+
+    metric = models.GembaMetric.query.get_or_404(metric_id)
+
+    form_category = request.form.get("category")
+    try:
+        metric.category = models.GembaMetric.normalize_category(form_category)
+    except ValueError:
+        flash("Select a valid SQDPM category for the metric.", "warning")
+        return _redirect_to_gemba_dashboard()
+
+    metric.metric_name = (request.form.get("metric_name") or "").strip()
+    if not metric.metric_name:
+        flash("Metric name cannot be empty.", "warning")
+        return _redirect_to_gemba_dashboard()
+
+    metric_value, value_error = _parse_decimal_field(
+        request.form.get("metric_value"), field_label="Metric value"
+    )
+    target_value, target_error = _parse_decimal_field(
+        request.form.get("target_value"), field_label="Target value", allow_empty=True
+    )
+    metric_date, date_error = _parse_date_field(
+        request.form.get("date"), default=metric.date
+    )
+
+    errors = [message for message in (value_error, target_error, date_error) if message]
+    for message in errors:
+        flash(message, "warning")
+    if errors:
+        return _redirect_to_gemba_dashboard()
+
+    metric.metric_value = metric_value
+    metric.target_value = target_value
+    metric.date = metric_date or metric.date
+    metric.unit = (request.form.get("unit") or "").strip() or None
+    metric.department = (request.form.get("department") or "").strip() or None
+    metric.notes = (request.form.get("notes") or "").strip() or None
+    metric.linked_record_url = (request.form.get("linked_record_url") or "").strip() or None
+
+    db.session.commit()
+    flash("Gemba metric updated.", "success")
+    return _redirect_to_gemba_dashboard()
+
+
 @bp.route("/tools")
 @login_required
 @require_roles("admin")
@@ -565,6 +1026,12 @@ def tools():
             "href": url_for("reports.reports_home"),
             "disabled": False,
             "note": None,
+        },
+        {
+            "label": "Gemba / MDI Dashboard",
+            "href": url_for("admin.gemba_dashboard"),
+            "disabled": False,
+            "note": "Review daily SQDPM performance and trends.",
         },
         {
             "label": "Data Backup",

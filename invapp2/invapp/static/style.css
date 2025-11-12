@@ -1440,6 +1440,238 @@ body.light .progress-track {
     background: rgba(0, 0, 0, 0.1);
 }
 
+.gemba-filter-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 18px;
+    align-items: flex-end;
+}
+
+.gemba-filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 160px;
+}
+
+.gemba-filter-actions {
+    display: flex;
+    gap: 12px;
+}
+
+.gemba-form {
+    gap: 16px;
+}
+
+.gemba-form-grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.gemba-form-notes {
+    grid-column: span 2;
+}
+
+.gemba-form-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.gemba-layout {
+    display: grid;
+    gap: 24px;
+    grid-template-columns: 220px 1fr;
+    margin-top: 24px;
+}
+
+.gemba-nav {
+    align-self: start;
+}
+
+.gemba-nav-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.gemba-nav-btn {
+    width: 100%;
+    text-align: left;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    padding: 10px 16px;
+}
+
+.gemba-nav-btn.is-active {
+    background: #22c55e;
+    color: #111;
+}
+
+body.light .gemba-nav-btn {
+    background: rgba(0, 0, 0, 0.08);
+    color: inherit;
+}
+
+body.light .gemba-nav-btn.is-active {
+    background: #4ade80;
+    color: #063b19;
+}
+
+.gemba-category-panel.is-hidden {
+    display: none;
+}
+
+.gemba-category-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.gemba-shortcuts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.gemba-trend-card {
+    margin-bottom: 24px;
+}
+
+.gemba-trend-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.gemba-trend-buttons {
+    display: flex;
+    gap: 10px;
+}
+
+.gemba-chart-empty {
+    margin-top: 12px;
+}
+
+.gemba-metric-section {
+    margin-bottom: 16px;
+}
+
+.gemba-section-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.gemba-metric-grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.gemba-metric-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.gemba-metric-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+}
+
+.gemba-metric-date {
+    font-size: 0.85rem;
+    opacity: 0.7;
+}
+
+.gemba-metric-notes {
+    font-size: 0.95rem;
+    line-height: 1.4;
+}
+
+.gemba-metric-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.gemba-edit-form {
+    margin-top: 12px;
+    padding: 16px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+body.light .gemba-edit-form {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+.gemba-edit-grid {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.gemba-notes-field {
+    grid-column: span 2;
+}
+
+.gemba-edit-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+@media (max-width: 960px) {
+    .gemba-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .gemba-nav {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 12px;
+        padding: 12px;
+    }
+
+    body.light .gemba-nav {
+        background: rgba(255, 255, 255, 0.7);
+    }
+
+    .gemba-nav-list {
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    .gemba-nav-btn {
+        text-align: center;
+    }
+
+    .gemba-form-notes,
+    .gemba-notes-field {
+        grid-column: span 1;
+    }
+}
+
 .progress-fill {
     height: 100%;
     background: linear-gradient(90deg, #3b82f6, #6366f1);

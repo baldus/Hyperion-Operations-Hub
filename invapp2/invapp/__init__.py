@@ -43,6 +43,7 @@ NAVIGATION_PAGES: tuple[tuple[str, str, str], ...] = (
     ("quality", "quality.quality_home", "Quality"),
     ("work", "work.station_overview", "Workstations"),
     ("production", "production.history", "Production History"),
+    ("gemba", "admin.gemba_dashboard", "Gemba / MDI"),
 )
 
 
@@ -456,6 +457,7 @@ def create_app(config_override=None):
                     app.config.get("ADMIN_PASSWORD", "joshbaldus"),
                 )
                 _ensure_core_roles()
+                models.GembaCategory.ensure_defaults()
             except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
                 database_available = False
                 database_error_message = (

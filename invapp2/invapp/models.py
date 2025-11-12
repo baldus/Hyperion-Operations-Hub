@@ -198,6 +198,119 @@ class Printer(db.Model):
         return f"{self.host}{port_display}"
 
 
+class GembaCategory(db.Model):
+    __tablename__ = "gemba_category"
+
+    name = db.Column(db.String(32), primary_key=True)
+    description = db.Column(db.Text, nullable=True)
+
+    DEFAULT_DEFINITIONS: ClassVar[dict[str, str]] = {
+        "Safety": "Track incidents, hazards, and other safety signals to keep every shift protected.",
+        "Quality": "Monitor defects, complaints, and rework to ensure customers receive top-tier products.",
+        "Delivery": "Measure schedule adherence and throughput to stay on track for customer commitments.",
+        "People": "Review staffing, training, and engagement metrics that influence team performance.",
+        "Material": "Watch inventory availability, shortages, and purchasing activity to keep material flowing.",
+    }
+
+    @classmethod
+    def ensure_defaults(cls) -> None:
+        existing = {
+            category.name: category
+            for category in cls.query.filter(cls.name.in_(cls.DEFAULT_DEFINITIONS)).all()
+        }
+
+        created = False
+        for name, description in cls.DEFAULT_DEFINITIONS.items():
+            category = existing.get(name)
+            if category is None:
+                db.session.add(cls(name=name, description=description))
+                created = True
+            elif description and not category.description:
+                category.description = description
+                created = True
+
+        if created:
+            db.session.commit()
+
+
+class GembaMetric(db.Model):
+    __tablename__ = "gemba_metric"
+
+    CATEGORIES: ClassVar[tuple[str, ...]] = (
+        "Safety",
+        "Quality",
+        "Delivery",
+        "People",
+        "Material",
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    category = db.Column(db.String(32), db.ForeignKey("gemba_category.name"), nullable=False)
+    department = db.Column(db.String(120), nullable=True)
+    metric_name = db.Column(db.String(255), nullable=False)
+    metric_value = db.Column(db.Numeric(14, 4), nullable=False)
+    target_value = db.Column(db.Numeric(14, 4), nullable=True)
+    unit = db.Column(db.String(32), nullable=True)
+    date = db.Column(db.Date, nullable=False, default=date.today)
+    notes = db.Column(db.Text, nullable=True)
+    linked_record_url = db.Column(db.String(512), nullable=True)
+
+    category_rel = db.relationship(
+        "GembaCategory",
+        backref=db.backref("metrics", lazy="dynamic"),
+    )
+
+    links = db.relationship(
+        "GembaLink",
+        backref="metric",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        db.Index("ix_gemba_metric_category_date", "category", "date"),
+        db.Index("ix_gemba_metric_department", "department"),
+    )
+
+    @classmethod
+    def normalize_category(cls, value: str) -> str:
+        normalized = (value or "").strip()
+        for option in cls.CATEGORIES:
+            if normalized.lower() == option.lower():
+                return option
+        raise ValueError(f"Unsupported category: {value!r}")
+
+    @staticmethod
+    def _to_float(value: Decimal | None) -> float | None:
+        if value is None:
+            return None
+        return float(value)
+
+    def metric_value_float(self) -> float | None:
+        return self._to_float(self.metric_value)
+
+    def target_value_float(self) -> float | None:
+        return self._to_float(self.target_value)
+
+    def performance_ratio(self) -> float | None:
+        actual = self.metric_value_float()
+        target = self.target_value_float()
+        if actual is None or target in (None, 0.0):
+            return None
+        return actual / target if target else None
+
+
+class GembaLink(db.Model):
+    __tablename__ = "gemba_link"
+
+    id = db.Column(db.Integer, primary_key=True)
+    metric_id = db.Column(
+        db.Integer, db.ForeignKey("gemba_metric.id", ondelete="CASCADE"), nullable=False
+    )
+    label = db.Column(db.String(255), nullable=False)
+    url = db.Column(db.String(512), nullable=False)
+
+
 class LabelTemplate(db.Model):
     __tablename__ = "label_template"
 
