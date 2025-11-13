@@ -16,6 +16,7 @@
                     {% for link in navigation_links() %}
                     <a href="{{ link.href }}" class="nav-btn">{{ link.label }}</a>
                     {% endfor %}
+                    <a href="{{ url_for('mdi.meeting_view') }}" class="nav-btn">MDI Dashboards</a>
                 </nav>
             </div>
             <div class="header-actions">
