@@ -4,6 +4,37 @@
 
 {% block extra_head %}
   <meta http-equiv="refresh" content="300" />
+  <style>
+    .mdi-category-card {
+      border-radius: 1.25rem;
+      overflow: hidden;
+    }
+
+    .mdi-category-card .card-header {
+      min-height: 5rem;
+    }
+
+    .mdi-entry-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      padding: 1.25rem;
+      background: var(--bs-body-bg);
+    }
+
+    .mdi-entry-card {
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .mdi-entry-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0.75rem 1.5rem rgba(15, 23, 42, 0.12);
+    }
+
+    .mdi-entry-card .card-body {
+      padding: 1rem 1.1rem;
+    }
+  </style>
 {% endblock %}
 
 {% block content %}
@@ -62,32 +93,37 @@
     </div>
   </form>
 
-  <div class="row g-4" id="category-grid">
+  <div class="row row-cols-1 row-cols-lg-2 row-cols-xl-3 row-cols-xxl-5 g-4" id="category-grid">
     {% for category, meta in category_meta.items() %}
-      <div class="col-12 col-md-6 col-xl-4">
-        <div class="card shadow-sm h-100" data-category="{{ category }}">
-          <div class="card-header bg-{{ meta.color }} text-white d-flex justify-content-between align-items-center">
-            <span class="category-title"><i class="bi {{ meta.icon }} me-2"></i>{{ category }}</span>
-            <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end metrics-summary">
-              <span class="badge bg-light text-dark item-count">{{ grouped_entries[category]|length }} items</span>
-              {% set metric_count = metrics_overview.get(category, {}).get('metric_count', 0) %}
-              {% if metric_count %}
-                <span class="badge bg-white text-dark border metrics-count">{{ metric_count }} metrics</span>
-              {% endif %}
+      <div class="col">
+        <section class="card shadow-sm border-0 h-100 mdi-category-card" data-category="{{ category }}">
+          <div class="card-header bg-{{ meta.color }} text-white d-flex flex-column gap-2">
+            <div class="d-flex justify-content-between align-items-center">
+              <span class="category-title fw-semibold text-uppercase">
+                <i class="bi {{ meta.icon }} me-2"></i>{{ category }}
+              </span>
+              <span class="badge bg-white text-dark fw-semibold">{{ grouped_entries[category]|length }} items</span>
             </div>
+            {% set metric_count = metrics_overview.get(category, {}).get('metric_count', 0) %}
+            {% if metric_count %}
+              <div class="small fw-semibold">{{ metric_count }} metrics updated</div>
+            {% endif %}
           </div>
           <div class="card-body p-0">
-            <div class="list-group list-group-flush">
+            <div class="mdi-entry-stack">
               {% if grouped_entries[category] %}
                 {% for entry in grouped_entries[category] %}
-                  {% include 'components/category_card.html' %}
+                  {% include 'components/category_card.html' with context %}
                 {% endfor %}
               {% else %}
-                <div class="p-4 text-center text-muted empty-state">No entries logged.</div>
+                <div class="text-center text-muted py-5">
+                  <i class="bi bi-clipboard-data mb-2 d-block fs-3"></i>
+                  No entries logged for {{ category }} yet.
+                </div>
               {% endif %}
             </div>
           </div>
-        </div>
+        </section>
       </div>
     {% endfor %}
   </div>

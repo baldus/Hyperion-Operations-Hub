@@ -1,67 +1,71 @@
-<a href="{{ url_for('mdi.report_entry', id=entry.id) }}" class="list-group-item list-group-item-action py-3">
-  <div class="d-flex w-100 justify-content-between align-items-start">
-    <h6 class="mb-1">
-      {% if entry.category == 'Delivery' %}
-        {{ entry.item_description or 'Delivery Item' }}
-      {% elif entry.category == 'People' %}
-        People Update
-      {% else %}
-        {{ (entry.description or 'No description provided')[:80] }}{% if entry.description and entry.description|length > 80 %}...{% endif %}
-      {% endif %}
-    </h6>
-    {% if entry.status %}
-      <span class="badge bg-{{ status_badges.get(entry.status, 'secondary') }}">{{ entry.status }}</span>
-    {% endif %}
-  </div>
-
-  {% if entry.category in ['Safety', 'Quality', 'Materials', 'Delivery'] %}
-    <p class="mb-1 text-muted small">
-      {% if entry.category != 'People' %}
-        <strong>Owner:</strong> {{ entry.owner or 'Unassigned' }}
-        {% if entry.priority %}&middot; <strong>Priority:</strong> {{ entry.priority }}{% endif %}
-      {% endif %}
-    </p>
-  {% endif %}
-
-  {% if entry.category == 'Safety' %}
-    <div class="small text-muted">
-      Area: {{ entry.area or 'N/A' }}
-    </div>
-  {% elif entry.category == 'Quality' %}
-    <div class="small text-muted">
-      Area: {{ entry.area or 'N/A' }}
-      {% if entry.related_reference %}&middot; Reference: {{ entry.related_reference }}{% endif %}
-    </div>
-  {% elif entry.category == 'Delivery' %}
-    <div class="small text-muted">
-      {% if entry.order_number %}Order: {{ entry.order_number }}{% endif %}
-      {% if entry.customer %}&middot; Customer: {{ entry.customer }}{% endif %}
-      {% if entry.due_date %}&middot; Due: {{ entry.due_date.strftime('%b %d, %Y') }}{% endif %}
-    </div>
-    {% if entry.notes %}
-      <div class="mt-2 small text-muted">
-        {{ entry.notes[:120] }}{% if entry.notes|length > 120 %}...{% endif %}
+<a href="{{ url_for('mdi.report_entry', id=entry.id) }}" class="text-decoration-none text-reset">
+  <article class="mdi-entry-card card border-0 shadow-sm h-100 border-start border-4 border-{{ meta.color }}">
+    <div class="card-body d-flex flex-column gap-2">
+      <div class="d-flex justify-content-between align-items-start">
+        <div class="d-flex flex-column gap-1">
+          {% if entry.priority %}
+            <span class="badge text-bg-light text-uppercase fw-semibold align-self-start">{{ entry.priority }}</span>
+          {% endif %}
+          <h6 class="mb-0 fw-semibold">
+            {% if entry.category == 'Delivery' %}
+              {{ entry.item_description or 'Delivery Item' }}
+            {% elif entry.category == 'People' %}
+              People Update
+            {% else %}
+              {{ entry.description or 'No description provided' }}
+            {% endif %}
+          </h6>
+        </div>
+        {% if entry.status %}
+          <span class="badge bg-{{ status_badges.get(entry.status, 'secondary') }}">{{ entry.status }}</span>
+        {% endif %}
       </div>
-    {% endif %}
-  {% elif entry.category == 'People' %}
-    <p class="mb-1 text-muted small">
-      <strong>Absentees:</strong> {{ entry.number_absentees if entry.number_absentees is not none else 'N/A' }}
-      &middot;
-      <strong>Open Positions:</strong> {{ entry.open_positions if entry.open_positions is not none else 'N/A' }}
-    </p>
-  {% elif entry.category == 'Materials' %}
-    <div class="small text-muted">
-      {% if entry.item_part_number %}Part: {{ entry.item_part_number }}{% endif %}
-      {% if entry.vendor %}&middot; Vendor: {{ entry.vendor }}{% endif %}
-      {% if entry.eta %}&middot; ETA: {{ entry.eta }}{% endif %}
-      {% if entry.po_number %}&middot; PO: {{ entry.po_number }}{% endif %}
-    </div>
-    {% if entry.area %}
-      <div class="small text-muted">Area: {{ entry.area }}</div>
-    {% endif %}
-  {% endif %}
 
-  <div class="mt-2 small text-muted">
-    Logged: {{ entry.date_logged.strftime('%b %d, %Y') if entry.date_logged else 'N/A' }}
-  </div>
+      <div class="text-muted small">
+        <i class="bi bi-person-circle me-1"></i>{{ entry.owner or 'Unassigned' }}
+        {% if entry.area %}
+          &middot;
+          <i class="bi bi-geo-alt ms-1 me-1"></i>{{ entry.area }}
+        {% endif %}
+      </div>
+
+      {% if entry.category == 'Safety' %}
+        <div class="small text-muted">
+          Review focus: {{ entry.related_reference or 'Observation' }}
+        </div>
+      {% elif entry.category == 'Quality' %}
+        <div class="small text-muted">
+          {% if entry.related_reference %}Reference: {{ entry.related_reference }} &middot; {% endif %}
+          Logged {{ entry.date_logged.strftime('%b %d, %Y') if entry.date_logged else 'N/A' }}
+        </div>
+      {% elif entry.category == 'Delivery' %}
+        <dl class="row row-cols-2 small text-muted g-1 mb-0">
+          <dt class="col">Order</dt>
+          <dd class="col mb-0">{{ entry.order_number or 'N/A' }}</dd>
+          <dt class="col">Due</dt>
+          <dd class="col mb-0">{{ entry.due_date.strftime('%b %d, %Y') if entry.due_date else 'N/A' }}</dd>
+        </dl>
+        {% if entry.notes %}
+          <div class="small text-muted">{{ entry.notes[:140] }}{% if entry.notes|length > 140 %}...{% endif %}</div>
+        {% endif %}
+      {% elif entry.category == 'People' %}
+        <div class="d-flex flex-wrap gap-2 small text-muted">
+          <span><strong>Absentees:</strong> {{ entry.number_absentees if entry.number_absentees is not none else 'N/A' }}</span>
+          <span><strong>Open Roles:</strong> {{ entry.open_positions if entry.open_positions is not none else 'N/A' }}</span>
+        </div>
+      {% elif entry.category == 'Materials' %}
+        <div class="small text-muted">
+          {% if entry.item_part_number %}Part {{ entry.item_part_number }}{% endif %}
+          {% if entry.vendor %}&middot; Vendor {{ entry.vendor }}{% endif %}
+          {% if entry.eta %}&middot; ETA {{ entry.eta }}{% endif %}
+          {% if entry.po_number %}&middot; PO {{ entry.po_number }}{% endif %}
+        </div>
+      {% endif %}
+
+      <div class="d-flex justify-content-between align-items-center text-muted small pt-2 border-top">
+        <span><i class="bi bi-calendar-event me-1"></i>{{ entry.date_logged.strftime('%b %d, %Y') if entry.date_logged else 'N/A' }}</span>
+        <span class="fw-semibold">View details →</span>
+      </div>
+    </div>
+  </article>
 </a>

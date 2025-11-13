@@ -134,7 +134,7 @@
                 </a>
                 <form
                   method="post"
-                action="{{ url_for('mdi.delete_entry', entry_id=entry.id) }}"
+                action="{{ url_for('mdi.report_delete_entry', entry_id=entry.id) }}"
                   onsubmit="return confirm('Delete this entry?');"
                 >
                   <button type="submit" class="btn btn-sm btn-outline-danger">
