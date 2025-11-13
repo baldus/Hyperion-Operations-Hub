@@ -1,0 +1,67 @@
+<a href="{{ url_for('report.report_entry', id=entry.id) }}" class="list-group-item list-group-item-action py-3">
+  <div class="d-flex w-100 justify-content-between align-items-start">
+    <h6 class="mb-1">
+      {% if entry.category == 'Delivery' %}
+        {{ entry.item_description or 'Delivery Item' }}
+      {% elif entry.category == 'People' %}
+        People Update
+      {% else %}
+        {{ (entry.description or 'No description provided')[:80] }}{% if entry.description and entry.description|length > 80 %}...{% endif %}
+      {% endif %}
+    </h6>
+    {% if entry.status %}
+      <span class="badge bg-{{ status_badges.get(entry.status, 'secondary') }}">{{ entry.status }}</span>
+    {% endif %}
+  </div>
+
+  {% if entry.category in ['Safety', 'Quality', 'Materials', 'Delivery'] %}
+    <p class="mb-1 text-muted small">
+      {% if entry.category != 'People' %}
+        <strong>Owner:</strong> {{ entry.owner or 'Unassigned' }}
+        {% if entry.priority %}&middot; <strong>Priority:</strong> {{ entry.priority }}{% endif %}
+      {% endif %}
+    </p>
+  {% endif %}
+
+  {% if entry.category == 'Safety' %}
+    <div class="small text-muted">
+      Area: {{ entry.area or 'N/A' }}
+    </div>
+  {% elif entry.category == 'Quality' %}
+    <div class="small text-muted">
+      Area: {{ entry.area or 'N/A' }}
+      {% if entry.related_reference %}&middot; Reference: {{ entry.related_reference }}{% endif %}
+    </div>
+  {% elif entry.category == 'Delivery' %}
+    <div class="small text-muted">
+      {% if entry.order_number %}Order: {{ entry.order_number }}{% endif %}
+      {% if entry.customer %}&middot; Customer: {{ entry.customer }}{% endif %}
+      {% if entry.due_date %}&middot; Due: {{ entry.due_date.strftime('%b %d, %Y') }}{% endif %}
+    </div>
+    {% if entry.notes %}
+      <div class="mt-2 small text-muted">
+        {{ entry.notes[:120] }}{% if entry.notes|length > 120 %}...{% endif %}
+      </div>
+    {% endif %}
+  {% elif entry.category == 'People' %}
+    <p class="mb-1 text-muted small">
+      <strong>Absentees:</strong> {{ entry.number_absentees if entry.number_absentees is not none else 'N/A' }}
+      &middot;
+      <strong>Open Positions:</strong> {{ entry.open_positions if entry.open_positions is not none else 'N/A' }}
+    </p>
+  {% elif entry.category == 'Materials' %}
+    <div class="small text-muted">
+      {% if entry.item_part_number %}Part: {{ entry.item_part_number }}{% endif %}
+      {% if entry.vendor %}&middot; Vendor: {{ entry.vendor }}{% endif %}
+      {% if entry.eta %}&middot; ETA: {{ entry.eta }}{% endif %}
+      {% if entry.po_number %}&middot; PO: {{ entry.po_number }}{% endif %}
+    </div>
+    {% if entry.area %}
+      <div class="small text-muted">Area: {{ entry.area }}</div>
+    {% endif %}
+  {% endif %}
+
+  <div class="mt-2 small text-muted">
+    Logged: {{ entry.date_logged.strftime('%b %d, %Y') if entry.date_logged else 'N/A' }}
+  </div>
+</a>

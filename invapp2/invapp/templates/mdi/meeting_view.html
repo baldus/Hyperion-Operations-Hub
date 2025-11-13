@@ -1,0 +1,100 @@
+{% extends 'base.html' %}
+
+{% block title %}MDI Meeting View{% endblock %}
+
+{% block extra_head %}
+  <meta http-equiv="refresh" content="300" />
+{% endblock %}
+
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center flex-wrap mb-4">
+    <div>
+      <h1 class="display-6 fw-bold">MDI Meeting Dashboard</h1>
+      <p class="text-muted mb-0">Live updates across Safety, Quality, Delivery, People, and Materials</p>
+      <small class="text-muted">Last refreshed {{ current_time.strftime('%Y-%m-%d %H:%M UTC') }}</small>
+    </div>
+    <div class="btn-group mt-3 mt-md-0" role="group">
+      <a class="btn btn-outline-primary" href="{{ url_for('report.report_entry') }}">
+        <i class="bi bi-plus-circle"></i> Add Item
+      </a>
+      <a class="btn btn-outline-success" href="{{ url_for('report.export_csv') }}">
+        <i class="bi bi-download"></i> Export CSV
+      </a>
+      <form class="btn-group" action="{{ url_for('report.import_csv') }}" method="post" enctype="multipart/form-data">
+        <label class="btn btn-outline-secondary mb-0">
+          <i class="bi bi-upload"></i> Upload CSV
+          <input class="d-none" type="file" name="file" accept=".csv" onchange="this.form.submit()" />
+        </label>
+      </form>
+      <button class="btn btn-outline-secondary" id="refresh-btn">
+        <i class="bi bi-arrow-repeat"></i> Refresh
+      </button>
+    </div>
+  </div>
+
+  <form class="row gy-2 gx-3 align-items-end mb-4" method="get">
+    <div class="col-sm-3">
+      <label for="filter-category" class="form-label">Category</label>
+      <select class="form-select" name="category" id="filter-category">
+        <option value="">All</option>
+        {% for category in category_meta.keys() %}
+          <option value="{{ category }}" {% if filters.category == category %}selected{% endif %}>{{ category }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-3">
+      <label for="filter-status" class="form-label">Status</label>
+      <select class="form-select" name="status" id="filter-status">
+        <option value="">All</option>
+        {% for status in status_badges.keys() %}
+          <option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ status }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-3">
+      <label for="filter-date" class="form-label">Date</label>
+      <input type="date" class="form-control" name="date" id="filter-date" value="{{ filters.date }}" />
+    </div>
+    <div class="col-sm-3">
+      <button type="submit" class="btn btn-primary w-100">
+        <i class="bi bi-funnel"></i> Apply Filters
+      </button>
+    </div>
+  </form>
+
+  <div class="row g-4" id="category-grid">
+    {% for category, meta in category_meta.items() %}
+      <div class="col-12 col-md-6 col-xl-4">
+        <div class="card shadow-sm h-100" data-category="{{ category }}">
+          <div class="card-header bg-{{ meta.color }} text-white d-flex justify-content-between align-items-center">
+            <span class="category-title"><i class="bi {{ meta.icon }} me-2"></i>{{ category }}</span>
+            <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end metrics-summary">
+              <span class="badge bg-light text-dark item-count">{{ grouped_entries[category]|length }} items</span>
+              {% set metric_count = metrics_overview.get(category, {}).get('metric_count', 0) %}
+              {% if metric_count %}
+                <span class="badge bg-white text-dark border metrics-count">{{ metric_count }} metrics</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="card-body p-0">
+            <div class="list-group list-group-flush">
+              {% if grouped_entries[category] %}
+                {% for entry in grouped_entries[category] %}
+                  {% include 'components/category_card.html' %}
+                {% endfor %}
+              {% else %}
+                <div class="p-4 text-center text-muted empty-state">No entries logged.</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% endblock %}
+
+{% block extra_scripts %}
+  <script>
+    document.getElementById('refresh-btn').addEventListener('click', () => window.location.reload());
+  </script>
+{% endblock %}

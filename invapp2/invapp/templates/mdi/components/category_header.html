@@ -1,0 +1,23 @@
+<div class="category-header d-flex flex-column flex-md-row align-items-center justify-content-between gap-3 mb-4">
+  <a
+    class="btn btn-outline-secondary category-nav-arrow"
+    href="{{ nav_links.prev.url }}"
+    aria-label="Go to {{ nav_links.prev.name }}"
+  >
+    <i class="bi bi-arrow-left"></i>
+  </a>
+  <div class="text-center flex-grow-1">
+    <p class="text-uppercase text-muted small mb-1">MDI Category</p>
+    <h1 class="h3 mb-1" style="color: {{ category_color }};">{{ category }}</h1>
+    {% if subtitle %}
+      <p class="text-muted mb-0">{{ subtitle }}</p>
+    {% endif %}
+  </div>
+  <a
+    class="btn btn-outline-secondary category-nav-arrow"
+    href="{{ nav_links.next.url }}"
+    aria-label="Go to {{ nav_links.next.name }}"
+  >
+    <i class="bi bi-arrow-right"></i>
+  </a>
+</div>
