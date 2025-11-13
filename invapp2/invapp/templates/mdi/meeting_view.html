@@ -1,231 +1,123 @@
 {% extends 'base.html' %}
+{% import 'mdi/components/assets.html' as mdi_assets %}
 
 {% block title %}MDI Meeting View{% endblock %}
 
+{% block content_card_class %}content-card--mdi content-card--flush{% endblock %}
+
 {% block extra_head %}
-  <link
-    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
-    rel="stylesheet"
-    integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
-    crossorigin="anonymous"
-  />
-  <link
-    rel="stylesheet"
-    href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
-  />
+  {{ super() }}
+  {{ mdi_assets.head_assets() }}
   <meta http-equiv="refresh" content="300" />
-  <style>
-    :root {
-      --mdi-lane-radius: 1.4rem;
-      --mdi-stack-height: clamp(28rem, 62vh, 75vh);
-    }
-
-    .mdi-toolbar .btn {
-      border-radius: 999px;
-      padding-inline: 1.25rem;
-    }
-
-    .mdi-board {
-      display: grid;
-      gap: 1.5rem;
-      align-items: start;
-      grid-template-columns: repeat(auto-fit, minmax(15.5rem, 1fr));
-    }
-
-    @media (min-width: 1600px) {
-      .mdi-board {
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-      }
-    }
-
-    .mdi-lane {
-      border-radius: var(--mdi-lane-radius);
-      box-shadow: 0 1.5rem 2.5rem rgba(15, 23, 42, 0.08);
-      background: var(--bs-body-bg);
-      display: flex;
-      flex-direction: column;
-      min-height: 100%;
-      overflow: hidden;
-      border: 1px solid rgba(15, 23, 42, 0.08);
-    }
-
-    .mdi-lane-header {
-      padding: 1.25rem 1.5rem;
-      min-height: 5.5rem;
-    }
-
-    .mdi-lane-header .category-title {
-      letter-spacing: 0.06em;
-    }
-
-    .mdi-lane-header .badge {
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.18);
-      color: #fff;
-    }
-
-    .mdi-entry-stack {
-      flex: 1 1 auto;
-      max-height: var(--mdi-stack-height);
-      overflow-y: auto;
-      padding: 1.25rem 1.25rem 1.5rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.85rem;
-      background: linear-gradient(180deg, rgba(15, 23, 42, 0.02), transparent 45%);
-    }
-
-    .mdi-entry-stack::-webkit-scrollbar {
-      width: 0.4rem;
-    }
-
-    .mdi-entry-stack::-webkit-scrollbar-thumb {
-      background: rgba(15, 23, 42, 0.2);
-      border-radius: 999px;
-    }
-
-    .mdi-empty-state {
-      border: 1px dashed rgba(15, 23, 42, 0.2);
-      border-radius: 1rem;
-      padding: 2.5rem 1.5rem;
-    }
-
-    .mdi-entry-card {
-      border-radius: 1rem;
-      border: 1px solid rgba(15, 23, 42, 0.08);
-      box-shadow: 0 0.75rem 1.6rem rgba(15, 23, 42, 0.06);
-      transition: transform 120ms ease, box-shadow 120ms ease;
-      display: block;
-      background: #fff;
-    }
-
-    .mdi-entry-card:hover {
-      transform: translateY(-3px);
-      box-shadow: 0 1.2rem 2.2rem rgba(15, 23, 42, 0.18);
-      text-decoration: none;
-    }
-
-    .mdi-entry-card__title {
-      font-size: 0.95rem;
-    }
-
-    .mdi-pill {
-      border-radius: 999px;
-      font-size: 0.75rem;
-      padding: 0.1rem 0.75rem;
-      background: rgba(15, 23, 42, 0.06);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      font-weight: 600;
-    }
-
-    .mdi-pill--status {
-      color: #fff;
-    }
-
-    .mdi-entry-divider {
-      height: 1px;
-      background: rgba(15, 23, 42, 0.08);
-      margin: 0.85rem 0;
-    }
-
-    .mdi-entry-meta {
-      font-size: 0.8rem;
-    }
-  </style>
 {% endblock %}
 
 {% block content %}
-  <div class="d-flex justify-content-between align-items-center flex-wrap mb-4">
-    <div>
-      <h1 class="display-6 fw-bold">MDI Meeting Dashboard</h1>
-      <p class="text-muted mb-0">Live updates across Safety, Quality, Delivery, People, and Materials</p>
-      <small class="text-muted">Last refreshed {{ current_time.strftime('%Y-%m-%d %H:%M UTC') }}</small>
+  <div class="mdi-page">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+      <div>
+        <p class="text-uppercase text-muted small mb-1">Management for Daily Improvement</p>
+        <h1 class="display-6 fw-bold">MDI Meeting Dashboard</h1>
+        <p class="text-muted mb-0">Live updates across Safety, Quality, Delivery, People, and Materials</p>
+        <small class="text-muted">Last refreshed {{ current_time.strftime('%Y-%m-%d %H:%M UTC') }}</small>
+      </div>
+      <div class="mdi-toolbar btn-group mt-3 mt-md-0" role="group">
+        <a class="btn btn-outline-primary" href="{{ url_for('mdi.report_entry') }}">
+          <i class="bi bi-plus-circle"></i> Add Item
+        </a>
+        <a class="btn btn-outline-success" href="{{ url_for('mdi.report_export_csv') }}">
+          <i class="bi bi-download"></i> Export CSV
+        </a>
+        <form class="btn-group" action="{{ url_for('mdi.report_import_csv') }}" method="post" enctype="multipart/form-data">
+          <label class="btn btn-outline-secondary mb-0">
+            <i class="bi bi-upload"></i> Upload CSV
+            <input class="d-none" type="file" name="file" accept=".csv" onchange="this.form.submit()" />
+          </label>
+        </form>
+        <button class="btn btn-outline-secondary" id="refresh-btn" type="button">
+          <i class="bi bi-arrow-repeat"></i> Refresh
+        </button>
+      </div>
     </div>
-    <div class="mdi-toolbar btn-group mt-3 mt-md-0" role="group">
-      <a class="btn btn-outline-primary" href="{{ url_for('mdi.report_entry') }}">
-        <i class="bi bi-plus-circle"></i> Add Item
-      </a>
-      <a class="btn btn-outline-success" href="{{ url_for('mdi.report_export_csv') }}">
-        <i class="bi bi-download"></i> Export CSV
-      </a>
-      <form class="btn-group" action="{{ url_for('mdi.report_import_csv') }}" method="post" enctype="multipart/form-data">
-        <label class="btn btn-outline-secondary mb-0">
-          <i class="bi bi-upload"></i> Upload CSV
-          <input class="d-none" type="file" name="file" accept=".csv" onchange="this.form.submit()" />
-        </label>
-      </form>
-      <button class="btn btn-outline-secondary" id="refresh-btn">
-        <i class="bi bi-arrow-repeat"></i> Refresh
-      </button>
-    </div>
-  </div>
 
-  <form class="row gy-2 gx-3 align-items-end mb-4" method="get">
-    <div class="col-sm-3">
-      <label for="filter-category" class="form-label">Category</label>
-      <select class="form-select" name="category" id="filter-category">
-        <option value="">All</option>
-        {% for category in category_meta.keys() %}
-          <option value="{{ category }}" {% if filters.category == category %}selected{% endif %}>{{ category }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="col-sm-3">
-      <label for="filter-status" class="form-label">Status</label>
-      <select class="form-select" name="status" id="filter-status">
-        <option value="">All</option>
-        {% for status in status_badges.keys() %}
-          <option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ status }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="col-sm-3">
-      <label for="filter-date" class="form-label">Date</label>
-      <input type="date" class="form-control" name="date" id="filter-date" value="{{ filters.date }}" />
-    </div>
-    <div class="col-sm-3">
-      <button type="submit" class="btn btn-primary w-100">
-        <i class="bi bi-funnel"></i> Apply Filters
-      </button>
-    </div>
-  </form>
+    <form class="row gy-2 gx-3 align-items-end mb-4 mdi-filter-form" method="get">
+      <div class="col-sm-3">
+        <label for="filter-category" class="form-label">Category</label>
+        <select class="form-select" name="category" id="filter-category">
+          <option value="">All</option>
+          {% for category in category_meta.keys() %}
+            <option value="{{ category }}" {% if filters.category == category %}selected{% endif %}>{{ category }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-sm-3">
+        <label for="filter-status" class="form-label">Status</label>
+        <select class="form-select" name="status" id="filter-status">
+          <option value="">All</option>
+          {% for status in status_badges.keys() %}
+            <option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ status }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-sm-3">
+        <label for="filter-date" class="form-label">Date</label>
+        <input type="date" class="form-control" name="date" id="filter-date" value="{{ filters.date }}" />
+      </div>
+      <div class="col-sm-3">
+        <button type="submit" class="btn btn-primary w-100">
+          <i class="bi bi-funnel"></i> Apply Filters
+        </button>
+      </div>
+    </form>
 
-  <div class="mdi-board" id="category-grid">
-    {% for category, meta in category_meta.items() %}
-      <section class="mdi-lane" data-category="{{ category }}">
-        <header class="mdi-lane-header bg-{{ meta.color }} text-white">
-          <div class="d-flex justify-content-between align-items-start gap-3">
-            <span class="category-title fw-semibold text-uppercase">
-              <i class="bi {{ meta.icon }} me-2"></i>{{ category }}
-            </span>
-            <span class="badge border-0">{{ grouped_entries[category]|length }} items</span>
-          </div>
-          {% set metric_count = metrics_overview.get(category, {}).get('metric_count', 0) %}
-          {% if metric_count %}
-            <div class="small fw-semibold opacity-75 mt-2">{{ metric_count }} metrics updated</div>
-          {% endif %}
-        </header>
-        <div class="mdi-entry-stack">
-          {% if grouped_entries[category] %}
-            {% for entry in grouped_entries[category] %}
-              {% include 'components/category_card.html' with context %}
-            {% endfor %}
-          {% else %}
-            <div class="mdi-empty-state text-center text-muted">
-              <i class="bi bi-clipboard-data fs-3 mb-3 d-block"></i>
-              <p class="mb-0">No entries logged for {{ category }} yet.</p>
-              <small>Use “Add Item” to create the first record.</small>
+    <div
+      class="mdi-board"
+      id="category-grid"
+      data-api-url="{{ url_for('mdi.api_get_entries') }}"
+      data-entry-url="{{ url_for('mdi.report_entry') }}"
+      data-status-badges='{{ status_badges | tojson }}'
+      data-category-meta='{{ category_meta | tojson }}'
+    >
+      {% for category, meta in category_meta.items() %}
+        <section class="mdi-lane" data-category="{{ category }}">
+          <header class="mdi-lane-header bg-{{ meta.color }} text-white">
+            <div class="d-flex justify-content-between align-items-start gap-3">
+              <span class="category-title fw-semibold text-uppercase">
+                <i class="bi {{ meta.icon }} me-2"></i>{{ category }}
+              </span>
+              <span class="badge border-0" data-category-count>{{ grouped_entries[category]|length }} items</span>
             </div>
-          {% endif %}
-        </div>
-      </section>
-    {% endfor %}
+            {% set metric_count = metrics_overview.get(category, {}).get('metric_count', 0) %}
+            <div class="metrics-summary mt-2 text-white-50">
+              <span data-metric-count>
+                {% if metric_count %}
+                  {{ metric_count }} metrics updated
+                {% else %}
+                  No metrics logged yet
+                {% endif %}
+              </span>
+            </div>
+          </header>
+          <div class="mdi-entry-stack" data-category-stack>
+            {% if grouped_entries[category] %}
+              {% for entry in grouped_entries[category] %}
+                {% include 'components/category_card.html' with context %}
+              {% endfor %}
+            {% else %}
+              <div class="mdi-empty-state text-center text-muted">
+                <i class="bi bi-clipboard-data fs-3 mb-3 d-block"></i>
+                <p class="mb-0">No entries logged for {{ category }} yet.</p>
+                <small>Use “Add Item” to create the first record.</small>
+              </div>
+            {% endif %}
+          </div>
+        </section>
+      {% endfor %}
+    </div>
   </div>
 {% endblock %}
 
 {% block extra_scripts %}
-  <script>
-    document.getElementById('refresh-btn').addEventListener('click', () => window.location.reload());
-  </script>
+  {{ super() }}
+  {{ mdi_assets.script_assets() }}
+  <script src="{{ url_for('mdi.static', filename='js/main.js') }}" defer></script>
 {% endblock %}

@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <title>Hyperion Operations Module</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    {% block extra_head %}{% endblock %}
 </head>
 <body class="{{ session.get('theme', 'dark') }}">
     <header>
@@ -49,7 +50,7 @@
     </header>
 
     <main>
-        <div class="content-card">
+        <div class="content-card {% block content_card_class %}{% endblock %}">
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
                     <ul class="flashes">

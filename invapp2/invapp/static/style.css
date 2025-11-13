@@ -518,6 +518,25 @@ body.light .content-card {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
+.content-card--mdi {
+    width: min(1800px, 98vw);
+    padding: clamp(20px, 2.5vw, 48px);
+}
+
+.content-card--flush {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    background-color: transparent;
+    box-shadow: none;
+}
+
+body.light .content-card--flush {
+    background-color: transparent;
+    box-shadow: none;
+}
+
 .lead {
     margin-bottom: 1.5rem;
     font-size: 1.1rem;
