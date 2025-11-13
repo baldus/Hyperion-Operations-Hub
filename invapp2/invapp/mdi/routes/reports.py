@@ -2,9 +2,14 @@ from datetime import datetime
 import csv
 from io import StringIO, BytesIO
 
-from flask import Blueprint, flash, redirect, render_template, request, send_file, url_for
+import csv
+from datetime import datetime
+from io import BytesIO, StringIO
 
-from models.mdi_models import CATEGORY_DISPLAY, CategoryMetric, MDIEntry, STATUS_BADGES, db
+from flask import flash, redirect, render_template, request, send_file, url_for
+
+from invapp.extensions import db
+from invapp.mdi.models import CATEGORY_DISPLAY, CategoryMetric, MDIEntry, STATUS_BADGES
 
 
 DEFAULT_STATUS_OPTIONS = ["Open", "In Progress", "Closed"]
@@ -44,12 +49,6 @@ ENTRY_EXPORT_COLUMNS = [
     "Created At",
     "Updated At",
 ]
-
-
-report_bp = Blueprint("report", __name__, template_folder="../templates")
-
-
-@report_bp.route("/mdi/report")
 def report_entry():
     entry_id = request.args.get("id")
     entry = MDIEntry.query.get(entry_id) if entry_id else None
@@ -71,9 +70,6 @@ def report_entry():
         default_open_positions=previous_open_positions,
         initial_category=initial_category,
     )
-
-
-@report_bp.route("/mdi/report/add", methods=["POST"])
 def add_entry():
     entry = MDIEntry()
     _populate_entry_from_form(entry, request.form)
@@ -84,29 +80,26 @@ def add_entry():
     db.session.add(entry)
     db.session.commit()
     flash("MDI entry added successfully", "success")
-    return redirect(url_for("meeting.meeting_view"))
+    return redirect(url_for("mdi.meeting_view"))
 
 
-@report_bp.route("/mdi/report/update/<int:entry_id>", methods=["POST"])
 def update_entry(entry_id):
     entry = MDIEntry.query.get_or_404(entry_id)
     _populate_entry_from_form(entry, request.form)
     entry.updated_at = datetime.utcnow()
     db.session.commit()
     flash("MDI entry updated", "info")
-    return redirect(url_for("meeting.meeting_view"))
+    return redirect(url_for("mdi.meeting_view"))
 
 
-@report_bp.route("/mdi/report/delete/<int:entry_id>", methods=["POST"])
 def delete_entry(entry_id):
     entry = MDIEntry.query.get_or_404(entry_id)
     db.session.delete(entry)
     db.session.commit()
     flash("MDI entry deleted", "warning")
-    return redirect(url_for("meeting.meeting_view"))
+    return redirect(url_for("mdi.meeting_view"))
 
 
-@report_bp.route("/mdi/report/export/csv")
 def export_csv():
     entries = MDIEntry.query.order_by(MDIEntry.category, MDIEntry.priority.desc()).all()
     metrics = CategoryMetric.query.order_by(
@@ -188,20 +181,17 @@ def export_csv():
         as_attachment=True,
         download_name=f"mdi_data_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv",
     )
-
-
-@report_bp.route("/mdi/report/import/csv", methods=["POST"])
 def import_csv():
     upload = request.files.get("file")
     if upload is None or upload.filename == "":
         flash("Please choose a CSV file to upload.", "warning")
-        return redirect(url_for("meeting.meeting_view"))
+        return redirect(url_for("mdi.meeting_view"))
 
     try:
         payload = upload.stream.read().decode("utf-8-sig")
     except UnicodeDecodeError:
         flash("Unable to decode the uploaded file. Please ensure it is UTF-8 encoded.", "danger")
-        return redirect(url_for("meeting.meeting_view"))
+        return redirect(url_for("mdi.meeting_view"))
 
     reader = csv.reader(StringIO(payload))
 
@@ -314,7 +304,7 @@ def import_csv():
         db.session.rollback()
         flash(f"Failed to import CSV data: {exc}", "danger")
 
-    return redirect(url_for("meeting.meeting_view"))
+    return redirect(url_for("mdi.meeting_view"))
 
 
 def _populate_entry_from_form(entry, form):
@@ -381,6 +371,35 @@ def _parse_int(value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def register(bp):
+    bp.add_url_rule("/mdi/report", view_func=report_entry, methods=["GET"], endpoint="report_entry")
+    bp.add_url_rule("/mdi/report/add", view_func=add_entry, methods=["POST"], endpoint="report_add_entry")
+    bp.add_url_rule(
+        "/mdi/report/update/<int:entry_id>",
+        view_func=update_entry,
+        methods=["POST"],
+        endpoint="report_update_entry",
+    )
+    bp.add_url_rule(
+        "/mdi/report/delete/<int:entry_id>",
+        view_func=delete_entry,
+        methods=["POST"],
+        endpoint="report_delete_entry",
+    )
+    bp.add_url_rule(
+        "/mdi/report/export/csv",
+        view_func=export_csv,
+        methods=["GET"],
+        endpoint="report_export_csv",
+    )
+    bp.add_url_rule(
+        "/mdi/report/import/csv",
+        view_func=import_csv,
+        methods=["POST"],
+        endpoint="report_import_csv",
+    )
 
 
 def _clean_string(value):

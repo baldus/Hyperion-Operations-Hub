@@ -14,13 +14,13 @@
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
     />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('mdi.static', filename='css/styles.css') }}" />
     {% block extra_head %}{% endblock %}
   </head>
   <body class="bg-light">
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
       <div class="container-fluid">
-        <a class="navbar-brand" href="{{ url_for('meeting.meeting_view') }}">MDI Console</a>
+        <a class="navbar-brand" href="{{ url_for('mdi.meeting_view') }}">MDI Console</a>
         <button
           class="navbar-toggler"
           type="button"
@@ -35,13 +35,13 @@
         <div class="collapse navbar-collapse" id="navbarNav">
           <ul class="navbar-nav ms-auto">
             <li class="nav-item">
-              <a class="nav-link" href="{{ url_for('meeting.meeting_view') }}">Agenda</a>
+              <a class="nav-link" href="{{ url_for('mdi.meeting_view') }}">Agenda</a>
             </li>
             <li class="nav-item">
-              <a class="nav-link" href="{{ url_for('report.report_entry') }}">Report Entry</a>
+              <a class="nav-link" href="{{ url_for('mdi.report_entry') }}">Report Entry</a>
             </li>
             <li class="nav-item">
-              <a class="nav-link" href="{{ url_for('dashboard.safety_dashboard') }}">Meeting View</a>
+              <a class="nav-link" href="{{ url_for('mdi.safety_dashboard') }}">Meeting View</a>
             </li>
           </ul>
         </div>
@@ -67,7 +67,7 @@
       integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
       crossorigin="anonymous"
     ></script>
-    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script src="{{ url_for('mdi.static', filename='js/main.js') }}"></script>
     {% block extra_scripts %}{% endblock %}
   </body>
 </html>

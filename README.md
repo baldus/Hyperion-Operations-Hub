@@ -1,75 +1,133 @@
-# 🚀 Hyperion Operations Hub
+# Hyperion Operations Hub
 
-Hyperion Operations Hub is a Flask-based operations platform that unifies
-inventory control, production reporting, workstation management, and printer
-integrations for small-to-medium manufacturers. The application is designed to
-run comfortably on edge hardware such as a Raspberry Pi while still scaling to
-x86 mini PCs and centralized PostgreSQL deployments.
+Hyperion Operations Hub is a Flask-based manufacturing console that unifies
+inventory, production, purchasing, workstation, and reporting workflows behind a
+single login. It targets lightweight industrial deployments (Intel NUC,
+Raspberry Pi, or similar edge nodes) while scaling to centralized PostgreSQL.
 
----
-
-## 📚 Table of Contents
-- [Feature Overview](#-feature-overview)
-- [Architecture Snapshot](#-architecture-snapshot)
-- [Getting Started](#-getting-started)
-- [Environment Configuration](#-environment-configuration)
-- [Running & Development](#-running--development)
-- [Testing](#-testing)
-- [Deployment & Operations Docs](#-deployment--operations-docs)
-- [Contributing](#-contributing)
-- [License](#-license)
+The platform now embeds the KPI Board/"mdi-console" experience as the **MDI
+module** so teams can run their daily Management for Daily Improvement cadence
+without juggling a second service. All KPI dashboards, meeting views, CSV import
+utilities, and API endpoints live under Hyperion's authentication, database, and
+logging stack.
 
 ---
 
-## ✨ Feature Overview
+## Table of Contents
+1. [Platform Overview](#platform-overview)
+2. [MDI (KPI Board) Module](#mdi-kpi-board-module)
+3. [How the Integration Works](#how-the-integration-works)
+4. [Repository Layout](#repository-layout)
+5. [Developer Setup](#developer-setup)
+6. [Database Initialization](#database-initialization)
+7. [Running the Application](#running-the-application)
+8. [Accessing the MDI Dashboards](#accessing-the-mdi-dashboards)
+9. [Extending the MDI Module](#extending-the-mdi-module)
+10. [Operational Tips](#operational-tips)
+
+---
+
+## Platform Overview
 
 | Area | Highlights |
 |------|------------|
-| Inventory | Track items, batches, storage locations, and full movement history with CSV import/export and audit-ready logs. |
-| Production | Capture daily throughput, customer totals, routing steps, and workstation queues for live shop-floor visibility. |
-| Orders & Reservations | Model orders, BOM components, reservations, and consumption events to keep material usage synchronized. |
-| Purchasing & Quality | Log purchase requests, RMAs, and quality events with document storage for traceability. |
-| Workstations | Surface job queues, work instructions, and printer-ready labels for each station. |
-| Reporting | Export comprehensive ZIP bundles (items, locations, batches, movements) and render production charts. |
-| Labeling | Manage Zebra printer hosts, ZPL label templates, and process-to-template mappings. |
-| Security & Auditing | Role-based access controls, admin session timeouts, access logs, and default superuser bootstrapping. |
+| Inventory & Orders | Track items, batches, movements, reservations, and order BOMs with CSV import/export and audit history. |
+| Production | Capture daily output, workstation queues, and printer-ready labels with Zebra integrations. |
+| Purchasing & Quality | Manage purchase requests, RMAs, and quality notices including attachment storage. |
+| Workstations | Serve instructions, schedules, and barcode workflows tailored for each station. |
+| Reporting | Export bundled data packs and view live dashboards surfaced on the home screen. |
+| Security | Role-based permissions, emergency offline access, and admin auditing baked into the app factory. |
 
 ---
 
-## 🧱 Architecture Snapshot
+## MDI (KPI Board) Module
 
-| Layer | Technology |
-|-------|------------|
-| Web Application | Flask with Blueprints, WTForms, and Jinja2 templates |
-| Persistence | SQLAlchemy ORM backed by PostgreSQL |
-| Task Execution | Synchronous request handling with gunicorn (WSGI) |
-| Front-end | Server-rendered UI optimized for dark themes and barcode input |
-| Platform | Linux edge hardware (Raspberry Pi, Intel NUC, or similar mini PC) |
+The `invapp.mdi` package is the transplanted **kpi-board** (formerly
+`mdi_console`) application. It adds:
 
-Repository layout (trimmed to the most relevant directories):
+* `/mdi/meeting` – Kanban-style meeting deck with category cards and CSV tools.
+* `/mdi/report` – CRUD interface for MDI entries, attendance, shortages, etc.
+* `/mdi/<category>` – Category dashboards for Safety, Quality, Delivery, People,
+  and Materials with charts powered by seeded demo data.
+* `/api/mdi_entries` – JSON API consumed by the dashboard JavaScript for live
+  filtering and automation hooks.
+
+All templates extend Hyperion's `base.html`, static assets live under
+`invapp/static/mdi`, and SQLAlchemy models reuse the shared
+`invapp.extensions.db` instance so KPI metrics are persisted in the same
+PostgreSQL database as the rest of the platform.
+
+---
+
+## How the Integration Works
+
+1. **Blueprint** – `invapp.mdi.mdi_bp` registers routes, templates, and static
+   assets with `template_folder="../templates/mdi"` and
+   `static_folder="../static/mdi"` to reuse Hyperion's directory tree.
+2. **Routes** – The original `mdi_console` routes were converted into a single
+   blueprint with modules for `meeting`, `dashboard`, `reports`, and `api`.
+   Every route imports from `invapp.mdi` and uses `url_for('mdi.*')`, removing
+   the duplicated Flask app from the donor project.
+3. **Models** – `invapp.mdi.models` now imports `db` from `invapp.extensions`
+   instead of instantiating its own `SQLAlchemy()`. The `ensure_schema()` helper
+   runs during app startup alongside the legacy schema migrations to add the MDI
+   tables/columns when missing, and `seed_data()` loads demo content.
+4. **Templates & Static Files** – All donor HTML/JS/CSS moved into
+   `invapp/templates/mdi` and `invapp/static/mdi`. Template references were
+   updated to extend Hyperion's base layout and use the `mdi` blueprint’s
+   endpoints.
+5. **App Factory** – `invapp/__init__.py` imports `mdi_bp`, registers the
+   blueprint, and invokes `mdi_models.ensure_schema()` plus
+   `mdi_models.seed_data()` after the legacy schema preparation so new installs
+   automatically expose the KPI features.
+
+---
+
+## Repository Layout
 
 ```
 invapp2/
-├── app.py                 # Gunicorn entry point
-├── config.py              # Configuration defaults & upload paths
+├── app.py
+├── config.py
+├── requirements.txt
+├── start_inventory.sh
 ├── invapp/
-│   ├── __init__.py        # App factory, blueprints, navigation metadata
-│   ├── models.py          # SQLAlchemy models for inventory, production, auth, printers
-│   ├── routes/            # Feature blueprints: inventory, orders, purchasing, quality, etc.
-│   ├── templates/         # HTML templates grouped per feature
-│   └── static/            # Compiled assets and uploaded documents
-├── requirements.txt       # Python dependencies
-└── start_inventory.sh     # Helper script for provisioning and launching gunicorn
+│   ├── __init__.py          # App factory + blueprint registration (incl. MDI)
+│   ├── extensions.py        # Shared db/login manager
+│   ├── models.py            # Core inventory/production/auth models
+│   ├── mdi/
+│   │   ├── __init__.py      # mdi_bp blueprint definition
+│   │   ├── models.py        # MDIEntry & CategoryMetric models + seed helpers
+│   │   └── routes/
+│   │       ├── api.py       # /api/mdi_entries CRUD
+│   │       ├── dashboard.py # Safety/Quality/Delivery/People/Materials pages
+│   │       ├── meeting.py   # /mdi/meeting deck
+│   │       └── reports.py   # /mdi/report CRUD & CSV import/export
+│   ├── routes/              # Inventory, orders, purchasing, etc.
+│   ├── templates/
+│   │   ├── base.html
+│   │   └── mdi/
+│   │       ├── base.html
+│   │       ├── meeting_view.html
+│   │       ├── report_entry.html
+│   │       ├── components/*.html
+│   │       └── category templates (safety, quality, delivery, people, materials)
+│   └── static/
+│       ├── js/, css/, uploads…
+│       └── mdi/
+│           ├── css/styles.css
+│           └── js/{main.js, charts.js}
+└── start_operations_console.sh
 ```
 
 ---
 
-## 🛠 Getting Started
+## Developer Setup
 
 ### Prerequisites
-- Python 3.10+
-- PostgreSQL 13+ with `libpq` client libraries
-- `git`, `pip`, `setuptools`, and `wheel`
+* Python 3.10+
+* PostgreSQL 13+ with `libpq` headers (`libpq-dev`) and client libs (`libpq5`)
+* `git`, `pip`, `setuptools`, `wheel`
 
 ### Clone & Install
 ```bash
@@ -81,123 +139,127 @@ pip install --upgrade pip setuptools wheel
 pip install -r requirements.txt
 ```
 
-### Initialize the Database
-Configure environment variables (see below), then create the schema:
-
+### Configure Environment
+Set the database URL, secret key, and bootstrap credentials before launching:
 ```bash
 export DB_URL="postgresql+psycopg2://USER:PASSWORD@localhost/invdb"
 export SECRET_KEY="change_me"
 export ADMIN_USER="superuser"
 export ADMIN_PASSWORD="change_me"
-flask --app app shell <<'PYTHON'
-from invapp.extensions import db
+```
+Optional knobs (see `invapp2/config.py`) include printer hosts, attachment
+extension allow-lists, and admin session timeouts.
+
+---
+
+## Database Initialization
+
+Running `create_app()` automatically:
+1. Pings the configured PostgreSQL instance.
+2. Calls `db.create_all()` for the core models and the MDI models.
+3. Applies legacy schema migrations (`_ensure_inventory_schema`, etc.).
+4. Executes `mdi_models.ensure_schema()` and `mdi_models.seed_data()` to provision
+   the KPI tables plus demo content.
+5. Seeds the admin account and role definitions.
+
+For a manual bootstrap:
+```bash
+cd Hyperion-Operations-Hub/invapp2
+source .venv/bin/activate
+flask --app app shell <<'PY'
 from invapp import create_app
+from invapp.extensions import db
 app = create_app()
 with app.app_context():
     db.create_all()
-PYTHON
+PY
 ```
-
-If you are running on Raspberry Pi or Debian-based systems, ensure the `libpq5`
-and `libpq-dev` packages are installed before installing `psycopg2`.
+The first launch performs the same migration + seeding steps, so no separate
+migration tool is required.
 
 ---
 
-## ⚙️ Environment Configuration
+## Running the Application
 
-All configuration values are read from environment variables with sane defaults
-defined in [`invapp2/config.py`](invapp2/config.py). Common options include:
-
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `DB_URL` | SQLAlchemy connection string for PostgreSQL. | `postgresql+psycopg2://inv:change_me@localhost/invdb` |
-| `SECRET_KEY` | Flask session secret. | `supersecret` |
-| `ADMIN_USER` / `ADMIN_PASSWORD` | Seed credentials for the superuser created on startup. | `superuser` / `joshbaldus` |
-| `ADMIN_SESSION_TIMEOUT` | Idle timeout (seconds) for admin pages. | `300` |
-| `ZEBRA_PRINTER_HOST` / `ZEBRA_PRINTER_PORT` | Default Zebra printer host and port. | `localhost` / `9100` |
-| `WORK_INSTRUCTION_ALLOWED_EXTENSIONS` | File types accepted for uploaded work instructions. | `{"pdf"}` |
-| `ITEM_ATTACHMENT_ALLOWED_EXTENSIONS` | Allowed item attachment file types. | `{"pdf","png","jpg","jpeg"}` |
-| `QUALITY_ATTACHMENT_ALLOWED_EXTENSIONS` | Allowed RMA/quality attachment types. | Multiple formats (PDF, Office, images, CSV, TXT). |
-
-Uploaded documents are stored under `invapp2/invapp/static/...` by default; make
-sure the service account has write access to these directories in production.
-
----
-
-## 🏃 Running & Development
-
-Start the production-ready WSGI server with gunicorn:
-
+### Development Server
 ```bash
-gunicorn --bind 0.0.0.0:8000 app:app
-```
-
-For local development you can use the Flask development server (not
-recommended for production):
-
-```bash
+cd Hyperion-Operations-Hub/invapp2
+source .venv/bin/activate
 flask --app app run --debug
 ```
 
-The helper script [`start_inventory.sh`](invapp2/start_inventory.sh) bundles
-virtual environment creation, dependency installation, and gunicorn startup with
-sensible defaults—ideal for first-time provisioning. For the full operations
-console, use [`start_operations_console.sh`](start_operations_console.sh); it
-applies the same provisioning steps and launches gunicorn pointed at
-`app:app`.
-
-> **Heads-up:** The application now boots even if PostgreSQL is offline. When
-> this happens, the home page renders an alert that lists recovery commands
-> (checking the PostgreSQL service, starting it, confirming `DB_URL`, and
-> rerunning `./start_operations_console.sh`). This allows you to verify that the
-> web layer is healthy before tackling database connectivity. During this
-> degraded mode the console automatically enables *emergency offline access* so
-> you can open the admin diagnostics pages, launch the browser-based emergency
-> command console, restart PostgreSQL, or reinstall packages without logging in.
-
----
-
-## ✅ Testing
-
-Automated tests live under `invapp2/tests`. After activating the virtual
-environment, run:
-
+### Production-style (gunicorn)
 ```bash
-pytest
+cd Hyperion-Operations-Hub
+./start_operations_console.sh
+# or
+cd invapp2
+source .venv/bin/activate
+gunicorn --bind 0.0.0.0:8000 app:app
 ```
+`start_operations_console.sh` provisions the virtualenv, installs requirements,
+checks database connectivity, and launches gunicorn pointed at `app:app`.
+
+When PostgreSQL is unavailable the UI surfaces recovery guidance (service status
+checks, restarting the DB, confirming `DB_URL`) while still allowing emergency
+admin access so you can correct the outage.
 
 ---
 
-## 📦 Deployment & Operations Docs
+## Accessing the MDI Dashboards
 
-Additional, scenario-specific documentation lives under the [`docs/`](docs)
-directory:
+* **MDI Meeting View** – `GET /mdi/meeting`
+  * Filter cards by category, status, or date.
+  * Trigger CSV import/export and quick refresh actions.
+* **MDI Report Entry** – `GET /mdi/report`
+  * Provides a multi-category form with context-aware fields.
+  * Submit via `POST /mdi/report/add` or update via
+    `/mdi/report/update/<id>`.
+* **Category Dashboards** – `GET /mdi/safety`, `/mdi/quality`, `/mdi/delivery`,
+  `/mdi/people`, `/mdi/materials`
+  * Show chart blocks, attendance summaries, shortages, and quick links.
+* **JSON API** – `GET/POST/PUT/DELETE /api/mdi_entries`
+  * Consumed by `invapp/static/mdi/js/main.js`; use the same endpoints for
+    integrations or automations.
 
-- [`docs/HARDWARE.md`](docs/HARDWARE.md) — Quick hardware tiers for pilots,
-  small teams, and multi-workcell deployments.
-- [`docs/hardware-guide.md`](docs/hardware-guide.md) — Deep dive into bill of
-  materials, sizing, peripherals, and maintenance practices.
-- [`docs/deployment-guide.md`](docs/deployment-guide.md) — Step-by-step
-  provisioning guide for Raspberry Pi and Debian/Ubuntu hosts.
-- [`docs/database-schema.md`](docs/database-schema.md) — Entity relationship
-overview and table reference for inventory, production, and access control.
-
----
-
-## 🤝 Contributing
-
-1. Fork the repository.
-2. Create a feature branch: `git checkout -b feature/amazing-improvement`.
-3. Commit your changes: `git commit -am "Describe feature"`.
-4. Push to the branch: `git push origin feature/amazing-improvement`.
-5. Open a pull request and describe the context/test coverage.
-
-Bug reports and feature suggestions are always welcome—please include logs,
-steps to reproduce, and environment details when filing an issue.
+All routes inherit Hyperion's authentication/authorization middleware, so access
+is controlled via the same role definitions as the rest of the platform.
 
 ---
 
-## 📄 License
+## Extending the MDI Module
 
-This project is distributed under the MIT License. See [`LICENSE`](LICENSE) for
-full terms.
+1. **Add metrics or categories** – Update `CATEGORY_DISPLAY`,
+   `CATEGORY_SEQUENCE`, and `CATEGORY_METRIC_CONFIG` in
+   `invapp/mdi/routes/dashboard.py`. New cards automatically appear in the
+   meeting view once `CATEGORY_DISPLAY` includes them.
+2. **Add persistence fields** – Extend `MDIEntry` or `CategoryMetric` in
+   `invapp/mdi/models.py`. The `ensure_schema()` helper will append missing
+   columns to existing databases when the app restarts.
+3. **Expose new endpoints** – Define additional routes in
+   `invapp/mdi/routes/*.py` and decorate them with `@mdi_bp.route(...)`. The
+   template/static folders are already scoped to `invapp/templates/mdi` and
+   `invapp/static/mdi` so Jinja includes remain local to the module.
+4. **Seed additional demo data** – Modify `seed_data()` to pre-populate whatever
+   KPIs help showcase your deployment; it only inserts data when the tables are
+   empty.
+
+---
+
+## Operational Tips
+
+* **Backups** – Schedule `pg_dump` jobs for the PostgreSQL database; both core
+  inventory data and MDI KPIs live inside the same schema.
+* **Static uploads** – Grant write access to `invapp/static` (including
+  `invapp/static/mdi`) for the service account if running on hardened systems.
+* **Diagnostics** – Use the admin "Emergency Console" (under Settings) if the
+  database is offline; the UI exposes next-step commands to restart services.
+* **Testing** – `pytest` tests live under `invapp2/tests`. Activate the virtual
+  environment and run `pytest` before opening pull requests.
+
+---
+
+## License
+
+Hyperion Operations Hub is released under the MIT License. See
+[LICENSE](LICENSE) for details.

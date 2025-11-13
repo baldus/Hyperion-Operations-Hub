@@ -31,6 +31,8 @@ from .routes import (
     users,
     work,
 )
+from .mdi import init_blueprint, mdi_bp
+from .mdi import models as mdi_models
 from config import Config
 from . import models  # ensure models are registered with SQLAlchemy
 from .audit import record_access_event, resolve_client_ip
@@ -448,6 +450,8 @@ def create_app(config_override=None):
                 _ensure_inventory_schema(db.engine)
                 _ensure_order_schema(db.engine)
                 _ensure_production_schema(db.engine)
+                mdi_models.ensure_schema()
+                mdi_models.seed_data()
                 # ✅ ensure default production customers at startup
                 production._ensure_default_customers()
                 production._ensure_output_formula()
@@ -523,6 +527,8 @@ def create_app(config_override=None):
     app.register_blueprint(purchasing.bp)
     app.register_blueprint(quality.bp)
     app.register_blueprint(work.bp)
+    init_blueprint()
+    app.register_blueprint(mdi_bp)
     app.register_blueprint(settings.bp)
     app.register_blueprint(printers.bp)
     app.register_blueprint(production.bp)

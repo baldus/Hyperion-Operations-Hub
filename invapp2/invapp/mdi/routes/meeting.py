@@ -1,16 +1,11 @@
 from datetime import datetime
 
-from flask import Blueprint, render_template, request
-
+from flask import render_template, request
 from sqlalchemy import case
 
-from models.mdi_models import MDIEntry, CATEGORY_DISPLAY, STATUS_BADGES
+from invapp.mdi.models import CATEGORY_DISPLAY, MDIEntry, STATUS_BADGES
 
 
-meeting_bp = Blueprint("meeting", __name__, template_folder="../templates")
-
-
-@meeting_bp.route("/mdi/meeting")
 def meeting_view():
     status_filter = request.args.get("status")
     category_filter = request.args.get("category")
@@ -58,4 +53,8 @@ def meeting_view():
         },
         current_time=datetime.utcnow(),
     )
+
+
+def register(bp):
+    bp.add_url_rule("/mdi/meeting", view_func=meeting_view)
 

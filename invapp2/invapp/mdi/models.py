@@ -1,11 +1,9 @@
 from datetime import datetime, date, timedelta
 import random
 
-from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import inspect, text
 
-
-db = SQLAlchemy()
+from invapp.extensions import db
 
 
 class MDIEntry(db.Model):
