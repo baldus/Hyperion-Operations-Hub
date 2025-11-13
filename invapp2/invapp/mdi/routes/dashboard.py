@@ -4,21 +4,19 @@ from collections import defaultdict
 from datetime import date, timedelta
 from typing import Callable, Dict, Iterable, List, Tuple
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import flash, redirect, render_template, request, url_for
 
-from models.mdi_models import CATEGORY_DISPLAY, CategoryMetric, MDIEntry, STATUS_BADGES, db
-
-
-dashboard_bp = Blueprint("dashboard", __name__, template_folder="../templates")
+from invapp.extensions import db
+from invapp.mdi.models import CATEGORY_DISPLAY, CategoryMetric, MDIEntry, STATUS_BADGES
 
 
 CATEGORY_SEQUENCE = ["Safety", "Quality", "Delivery", "People", "Materials"]
 CATEGORY_ENDPOINTS = {
-    "Safety": "dashboard.safety_dashboard",
-    "Quality": "dashboard.quality_dashboard",
-    "Delivery": "dashboard.delivery_dashboard",
-    "People": "dashboard.people_dashboard",
-    "Materials": "dashboard.materials_dashboard",
+    "Safety": "mdi.safety_dashboard",
+    "Quality": "mdi.quality_dashboard",
+    "Delivery": "mdi.delivery_dashboard",
+    "People": "mdi.people_dashboard",
+    "Materials": "mdi.materials_dashboard",
 }
 
 
@@ -138,9 +136,6 @@ def safety_dashboard():  # pragma: no cover - registered via blueprint
     return render_template("safety.html", **context)
 
 
-dashboard_bp.add_url_rule("/mdi/safety", view_func=safety_dashboard, methods=["GET", "POST"])
-
-
 def quality_dashboard():  # pragma: no cover - registered via blueprint
     category = "Quality"
     if request.method == "POST" and _handle_metric_submission(category):
@@ -187,9 +182,6 @@ def quality_dashboard():  # pragma: no cover - registered via blueprint
     return render_template("quality.html", **context)
 
 
-dashboard_bp.add_url_rule("/mdi/quality", view_func=quality_dashboard, methods=["GET", "POST"])
-
-
 def delivery_dashboard():  # pragma: no cover - registered via blueprint
     category = "Delivery"
     if request.method == "POST" and _handle_metric_submission(category):
@@ -224,9 +216,6 @@ def delivery_dashboard():  # pragma: no cover - registered via blueprint
         **_metric_context(category),
     })
     return render_template("delivery.html", **context)
-
-
-dashboard_bp.add_url_rule("/mdi/delivery", view_func=delivery_dashboard, methods=["GET", "POST"])
 
 
 def people_dashboard():  # pragma: no cover - registered via blueprint
@@ -274,9 +263,6 @@ def people_dashboard():  # pragma: no cover - registered via blueprint
     return render_template("people.html", **context)
 
 
-dashboard_bp.add_url_rule("/mdi/people", view_func=people_dashboard, methods=["GET", "POST"])
-
-
 def materials_dashboard():  # pragma: no cover - registered via blueprint
     category = "Materials"
     entries = _entries_for_category(category)
@@ -311,9 +297,6 @@ def materials_dashboard():  # pragma: no cover - registered via blueprint
         **_metric_context(category),
     })
     return render_template("materials.html", **context)
-
-
-dashboard_bp.add_url_rule("/mdi/materials", view_func=materials_dashboard)
 
 
 def _base_context(category: str, subtitle: str) -> Dict[str, object]:
@@ -683,11 +666,18 @@ def _with_alpha(hex_color: str, alpha: float) -> str:
 
 
 __all__ = [
-    "dashboard_bp",
     "safety_dashboard",
     "quality_dashboard",
     "delivery_dashboard",
     "people_dashboard",
     "materials_dashboard",
 ]
+
+
+def register(bp):
+    bp.add_url_rule("/mdi/safety", view_func=safety_dashboard, methods=["GET", "POST"])
+    bp.add_url_rule("/mdi/quality", view_func=quality_dashboard, methods=["GET", "POST"])
+    bp.add_url_rule("/mdi/delivery", view_func=delivery_dashboard, methods=["GET", "POST"])
+    bp.add_url_rule("/mdi/people", view_func=people_dashboard, methods=["GET", "POST"])
+    bp.add_url_rule("/mdi/materials", view_func=materials_dashboard)
 

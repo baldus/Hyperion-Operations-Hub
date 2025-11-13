@@ -24,7 +24,7 @@
         data-collapse-show="Show Entries"
       >Hide Entries</span>
     </button>
-    <a class="btn btn-sm btn-primary" href="{{ url_for('report.report_entry') }}">
+    <a class="btn btn-sm btn-primary" href="{{ url_for('mdi.report_entry') }}">
       <i class="bi bi-plus-lg me-1"></i>
       Log Entry
     </a>
@@ -128,13 +128,13 @@
               </dl>
             {% endif %}
             <div class="mt-auto d-flex gap-2">
-              <a class="btn btn-sm btn-outline-primary" href="{{ url_for('report.report_entry', id=entry.id) }}">
+              <a class="btn btn-sm btn-outline-primary" href="{{ url_for('mdi.report_entry', id=entry.id) }}">
                 <i class="bi bi-pencil-square me-1"></i>
                   Edit
                 </a>
                 <form
                   method="post"
-                  action="{{ url_for('report.delete_entry', entry_id=entry.id) }}"
+                action="{{ url_for('mdi.delete_entry', entry_id=entry.id) }}"
                   onsubmit="return confirm('Delete this entry?');"
                 >
                   <button type="submit" class="btn btn-sm btn-outline-danger">

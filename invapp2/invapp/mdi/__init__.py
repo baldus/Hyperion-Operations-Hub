@@ -1,16 +1,32 @@
-# invapp2/invapp/__init__.py
+"""Blueprint registration for the integrated MDI module."""
+from __future__ import annotations
 
-def create_app(config_object=None):
-    app = Flask(__name__)
+from flask import Blueprint
 
-    # ... existing config & extension init ...
+from .routes import register_routes
 
-    # Existing blueprint imports (example)
-    # from invapp.routes.inventory import inventory_bp
-    # app.register_blueprint(inventory_bp)
+mdi_bp: Blueprint | None = None
 
-    # NEW: MDI blueprint
-    from invapp.mdi import mdi_bp
-    app.register_blueprint(mdi_bp)
 
-    return app
+def _build_blueprint() -> Blueprint:
+    bp = Blueprint(
+        "mdi",
+        __name__,
+        template_folder="../templates/mdi",
+        static_folder="../static/mdi",
+    )
+    register_routes(bp)
+    return bp
+
+
+def init_blueprint() -> Blueprint:
+    """Create a fresh blueprint so repeated app factories stay isolated."""
+    global mdi_bp
+    mdi_bp = _build_blueprint()
+    return mdi_bp
+
+
+# Initialize the module-level blueprint once so runtime imports can use it.
+init_blueprint()
+
+__all__ = ["mdi_bp", "init_blueprint"]

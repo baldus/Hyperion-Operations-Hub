@@ -14,13 +14,13 @@
       <small class="text-muted">Last refreshed {{ current_time.strftime('%Y-%m-%d %H:%M UTC') }}</small>
     </div>
     <div class="btn-group mt-3 mt-md-0" role="group">
-      <a class="btn btn-outline-primary" href="{{ url_for('report.report_entry') }}">
+      <a class="btn btn-outline-primary" href="{{ url_for('mdi.report_entry') }}">
         <i class="bi bi-plus-circle"></i> Add Item
       </a>
-      <a class="btn btn-outline-success" href="{{ url_for('report.export_csv') }}">
+      <a class="btn btn-outline-success" href="{{ url_for('mdi.export_csv') }}">
         <i class="bi bi-download"></i> Export CSV
       </a>
-      <form class="btn-group" action="{{ url_for('report.import_csv') }}" method="post" enctype="multipart/form-data">
+      <form class="btn-group" action="{{ url_for('mdi.import_csv') }}" method="post" enctype="multipart/form-data">
         <label class="btn btn-outline-secondary mb-0">
           <i class="bi bi-upload"></i> Upload CSV
           <input class="d-none" type="file" name="file" accept=".csv" onchange="this.form.submit()" />
