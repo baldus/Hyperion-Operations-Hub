@@ -9,6 +9,15 @@
   gap: 1.5rem;
 }
 
+body.dark .mdi-page {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+body.dark .mdi-page .text-muted,
+body.dark .mdi-page small {
+  color: rgba(255, 255, 255, 0.72) !important;
+}
+
 .mdi-toolbar .btn {
   border-radius: 999px;
   padding-inline: 1.25rem;
@@ -119,7 +128,9 @@ body.dark .mdi-empty-state {
   border: 1px solid rgba(15, 23, 42, 0.08);
   box-shadow: 0 0.75rem 1.6rem rgba(15, 23, 42, 0.06);
   transition: transform 120ms ease, box-shadow 120ms ease;
-  display: block;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   background: #fff;
 }
 
@@ -132,10 +143,25 @@ body.dark .mdi-empty-state {
 body.dark .mdi-entry-card {
   background: rgba(18, 24, 40, 0.95);
   border-color: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .mdi-entry-card__title {
   font-size: 0.95rem;
+}
+
+body.dark .mdi-entry-card__title {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+body.dark .mdi-entry-card .text-muted,
+body.dark .mdi-entry-card small {
+  color: rgba(255, 255, 255, 0.72) !important;
+}
+
+body.dark .mdi-entry-card .mdi-pill {
+  background: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .mdi-pill {
@@ -164,6 +190,32 @@ body.dark .mdi-entry-divider {
 
 .mdi-entry-meta {
   font-size: 0.8rem;
+}
+
+.mdi-entry-card__actions {
+  padding: 0.75rem 1rem 1.1rem;
+  border-top: 1px dashed rgba(15, 23, 42, 0.15);
+  background: rgba(15, 23, 42, 0.01);
+}
+
+.mdi-entry-card__actions .btn {
+  font-weight: 600;
+}
+
+body.dark .mdi-entry-card__actions {
+  border-top-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+body.dark .mdi-entry-card__actions .btn.btn-outline-success {
+  color: rgba(255, 255, 255, 0.85);
+  border-color: rgba(34, 197, 94, 0.7);
+}
+
+body.dark .mdi-entry-card__actions .btn.btn-outline-success:hover,
+body.dark .mdi-entry-card__actions .btn.btn-outline-success:focus {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.9);
 }
 
 .category-header {
