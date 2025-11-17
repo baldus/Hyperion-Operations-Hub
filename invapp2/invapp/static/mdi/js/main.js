@@ -102,6 +102,7 @@ function renderEntryCard(entry, categoryMeta, statusBadges, entryUrl) {
   const meta = categoryMeta[entry.category] || {};
   const color = meta.color || 'primary';
   const statusClass = statusToBadge(entry.status, statusBadges);
+  const entryNumber = String(entry.id).padStart(4, '0');
   const entryTitle = (() => {
     if (entry.category === 'Delivery') {
       return entry.item_description || entry.description || 'Delivery Item';
@@ -111,14 +112,30 @@ function renderEntryCard(entry, categoryMeta, statusBadges, entryUrl) {
     }
     return entry.description || 'No description provided';
   })();
+  const showCompleteButton = entry.status !== 'Closed';
+  const completeButton = showCompleteButton
+    ? `
+      <div class="mdi-entry-card__actions">
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-success w-100"
+          data-mark-complete
+          data-entry-id="${entry.id}"
+        >
+          <i class="bi bi-check2-circle me-1"></i>
+          Mark Complete
+        </button>
+      </div>
+    `
+    : '';
 
   return `
-    <a href="${entryUrl}?id=${entry.id}" class="mdi-entry-card text-reset">
-      <div class="p-3 d-flex flex-column gap-2">
+    <article class="mdi-entry-card" data-entry-id="${entry.id}">
+      <div class="p-3 d-flex flex-column gap-2 position-relative">
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
           <div class="d-flex align-items-center gap-2">
             ${entry.priority ? `<span class="mdi-pill text-${color} bg-${color}-subtle">${escapeHtml(entry.priority)}</span>` : ''}
-            <small class="text-muted">#${String(entry.id).padStart(4, '0')}</small>
+            <small class="text-muted">#${entryNumber}</small>
           </div>
           ${entry.status ? `<span class="mdi-pill mdi-pill--status bg-${statusClass}">${escapeHtml(entry.status)}</span>` : ''}
         </div>
@@ -136,8 +153,14 @@ function renderEntryCard(entry, categoryMeta, statusBadges, entryUrl) {
           <span><i class="bi bi-calendar-event me-1"></i>${formatDate(entry.date_logged)}</span>
           <span class="fw-semibold">View details →</span>
         </div>
+        <a
+          href="${entryUrl}?id=${entry.id}"
+          class="stretched-link"
+          aria-label="View entry #${entryNumber}"
+        ></a>
       </div>
-    </a>
+      ${completeButton}
+    </article>
   `;
 }
 
@@ -161,7 +184,7 @@ function refreshBoard(board) {
   const queryString = params.toString();
   const url = queryString ? `${apiUrl}?${queryString}` : apiUrl;
 
-  fetch(url)
+  return fetch(url)
     .then((response) => response.json())
     .then((entries) => {
       const grouped = entries.reduce((acc, entry) => {
@@ -199,6 +222,45 @@ function refreshBoard(board) {
     .catch((error) => console.error('Failed to refresh entries', error));
 }
 
+function markEntryComplete(entryId, button, board, onComplete) {
+  const updateBase = board.dataset.entryUpdateBase;
+  if (!updateBase) {
+    return;
+  }
+
+  const originalLabel = button.innerHTML;
+  button.disabled = true;
+  button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Closing…';
+
+  fetch(`${updateBase}${entryId}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ status: 'Closed' }),
+  })
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error('Failed to complete entry');
+      }
+      return response.json();
+    })
+    .then(() => {
+      button.innerHTML = '<i class="bi bi-check2-circle me-1"></i>Closed';
+      if (typeof onComplete === 'function') {
+        onComplete();
+      }
+    })
+    .catch((error) => {
+      console.error('Failed to complete entry', error);
+      button.disabled = false;
+      button.innerHTML = '<i class="bi bi-arrow-counterclockwise me-1"></i>Try again';
+      setTimeout(() => {
+        button.innerHTML = originalLabel;
+      }, 2000);
+    });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const board = document.getElementById('category-grid');
   if (!board) {
@@ -210,6 +272,20 @@ document.addEventListener('DOMContentLoaded', () => {
   if (refreshButton) {
     refreshButton.addEventListener('click', refresh);
   }
+
+  board.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-mark-complete]');
+    if (!button) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const entryId = button.getAttribute('data-entry-id');
+    if (!entryId) {
+      return;
+    }
+    markEntryComplete(entryId, button, board, refresh);
+  });
 
   refresh();
   setInterval(refresh, AUTO_REFRESH_INTERVAL);

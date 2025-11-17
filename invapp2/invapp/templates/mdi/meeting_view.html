@@ -74,6 +74,7 @@
       id="category-grid"
       data-api-url="{{ url_for('mdi.api_get_entries') }}"
       data-entry-url="{{ url_for('mdi.report_entry') }}"
+      data-entry-update-base="{{ url_for('mdi.api_update_entry', entry_id=0)[:-1] }}"
       data-status-badges='{{ status_badges | tojson }}'
       data-category-meta='{{ category_meta | tojson }}'
     >

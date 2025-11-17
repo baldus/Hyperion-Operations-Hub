@@ -1,5 +1,5 @@
-<a href="{{ url_for('mdi.report_entry', id=entry.id) }}" class="mdi-entry-card text-reset">
-  <div class="p-3 d-flex flex-column gap-2">
+<article class="mdi-entry-card" data-entry-id="{{ entry.id }}">
+  <div class="p-3 d-flex flex-column gap-2 position-relative">
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
       <div class="d-flex align-items-center gap-2">
         {% if entry.priority %}
@@ -70,5 +70,24 @@
       <span><i class="bi bi-calendar-event me-1"></i>{{ entry.date_logged.strftime('%b %d, %Y') if entry.date_logged else 'N/A' }}</span>
       <span class="fw-semibold">View details →</span>
     </div>
+
+    <a
+      href="{{ url_for('mdi.report_entry', id=entry.id) }}"
+      class="stretched-link"
+      aria-label="View entry #{{ '%04d'|format(entry.id) }}"
+    ></a>
   </div>
-</a>
+  {% if entry.status != 'Closed' %}
+    <div class="mdi-entry-card__actions">
+      <button
+        type="button"
+        class="btn btn-sm btn-outline-success w-100"
+        data-mark-complete
+        data-entry-id="{{ entry.id }}"
+      >
+        <i class="bi bi-check2-circle me-1"></i>
+        Mark Complete
+      </button>
+    </div>
+  {% endif %}
+</article>
