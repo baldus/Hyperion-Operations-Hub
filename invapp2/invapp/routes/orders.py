@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import re
 from collections import defaultdict
 from datetime import datetime
 
@@ -201,6 +202,97 @@ def _save_bom_template(item: Item, component_entries, *, replace_existing=False)
         )
 
     return template, created, (created or replaced)
+
+
+def _normalize_csv_key(field_name: str) -> str:
+    if not field_name:
+        return ""
+    return re.sub(r"[^a-z0-9]+", "_", field_name.strip().lower()).strip("_")
+
+
+def _parse_bulk_bom_rows(reader: csv.DictReader):
+    errors = []
+    normalized_fields = {
+        _normalize_csv_key(name): name for name in (reader.fieldnames or []) if name
+    }
+
+    assembly_field = normalized_fields.get("assembly")
+    component_field = normalized_fields.get("component") or normalized_fields.get(
+        "component_sku"
+    )
+    quantity_field = (
+        normalized_fields.get("component_qty")
+        or normalized_fields.get("component_quantity")
+        or normalized_fields.get("componentqty")
+    )
+    level_field = normalized_fields.get("level")
+
+    if not assembly_field or not component_field or not quantity_field:
+        errors.append(
+            "CSV must include columns for Assembly, Component, and Component Qty."
+        )
+        return {}, errors
+
+    bom_rows = defaultdict(lambda: defaultdict(int))
+    current_assembly = None
+
+    for row_index, row in enumerate(reader, start=2):
+        assembly_value = (row.get(assembly_field) or "").strip()
+        if assembly_value:
+            current_assembly = assembly_value
+
+        if not current_assembly:
+            meaningful_values = [
+                (value or "").strip() for value in row.values() if value is not None
+            ]
+            if not any(meaningful_values):
+                continue
+            errors.append(f"Row {row_index}: Assembly value is required.")
+            continue
+
+        component_value = (row.get(component_field) or "").strip()
+        quantity_value = (row.get(quantity_field) or "").strip()
+        level_value = (row.get(level_field) or "").strip() if level_field else ""
+
+        if not component_value and not quantity_value:
+            continue
+
+        try:
+            level_int = int(level_value) if level_value else None
+        except ValueError:
+            level_int = None
+
+        if level_int == 0 and not component_value:
+            continue
+
+        if not component_value:
+            errors.append(
+                f"Row {row_index}: Component value is required for assembly {current_assembly}."
+            )
+            continue
+
+        if not quantity_value:
+            errors.append(
+                f"Row {row_index}: Component quantity is required for assembly {current_assembly}."
+            )
+            continue
+
+        try:
+            quantity = int(quantity_value)
+            if quantity <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            errors.append(
+                f"Row {row_index}: Component quantity for {component_value} must be a positive integer."
+            )
+            continue
+
+        bom_rows[current_assembly][component_value] += quantity
+
+    if not bom_rows and not errors:
+        errors.append("No BOM component rows were found in the CSV file.")
+
+    return bom_rows, errors
 
 
 def _prepare_order_detail(order: Order, *, pending_completed_ids=None, selected_batches=None):
@@ -658,6 +750,120 @@ def bom_library():
         templates=templates,
         form_data=form_data,
         editing_template=editing_template,
+    )
+
+
+@bp.route("/bom-bulk-import", methods=["GET", "POST"])
+@require_roles("admin")
+def bom_bulk_import():
+    import_results = None
+
+    if request.method == "POST":
+        errors = []
+        upload = request.files.get("csv_file")
+        bom_rows = {}
+        item_lookup = {}
+
+        if upload is None or not upload.filename:
+            errors.append("A CSV file is required to import BOM templates.")
+        else:
+            try:
+                raw_content = upload.read().decode("utf-8-sig")
+            except UnicodeDecodeError:
+                errors.append("CSV import files must be UTF-8 encoded.")
+            else:
+                stream = io.StringIO(raw_content)
+                reader = csv.DictReader(stream)
+                if not reader.fieldnames:
+                    errors.append("CSV file is empty.")
+                else:
+                    bom_rows, parse_errors = _parse_bulk_bom_rows(reader)
+                    errors.extend(parse_errors)
+
+        if not errors and bom_rows:
+            assembly_skus = set(bom_rows.keys())
+            component_skus = {
+                component
+                for components in bom_rows.values()
+                for component in components.keys()
+            }
+            required_skus = assembly_skus | component_skus
+            items = (
+                Item.query.filter(Item.sku.in_(required_skus)).all()
+                if required_skus
+                else []
+            )
+            item_lookup = {item.sku: item for item in items}
+
+            missing_assemblies = sorted(
+                sku for sku in assembly_skus if sku not in item_lookup
+            )
+            missing_components = sorted(
+                sku for sku in component_skus if sku not in item_lookup
+            )
+
+            if missing_assemblies:
+                errors.append(
+                    "Assembly SKUs not found: " + ", ".join(missing_assemblies)
+                )
+            if missing_components:
+                errors.append(
+                    "Component SKUs not found: " + ", ".join(missing_components)
+                )
+
+        if not errors and bom_rows:
+            import_details = []
+            created_count = 0
+            updated_count = 0
+
+            for assembly_sku in sorted(bom_rows.keys()):
+                item = item_lookup[assembly_sku]
+                component_entries = [
+                    {"item": item_lookup[component_sku], "quantity": quantity}
+                    for component_sku, quantity in sorted(
+                        bom_rows[assembly_sku].items()
+                    )
+                ]
+
+                template, created, changed = _save_bom_template(
+                    item, component_entries, replace_existing=True
+                )
+                import_details.append(
+                    {
+                        "sku": assembly_sku,
+                        "component_count": len(component_entries),
+                        "created": created,
+                        "updated": (not created and changed),
+                    }
+                )
+                if created:
+                    created_count += 1
+                elif changed:
+                    updated_count += 1
+
+            db.session.commit()
+
+            unchanged_count = len(import_details) - created_count - updated_count
+            import_results = {
+                "total": len(import_details),
+                "created": created_count,
+                "updated": updated_count,
+                "unchanged": unchanged_count,
+                "details": import_details,
+            }
+
+            flash(
+                "Bulk import complete: "
+                f"{created_count} created, {updated_count} updated, {unchanged_count} unchanged.",
+                "success",
+            )
+        else:
+            for error in errors:
+                flash(error, "danger")
+
+    return render_template(
+        "orders/bom_bulk_import.html",
+        import_results=import_results,
     )
 
 
