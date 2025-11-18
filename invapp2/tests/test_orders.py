@@ -1,3 +1,4 @@
+import csv
 import io
 import json
 import os
@@ -13,6 +14,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from invapp import create_app
 from invapp.extensions import db
+from invapp.routes import orders as orders_routes
 from sqlalchemy.exc import IntegrityError
 
 from invapp.models import (
@@ -769,3 +771,26 @@ def test_bom_bulk_import_missing_components_blocks_import(client, app):
 
     with app.app_context():
         assert BillOfMaterial.query.count() == 0
+
+
+def test_bulk_import_column_override_parses_qty():
+    csv_text = "Assembly,Component,Qty\nFG-1,CMP-1,5\n"
+    reader = csv.DictReader(io.StringIO(csv_text))
+
+    bom_rows, errors = orders_routes._parse_bulk_bom_rows(
+        reader, column_overrides={"quantity": "qty"}
+    )
+
+    assert errors == []
+    assert bom_rows == {"FG-1": {"CMP-1": 5}}
+
+
+def test_bulk_import_column_override_missing_field_error():
+    csv_text = "Assembly,Component,Qty\nFG-1,CMP-1,5\n"
+    reader = csv.DictReader(io.StringIO(csv_text))
+
+    _, errors = orders_routes._parse_bulk_bom_rows(
+        reader, column_overrides={"quantity": "component qty"}
+    )
+
+    assert any("component qty" in error.lower() for error in errors)

@@ -210,22 +210,57 @@ def _normalize_csv_key(field_name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", field_name.strip().lower()).strip("_")
 
 
-def _parse_bulk_bom_rows(reader: csv.DictReader):
+def _resolve_csv_field(normalized_fields, override_name, fallback_keys, *, label):
+    if override_name:
+        normalized_override = _normalize_csv_key(override_name)
+        if normalized_override in normalized_fields:
+            return normalized_fields[normalized_override], None
+        return None, f"CSV does not include a column named '{override_name}' for {label}."
+
+    for key in fallback_keys:
+        if key in normalized_fields:
+            return normalized_fields[key], None
+
+    return None, None
+
+
+def _parse_bulk_bom_rows(reader: csv.DictReader, *, column_overrides=None):
+    if column_overrides is None:
+        column_overrides = {}
+
     errors = []
     normalized_fields = {
         _normalize_csv_key(name): name for name in (reader.fieldnames or []) if name
     }
 
-    assembly_field = normalized_fields.get("assembly")
-    component_field = normalized_fields.get("component") or normalized_fields.get(
-        "component_sku"
+    assembly_field, assembly_error = _resolve_csv_field(
+        normalized_fields,
+        column_overrides.get("assembly"),
+        ["assembly"],
+        label="Assembly",
     )
-    quantity_field = (
-        normalized_fields.get("component_qty")
-        or normalized_fields.get("component_quantity")
-        or normalized_fields.get("componentqty")
+    component_field, component_error = _resolve_csv_field(
+        normalized_fields,
+        column_overrides.get("component"),
+        ["component", "component_sku"],
+        label="Component",
     )
-    level_field = normalized_fields.get("level")
+    quantity_field, quantity_error = _resolve_csv_field(
+        normalized_fields,
+        column_overrides.get("quantity"),
+        ["component_qty", "component_quantity", "componentqty"],
+        label="Component Qty",
+    )
+    level_field, level_error = _resolve_csv_field(
+        normalized_fields,
+        column_overrides.get("level"),
+        ["level"],
+        label="Level",
+    )
+
+    for field_error in (assembly_error, component_error, quantity_error, level_error):
+        if field_error:
+            errors.append(field_error)
 
     if not assembly_field or not component_field or not quantity_field:
         errors.append(
@@ -763,6 +798,12 @@ def bom_bulk_import():
         upload = request.files.get("csv_file")
         bom_rows = {}
         item_lookup = {}
+        column_overrides = {
+            "assembly": request.form.get("assembly_column", "").strip() or None,
+            "component": request.form.get("component_column", "").strip() or None,
+            "quantity": request.form.get("quantity_column", "").strip() or None,
+            "level": request.form.get("level_column", "").strip() or None,
+        }
 
         if upload is None or not upload.filename:
             errors.append("A CSV file is required to import BOM templates.")
@@ -777,7 +818,9 @@ def bom_bulk_import():
                 if not reader.fieldnames:
                     errors.append("CSV file is empty.")
                 else:
-                    bom_rows, parse_errors = _parse_bulk_bom_rows(reader)
+                    bom_rows, parse_errors = _parse_bulk_bom_rows(
+                        reader, column_overrides=column_overrides
+                    )
                     errors.extend(parse_errors)
 
         if not errors and bom_rows:

@@ -21,6 +21,26 @@
                 <span class="field-label">CSV File</span>
                 <input type="file" name="csv_file" accept=".csv" required>
             </label>
+            <label class="form-field">
+                <span class="field-label">Assembly Column</span>
+                <input type="text" name="assembly_column" placeholder="Assembly" value="{{ request.form.get('assembly_column', '') }}">
+                <span class="field-help">Optional. Leave blank to auto-detect.</span>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Component Column</span>
+                <input type="text" name="component_column" placeholder="Component" value="{{ request.form.get('component_column', '') }}">
+                <span class="field-help">Optional. Leave blank to auto-detect.</span>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Component Qty Column</span>
+                <input type="text" name="quantity_column" placeholder="Component Qty" value="{{ request.form.get('quantity_column', '') }}">
+                <span class="field-help">Optional. Use when your file labels the column differently (e.g. Qty).</span>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Level Column</span>
+                <input type="text" name="level_column" placeholder="Level" value="{{ request.form.get('level_column', '') }}">
+                <span class="field-help">Optional. Only needed if the column name differs.</span>
+            </label>
         </div>
         <div class="form-actions">
             <button type="submit" class="action-btn">Import BOMs</button>
