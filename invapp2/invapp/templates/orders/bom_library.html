@@ -103,6 +103,10 @@
 
 <section class="form-section">
     <h3>Import from CSV</h3>
+    <p class="section-help">
+        Need to import multiple BOM templates at once?
+        <a href="{{ url_for('orders.bom_bulk_import') }}">Use the bulk import tool</a>.
+    </p>
     <form method="post" enctype="multipart/form-data" class="form-stack">
         <input type="hidden" name="action" value="import_csv">
         <div class="form-grid">

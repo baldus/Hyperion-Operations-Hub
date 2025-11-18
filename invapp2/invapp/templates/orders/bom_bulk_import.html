@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Bulk BOM Import</h2>
+<p class="section-help">
+    Upload a CSV that contains the following headers: <code>Assembly</code>, <code>Level</code>,
+    <code>Action</code>, <code>Notes</code>, <code>BOM_SizeHint</code>, <code>Line</code>,
+    <code>Component Qty</code>, <code>Component</code>, and
+    <code>Count of in Componet Column</code>.
+    Only the Assembly, Component, and Component Qty columns are required for each BOM row.
+</p>
+<p class="section-help">
+    When the Assembly column is blank the importer will reuse the most recent assembly value.
+    Level 0 rows are treated as assembly descriptions and are skipped automatically.
+</p>
+
+<section class="form-section">
+    <h3>Upload CSV</h3>
+    <form method="post" enctype="multipart/form-data" class="form-stack">
+        <div class="form-grid">
+            <label class="form-field">
+                <span class="field-label">CSV File</span>
+                <input type="file" name="csv_file" accept=".csv" required>
+            </label>
+        </div>
+        <div class="form-actions">
+            <button type="submit" class="action-btn">Import BOMs</button>
+            <a class="link-btn" href="{{ url_for('orders.bom_library') }}">Back to BOM Library</a>
+        </div>
+    </form>
+</section>
+
+{% if import_results %}
+<section class="form-section">
+    <h3>Import Summary</h3>
+    <p class="section-help">
+        {{ import_results.created }} created,
+        {{ import_results.updated }} updated,
+        {{ import_results.unchanged }} unchanged.
+    </p>
+    <div class="table-scroll">
+        <table class="form-table">
+            <thead>
+                <tr>
+                    <th>Assembly</th>
+                    <th>Components</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in import_results.details %}
+                <tr>
+                    <td class="finished-good">
+                        <span class="sku">{{ entry.sku }}</span>
+                    </td>
+                    <td>{{ entry.component_count }}</td>
+                    <td>
+                        {% if entry.created %}
+                            Created
+                        {% elif entry.updated %}
+                            Updated
+                        {% else %}
+                            Unchanged
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endif %}
+{% endblock %}

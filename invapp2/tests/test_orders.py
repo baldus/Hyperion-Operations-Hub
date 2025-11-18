@@ -700,3 +700,72 @@ def test_bom_library_csv_import_updates_template(client, app, items):
     with app.app_context():
         template = BillOfMaterial.query.filter_by(item_id=finished.id).one()
         assert template.components[0].quantity == 7
+
+
+def test_bom_bulk_import_creates_multiple_templates(client, app):
+    with app.app_context():
+        asm_one = Item(sku='ASM-1', name='Assembly One')
+        asm_two = Item(sku='ASM-2', name='Assembly Two')
+        cmp_a = Item(sku='CMP-A', name='Component A')
+        cmp_b = Item(sku='CMP-B', name='Component B')
+        db.session.add_all([asm_one, asm_two, cmp_a, cmp_b])
+        db.session.commit()
+
+    csv_content = (
+        "Assembly,Level,Action,Notes,BOM_SizeHint,Line,Component Qty,Component,Count of in Componet Column\n"
+        "ASM-1,0,,,,,,,\n"
+        ",1,,,,,2,CMP-A,\n"
+        ",1,,,,,3,CMP-B,\n"
+        "ASM-2,0,,,,,,,\n"
+        ",1,,,,,5,CMP-A,\n"
+    )
+    data = {
+        'csv_file': (io.BytesIO(csv_content.encode('utf-8')), 'bulk.csv'),
+    }
+
+    resp = client.post(
+        '/orders/bom-bulk-import',
+        data=data,
+        content_type='multipart/form-data',
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+
+    with app.app_context():
+        bom_one = BillOfMaterial.query.join(Item).filter(Item.sku == 'ASM-1').one()
+        bom_two = BillOfMaterial.query.join(Item).filter(Item.sku == 'ASM-2').one()
+        components_one = {
+            component.component_item.sku: component.quantity for component in bom_one.components
+        }
+        components_two = {
+            component.component_item.sku: component.quantity for component in bom_two.components
+        }
+        assert components_one == {'CMP-A': 2, 'CMP-B': 3}
+        assert components_two == {'CMP-A': 5}
+
+
+def test_bom_bulk_import_missing_components_blocks_import(client, app):
+    with app.app_context():
+        asm_one = Item(sku='ASM-3', name='Assembly Three')
+        db.session.add(asm_one)
+        db.session.commit()
+
+    csv_content = (
+        "Assembly,Level,Action,Notes,BOM_SizeHint,Line,Component Qty,Component,Count of in Componet Column\n"
+        "ASM-3,1,,,,,4,UNKNOWN,\n"
+    )
+    data = {
+        'csv_file': (io.BytesIO(csv_content.encode('utf-8')), 'bulk.csv'),
+    }
+
+    resp = client.post(
+        '/orders/bom-bulk-import',
+        data=data,
+        content_type='multipart/form-data',
+        follow_redirects=True,
+    )
+    body = resp.get_data(as_text=True)
+    assert 'Component SKUs not found' in body
+
+    with app.app_context():
+        assert BillOfMaterial.query.count() == 0
