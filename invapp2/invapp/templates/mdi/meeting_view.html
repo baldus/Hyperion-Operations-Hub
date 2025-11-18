@@ -53,6 +53,9 @@
         <label for="filter-status" class="form-label">Status</label>
         <select class="form-select" name="status" id="filter-status">
           <option value="">All</option>
+          <option value="{{ active_status_filter }}" {% if filters.status == active_status_filter %}selected{% endif %}>
+            Active (not Closed/Received)
+          </option>
           {% for status in status_badges.keys() %}
             <option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ status }}</option>
           {% endfor %}

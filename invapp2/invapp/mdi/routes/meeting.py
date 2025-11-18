@@ -5,6 +5,8 @@ from sqlalchemy import case
 
 from invapp.mdi.models import CATEGORY_DISPLAY, MDIEntry, STATUS_BADGES
 
+from .constants import ACTIVE_STATUS_FILTER, COMPLETED_STATUSES
+
 
 def meeting_view():
     status_filter = request.args.get("status")
@@ -12,7 +14,9 @@ def meeting_view():
     date_filter = request.args.get("date")
 
     query = MDIEntry.query
-    if status_filter:
+    if status_filter == ACTIVE_STATUS_FILTER:
+        query = query.filter(MDIEntry.status.notin_(COMPLETED_STATUSES))
+    elif status_filter:
         query = query.filter(MDIEntry.status == status_filter)
     if category_filter:
         query = query.filter(MDIEntry.category == category_filter)
@@ -51,6 +55,7 @@ def meeting_view():
             "category": category_filter,
             "date": date_filter,
         },
+        active_status_filter=ACTIVE_STATUS_FILTER,
         current_time=datetime.utcnow(),
     )
 

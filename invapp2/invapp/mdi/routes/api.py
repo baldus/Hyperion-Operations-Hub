@@ -6,6 +6,8 @@ from flask import jsonify, request
 from invapp.extensions import db
 from invapp.mdi.models import MDIEntry
 
+from .constants import ACTIVE_STATUS_FILTER, COMPLETED_STATUSES
+
 
 def get_entries():
     """Return the filtered list of MDI entries as JSON."""
@@ -16,7 +18,9 @@ def get_entries():
     query = MDIEntry.query
     if category:
         query = query.filter(MDIEntry.category == category)
-    if status:
+    if status == ACTIVE_STATUS_FILTER:
+        query = query.filter(MDIEntry.status.notin_(COMPLETED_STATUSES))
+    elif status:
         query = query.filter(MDIEntry.status == status)
     if date:
         try:
