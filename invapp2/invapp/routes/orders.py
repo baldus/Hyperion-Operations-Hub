@@ -828,6 +828,7 @@ def bom_library():
 @require_roles("admin")
 def bom_bulk_import():
     import_results = None
+    warnings: list[str] = []
 
     if request.method == "POST":
         errors = []
@@ -840,6 +841,18 @@ def bom_bulk_import():
             "quantity": request.form.get("quantity_column", "").strip() or None,
             "level": request.form.get("level_column", "").strip() or None,
         }
+
+        assembly_missing_handling = (
+            request.form.get("missing_assembly_handling") or "skip"
+        ).lower()
+        component_missing_handling = (
+            request.form.get("missing_component_handling") or "skip"
+        ).lower()
+        missing_handling_choices = {"skip", "abort"}
+        if assembly_missing_handling not in missing_handling_choices:
+            assembly_missing_handling = "skip"
+        if component_missing_handling not in missing_handling_choices:
+            component_missing_handling = "skip"
 
         if upload is None or not upload.filename:
             errors.append("A CSV file is required to import BOM templates.")
@@ -881,14 +894,55 @@ def bom_bulk_import():
                 sku for sku in component_skus if sku not in item_lookup
             )
 
+            import_cancelled = False
+
             if missing_assemblies:
-                errors.append(
-                    "Assembly SKUs not found: " + ", ".join(missing_assemblies)
-                )
-            if missing_components:
-                errors.append(
-                    "Component SKUs not found: " + ", ".join(missing_components)
-                )
+                if assembly_missing_handling == "abort":
+                    import_cancelled = True
+                    warnings.append(
+                        "Import cancelled because required assemblies are missing: "
+                        + ", ".join(missing_assemblies)
+                    )
+                else:
+                    for missing_sku in missing_assemblies:
+                        bom_rows.pop(missing_sku, None)
+                    warnings.append(
+                        "Skipped missing assemblies: " + ", ".join(missing_assemblies)
+                    )
+
+            if missing_components and not import_cancelled:
+                if component_missing_handling == "abort":
+                    import_cancelled = True
+                    warnings.append(
+                        "Import cancelled because required components are missing: "
+                        + ", ".join(missing_components)
+                    )
+                else:
+                    removed_components = 0
+                    assemblies_with_removed_components = set()
+
+                    for assembly_sku, components in list(bom_rows.items()):
+                        for component_sku in list(components.keys()):
+                            if component_sku in missing_components:
+                                removed_components += 1
+                                components.pop(component_sku, None)
+                                assemblies_with_removed_components.add(assembly_sku)
+
+                        if not components:
+                            bom_rows.pop(assembly_sku, None)
+
+                    if removed_components:
+                        warnings.append(
+                            "Skipped missing components: " + ", ".join(missing_components)
+                        )
+                    if assemblies_with_removed_components:
+                        warnings.append(
+                            "Removed empty BOM rows after filtering missing components for: "
+                            + ", ".join(sorted(assemblies_with_removed_components))
+                        )
+
+            if import_cancelled:
+                bom_rows = {}
 
         if not errors and bom_rows:
             import_details = []
@@ -920,25 +974,33 @@ def bom_bulk_import():
                 elif changed:
                     updated_count += 1
 
-            db.session.commit()
+            if import_details:
+                db.session.commit()
 
-            unchanged_count = len(import_details) - created_count - updated_count
-            import_results = {
-                "total": len(import_details),
-                "created": created_count,
-                "updated": updated_count,
-                "unchanged": unchanged_count,
-                "details": import_details,
-            }
+                unchanged_count = len(import_details) - created_count - updated_count
+                import_results = {
+                    "total": len(import_details),
+                    "created": created_count,
+                    "updated": updated_count,
+                    "unchanged": unchanged_count,
+                    "details": import_details,
+                }
 
-            flash(
-                "Bulk import complete: "
-                f"{created_count} created, {updated_count} updated, {unchanged_count} unchanged.",
-                "success",
-            )
+                flash(
+                    "Bulk import complete: "
+                    f"{created_count} created, {updated_count} updated, {unchanged_count} unchanged.",
+                    "success",
+                )
+            else:
+                warnings.append(
+                    "No BOM templates were imported because all rows were skipped or removed."
+                )
         else:
             for error in errors:
                 flash(error, "danger")
+
+        for warning in warnings:
+            flash(warning, "warning")
 
     return render_template(
         "orders/bom_bulk_import.html",

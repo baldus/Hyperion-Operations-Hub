@@ -747,7 +747,7 @@ def test_bom_bulk_import_creates_multiple_templates(client, app):
         assert components_two == {'CMP-A': 5}
 
 
-def test_bom_bulk_import_missing_components_blocks_import(client, app):
+def test_bom_bulk_import_missing_components_skips_rows_without_errors(client, app):
     with app.app_context():
         asm_one = Item(sku='ASM-3', name='Assembly Three')
         db.session.add(asm_one)
@@ -768,7 +768,41 @@ def test_bom_bulk_import_missing_components_blocks_import(client, app):
         follow_redirects=True,
     )
     body = resp.get_data(as_text=True)
-    assert 'Component SKUs not found' in body
+
+    assert 'Component SKUs not found' not in body
+    assert 'Skipped missing components: UNKNOWN' in body
+    assert 'Removed empty BOM rows after filtering missing components for: ASM-3' in body
+
+    with app.app_context():
+        assert BillOfMaterial.query.count() == 0
+
+
+def test_bom_bulk_import_missing_component_abort_option(client, app):
+    with app.app_context():
+        asm_one = Item(sku='ASM-4', name='Assembly Four')
+        cmp_one = Item(sku='CMP-4', name='Component Four')
+        db.session.add_all([asm_one, cmp_one])
+        db.session.commit()
+
+    csv_content = (
+        "Assembly,Level,Action,Notes,BOM_SizeHint,Line,Component Qty,Component,Count of in Componet Column\n"
+        "ASM-4,1,,,,,2,CMP-4,\n"
+        "ASM-4,1,,,,,1,UNKNOWN,\n"
+    )
+    data = {
+        'csv_file': (io.BytesIO(csv_content.encode('utf-8')), 'bulk.csv'),
+        'missing_component_handling': 'abort',
+    }
+
+    resp = client.post(
+        '/orders/bom-bulk-import',
+        data=data,
+        content_type='multipart/form-data',
+        follow_redirects=True,
+    )
+    body = resp.get_data(as_text=True)
+
+    assert 'Import cancelled because required components are missing: UNKNOWN' in body
 
     with app.app_context():
         assert BillOfMaterial.query.count() == 0

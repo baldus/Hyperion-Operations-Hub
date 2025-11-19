@@ -41,6 +41,24 @@
                 <input type="text" name="level_column" placeholder="Level" value="{{ request.form.get('level_column', '') }}">
                 <span class="field-help">Optional. Only needed if the column name differs.</span>
             </label>
+            <label class="form-field">
+                <span class="field-label">When assemblies are missing</span>
+                <select name="missing_assembly_handling">
+                    {% set assembly_strategy = request.form.get('missing_assembly_handling', 'skip') %}
+                    <option value="skip" {% if assembly_strategy == 'skip' %}selected{% endif %}>Skip missing assemblies</option>
+                    <option value="abort" {% if assembly_strategy == 'abort' %}selected{% endif %}>Cancel import if assemblies are missing</option>
+                </select>
+                <span class="field-help">Choose how the importer responds when an assembly SKU is not found.</span>
+            </label>
+            <label class="form-field">
+                <span class="field-label">When components are missing</span>
+                <select name="missing_component_handling">
+                    {% set component_strategy = request.form.get('missing_component_handling', 'skip') %}
+                    <option value="skip" {% if component_strategy == 'skip' %}selected{% endif %}>Skip missing components</option>
+                    <option value="abort" {% if component_strategy == 'abort' %}selected{% endif %}>Cancel import if components are missing</option>
+                </select>
+                <span class="field-help">Skip rows with missing components or stop the import instead.</span>
+            </label>
         </div>
         <div class="form-actions">
             <button type="submit" class="action-btn">Import BOMs</button>
