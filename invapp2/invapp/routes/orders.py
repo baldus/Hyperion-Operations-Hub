@@ -895,34 +895,21 @@ def bom_bulk_import():
                     if missing_by_sku
                     else []
                 )
-                created_skus = []
+                rekeyed_skus = []
                 for match in name_matches:
                     name_as_sku = (match.name or "").strip()
                     if not name_as_sku or name_as_sku in item_lookup:
                         continue
 
-                    new_item = Item(
-                        sku=name_as_sku,
-                        name=match.name,
-                        type=match.type,
-                        unit=match.unit,
-                        description=match.description,
-                        min_stock=match.min_stock,
-                        notes=match.notes,
-                        list_price=match.list_price,
-                        last_unit_cost=match.last_unit_cost,
-                        item_class=match.item_class,
-                    )
-                    db.session.add(new_item)
-                    db.session.delete(match)
-                    item_lookup[name_as_sku] = new_item
-                    created_skus.append(name_as_sku)
+                    match.sku = name_as_sku
+                    item_lookup[name_as_sku] = match
+                    rekeyed_skus.append(name_as_sku)
                     created_from_names = True
 
-                if created_skus:
+                if rekeyed_skus:
                     warnings.append(
-                        "Created items from Name column to match SKUs: "
-                        + ", ".join(sorted(created_skus))
+                        "Updated items whose Assembly IDs were in the Name column: "
+                        + ", ".join(sorted(rekeyed_skus))
                     )
 
             missing_assemblies = sorted(
