@@ -375,7 +375,7 @@ def inventory_home():
         .group_by(Movement.item_id)
         .all()
     )
-    on_hand_map = {item_id: int(total or 0) for item_id, total in movement_totals}
+    on_hand_map = {item_id: Decimal(total or 0) for item_id, total in movement_totals}
 
     reservation_totals = (
         db.session.query(
@@ -388,7 +388,7 @@ def inventory_home():
         .group_by(Reservation.item_id)
         .all()
     )
-    reserved_map = {item_id: int(total or 0) for item_id, total in reservation_totals}
+    reserved_map = {item_id: Decimal(total or 0) for item_id, total in reservation_totals}
 
     items = (
         Item.query.options(load_only(Item.id, Item.sku, Item.name, Item.min_stock))
@@ -456,15 +456,15 @@ def inventory_home():
         .all()
     )
 
-    required_by_item = defaultdict(int)
+    required_by_item = defaultdict(Decimal)
     order_refs = defaultdict(list)
     for order in waiting_orders:
         for line in order.order_lines:
-            line_quantity = int(line.quantity or 0)
+            line_quantity = Decimal(line.quantity or 0)
             if line_quantity <= 0:
                 continue
             for component in line.components:
-                component_quantity = int(component.quantity or 0)
+                component_quantity = Decimal(component.quantity or 0)
                 if component_quantity <= 0:
                     continue
                 total_required = component_quantity * line_quantity
@@ -482,9 +482,11 @@ def inventory_home():
 
     waiting_items = []
     for item_id, required_total in required_by_item.items():
-        available = on_hand_map.get(item_id, 0) - reserved_map.get(item_id, 0)
+        available = on_hand_map.get(item_id, Decimal(0)) - reserved_map.get(
+            item_id, Decimal(0)
+        )
         if available < 0:
-            available = 0
+            available = Decimal(0)
         shortage = required_total - available
         if shortage <= 0:
             continue
@@ -503,7 +505,7 @@ def inventory_home():
     def _build_chart_entries(source_map):
         entries = []
         for item_id, raw_value in source_map.items():
-            value = int(raw_value)
+            value = float(raw_value)
             if value <= 0:
                 continue
             item = items_by_id.get(item_id)
@@ -682,25 +684,29 @@ def create_purchase_request_from_waiting(item_id: int):
     def _create_request():
         item = Item.query.get_or_404(item_id)
 
-        total_on_hand = (
-            db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
-            .filter(Movement.item_id == item.id)
-            .scalar()
-        ) or 0
-        total_on_hand = int(total_on_hand)
-
-        reserved_total = (
-            db.session.query(func.coalesce(func.sum(Reservation.quantity), 0))
-            .join(OrderLine)
-            .join(Order)
-            .filter(
-                Reservation.item_id == item.id,
-                Order.status.in_(OrderStatus.RESERVABLE_STATES),
+        total_on_hand = Decimal(
+            (
+                db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+                .filter(Movement.item_id == item.id)
+                .scalar()
             )
-            .scalar()
-        ) or 0
-        reserved_total = int(reserved_total)
-        available_after_reservations = max(total_on_hand - reserved_total, 0)
+            or 0
+        )
+
+        reserved_total = Decimal(
+            (
+                db.session.query(func.coalesce(func.sum(Reservation.quantity), 0))
+                .join(OrderLine)
+                .join(Order)
+                .filter(
+                    Reservation.item_id == item.id,
+                    Order.status.in_(OrderStatus.RESERVABLE_STATES),
+                )
+                .scalar()
+            )
+            or 0
+        )
+        available_after_reservations = max(total_on_hand - reserved_total, Decimal(0))
 
         waiting_orders = (
             Order.query.options(
@@ -712,16 +718,16 @@ def create_purchase_request_from_waiting(item_id: int):
             .all()
         )
 
-        total_required = 0
+        total_required = Decimal(0)
         for order in waiting_orders:
             for line in order.order_lines:
-                line_quantity = int(line.quantity or 0)
+                line_quantity = Decimal(line.quantity or 0)
                 if line_quantity <= 0:
                     continue
                 for component in line.components:
                     if component.component_item_id != item.id:
                         continue
-                    component_quantity = int(component.quantity or 0)
+                    component_quantity = Decimal(component.quantity or 0)
                     if component_quantity <= 0:
                         continue
                     total_required += component_quantity * line_quantity
@@ -743,9 +749,9 @@ def create_purchase_request_from_waiting(item_id: int):
 
         description = (
             "Generated from the Waiting on Material list on the inventory dashboard. "
-            f"Required for waiting orders: {total_required}. "
-            f"Available after reservations: {available_after_reservations}. "
-            f"Calculated shortage: {shortage}."
+            f"Required for waiting orders: {float(total_required)}. "
+            f"Available after reservations: {float(available_after_reservations)}. "
+            f"Calculated shortage: {float(shortage)}."
         )
 
         return _create_purchase_request_for_item(

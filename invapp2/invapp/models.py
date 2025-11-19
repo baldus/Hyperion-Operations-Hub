@@ -275,7 +275,7 @@ class Batch(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
     lot_number = db.Column(db.String, nullable=True)  # supplier batch/lot reference
-    quantity = db.Column(db.Integer, default=0)
+    quantity = db.Column(db.Numeric(12, 3), default=0)
     received_date = db.Column(db.DateTime, default=datetime.utcnow)
     expiration_date = db.Column(db.Date, nullable=True)
     supplier_name = db.Column(db.String, nullable=True)
@@ -292,7 +292,7 @@ class Movement(db.Model):
     item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
     batch_id = db.Column(db.Integer, db.ForeignKey("batch.id"), nullable=True)
     location_id = db.Column(db.Integer, db.ForeignKey("location.id"), nullable=False)
-    quantity = db.Column(db.Integer, nullable=False)
+    quantity = db.Column(db.Numeric(12, 3), nullable=False)
     movement_type = db.Column(db.String, nullable=False)  # RECEIPT, ISSUE, MOVE, ADJUST
     person = db.Column(db.String, nullable=True)
     po_number = db.Column(db.String, nullable=True)
@@ -995,7 +995,7 @@ class OrderComponent(db.Model):
         "order_item_id", db.Integer, db.ForeignKey("order_item.id"), nullable=False
     )
     component_item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
-    quantity = db.Column(db.Integer, nullable=False)
+    quantity = db.Column(db.Numeric(10, 3), nullable=False)
 
     order_line = db.relationship("OrderLine", back_populates="components")
     order_item = synonym("order_line")
@@ -1060,7 +1060,7 @@ class BillOfMaterialComponent(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     bom_id = db.Column(db.Integer, db.ForeignKey("item_bom.id"), nullable=False)
     component_item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
-    quantity = db.Column(db.Integer, nullable=False)
+    quantity = db.Column(db.Numeric(10, 3), nullable=False)
 
     bom = db.relationship("BillOfMaterial", back_populates="components")
     component_item = db.relationship("Item")
@@ -1154,7 +1154,7 @@ class RoutingStepConsumption(db.Model):
         nullable=False,
     )
     movement_id = db.Column(db.Integer, db.ForeignKey("movement.id"), nullable=False)
-    quantity = db.Column(db.Integer, nullable=False)
+    quantity = db.Column(db.Numeric(12, 3), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     routing_step_component = db.relationship(
@@ -1181,7 +1181,7 @@ class Reservation(db.Model):
         "order_item_id", db.Integer, db.ForeignKey("order_item.id"), nullable=False
     )
     item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
-    quantity = db.Column(db.Integer, nullable=False)
+    quantity = db.Column(db.Numeric(10, 3), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     order_line = db.relationship("OrderLine", back_populates="reservations")

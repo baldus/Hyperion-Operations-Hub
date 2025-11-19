@@ -4,6 +4,7 @@ import json
 import re
 from collections import defaultdict
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 from flask import (
     Blueprint,
@@ -56,33 +57,40 @@ def _search_filter(query, search_term):
     )
 
 
-def _available_quantity(item_id: int) -> int:
+def _available_quantity(item_id: int) -> Decimal:
     """Return on-hand inventory minus active reservations for an item."""
 
-    total_on_hand = (
-        db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
-        .filter(Movement.item_id == item_id)
-        .scalar()
-    ) or 0
-
-    reserved_total = (
-        db.session.query(func.coalesce(func.sum(Reservation.quantity), 0))
-        .join(OrderLine)
-        .join(Order)
-        .filter(
-            Reservation.item_id == item_id,
-            Order.status.in_(OrderStatus.RESERVABLE_STATES),
+    total_on_hand = Decimal(
+        (
+            db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+            .filter(Movement.item_id == item_id)
+            .scalar()
         )
-        .scalar()
-    ) or 0
+        or 0
+    )
 
-    return max(0, int(total_on_hand) - int(reserved_total))
+    reserved_total = Decimal(
+        (
+            db.session.query(func.coalesce(func.sum(Reservation.quantity), 0))
+            .join(OrderLine)
+            .join(Order)
+            .filter(
+                Reservation.item_id == item_id,
+                Order.status.in_(OrderStatus.RESERVABLE_STATES),
+            )
+            .scalar()
+        )
+        or 0
+    )
+
+    available = total_on_hand - reserved_total
+    return available if available > 0 else Decimal("0")
 
 
-def _component_requirement(usage: RoutingStepComponent) -> int:
+def _component_requirement(usage: RoutingStepComponent) -> Decimal:
     bom_component = usage.bom_component
     order_line = bom_component.order_line
-    return int(bom_component.quantity) * int(order_line.quantity)
+    return Decimal(bom_component.quantity) * Decimal(order_line.quantity)
 
 
 def _position_balance(item_id: int, batch_id: int | None, location_id: int) -> int:
@@ -141,8 +149,8 @@ def _inventory_options(item_id: int):
                 "value": f"{batch_id if batch_id is not None else 'none'}::{location_id}",
                 "batch_id": batch_id,
                 "location_id": location_id,
-                "label": f"{batch_label} @ {location_label} (avail {int(on_hand)})",
-                "available": int(on_hand),
+                "label": f"{batch_label} @ {location_label} (avail {_format_quantity(on_hand)})",
+                "available": float(on_hand),
             }
         )
 
@@ -172,6 +180,34 @@ def _format_schedule_breakdown(buckets):
         )
 
     return {"dates": date_labels, "series": series}
+
+
+def _parse_positive_quantity(raw_value, *, allow_zero=False):
+    if raw_value is None:
+        raise ValueError("Quantity is required")
+
+    if isinstance(raw_value, (int, float, Decimal)):
+        value = Decimal(str(raw_value))
+    else:
+        value = Decimal(str(raw_value).strip())
+
+    if value == 0:
+        if allow_zero:
+            return value
+        raise ValueError("Quantity must be greater than zero")
+    if value < 0:
+        raise ValueError("Quantity must be greater than zero")
+    return value
+
+
+def _format_quantity(value):
+    if isinstance(value, Decimal):
+        normalized = value.normalize()
+        text = format(normalized, "f")
+        if "." in text:
+            text = text.rstrip("0").rstrip(".")
+        return text or "0"
+    return str(value)
 
 
 def _save_bom_template(item: Item, component_entries, *, replace_existing=False):
@@ -268,7 +304,7 @@ def _parse_bulk_bom_rows(reader: csv.DictReader, *, column_overrides=None):
         )
         return {}, errors
 
-    bom_rows = defaultdict(lambda: defaultdict(int))
+    bom_rows = defaultdict(lambda: defaultdict(Decimal))
     current_assembly = None
 
     for row_index, row in enumerate(reader, start=2):
@@ -313,13 +349,13 @@ def _parse_bulk_bom_rows(reader: csv.DictReader, *, column_overrides=None):
             continue
 
         try:
-            quantity = int(quantity_value)
-            if quantity <= 0:
-                raise ValueError
-        except (TypeError, ValueError):
+            quantity = _parse_positive_quantity(quantity_value, allow_zero=True)
+        except (TypeError, ValueError, InvalidOperation):
             errors.append(
-                f"Row {row_index}: Component quantity for {component_value} must be a positive integer."
+                f"Row {row_index}: Component quantity for {component_value} must be a positive number."
             )
+            continue
+        if quantity == 0:
             continue
 
         bom_rows[current_assembly][component_value] += quantity
@@ -377,15 +413,17 @@ def _adjust_reservation(order_line: OrderLine, item_id: int, delta: int):
         None,
     )
 
+    delta_value = Decimal(delta)
+
     if reservation:
-        new_quantity = int(reservation.quantity) + int(delta)
+        new_quantity = Decimal(reservation.quantity) + delta_value
         if new_quantity <= 0:
             db.session.delete(reservation)
         else:
             reservation.quantity = new_quantity
-    elif delta > 0:
+    elif delta_value > 0:
         db.session.add(
-            Reservation(order_line=order_line, item_id=item_id, quantity=int(delta))
+            Reservation(order_line=order_line, item_id=item_id, quantity=delta_value)
         )
 
 
@@ -535,7 +573,7 @@ def fetch_bom_template(sku: str):
         {
             "sku": component.component_item.sku,
             "name": component.component_item.name,
-            "quantity": component.quantity,
+            "quantity": float(component.quantity),
         }
         for component in sorted(
             bom.components, key=lambda entry: entry.component_item.sku
@@ -707,12 +745,10 @@ def bom_library():
                     errors.append(f"BOM component SKU '{sku}' was not found.")
                     continue
                 try:
-                    component_quantity = int(quantity_value)
-                    if component_quantity <= 0:
-                        raise ValueError
-                except (TypeError, ValueError):
+                    component_quantity = _parse_positive_quantity(quantity_value)
+                except (TypeError, ValueError, InvalidOperation):
                     errors.append(
-                        f"BOM component quantity for {sku} must be a positive integer."
+                        f"BOM component quantity for {sku} must be a positive number."
                     )
                     continue
                 bom_components.append(
@@ -769,7 +805,7 @@ def bom_library():
                 form_data["bom"] = [
                     {
                         "sku": component.component_item.sku,
-                        "quantity": component.quantity,
+                        "quantity": float(component.quantity),
                     }
                     for component in editing_template.components
                 ]
@@ -792,6 +828,7 @@ def bom_library():
 @require_roles("admin")
 def bom_bulk_import():
     import_results = None
+    warnings: list[str] = []
 
     if request.method == "POST":
         errors = []
@@ -804,6 +841,18 @@ def bom_bulk_import():
             "quantity": request.form.get("quantity_column", "").strip() or None,
             "level": request.form.get("level_column", "").strip() or None,
         }
+
+        assembly_missing_handling = (
+            request.form.get("missing_assembly_handling") or "skip"
+        ).lower()
+        component_missing_handling = (
+            request.form.get("missing_component_handling") or "skip"
+        ).lower()
+        missing_handling_choices = {"skip", "abort"}
+        if assembly_missing_handling not in missing_handling_choices:
+            assembly_missing_handling = "skip"
+        if component_missing_handling not in missing_handling_choices:
+            component_missing_handling = "skip"
 
         if upload is None or not upload.filename:
             errors.append("A CSV file is required to import BOM templates.")
@@ -845,14 +894,55 @@ def bom_bulk_import():
                 sku for sku in component_skus if sku not in item_lookup
             )
 
+            import_cancelled = False
+
             if missing_assemblies:
-                errors.append(
-                    "Assembly SKUs not found: " + ", ".join(missing_assemblies)
-                )
-            if missing_components:
-                errors.append(
-                    "Component SKUs not found: " + ", ".join(missing_components)
-                )
+                if assembly_missing_handling == "abort":
+                    import_cancelled = True
+                    warnings.append(
+                        "Import cancelled because required assemblies are missing: "
+                        + ", ".join(missing_assemblies)
+                    )
+                else:
+                    for missing_sku in missing_assemblies:
+                        bom_rows.pop(missing_sku, None)
+                    warnings.append(
+                        "Skipped missing assemblies: " + ", ".join(missing_assemblies)
+                    )
+
+            if missing_components and not import_cancelled:
+                if component_missing_handling == "abort":
+                    import_cancelled = True
+                    warnings.append(
+                        "Import cancelled because required components are missing: "
+                        + ", ".join(missing_components)
+                    )
+                else:
+                    removed_components = 0
+                    assemblies_with_removed_components = set()
+
+                    for assembly_sku, components in list(bom_rows.items()):
+                        for component_sku in list(components.keys()):
+                            if component_sku in missing_components:
+                                removed_components += 1
+                                components.pop(component_sku, None)
+                                assemblies_with_removed_components.add(assembly_sku)
+
+                        if not components:
+                            bom_rows.pop(assembly_sku, None)
+
+                    if removed_components:
+                        warnings.append(
+                            "Skipped missing components: " + ", ".join(missing_components)
+                        )
+                    if assemblies_with_removed_components:
+                        warnings.append(
+                            "Removed empty BOM rows after filtering missing components for: "
+                            + ", ".join(sorted(assemblies_with_removed_components))
+                        )
+
+            if import_cancelled:
+                bom_rows = {}
 
         if not errors and bom_rows:
             import_details = []
@@ -884,25 +974,33 @@ def bom_bulk_import():
                 elif changed:
                     updated_count += 1
 
-            db.session.commit()
+            if import_details:
+                db.session.commit()
 
-            unchanged_count = len(import_details) - created_count - updated_count
-            import_results = {
-                "total": len(import_details),
-                "created": created_count,
-                "updated": updated_count,
-                "unchanged": unchanged_count,
-                "details": import_details,
-            }
+                unchanged_count = len(import_details) - created_count - updated_count
+                import_results = {
+                    "total": len(import_details),
+                    "created": created_count,
+                    "updated": updated_count,
+                    "unchanged": unchanged_count,
+                    "details": import_details,
+                }
 
-            flash(
-                "Bulk import complete: "
-                f"{created_count} created, {updated_count} updated, {unchanged_count} unchanged.",
-                "success",
-            )
+                flash(
+                    "Bulk import complete: "
+                    f"{created_count} created, {updated_count} updated, {unchanged_count} unchanged.",
+                    "success",
+                )
+            else:
+                warnings.append(
+                    "No BOM templates were imported because all rows were skipped or removed."
+                )
         else:
             for error in errors:
                 flash(error, "danger")
+
+        for warning in warnings:
+            flash(warning, "warning")
 
     return render_template(
         "orders/bom_bulk_import.html",
@@ -1059,12 +1157,10 @@ def new_order():
                     errors.append(f"BOM component SKU '{sku}' was not found.")
                     continue
                 try:
-                    component_quantity = int(quantity_value)
-                    if component_quantity <= 0:
-                        raise ValueError
-                except (TypeError, ValueError):
+                    component_quantity = _parse_positive_quantity(quantity_value)
+                except (TypeError, ValueError, InvalidOperation):
                     errors.append(
-                        f"BOM component quantity for {sku} must be a positive integer."
+                        f"BOM component quantity for {sku} must be a positive number."
                     )
                     continue
 
@@ -1259,7 +1355,8 @@ def new_order():
         db.session.commit()
         if shortages:
             shortage_summary = ", ".join(
-                f"{entry['item'].sku} (required {entry['required']}, available {entry['available']})"
+                f"{entry['item'].sku} (required {_format_quantity(entry['required'])}, "
+                f"available {_format_quantity(entry['available'])})"
                 for entry in shortages
             )
             message = "Order created but waiting on material"
