@@ -5,6 +5,7 @@ import os
 import re
 import sys
 from datetime import date, timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -794,3 +795,18 @@ def test_bulk_import_column_override_missing_field_error():
     )
 
     assert any("component qty" in error.lower() for error in errors)
+
+
+def test_bulk_import_allows_partial_quantity_and_skips_zero():
+    csv_text = (
+        "Assembly,Component,Component Qty\n"
+        "FG-1,CMP-1,0.5\n"
+        ",CMP-2,0\n"
+        ",CMP-3,1.25\n"
+    )
+    reader = csv.DictReader(io.StringIO(csv_text))
+
+    bom_rows, errors = orders_routes._parse_bulk_bom_rows(reader)
+
+    assert errors == []
+    assert bom_rows == {"FG-1": {"CMP-1": Decimal("0.5"), "CMP-3": Decimal("1.25")}}
