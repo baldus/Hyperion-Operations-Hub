@@ -887,6 +887,44 @@ def bom_bulk_import():
             )
             item_lookup = {item.sku: item for item in items}
 
+            created_from_names = False
+            missing_by_sku = required_skus - set(item_lookup.keys())
+            if missing_by_sku:
+                name_matches = (
+                    Item.query.filter(Item.name.in_(missing_by_sku)).all()
+                    if missing_by_sku
+                    else []
+                )
+                created_skus = []
+                for match in name_matches:
+                    name_as_sku = (match.name or "").strip()
+                    if not name_as_sku or name_as_sku in item_lookup:
+                        continue
+
+                    new_item = Item(
+                        sku=name_as_sku,
+                        name=match.name,
+                        type=match.type,
+                        unit=match.unit,
+                        description=match.description,
+                        min_stock=match.min_stock,
+                        notes=match.notes,
+                        list_price=match.list_price,
+                        last_unit_cost=match.last_unit_cost,
+                        item_class=match.item_class,
+                    )
+                    db.session.add(new_item)
+                    db.session.delete(match)
+                    item_lookup[name_as_sku] = new_item
+                    created_skus.append(name_as_sku)
+                    created_from_names = True
+
+                if created_skus:
+                    warnings.append(
+                        "Created items from Name column to match SKUs: "
+                        + ", ".join(sorted(created_skus))
+                    )
+
             missing_assemblies = sorted(
                 sku for sku in assembly_skus if sku not in item_lookup
             )
@@ -992,6 +1030,8 @@ def bom_bulk_import():
                     "success",
                 )
             else:
+                if created_from_names:
+                    db.session.commit()
                 warnings.append(
                     "No BOM templates were imported because all rows were skipped or removed."
                 )
