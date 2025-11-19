@@ -976,12 +976,22 @@ def bom_bulk_import():
 
             for assembly_sku in sorted(bom_rows.keys()):
                 item = item_lookup[assembly_sku]
-                component_entries = [
-                    {"item": item_lookup[component_sku], "quantity": quantity}
-                    for component_sku, quantity in sorted(
-                        bom_rows[assembly_sku].items()
+                skipped_components = []
+                component_entries = []
+                for component_sku, quantity in sorted(bom_rows[assembly_sku].items()):
+                    if quantity <= 0:
+                        skipped_components.append(component_sku)
+                        continue
+
+                    component_entries.append(
+                        {"item": item_lookup[component_sku], "quantity": quantity}
                     )
-                ]
+
+                if skipped_components:
+                    warnings.append(
+                        "Skipped components with non-positive quantity for assembly "
+                        f"{assembly_sku}: " + ", ".join(skipped_components)
+                    )
 
                 template, created, changed = _save_bom_template(
                     item, component_entries, replace_existing=True
