@@ -421,25 +421,26 @@ def inventory_home():
     low_stock_items = []
     near_stock_items = []
     for item in items:
-        min_stock = int(item.min_stock or 0)
-        if min_stock <= 0:
+        min_stock_int = int(item.min_stock or 0)
+        if min_stock_int <= 0:
             continue
-        total_on_hand = on_hand_map.get(item.id, 0)
-        coverage = total_on_hand / float(min_stock) if min_stock else None
+        min_stock = Decimal(min_stock_int)
+        total_on_hand = on_hand_map.get(item.id, Decimal(0))
+        coverage = (total_on_hand / min_stock) if min_stock else None
         entry = {
             "item": item,
             "on_hand": total_on_hand,
-            "min_stock": min_stock,
+            "min_stock": min_stock_int,
             "coverage": coverage,
         }
-        if total_on_hand < (min_stock * 1.05):
+        if total_on_hand < (min_stock * Decimal("1.05")):
             low_stock_items.append(entry)
-        elif total_on_hand < (min_stock * 1.25):
+        elif total_on_hand < (min_stock * Decimal("1.25")):
             near_stock_items.append(entry)
 
     def _coverage_sort_key(entry):
         coverage = entry.get("coverage")
-        return coverage if coverage is not None else float("inf")
+        return float(coverage) if coverage is not None else float("inf")
 
     low_stock_items.sort(key=_coverage_sort_key)
     near_stock_items.sort(key=_coverage_sort_key)
