@@ -1,23 +1,19 @@
 from __future__ import annotations
 
-from functools import wraps
 from typing import Iterable, Optional
 
 from flask import (
     Blueprint,
-    abort,
     current_app,
     flash,
     redirect,
     render_template,
     request,
-    session,
     url_for,
 )
 from sqlalchemy.exc import IntegrityError
 
 from invapp.extensions import db
-from invapp.login import current_user, login_required
 from invapp.models import Role, User
 from invapp.permissions import (
     get_known_pages,
@@ -25,6 +21,7 @@ from invapp.permissions import (
     update_page_permissions,
 )
 from invapp.offline import is_emergency_mode_active
+from invapp.superuser import superuser_required
 
 bp = Blueprint("users", __name__, url_prefix="/users")
 
@@ -39,39 +36,6 @@ def _offline_user_admin_response():
         "users/offline.html",
         recovery_steps=recovery_steps,
     )
-
-
-def _is_superuser() -> bool:
-    if getattr(current_user, "is_emergency_user", False):
-        return True
-
-    if not current_user.is_authenticated:
-        return False
-
-    user_id = session.get("_user_id")
-    if not user_id:
-        return False
-
-    try:
-        user = User.query.get(int(user_id))
-    except (TypeError, ValueError):
-        return False
-
-    if user is None:
-        return False
-
-    admin_username = current_app.config.get("ADMIN_USER", "superuser")
-    return user.username == admin_username
-
-
-def superuser_required(view):
-    @wraps(view)
-    def wrapped(*args, **kwargs):
-        if not _is_superuser():
-            abort(403)
-        return view(*args, **kwargs)
-
-    return login_required(wrapped)
 
 
 @bp.route("/")
