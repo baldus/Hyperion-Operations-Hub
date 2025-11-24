@@ -28,6 +28,7 @@ from .routes import (
     production,
     reports,
     settings,
+    useful_links,
     users,
     work,
 )
@@ -36,6 +37,7 @@ from .mdi import models as mdi_models
 from config import Config
 from . import models  # ensure models are registered with SQLAlchemy
 from .audit import record_access_event, resolve_client_ip
+from .superuser import is_superuser
 
 
 NAVIGATION_PAGES: tuple[tuple[str, str, str], ...] = (
@@ -517,6 +519,8 @@ def create_app(config_override=None):
             "emergency_access_active": bool(
                 getattr(current_user, "is_emergency_user", False)
             ),
+            "is_superuser": is_superuser,
+            "can_manage_useful_links": useful_links.can_manage_useful_links,
         }
 
     # register blueprints
@@ -533,6 +537,7 @@ def create_app(config_override=None):
     app.register_blueprint(printers.bp)
     app.register_blueprint(production.bp)
     app.register_blueprint(admin.bp)
+    app.register_blueprint(useful_links.bp)
     app.register_blueprint(users.bp)
 
     def _should_log_request() -> bool:
@@ -599,11 +604,14 @@ def create_app(config_override=None):
         if guard_response is not None:
             return guard_response
 
+        useful_links: list[models.UsefulLink] = []
+
         if not current_app.config.get("DATABASE_AVAILABLE", True):
             return render_template(
                 "home.html",
                 order_summary=None,
                 inventory_summary=None,
+                useful_links=useful_links,
             )
 
         order_summary = None
@@ -721,10 +729,13 @@ def create_app(config_override=None):
                 "total_alerts": len(out_items) + len(low_items),
             }
 
+        useful_links = models.UsefulLink.ordered()
+
         return render_template(
             "home.html",
             order_summary=order_summary,
             inventory_summary=inventory_summary,
+            useful_links=useful_links,
         )
 
     return app

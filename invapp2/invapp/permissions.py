@@ -107,6 +107,11 @@ DEFAULT_PAGE_ACCESS: Mapping[str, Mapping[str, Sequence[str] | str]] = {
         "view_roles": ("admin",),
         "edit_roles": ("admin",),
     },
+    "useful_links": {
+        "label": "Useful Links",
+        "view_roles": ("admin",),
+        "edit_roles": ("admin",),
+    },
 }
 
 

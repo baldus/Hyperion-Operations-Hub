@@ -152,4 +152,33 @@
 {% if not current_user.is_authenticated %}
 <p class="home-summary-note">Need to make changes? <a href="{{ url_for('auth.login') }}">Log in</a> with your company credentials.</p>
 {% endif %}
+
+{% if useful_links %}
+<section class="home-links">
+  <div class="home-links__header">
+    <h3>Useful Links</h3>
+    {% if can_manage_useful_links() %}
+    <a class="home-summary-link" href="{{ url_for('useful_links.manage_links') }}">Edit links</a>
+    {% endif %}
+  </div>
+  <ul class="home-links-list">
+    {% for link in useful_links %}
+    <li class="home-link-card">
+      <h4 class="home-link-title"><a href="{{ link.url }}" target="_blank" rel="noreferrer noopener">{{ link.title }}</a></h4>
+      {% if link.description %}
+      <p class="home-link-description">{{ link.description }}</p>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% elif can_manage_useful_links() %}
+<section class="home-links">
+  <div class="home-links__header">
+    <h3>Useful Links</h3>
+    <a class="home-summary-link" href="{{ url_for('useful_links.manage_links') }}">Add links</a>
+  </div>
+  <p class="home-summary-note">Add links so your team can quickly reach external resources.</p>
+</section>
+{% endif %}
 {% endblock %}
