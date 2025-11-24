@@ -30,6 +30,9 @@
             <li><a href="{{ url_for('admin.tools') }}" class="link-item">Admin Tools Overview</a></li>
             <li><a href="{{ url_for('reports.reports_home') }}" class="link-item">Operational Reports</a></li>
             <li><a href="{{ url_for('admin.data_backup') }}" class="link-item">Data Backup</a></li>
+            {% if is_superuser() %}
+            <li><a href="{{ url_for('useful_links.manage_links') }}" class="link-item">Manage Useful Links</a></li>
+            {% endif %}
         </ul>
     </section>
 </div>

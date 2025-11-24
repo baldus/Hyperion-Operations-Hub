@@ -155,6 +155,26 @@ class AccessLog(db.Model):
 
 
 
+class UsefulLink(db.Model):
+    __tablename__ = "useful_link"
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(255), nullable=False)
+    url = db.Column(db.String(2048), nullable=False)
+    description = db.Column(db.String(512), nullable=True)
+    display_order = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = (db.Index("ix_useful_link_display_order", "display_order"),)
+
+    @classmethod
+    def ordered(cls):
+        return cls.query.order_by(cls.display_order.asc(), cls.title.asc()).all()
+
+
 class ProductionChartSettings(db.Model):
     __tablename__ = "production_chart_settings"
 
