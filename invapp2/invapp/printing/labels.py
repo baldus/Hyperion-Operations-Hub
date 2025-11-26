@@ -447,6 +447,94 @@ ORDER_DEFAULT_LAYOUT = {
 }
 
 
+LOCATION_SAMPLE_DATA = {
+    "code": "RACK-A1-01",
+    "description": "Aisle A / Rack 1 / Shelf 01",
+}
+
+
+LOCATION_FIELD_BINDINGS: tuple[DesignerFieldBinding, ...] = (
+    DesignerFieldBinding("code", "Location Code", "{{Location.Code}}"),
+    DesignerFieldBinding("description", "Description", "{{Location.Description}}"),
+)
+
+
+LOCATION_SAMPLE_CONTEXT = {
+    "Location": {
+        "Code": LOCATION_SAMPLE_DATA["code"],
+        "Description": LOCATION_SAMPLE_DATA["description"],
+    }
+}
+
+
+LOCATION_DEFAULT_FIELDS = [
+    {
+        "id": "field-location-title",
+        "label": "Inventory Location",
+        "bindingKey": None,
+        "type": "text",
+        "x": 60,
+        "y": 40,
+        "width": 692,
+        "height": 64,
+        "rotation": 0,
+        "fontSize": 48,
+        "align": "center",
+    },
+    {
+        "id": "field-location-code",
+        "label": "Location Code",
+        "bindingKey": "code",
+        "type": "text",
+        "x": 60,
+        "y": 140,
+        "width": 692,
+        "height": 80,
+        "rotation": 0,
+        "fontSize": 64,
+        "align": "center",
+    },
+    {
+        "id": "field-location-description",
+        "label": "Description",
+        "bindingKey": "description",
+        "type": "text",
+        "x": 60,
+        "y": 240,
+        "width": 692,
+        "height": 60,
+        "rotation": 0,
+        "fontSize": 30,
+        "align": "center",
+    },
+    {
+        "id": "field-location-barcode",
+        "label": "Location Barcode",
+        "bindingKey": "code",
+        "type": "barcode",
+        "x": 80,
+        "y": 340,
+        "width": 652,
+        "height": 200,
+        "rotation": 0,
+        "fontSize": 18,
+        "align": "center",
+        "showValue": True,
+    },
+]
+
+
+LOCATION_DEFAULT_LAYOUT = {
+    "id": "location-label",
+    "name": "Location Label",
+    "description": "Barcode label for fixed storage locations.",
+    "size": {"width": LABEL_WIDTH, "height": 600},
+    "dataFields": _build_data_field_list(LOCATION_FIELD_BINDINGS),
+    "sampleData": dict(LOCATION_SAMPLE_DATA),
+    "fields": deepcopy(LOCATION_DEFAULT_FIELDS),
+}
+
+
 BATCH_LABEL_CONFIG = DesignerLabelConfig(
     id="batch-label",
     name="Batch Label",
@@ -473,9 +561,23 @@ ORDER_LABEL_CONFIG = DesignerLabelConfig(
 )
 
 
+LOCATION_LABEL_CONFIG = DesignerLabelConfig(
+    id="location-label",
+    name="Location Label",
+    description="Barcode label for fixed storage locations.",
+    template_name="InventoryLocationLabelTemplate",
+    process="LocationLabel",
+    data_fields=LOCATION_FIELD_BINDINGS,
+    sample_data=dict(LOCATION_SAMPLE_DATA),
+    sample_context=deepcopy(LOCATION_SAMPLE_CONTEXT),
+    default_layout=deepcopy(LOCATION_DEFAULT_LAYOUT),
+)
+
+
 DESIGNER_LABELS: dict[str, DesignerLabelConfig] = {
     BATCH_LABEL_CONFIG.id: BATCH_LABEL_CONFIG,
     ORDER_LABEL_CONFIG.id: ORDER_LABEL_CONFIG,
+    LOCATION_LABEL_CONFIG.id: LOCATION_LABEL_CONFIG,
 }
 
 CONFIG_BY_TEMPLATE = {config.template_name: config for config in DESIGNER_LABELS.values()}
@@ -793,6 +895,20 @@ def build_batch_label_context(
     }
 
 
+def build_location_label_context(location: "Location" | Mapping[str, Any]) -> dict[str, Any]:
+    def _get(obj, attribute, default=""):
+        if obj is None:
+            return default
+        if isinstance(obj, Mapping):
+            return obj.get(attribute, default)
+        return getattr(obj, attribute, default)
+
+    code = _get(location, "code", "")
+    description = _get(location, "description", "")
+
+    return {"Location": {"Code": code, "Description": description}}
+
+
 def register_label_definition(template: LabelDefinition, *, override: bool = True) -> None:
     """Register a ``LabelDefinition`` for runtime use."""
 
@@ -1095,6 +1211,7 @@ __all__ = [
     "LabelDefinition",
     "assign_template_to_process",
     "build_batch_label_context",
+    "build_location_label_context",
     "build_designer_state",
     "build_receiving_label",
     "deserialize_designer_layout",

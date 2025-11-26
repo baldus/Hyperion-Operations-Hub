@@ -28,6 +28,8 @@ from invapp.models import (
     RoutingStep,
     RoutingStepComponent,
     RoutingStepConsumption,
+    Role,
+    User,
 )
 import invapp.routes.inventory as inventory
 from invapp.routes.inventory import (
@@ -279,6 +281,46 @@ def test_reprint_receiving_label_uses_batch_label(client, app, monkeypatch):
     assert context["Batch"]["LotNumber"] == lot_number
     assert context["Batch"]["Quantity"] == quantity
     assert context["Location"]["Code"] == location_code
+
+
+def test_print_location_label_uses_location_process(client, app, monkeypatch):
+    with app.app_context():
+        location = Location(code="LOC-99", description="Overflow Racking")
+        db.session.add(location)
+        admin_role = Role.query.filter_by(name="admin").first()
+        if admin_role is None:
+            admin_role = Role(name="admin", description="Administrator")
+            db.session.add(admin_role)
+
+        user = User.query.filter_by(username="superuser").first()
+        if user and admin_role not in user.roles:
+            user.roles.append(admin_role)
+
+        db.session.commit()
+        location_id = location.id
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_print_label(process, context):
+        calls.append((process, context))
+        return True
+
+    monkeypatch.setattr(
+        "invapp.printing.zebra.print_label_for_process", fake_print_label
+    )
+
+    response = client.post(
+        f"/inventory/location/{location_id}/print-label",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert calls, "Expected location label print to be triggered"
+
+    process, context = calls[-1]
+    assert process == "LocationLabel"
+    assert context["Location"]["Code"] == "LOC-99"
+    assert context["Location"]["Description"] == "Overflow Racking"
 
 
 def test_add_item_with_notes(client, app):

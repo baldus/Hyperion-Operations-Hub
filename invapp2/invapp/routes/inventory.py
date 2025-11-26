@@ -1719,6 +1719,23 @@ def edit_location(location_id):
     )
 
 
+@bp.route("/location/<int:location_id>/print-label", methods=["POST"])
+@require_roles("admin")
+def print_location_label(location_id: int):
+    location = Location.query.get_or_404(location_id)
+
+    from invapp.printing.labels import build_location_label_context
+    from invapp.printing.zebra import print_label_for_process
+
+    context = build_location_label_context(location)
+    if print_label_for_process("LocationLabel", context):
+        flash(f"Label queued for location {location.code}.", "success")
+    else:
+        flash("Failed to print location label.", "warning")
+
+    return redirect(url_for("inventory.edit_location", location_id=location.id))
+
+
 @bp.route("/location/<int:location_id>/delete", methods=["POST"])
 @require_roles("admin")
 def delete_location(location_id):
