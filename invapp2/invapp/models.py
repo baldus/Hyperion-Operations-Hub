@@ -306,8 +306,9 @@ class Batch(db.Model):
     item = db.relationship("Item", backref="batches")
 
 
-class Movement(db.Model):
+class Movement(PrimaryKeySequenceMixin, db.Model):
     __tablename__ = "movement"
+    pk_constraint_name: ClassVar[str] = "movement_pkey"
     id = db.Column(db.Integer, primary_key=True)
     item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
     batch_id = db.Column(db.Integer, db.ForeignKey("batch.id"), nullable=True)

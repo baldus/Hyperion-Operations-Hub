@@ -462,6 +462,9 @@ def create_app(config_override=None):
                     app.config.get("ADMIN_PASSWORD", "joshbaldus"),
                 )
                 _ensure_core_roles()
+                # Repair movement primary key sequences that may have been
+                # desynchronized by manual imports or restores.
+                models.Movement._repair_primary_key_sequence()
             except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
                 database_available = False
                 database_error_message = (
