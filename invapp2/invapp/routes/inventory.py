@@ -2329,10 +2329,24 @@ def receiving():
 
     if request.method == "POST":
         sku = request.form["sku"].strip()
-        qty = int(request.form["qty"])
+        defer_qty = (
+            current_user.is_authenticated
+            and current_user.has_role("admin")
+            and request.form.get("defer_qty") == "1"
+        )
+        qty_raw = request.form.get("qty", "").strip()
         person = request.form["person"].strip()
         po_number = request.form.get("po_number", "").strip() or None
         location_id = int(request.form["location_id"])
+
+        if defer_qty:
+            qty = 0
+        else:
+            try:
+                qty = int(qty_raw)
+            except (TypeError, ValueError):
+                flash("Quantity is required unless deferred for an admin.", "danger")
+                return redirect(url_for("inventory.receiving"))
 
         item = Item.query.filter_by(sku=sku).first()
         if not item:
@@ -2361,6 +2375,10 @@ def receiving():
             batch.purchase_order = po_number
 
         # Record movement
+        reference = "PO Receipt" if po_number else "Receipt"
+        if defer_qty:
+            reference += " (quantity pending)"
+
         mv = Movement(
             item_id=item.id,
             batch_id=batch_id,
@@ -2369,10 +2387,19 @@ def receiving():
             movement_type="RECEIPT",
             person=person,
             po_number=po_number,
-            reference="PO Receipt" if po_number else "Receipt"
+            reference=reference
         )
         db.session.add(mv)
         db.session.commit()
+
+        if defer_qty:
+            flash(f"Receiving recorded! Lot: {lot_number}", "success")
+            flash(
+                "Receiving recorded without a quantity. Update the batch once the count is known.",
+                "info",
+            )
+            return redirect(url_for("inventory.receiving"))
+
         try:
             location = Location.query.get(location_id)
             if not _print_batch_receipt_label(
@@ -2402,11 +2429,14 @@ def receiving():
         .all()
     )
 
+    can_defer_without_qty = current_user.is_authenticated and current_user.has_role("admin")
+
     return render_template(
         "inventory/receiving.html",
         records=records,
         locations=locations,
         form_defaults=form_defaults,
+        can_defer_without_qty=can_defer_without_qty,
     )
 
 
