@@ -22,8 +22,9 @@ logging stack.
 6. [Database Initialization](#database-initialization)
 7. [Running the Application](#running-the-application)
 8. [Accessing the MDI Dashboards](#accessing-the-mdi-dashboards)
-9. [Extending the MDI Module](#extending-the-mdi-module)
-10. [Operational Tips](#operational-tips)
+9. [MDI Meeting Dashboard Experience](#mdi-meeting-dashboard-experience)
+10. [Extending the MDI Module](#extending-the-mdi-module)
+11. [Operational Tips](#operational-tips)
 
 ---
 
@@ -209,6 +210,8 @@ admin access so you can correct the outage.
 ## Accessing the MDI Dashboards
 
 * **MDI Meeting View** – `GET /mdi/meeting`
+  * Defaults to the **Active (not Closed/Received)** filter so closed or received
+    work is hidden on load.
   * Filter cards by category, status, or date.
   * Trigger CSV import/export and quick refresh actions.
 * **MDI Report Entry** – `GET /mdi/report`
@@ -222,8 +225,38 @@ admin access so you can correct the outage.
   * Consumed by `invapp/static/mdi/js/main.js`; use the same endpoints for
     integrations or automations.
 
-All routes inherit Hyperion's authentication/authorization middleware, so access
-is controlled via the same role definitions as the rest of the platform.
+Read `docs/mdi-dashboard.md` for a facilitator-focused walkthrough of the
+meeting experience. All routes inherit Hyperion's authentication/authorization
+middleware, so access is controlled via the same role definitions as the rest of
+the platform.
+
+---
+
+## MDI Meeting Dashboard Experience
+
+The meeting dashboard is a Kanban-style deck optimized for daily production
+standups:
+
+* **Default view** – When the page loads it automatically applies the "Active
+  (not Closed/Received)" filter. The status pill in the filter bar is set to the
+  `not_closed_or_received` sentinel, and the JavaScript refresh loop persists
+  that filter in the URL so live updates stay aligned with the server render.
+* **Filters** – Users can switch category, status, and date via the form above
+  the grid. Hitting "Apply Filters" updates the query string so the auto-refresh
+  API calls stay scoped.
+* **Auto-refreshing board** – The deck polls `/api/mdi_entries` every 60 seconds
+  with the active filters. Each category lane summarizes how many items and
+  metrics are present and renders cards for the filtered entries.
+* **Fast actions** – Use **Add Item** to open the report form, **Export CSV** or
+  **Upload CSV** for bulk edits, and the per-card **Mark Complete** button to set
+  an item to `Closed`. Complete actions trigger a refresh so the card leaves the
+  board when the active filter is in use.
+* **Category context** – Each card surfaces the most relevant details for its
+  category (Delivery due dates, People absences/open roles, Materials vendor &
+  PO info, etc.) plus owner, priority, and date logged.
+
+This flow keeps daily huddles focused on work that still needs attention while
+retaining easy access to historical entries through the status filter.
 
 ---
 

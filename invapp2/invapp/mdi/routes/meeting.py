@@ -10,6 +10,8 @@ from .constants import ACTIVE_STATUS_FILTER, COMPLETED_STATUSES
 
 def meeting_view():
     status_filter = request.args.get("status")
+    if status_filter is None:
+        status_filter = ACTIVE_STATUS_FILTER
     category_filter = request.args.get("category")
     date_filter = request.args.get("date")
 
