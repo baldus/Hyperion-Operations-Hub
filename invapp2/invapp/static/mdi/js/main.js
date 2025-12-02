@@ -181,6 +181,13 @@ function refreshBoard(board) {
   const categoryMeta = parseJsonAttribute(board.dataset.categoryMeta, {});
 
   const params = new URLSearchParams(window.location.search);
+  const defaultStatus = board.dataset.activeStatus;
+  if (defaultStatus && !params.has('status')) {
+    params.set('status', defaultStatus);
+    const query = params.toString();
+    const newUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+    window.history.replaceState({}, '', newUrl);
+  }
   const queryString = params.toString();
   const url = queryString ? `${apiUrl}?${queryString}` : apiUrl;
 

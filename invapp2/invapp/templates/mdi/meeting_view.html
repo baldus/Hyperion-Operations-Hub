@@ -80,6 +80,7 @@
       data-entry-update-base="{{ url_for('mdi.api_update_entry', entry_id=0)[:-1] }}"
       data-status-badges='{{ status_badges | tojson }}'
       data-category-meta='{{ category_meta | tojson }}'
+      data-active-status="{{ active_status_filter }}"
     >
       {% for category, meta in category_meta.items() %}
         <section class="mdi-lane" data-category="{{ category }}">
