@@ -17,7 +17,9 @@ class Config:
     WORK_INSTRUCTION_ALLOWED_EXTENSIONS = {"pdf"}
 
     MDI_DEFAULT_RECIPIENTS = os.getenv("MDI_DEFAULT_RECIPIENTS", "")
-    MDI_DEFAULT_SENDER = os.getenv("MDI_DEFAULT_SENDER", "mdi-console@example.com")
+    # Leave sender blank by default so mail clients can select the active account
+    # automatically when the draft is opened. Configure via env var if desired.
+    MDI_DEFAULT_SENDER = os.getenv("MDI_DEFAULT_SENDER", "")
 
     ITEM_ATTACHMENT_UPLOAD_FOLDER = os.path.join(
         BASE_DIR, "invapp", "static", "item_attachments"

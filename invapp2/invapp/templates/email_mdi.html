@@ -5,33 +5,48 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Daily MDI Active Item Summary</title>
     <style>
+      :root {
+        --primary: #0d6efd;
+        --primary-soft: #e8f1ff;
+        --danger: #d6336c;
+        --danger-soft: #ffe6f1;
+        --warning: #f59f00;
+        --warning-soft: #fff4e0;
+        --success: #2b8a3e;
+        --success-soft: #e8f8ed;
+        --info: #0ea5e9;
+        --info-soft: #e7f6fd;
+        --slate: #1b2430;
+        --muted: #5f6b7a;
+      }
+
       body {
         font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
         background-color: #f6f8fb;
-        color: #1b2430;
+        color: var(--slate);
         margin: 0;
         padding: 24px;
       }
 
       .email-card {
-        max-width: 780px;
+        max-width: 840px;
         margin: 0 auto;
         background: #ffffff;
-        border-radius: 12px;
-        box-shadow: 0 10px 30px rgba(24, 32, 56, 0.08);
+        border-radius: 16px;
+        box-shadow: 0 14px 36px rgba(24, 32, 56, 0.12);
         overflow: hidden;
         border: 1px solid #e5e9f0;
       }
 
       .email-card header {
-        padding: 24px;
-        background: linear-gradient(90deg, #0d6efd, #4dabf7);
+        padding: 26px 28px;
+        background: linear-gradient(120deg, #0d6efd, #0ea5e9);
         color: #ffffff;
       }
 
       .email-card h1 {
-        margin: 0 0 6px;
-        font-size: 22px;
+        margin: 0 0 8px;
+        font-size: 24px;
       }
 
       .email-card p {
@@ -39,22 +54,61 @@
       }
 
       .content {
-        padding: 24px;
+        padding: 24px 28px 18px;
       }
 
       .cta-button {
         display: inline-block;
-        margin: 12px 0 20px;
+        margin: 12px 0 22px;
         padding: 12px 18px;
         background: #0d6efd;
         color: #ffffff;
         text-decoration: none;
-        border-radius: 8px;
+        border-radius: 10px;
         font-weight: 600;
+        box-shadow: 0 8px 18px rgba(13, 110, 253, 0.28);
       }
 
       .cta-button:hover {
         background: #0b5ed7;
+      }
+
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 12px;
+        margin: 10px 0 18px;
+      }
+
+      .summary-card {
+        background: #f9fbff;
+        border: 1px solid #e5e9f0;
+        border-radius: 12px;
+        padding: 12px 14px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .summary-title {
+        font-size: 13px;
+        color: var(--muted);
+        letter-spacing: 0.2px;
+        text-transform: uppercase;
+        margin: 0 0 4px;
+      }
+
+      .summary-count {
+        font-size: 20px;
+        font-weight: 800;
+        margin: 0;
+      }
+
+      .color-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
       }
 
       .item-card {
@@ -79,12 +133,12 @@
       }
 
       .item-meta {
-        color: #5f6b7a;
+        color: var(--muted);
         font-size: 13px;
       }
 
       .item-description {
-        margin: 8px 0 0;
+        margin: 10px 0 0;
         color: #27303f;
         line-height: 1.5;
       }
@@ -92,7 +146,7 @@
       .footer {
         padding: 18px 24px;
         background: #f6f8fb;
-        color: #5f6b7a;
+        color: var(--muted);
         font-size: 13px;
         border-top: 1px solid #e9edf4;
       }
@@ -122,13 +176,12 @@
       .category-block {
         margin-top: 24px;
         border: 1px solid #e5e9f0;
-        border-radius: 10px;
+        border-radius: 12px;
         overflow: hidden;
       }
 
       .category-header {
         padding: 14px 16px;
-        background: #f1f4f9;
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -137,14 +190,16 @@
 
       .category-title {
         font-size: 15px;
-        font-weight: 700;
-        text-transform: uppercase;
+        font-weight: 800;
         letter-spacing: 0.4px;
-        color: #1b2430;
+        color: var(--slate);
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
       }
 
       .category-count {
-        color: #5f6b7a;
+        color: var(--muted);
         font-size: 13px;
       }
 
@@ -154,6 +209,19 @@
         color: #6c757d;
         font-style: italic;
       }
+
+      /* Accent helpers */
+      .accent-primary { background: var(--primary-soft); border-left: 5px solid var(--primary); }
+      .accent-danger { background: var(--danger-soft); border-left: 5px solid var(--danger); }
+      .accent-warning { background: var(--warning-soft); border-left: 5px solid var(--warning); }
+      .accent-success { background: var(--success-soft); border-left: 5px solid var(--success); }
+      .accent-info { background: var(--info-soft); border-left: 5px solid var(--info); }
+
+      .pill-primary { background: var(--primary-soft); color: var(--primary); }
+      .pill-danger { background: var(--danger-soft); color: var(--danger); }
+      .pill-warning { background: var(--warning-soft); color: var(--warning); }
+      .pill-success { background: var(--success-soft); color: var(--success); }
+      .pill-info { background: var(--info-soft); color: var(--info); }
     </style>
   </head>
   <body>
@@ -169,10 +237,28 @@
         <p>Here are the currently active MDI items. Click any item title to jump directly to it.</p>
         <a class="cta-button" href="{{ dashboard_url }}">View Dashboard</a>
 
+        <div class="summary-grid">
+          {% for section in category_sections %}
+            <div class="summary-card">
+              <div>
+                <p class="summary-title">{{ section.name }}</p>
+                <p class="summary-count">{{ section.entries|length }}</p>
+              </div>
+              {% set color = section.meta.get('color', 'primary') %}
+              <span class="color-dot"
+                style="background-color: var(--{{ color }});"></span>
+            </div>
+          {% endfor %}
+        </div>
+
         {% for section in category_sections %}
+          {% set color = section.meta.get('color', 'primary') %}
           <div class="category-block">
-            <div class="category-header">
-              <span class="category-title">{{ section.name }}</span>
+            <div class="category-header accent-{{ color }}">
+              <span class="category-title">
+                <span class="color-dot" style="background-color: var(--{{ color }});"></span>
+                {{ section.name }}
+              </span>
               <span class="category-count">
                 {% set count = section.entries|length %}
                 {% if count %}
@@ -185,12 +271,12 @@
 
             {% if section.entries %}
               {% for entry in section.entries %}
-                <div class="item-card" style="border-radius: 0; border-left: 4px solid #0d6efd;">
+                <div class="item-card accent-{{ color }}">
                   <div class="item-header">
                     <p class="item-title">
                       <a class="item-link" href="{{ entry.url }}">{{ entry.title }}</a>
                     </p>
-                    <span class="badge">{{ entry.status }}</span>
+                    <span class="badge pill-{{ color }}">{{ entry.status }}</span>
                   </div>
                   <p class="item-meta">
                     <strong>Owner:</strong> {{ entry.owner }}
