@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MDI Active Items Summary</title>
+    <style>
+      body {
+        font-family: 'Segoe UI', Arial, sans-serif;
+        background-color: #f6f8fb;
+        color: #1f2933;
+        margin: 0;
+        padding: 0;
+      }
+      .container {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 24px 16px 48px;
+      }
+      .card {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+        padding: 20px;
+      }
+      .header {
+        text-align: center;
+        margin-bottom: 24px;
+      }
+      .header h2 {
+        margin: 0 0 8px;
+        font-size: 24px;
+        color: #111827;
+      }
+      .cta-button {
+        display: inline-block;
+        background: #0d6efd;
+        color: #ffffff !important;
+        padding: 12px 20px;
+        border-radius: 8px;
+        text-decoration: none;
+        font-weight: 600;
+        margin-top: 12px;
+      }
+      .item {
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        padding: 16px;
+        margin: 10px 0;
+      }
+      .item h3 {
+        margin: 0 0 6px;
+        font-size: 18px;
+      }
+      .meta {
+        color: #6b7280;
+        font-size: 14px;
+        margin: 4px 0;
+      }
+      .description {
+        margin: 10px 0 0;
+        color: #374151;
+        line-height: 1.5;
+      }
+      .item a {
+        color: #0d6efd;
+        text-decoration: none;
+        font-weight: 600;
+      }
+      .footer {
+        text-align: center;
+        margin-top: 20px;
+        color: #9ca3af;
+        font-size: 12px;
+      }
+      @media (max-width: 600px) {
+        .card {
+          padding: 16px;
+        }
+        .item {
+          padding: 14px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="card">
+        <div class="header">
+          <h2>Daily MDI Active Item Summary</h2>
+          <p style="margin: 0; color: #6b7280;">Here are the items currently in progress.</p>
+          <a class="cta-button" href="{{ dashboard_url }}">View Dashboard</a>
+        </div>
+
+        {% if active_items %}
+          {% for item in active_items %}
+            <div class="item">
+              <h3>{{ item.title }}</h3>
+              <p class="meta"><strong>Owner:</strong> {{ item.owner }}</p>
+              <p class="meta"><strong>Due:</strong> {{ item.due_date }}</p>
+              <p class="meta"><strong>Status:</strong> {{ item.status }}</p>
+              {% if item.description %}
+                <p class="description">{{ item.description }}</p>
+              {% endif %}
+              <p class="meta" style="margin-top: 10px;">
+                <a href="{{ item.link }}">View Item</a>
+              </p>
+            </div>
+          {% endfor %}
+        {% else %}
+          <p class="meta" style="text-align: center;">No active items found.</p>
+        {% endif %}
+      </div>
+      <p class="footer">Generated automatically from the MDI dashboard</p>
+    </div>
+  </body>
+</html>
