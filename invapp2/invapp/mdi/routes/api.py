@@ -1,5 +1,5 @@
 """REST API endpoints for the MDI module."""
-from datetime import datetime
+from datetime import datetime, date
 
 from flask import jsonify, request
 
@@ -60,6 +60,8 @@ def create_entry():
         metric_unit=data.get("metric_unit"),
         date_logged=_parse_date(data.get("date_logged")),
     )
+    if entry.date_logged is None:
+        entry.date_logged = date.today()
     if entry.category == "Delivery" and not entry.description:
         entry.description = entry.item_description or entry.notes or "Delivery update"
     elif entry.category == "People" and not entry.description:

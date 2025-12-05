@@ -53,7 +53,6 @@ function renderCategoryDetails(entry) {
       return `<p class="text-muted small mb-0">${reference}Logged ${formatDate(entry.date_logged)}</p>`;
     }
     case 'Delivery': {
-      const notes = entry.notes ? `<p class="text-muted small mb-0">${escapeHtml(truncateText(entry.notes))}</p>` : '';
       return `
         <dl class="row row-cols-2 g-2 small text-muted mb-0">
           <dt class="col">Order</dt>
@@ -61,7 +60,6 @@ function renderCategoryDetails(entry) {
           <dt class="col">Due</dt>
           <dd class="col mb-0">${formatDate(entry.due_date)}</dd>
         </dl>
-        ${notes}
       `;
     }
     case 'People':

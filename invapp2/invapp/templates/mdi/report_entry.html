@@ -76,6 +76,10 @@
                     <label for="safety-description" class="form-label">Description</label>
                     <textarea class="form-control" id="safety-description" name="description" rows="4" data-required="true" {% if active_category != 'Safety' %}disabled{% else %}required{% endif %}>{% if entry and entry.category == 'Safety' %}{{ entry.description }}{% endif %}</textarea>
                   </div>
+                  <div class="col-12">
+                    <label for="safety-notes" class="form-label">Notes</label>
+                    <textarea class="form-control" id="safety-notes" name="notes" rows="3" {% if active_category != 'Safety' %}disabled{% endif %}>{% if entry and entry.category == 'Safety' %}{{ entry.notes }}{% endif %}</textarea>
+                  </div>
                   <div class="col-md-6">
                     <label for="safety-area" class="form-label">Area / Department</label>
                     <input type="text" class="form-control" id="safety-area" name="area" value="{% if entry and entry.category == 'Safety' %}{{ entry.area }}{% endif %}" {% if active_category != 'Safety' %}disabled{% endif %} />
@@ -117,6 +121,10 @@
                   <div class="col-12">
                     <label for="quality-description" class="form-label">Description</label>
                     <textarea class="form-control" id="quality-description" name="description" rows="4" data-required="true" {% if active_category != 'Quality' %}disabled{% else %}required{% endif %}>{% if entry and entry.category == 'Quality' %}{{ entry.description }}{% endif %}</textarea>
+                  </div>
+                  <div class="col-12">
+                    <label for="quality-notes" class="form-label">Notes</label>
+                    <textarea class="form-control" id="quality-notes" name="notes" rows="3" {% if active_category != 'Quality' %}disabled{% endif %}>{% if entry and entry.category == 'Quality' %}{{ entry.notes }}{% endif %}</textarea>
                   </div>
                   <div class="col-md-6">
                     <label for="quality-area" class="form-label">Area / Department</label>
@@ -204,6 +212,10 @@
                       {% if active_category != 'People' %}disabled{% else %}required{% endif %}
                     />
                   </div>
+                  <div class="col-12">
+                    <label for="people-notes" class="form-label">Notes</label>
+                    <textarea class="form-control" id="people-notes" name="notes" rows="3" {% if active_category != 'People' %}disabled{% endif %}>{% if entry and entry.category == 'People' %}{{ entry.notes }}{% endif %}</textarea>
+                  </div>
                 </div>
               </div>
 
@@ -242,6 +254,10 @@
                     <label for="materials-description" class="form-label">Description</label>
                     <textarea class="form-control" id="materials-description" name="description" rows="3" data-required="true" {% if active_category != 'Materials' %}disabled{% else %}required{% endif %}>{% if entry and entry.category == 'Materials' %}{{ entry.description }}{% endif %}</textarea>
                   </div>
+                  <div class="col-12">
+                    <label for="materials-notes" class="form-label">Notes</label>
+                    <textarea class="form-control" id="materials-notes" name="notes" rows="3" {% if active_category != 'Materials' %}disabled{% endif %}>{% if entry and entry.category == 'Materials' %}{{ entry.notes }}{% endif %}</textarea>
+                  </div>
                   <div class="col-md-6">
                     <label for="materials-item" class="form-label">Item or Part Number</label>
                     <input type="text" class="form-control" id="materials-item" name="item_part_number" value="{% if entry and entry.category == 'Materials' %}{{ entry.item_part_number }}{% endif %}" {% if active_category != 'Materials' %}disabled{% endif %} />
@@ -269,7 +285,7 @@
             <div class="row g-3 mt-3">
               <div class="col-md-6">
                 <label for="date_logged" class="form-label">Date Logged</label>
-                <input type="date" class="form-control" id="date_logged" name="date_logged" value="{% if entry and entry.date_logged %}{{ entry.date_logged.isoformat() }}{% endif %}" />
+                <input type="date" class="form-control" id="date_logged" name="date_logged" value="{% if entry and entry.date_logged %}{{ entry.date_logged.isoformat() }}{% else %}{{ default_date.isoformat() }}{% endif %}" />
               </div>
             </div>
 

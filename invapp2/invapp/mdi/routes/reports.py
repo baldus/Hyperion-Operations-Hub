@@ -1,9 +1,5 @@
-from datetime import datetime
 import csv
-from io import StringIO, BytesIO
-
-import csv
-from datetime import datetime
+from datetime import datetime, date
 from io import BytesIO, StringIO
 
 from flask import flash, redirect, render_template, request, send_file, url_for
@@ -69,10 +65,13 @@ def report_entry():
         category_status_options=CATEGORY_STATUS_OPTIONS,
         default_open_positions=previous_open_positions,
         initial_category=initial_category,
+        default_date=date.today(),
     )
 def add_entry():
     entry = MDIEntry()
     _populate_entry_from_form(entry, request.form)
+    if entry.date_logged is None:
+        entry.date_logged = date.today()
     if entry.category == "People" and entry.open_positions is None:
         previous_entry = _get_previous_people_entry()
         if previous_entry is not None:
