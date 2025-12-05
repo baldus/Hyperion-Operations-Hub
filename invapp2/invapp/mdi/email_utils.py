@@ -70,6 +70,9 @@ def build_eml_message(subject: str, recipients: Sequence[str], html_body: str) -
 
     sender = current_app.config.get("MDI_DEFAULT_SENDER", "mdi-console@example.com")
     message = EmailMessage(policy=policy.default)
+    # Mark as draft for Outlook/desktop clients so it opens ready to send instead of as a
+    # received message. The X-Unsent header is understood by Outlook and other clients.
+    message["X-Unsent"] = "1"
     message["Subject"] = subject
     message["From"] = sender
     if recipients:
