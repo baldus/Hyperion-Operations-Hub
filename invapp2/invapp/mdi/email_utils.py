@@ -8,7 +8,7 @@ from typing import Callable, Iterable, List, Sequence
 
 from flask import current_app, render_template
 
-from invapp.mdi.models import MDIEntry
+from invapp.mdi.models import CATEGORY_DISPLAY, MDIEntry
 
 
 def suggested_recipients() -> List[str]:
@@ -47,9 +47,19 @@ def render_mdi_email_html(
         for entry in entries
     ]
 
+    ordered_categories = list(CATEGORY_DISPLAY.keys())
+    category_sections = [
+        {
+            "name": category,
+            "entries": [item for item in prepared_entries if item.get("category") == category],
+            "meta": CATEGORY_DISPLAY.get(category, {}),
+        }
+        for category in ordered_categories
+    ]
+
     return render_template(
         "email_mdi.html",
-        entries=prepared_entries,
+        category_sections=category_sections,
         dashboard_url=dashboard_url,
         generated_at=datetime.utcnow(),
     )

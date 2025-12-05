@@ -118,6 +118,42 @@
       .item-link:hover {
         text-decoration: underline;
       }
+
+      .category-block {
+        margin-top: 24px;
+        border: 1px solid #e5e9f0;
+        border-radius: 10px;
+        overflow: hidden;
+      }
+
+      .category-header {
+        padding: 14px 16px;
+        background: #f1f4f9;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .category-title {
+        font-size: 15px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: #1b2430;
+      }
+
+      .category-count {
+        color: #5f6b7a;
+        font-size: 13px;
+      }
+
+      .category-empty {
+        margin: 0;
+        padding: 14px 16px;
+        color: #6c757d;
+        font-style: italic;
+      }
     </style>
   </head>
   <body>
@@ -133,24 +169,42 @@
         <p>Here are the currently active MDI items. Click any item title to jump directly to it.</p>
         <a class="cta-button" href="{{ dashboard_url }}">View Dashboard</a>
 
-        {% for entry in entries %}
-          <div class="item-card">
-            <div class="item-header">
-              <p class="item-title">
-                <a class="item-link" href="{{ entry.url }}">{{ entry.title }}</a>
-              </p>
-              <span class="badge">{{ entry.category }} &middot; {{ entry.status }}</span>
+        {% for section in category_sections %}
+          <div class="category-block">
+            <div class="category-header">
+              <span class="category-title">{{ section.name }}</span>
+              <span class="category-count">
+                {% set count = section.entries|length %}
+                {% if count %}
+                  {{ count }} active item{% if count != 1 %}s{% endif %}
+                {% else %}
+                  No active items
+                {% endif %}
+              </span>
             </div>
-            <p class="item-meta">
-              <strong>Owner:</strong> {{ entry.owner }}
-              {% if entry.due_date %}
-                &middot; <strong>Due:</strong> {{ entry.due_date.strftime('%b %d, %Y') }}
-              {% endif %}
-            </p>
-            <p class="item-description">{{ entry.description }}</p>
+
+            {% if section.entries %}
+              {% for entry in section.entries %}
+                <div class="item-card" style="border-radius: 0; border-left: 4px solid #0d6efd;">
+                  <div class="item-header">
+                    <p class="item-title">
+                      <a class="item-link" href="{{ entry.url }}">{{ entry.title }}</a>
+                    </p>
+                    <span class="badge">{{ entry.status }}</span>
+                  </div>
+                  <p class="item-meta">
+                    <strong>Owner:</strong> {{ entry.owner }}
+                    {% if entry.due_date %}
+                      &middot; <strong>Due:</strong> {{ entry.due_date.strftime('%b %d, %Y') }}
+                    {% endif %}
+                  </p>
+                  <p class="item-description">{{ entry.description }}</p>
+                </div>
+              {% endfor %}
+            {% else %}
+              <p class="category-empty">No active items for {{ section.name }}.</p>
+            {% endif %}
           </div>
-        {% else %}
-          <p>No active items found.</p>
         {% endfor %}
       </div>
 
