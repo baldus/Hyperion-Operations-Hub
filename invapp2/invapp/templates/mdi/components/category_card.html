@@ -49,9 +49,6 @@
         <dt class="col">Due</dt>
         <dd class="col mb-0">{{ entry.due_date.strftime('%b %d, %Y') if entry.due_date else 'N/A' }}</dd>
       </dl>
-      {% if entry.notes %}
-        <p class="text-muted small mb-0">{{ entry.notes[:140] }}{% if entry.notes|length > 140 %}…{% endif %}</p>
-      {% endif %}
     {% elif entry.category == 'People' %}
       <div class="d-flex flex-wrap gap-3 small text-muted mb-0">
         <span><strong>Absentees:</strong> {{ entry.number_absentees if entry.number_absentees is not none else 'N/A' }}</span>
