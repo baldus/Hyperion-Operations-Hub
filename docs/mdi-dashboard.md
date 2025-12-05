@@ -20,6 +20,10 @@ metrics visible to the entire team.
   updates.
 * **Auto-refresh** – The board polls `/api/mdi_entries` every 60 seconds and
   re-renders the lanes without a page reload.
+* **Email summary** – Use the "📧 Send Active Items Email" button to trigger a
+  POST to `/send_mdi_email`. The backend compiles all non-Closed/Received
+  entries and sends an HTML summary with direct links back to the dashboard and
+  each item.
 
 ## Category lanes
 Each lane represents a pillar (Safety, Quality, Delivery, People, Materials):
@@ -40,3 +44,19 @@ Each lane represents a pillar (Safety, Quality, Delivery, People, Materials):
 Use this view as the shared, at-a-glance agenda for the daily huddle: it keeps
 attention on open work, encourages quick updates, and pairs live metrics with
 actions the team can take immediately.
+
+## Email configuration
+Set the following environment variables (or add them to `.env`) so the
+"Send Active Items Email" button can deliver the summary:
+
+* `MDI_SMTP_SERVER` – SMTP host (required)
+* `MDI_SMTP_PORT` – Port number (defaults to 587)
+* `MDI_SMTP_USERNAME` / `MDI_SMTP_PASSWORD` – Credentials (optional if your
+  relay is open or uses IP allowlisting)
+* `MDI_SMTP_USE_TLS` – Set to `false` to disable STARTTLS (defaults to `true`)
+* `MDI_EMAIL_SENDER` – From address; defaults to the username when omitted
+* `MDI_EMAIL_RECIPIENTS` – Comma-separated list of recipient addresses
+
+If any required values (server or sender/recipients) are missing, the endpoint
+returns `400` with a descriptive message so the UI can surface the error in a
+toast.
