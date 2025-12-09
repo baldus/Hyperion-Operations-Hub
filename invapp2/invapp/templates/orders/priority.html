@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Order Prioritization</h2>
+<p class="page-intro">Drag and drop the orders below to set their processing priority. The first row is the most urgent.</p>
+
+<div class="orders-toolbar">
+    <div class="toolbar-actions">
+        {% if can_edit_page('orders') %}
+            <a href="{{ url_for('orders.new_order') }}" class="action-btn primary-action">Create New Order</a>
+        {% endif %}
+        <a href="{{ url_for('orders.orders_home') }}" class="action-btn subtle-action">Active Orders</a>
+        <a href="{{ url_for('orders.schedule_view') }}" class="action-btn subtle-action">Schedule</a>
+        <a href="{{ url_for('orders.view_open_orders') }}" class="action-btn subtle-action">Open Orders</a>
+        <a href="{{ url_for('orders.view_closed_orders') }}" class="action-btn subtle-action">Closed Orders</a>
+    </div>
+</div>
+
+{% if orders %}
+<div class="priority-board" data-priority-board>
+    <div class="priority-board__header">
+        <div>Priority</div>
+        <div>Production Order</div>
+        <div>Type</div>
+        <div>Promise Date</div>
+        <div>Customer</div>
+        <div>Status</div>
+        <div>Actions</div>
+    </div>
+    <ul class="priority-board__list" id="priority-list">
+        {% for order in orders %}
+        <li class="priority-card" draggable="true" data-order-id="{{ order.id }}">
+            <div class="priority-card__cell">
+                <span class="priority-rank">{{ loop.index }}</span>
+                <span class="priority-handle" aria-hidden="true">⋮⋮</span>
+                <span class="sr-only">Drag to set priority</span>
+            </div>
+            <div class="priority-card__cell">
+                <div class="priority-title">{{ order.order_number }}</div>
+                <div class="priority-subtitle">{{ order.purchase_order_number or 'PO: —' }}</div>
+            </div>
+            <div class="priority-card__cell">{{ order.order_type }}</div>
+            <div class="priority-card__cell">{{ order.promised_date or '—' }}</div>
+            <div class="priority-card__cell">{{ order.customer_name or '—' }}</div>
+            <div class="priority-card__cell">{{ order.status_label }}</div>
+            <div class="priority-card__cell">
+                <a href="{{ url_for('orders.view_order', order_id=order.id) }}" class="action-btn subtle-action small">View</a>
+            </div>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+<div class="priority-save" data-priority-status aria-live="polite"></div>
+{% else %}
+<div class="empty-state">
+    <p>No active orders to prioritize.</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    window.orderPriorityConfig = {
+        updateUrl: "{{ url_for('orders.prioritize_orders') }}"
+    };
+</script>
+<script defer src="{{ url_for('static', filename='js/order-priority.js') }}"></script>
+{% endblock %}

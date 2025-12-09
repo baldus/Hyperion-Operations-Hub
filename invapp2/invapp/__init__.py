@@ -180,6 +180,7 @@ def _ensure_order_schema(engine):
         "order_step_component",
         "item_bom",
         "item_bom_component",
+        "gate_order_detail",
     }
     missing_tables = required_tables - existing_tables
     if missing_tables:
@@ -199,6 +200,14 @@ def _ensure_order_schema(engine):
         columns_to_add.append(("created_by", "VARCHAR"))
     if "general_notes" not in order_columns:
         columns_to_add.append(("general_notes", "TEXT"))
+    if "order_type" not in order_columns:
+        columns_to_add.append(("order_type", "VARCHAR"))
+    if "purchase_order_number" not in order_columns:
+        columns_to_add.append(("purchase_order_number", "VARCHAR"))
+    if "priority" not in order_columns:
+        columns_to_add.append(("priority", "INTEGER"))
+    if "scheduled_ship_date" not in order_columns:
+        columns_to_add.append(("scheduled_ship_date", "DATE"))
 
     if columns_to_add:
         with engine.begin() as conn:

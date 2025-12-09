@@ -2,23 +2,128 @@
 {% block content %}
 <h2>Edit Order {{ order.order_number }}</h2>
 <form method="post" class="form-stack">
-    <label class="form-field">
-        <span class="field-label">Status</span>
-        <select name="status">
-            {% for value in statuses %}
-                <option value="{{ value }}" {% if order.status==value %}selected{% endif %}>
-                    {{ status_labels.get(value, value.replace('_', ' ').title()) }}
-                </option>
-            {% endfor %}
-        </select>
-    </label>
-    <label class="form-field">
-        <span class="field-label">General Notes</span>
-        <textarea name="general_notes" rows="4">{{ order.general_notes or '' }}</textarea>
-    </label>
+    <section class="form-section">
+        <h3>Order Information</h3>
+        <div class="form-grid">
+            <label class="form-field">
+                <span class="field-label">Order Type</span>
+                <select name="order_type" id="order-type" required>
+                    {% for choice in order_type_choices %}
+                    <option value="{{ choice }}" {% if form_data.order_type == choice %}selected{% endif %}>{{ choice }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Production Order Number</span>
+                <input type="text" name="order_number" value="{{ form_data.order_number }}" required>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Purchase Order Number</span>
+                <input type="text" name="purchase_order_number" value="{{ form_data.purchase_order_number }}" required>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Customer Name</span>
+                <input type="text" name="customer_name" value="{{ form_data.customer_name }}" required>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Order Created By</span>
+                <input type="text" name="created_by" value="{{ form_data.created_by }}" required>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Promise Date</span>
+                <input type="date" name="promised_date" value="{{ form_data.promised_date }}" required>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Scheduled Ship Date</span>
+                <input type="date" name="scheduled_ship_date" value="{{ form_data.scheduled_ship_date }}" required>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Priority / Sequence</span>
+                <input type="number" name="priority" value="{{ form_data.priority }}" step="1">
+            </label>
+            <label class="form-field">
+                <span class="field-label">Status</span>
+                <select name="status">
+                    {% for status in statuses %}
+                        <option value="{{ status }}" {% if form_data.status == status %}selected{% endif %}>{{ status_labels[status] }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+        </div>
+        <label class="form-field">
+            <span class="field-label">Notes</span>
+            <textarea name="general_notes" rows="4">{{ form_data.general_notes }}</textarea>
+        </label>
+    </section>
+
+    <section class="form-section" id="gate-details" {% if form_data.order_type != 'Gates' %}hidden{% endif %}>
+        <h3>Gate Details</h3>
+        <div class="form-grid">
+            <label class="form-field">
+                <span class="field-label">Item Number</span>
+                <input type="text" name="item_number" value="{{ form_data.item_number }}" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Production Quantity</span>
+                <input type="number" name="production_quantity" min="1" value="{{ form_data.production_quantity }}" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Panel Count</span>
+                <input type="number" name="panel_count" min="1" value="{{ form_data.panel_count }}" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Total Gate Height</span>
+                <input type="number" name="total_gate_height" step="0.01" min="0" value="{{ form_data.total_gate_height }}" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+            </label>
+            <label class="form-field">
+                <span class="field-label">AL Color</span>
+                <input type="text" name="al_color" value="{{ form_data.al_color }}" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Acrylic/Wood/Vinyl Color</span>
+                <input type="text" name="insert_color" value="{{ form_data.insert_color }}" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Lead Post Direction</span>
+                <input type="text" name="lead_post_direction" value="{{ form_data.lead_post_direction }}" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Visi Panels</span>
+                <input type="text" name="visi_panels" value="{{ form_data.visi_panels }}" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+            </label>
+            <label class="form-field">
+                <span class="field-label">1/2 Panel Color</span>
+                <input type="text" name="half_panel_color" value="{{ form_data.half_panel_color }}" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+            </label>
+        </div>
+        <p class="section-help">Gate orders will automatically remain on the Framing → Assembly → Inspection → Packaging routing.</p>
+    </section>
+
     <div class="form-actions">
-        <button type="submit" class="action-btn">Save</button>
+        <button type="submit" class="action-btn">Save Changes</button>
         <a href="{{ url_for('orders.view_order', order_id=order.id) }}" class="action-btn secondary">Cancel</a>
     </div>
 </form>
+
+<script>
+(function() {
+    const orderTypeSelect = document.getElementById('order-type');
+    const gateDetails = document.getElementById('gate-details');
+
+    function toggleGateFields() {
+        const isGate = orderTypeSelect.value === 'Gates';
+        gateDetails.hidden = !isGate;
+        gateDetails.querySelectorAll('input').forEach(input => {
+            if (isGate) {
+                input.setAttribute('required', 'required');
+            } else {
+                input.removeAttribute('required');
+            }
+        });
+    }
+
+    orderTypeSelect.addEventListener('change', toggleGateFields);
+    toggleGateFields();
+})();
+</script>
 {% endblock %}

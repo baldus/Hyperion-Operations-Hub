@@ -897,6 +897,10 @@ class Order(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     order_number = db.Column(db.String, unique=True, nullable=False)
+    order_type = db.Column(db.String, nullable=False, default="Gates")
+    purchase_order_number = db.Column(db.String, nullable=False, default="")
+    priority = db.Column(db.Integer, nullable=False, default=0)
+    scheduled_ship_date = db.Column(db.Date, nullable=True)
     status = db.Column(db.String, nullable=False, default=OrderStatus.SCHEDULED)
     customer_name = db.Column(db.String, nullable=True)
     created_by = db.Column(db.String, nullable=True)
@@ -923,6 +927,12 @@ class Order(db.Model):
         order_by="RoutingStep.sequence",
     )
     steps = synonym("routing_steps")
+    gate_details = db.relationship(
+        "GateOrderDetail",
+        back_populates="order",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
     def __repr__(self):
         return f"<Order {self.order_number} status={self.status}>"
@@ -1035,6 +1045,24 @@ class OrderComponent(db.Model):
             f"<OrderComponent order_line={self.order_line_id} "
             f"component={self.component_item_id} qty={self.quantity}>"
         )
+
+
+class GateOrderDetail(db.Model):
+    __tablename__ = "gate_order_detail"
+
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("order.id"), nullable=False, unique=True)
+    item_number = db.Column(db.String, nullable=False)
+    production_quantity = db.Column(db.Integer, nullable=False)
+    panel_count = db.Column(db.Integer, nullable=False)
+    total_gate_height = db.Column(db.Numeric(10, 2), nullable=False)
+    al_color = db.Column(db.String, nullable=False)
+    insert_color = db.Column(db.String, nullable=False)
+    lead_post_direction = db.Column(db.String, nullable=False)
+    visi_panels = db.Column(db.String, nullable=False)
+    half_panel_color = db.Column(db.String, nullable=False)
+
+    order = db.relationship("Order", back_populates="gate_details")
 
 
 class BillOfMaterial(db.Model):
