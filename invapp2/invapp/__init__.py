@@ -28,12 +28,16 @@ from .routes import (
     production,
     reports,
     settings,
+    useful_links,
     users,
     work,
 )
+from .mdi import init_blueprint, mdi_bp
+from .mdi import models as mdi_models
 from config import Config
 from . import models  # ensure models are registered with SQLAlchemy
 from .audit import record_access_event, resolve_client_ip
+from .superuser import is_superuser
 
 
 NAVIGATION_PAGES: tuple[tuple[str, str, str], ...] = (
@@ -176,6 +180,7 @@ def _ensure_order_schema(engine):
         "order_step_component",
         "item_bom",
         "item_bom_component",
+        "gate_order_detail",
     }
     missing_tables = required_tables - existing_tables
     if missing_tables:
@@ -195,6 +200,14 @@ def _ensure_order_schema(engine):
         columns_to_add.append(("created_by", "VARCHAR"))
     if "general_notes" not in order_columns:
         columns_to_add.append(("general_notes", "TEXT"))
+    if "order_type" not in order_columns:
+        columns_to_add.append(("order_type", "VARCHAR"))
+    if "purchase_order_number" not in order_columns:
+        columns_to_add.append(("purchase_order_number", "VARCHAR"))
+    if "priority" not in order_columns:
+        columns_to_add.append(("priority", "INTEGER"))
+    if "scheduled_ship_date" not in order_columns:
+        columns_to_add.append(("scheduled_ship_date", "DATE"))
 
     if columns_to_add:
         with engine.begin() as conn:
@@ -448,6 +461,8 @@ def create_app(config_override=None):
                 _ensure_inventory_schema(db.engine)
                 _ensure_order_schema(db.engine)
                 _ensure_production_schema(db.engine)
+                mdi_models.ensure_schema()
+                mdi_models.seed_data()
                 # ✅ ensure default production customers at startup
                 production._ensure_default_customers()
                 production._ensure_output_formula()
@@ -456,6 +471,9 @@ def create_app(config_override=None):
                     app.config.get("ADMIN_PASSWORD", "joshbaldus"),
                 )
                 _ensure_core_roles()
+                # Repair movement primary key sequences that may have been
+                # desynchronized by manual imports or restores.
+                models.Movement._repair_primary_key_sequence()
             except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
                 database_available = False
                 database_error_message = (
@@ -513,6 +531,7 @@ def create_app(config_override=None):
             "emergency_access_active": bool(
                 getattr(current_user, "is_emergency_user", False)
             ),
+            "is_superuser": is_superuser,
         }
 
     # register blueprints
@@ -523,10 +542,13 @@ def create_app(config_override=None):
     app.register_blueprint(purchasing.bp)
     app.register_blueprint(quality.bp)
     app.register_blueprint(work.bp)
+    init_blueprint()
+    app.register_blueprint(mdi_bp)
     app.register_blueprint(settings.bp)
     app.register_blueprint(printers.bp)
     app.register_blueprint(production.bp)
     app.register_blueprint(admin.bp)
+    app.register_blueprint(useful_links.bp)
     app.register_blueprint(users.bp)
 
     def _should_log_request() -> bool:
@@ -593,11 +615,14 @@ def create_app(config_override=None):
         if guard_response is not None:
             return guard_response
 
+        useful_links: list[models.UsefulLink] = []
+
         if not current_app.config.get("DATABASE_AVAILABLE", True):
             return render_template(
                 "home.html",
                 order_summary=None,
                 inventory_summary=None,
+                useful_links=useful_links,
             )
 
         order_summary = None
@@ -715,10 +740,13 @@ def create_app(config_override=None):
                 "total_alerts": len(out_items) + len(low_items),
             }
 
+        useful_links = models.UsefulLink.ordered()
+
         return render_template(
             "home.html",
             order_summary=order_summary,
             inventory_summary=inventory_summary,
+            useful_links=useful_links,
         )
 
     return app

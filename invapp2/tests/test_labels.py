@@ -72,3 +72,13 @@ def test_custom_template_can_be_registered_and_assigned():
         labels.PROCESS_ASSIGNMENTS.pop("DemoEvent", None)
     assert "Hello" in rendered
 
+
+def test_location_label_template_renders_location_details():
+    context = labels.build_location_label_context(
+        {"code": "LOC-01", "description": "North Wall"}
+    )
+    zpl = labels.render_label_for_process("LocationLabel", context)
+    assert "LOC-01" in zpl
+    assert "North Wall" in zpl
+    assert "^BC" in zpl
+

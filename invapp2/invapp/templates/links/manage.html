@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Useful Links</h2>
+<p class="page-intro">Share quick access to documentation and tools. Only the superuser can edit this list.</p>
+
+<div class="links-admin-grid">
+  <section class="card-section settings-card">
+    <h3>Add a link</h3>
+    <form method="post" class="stacked-form">
+      <label>
+        Title
+        <input type="text" name="title" required aria-required="true">
+      </label>
+      <label>
+        URL
+        <input type="url" name="url" placeholder="https://example.com" required aria-required="true">
+      </label>
+      <label>
+        Description (optional)
+        <textarea name="description" rows="2" placeholder="Who should use this link or what they'll find"></textarea>
+      </label>
+      <label>
+        Display order
+        <input type="number" name="display_order" value="0" inputmode="numeric">
+      </label>
+      <button type="submit" class="action-btn">Add link</button>
+    </form>
+  </section>
+
+  <section class="card-section settings-card">
+    <h3>Current links</h3>
+    <ul class="links-admin-list">
+      {% for link in links %}
+      <li class="links-admin-card">
+        <form method="post" action="{{ url_for('useful_links.update_link', link_id=link.id) }}" class="stacked-form">
+          <label>
+            Title
+            <input type="text" name="title" value="{{ link.title }}" required aria-required="true">
+          </label>
+          <label>
+            URL
+            <input type="url" name="url" value="{{ link.url }}" required aria-required="true">
+          </label>
+          <label>
+            Description (optional)
+            <textarea name="description" rows="2">{{ link.description }}</textarea>
+          </label>
+          <label>
+            Display order
+            <input type="number" name="display_order" value="{{ link.display_order }}" inputmode="numeric">
+          </label>
+          <div class="form-row">
+            <button type="submit" class="action-btn">Save</button>
+            <button type="submit" formmethod="post" formaction="{{ url_for('useful_links.delete_link', link_id=link.id) }}" class="action-btn danger">Delete</button>
+            <a href="{{ link.url }}" class="form-link" target="_blank" rel="noreferrer noopener">Open</a>
+          </div>
+        </form>
+      </li>
+      {% else %}
+      <li class="links-admin-empty">No links have been added yet.</li>
+      {% endfor %}
+    </ul>
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% import 'mdi/components/assets.html' as mdi_assets %}
+
+{% block title %}Meeting View | MDI Console{% endblock %}
+
+{% block content_card_class %}content-card--mdi{% endblock %}
+
+{% block extra_head %}
+  {{ super() }}
+  {{ mdi_assets.head_assets() }}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block extra_scripts %}
+  {{ super() }}
+  {{ mdi_assets.script_assets() }}
+  <script src="{{ url_for('mdi.static', filename='js/charts.js') }}"></script>
+{% endblock %}
+
+{% block content %}
+  <div class="container py-3">
+    {% include 'components/category_header.html' %}
+
+    <div class="row g-4 mb-4">
+      {% for chart in charts %}
+        <div class="{{ chart.column_class or 'col-12 col-xl-6' }}">
+          {% include 'components/chart_block.html' %}
+        </div>
+      {% endfor %}
+    </div>
+
+    {% if metric_config %}
+      {% include 'components/category_metrics.html' %}
+    {% endif %}
+
+    {% include 'components/category_cards.html' %}
+  </div>
+{% endblock %}

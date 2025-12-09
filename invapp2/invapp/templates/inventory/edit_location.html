@@ -11,6 +11,10 @@
   <button type="submit" class="action-btn">Update</button>
 </form>
 
+<form method="POST" action="{{ url_for('inventory.print_location_label', location_id=location.id) }}">
+  <button type="submit" class="action-btn">Print Location Label</button>
+</form>
+
 <form method="POST" action="{{ url_for('inventory.delete_location', location_id=location.id) }}" onsubmit="return confirm('Are you sure you want to delete this location? This action cannot be undone.');">
   <button type="submit" class="action-btn action-btn--danger">Delete Location</button>
 </form>

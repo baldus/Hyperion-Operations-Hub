@@ -375,7 +375,7 @@ def inventory_home():
         .group_by(Movement.item_id)
         .all()
     )
-    on_hand_map = {item_id: int(total or 0) for item_id, total in movement_totals}
+    on_hand_map = {item_id: Decimal(total or 0) for item_id, total in movement_totals}
 
     reservation_totals = (
         db.session.query(
@@ -388,7 +388,7 @@ def inventory_home():
         .group_by(Reservation.item_id)
         .all()
     )
-    reserved_map = {item_id: int(total or 0) for item_id, total in reservation_totals}
+    reserved_map = {item_id: Decimal(total or 0) for item_id, total in reservation_totals}
 
     items = (
         Item.query.options(load_only(Item.id, Item.sku, Item.name, Item.min_stock))
@@ -421,25 +421,26 @@ def inventory_home():
     low_stock_items = []
     near_stock_items = []
     for item in items:
-        min_stock = int(item.min_stock or 0)
-        if min_stock <= 0:
+        min_stock_int = int(item.min_stock or 0)
+        if min_stock_int <= 0:
             continue
-        total_on_hand = on_hand_map.get(item.id, 0)
-        coverage = total_on_hand / float(min_stock) if min_stock else None
+        min_stock = Decimal(min_stock_int)
+        total_on_hand = on_hand_map.get(item.id, Decimal(0))
+        coverage = (total_on_hand / min_stock) if min_stock else None
         entry = {
             "item": item,
             "on_hand": total_on_hand,
-            "min_stock": min_stock,
+            "min_stock": min_stock_int,
             "coverage": coverage,
         }
-        if total_on_hand < (min_stock * 1.05):
+        if total_on_hand < (min_stock * Decimal("1.05")):
             low_stock_items.append(entry)
-        elif total_on_hand < (min_stock * 1.25):
+        elif total_on_hand < (min_stock * Decimal("1.25")):
             near_stock_items.append(entry)
 
     def _coverage_sort_key(entry):
         coverage = entry.get("coverage")
-        return coverage if coverage is not None else float("inf")
+        return float(coverage) if coverage is not None else float("inf")
 
     low_stock_items.sort(key=_coverage_sort_key)
     near_stock_items.sort(key=_coverage_sort_key)
@@ -456,15 +457,15 @@ def inventory_home():
         .all()
     )
 
-    required_by_item = defaultdict(int)
+    required_by_item = defaultdict(Decimal)
     order_refs = defaultdict(list)
     for order in waiting_orders:
         for line in order.order_lines:
-            line_quantity = int(line.quantity or 0)
+            line_quantity = Decimal(line.quantity or 0)
             if line_quantity <= 0:
                 continue
             for component in line.components:
-                component_quantity = int(component.quantity or 0)
+                component_quantity = Decimal(component.quantity or 0)
                 if component_quantity <= 0:
                     continue
                 total_required = component_quantity * line_quantity
@@ -482,9 +483,11 @@ def inventory_home():
 
     waiting_items = []
     for item_id, required_total in required_by_item.items():
-        available = on_hand_map.get(item_id, 0) - reserved_map.get(item_id, 0)
+        available = on_hand_map.get(item_id, Decimal(0)) - reserved_map.get(
+            item_id, Decimal(0)
+        )
         if available < 0:
-            available = 0
+            available = Decimal(0)
         shortage = required_total - available
         if shortage <= 0:
             continue
@@ -503,7 +506,7 @@ def inventory_home():
     def _build_chart_entries(source_map):
         entries = []
         for item_id, raw_value in source_map.items():
-            value = int(raw_value)
+            value = float(raw_value)
             if value <= 0:
                 continue
             item = items_by_id.get(item_id)
@@ -682,25 +685,29 @@ def create_purchase_request_from_waiting(item_id: int):
     def _create_request():
         item = Item.query.get_or_404(item_id)
 
-        total_on_hand = (
-            db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
-            .filter(Movement.item_id == item.id)
-            .scalar()
-        ) or 0
-        total_on_hand = int(total_on_hand)
-
-        reserved_total = (
-            db.session.query(func.coalesce(func.sum(Reservation.quantity), 0))
-            .join(OrderLine)
-            .join(Order)
-            .filter(
-                Reservation.item_id == item.id,
-                Order.status.in_(OrderStatus.RESERVABLE_STATES),
+        total_on_hand = Decimal(
+            (
+                db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+                .filter(Movement.item_id == item.id)
+                .scalar()
             )
-            .scalar()
-        ) or 0
-        reserved_total = int(reserved_total)
-        available_after_reservations = max(total_on_hand - reserved_total, 0)
+            or 0
+        )
+
+        reserved_total = Decimal(
+            (
+                db.session.query(func.coalesce(func.sum(Reservation.quantity), 0))
+                .join(OrderLine)
+                .join(Order)
+                .filter(
+                    Reservation.item_id == item.id,
+                    Order.status.in_(OrderStatus.RESERVABLE_STATES),
+                )
+                .scalar()
+            )
+            or 0
+        )
+        available_after_reservations = max(total_on_hand - reserved_total, Decimal(0))
 
         waiting_orders = (
             Order.query.options(
@@ -712,16 +719,16 @@ def create_purchase_request_from_waiting(item_id: int):
             .all()
         )
 
-        total_required = 0
+        total_required = Decimal(0)
         for order in waiting_orders:
             for line in order.order_lines:
-                line_quantity = int(line.quantity or 0)
+                line_quantity = Decimal(line.quantity or 0)
                 if line_quantity <= 0:
                     continue
                 for component in line.components:
                     if component.component_item_id != item.id:
                         continue
-                    component_quantity = int(component.quantity or 0)
+                    component_quantity = Decimal(component.quantity or 0)
                     if component_quantity <= 0:
                         continue
                     total_required += component_quantity * line_quantity
@@ -743,9 +750,9 @@ def create_purchase_request_from_waiting(item_id: int):
 
         description = (
             "Generated from the Waiting on Material list on the inventory dashboard. "
-            f"Required for waiting orders: {total_required}. "
-            f"Available after reservations: {available_after_reservations}. "
-            f"Calculated shortage: {shortage}."
+            f"Required for waiting orders: {float(total_required)}. "
+            f"Available after reservations: {float(available_after_reservations)}. "
+            f"Calculated shortage: {float(shortage)}."
         )
 
         return _create_purchase_request_for_item(
@@ -1712,6 +1719,23 @@ def edit_location(location_id):
     )
 
 
+@bp.route("/location/<int:location_id>/print-label", methods=["POST"])
+@require_roles("admin")
+def print_location_label(location_id: int):
+    location = Location.query.get_or_404(location_id)
+
+    from invapp.printing.labels import build_location_label_context
+    from invapp.printing.zebra import print_label_for_process
+
+    context = build_location_label_context(location)
+    if print_label_for_process("LocationLabel", context):
+        flash(f"Label queued for location {location.code}.", "success")
+    else:
+        flash("Failed to print location label.", "warning")
+
+    return redirect(url_for("inventory.edit_location", location_id=location.id))
+
+
 @bp.route("/location/<int:location_id>/delete", methods=["POST"])
 @require_roles("admin")
 def delete_location(location_id):
@@ -2305,10 +2329,24 @@ def receiving():
 
     if request.method == "POST":
         sku = request.form["sku"].strip()
-        qty = int(request.form["qty"])
+        defer_qty = (
+            current_user.is_authenticated
+            and current_user.has_role("admin")
+            and request.form.get("defer_qty") == "1"
+        )
+        qty_raw = request.form.get("qty", "").strip()
         person = request.form["person"].strip()
         po_number = request.form.get("po_number", "").strip() or None
         location_id = int(request.form["location_id"])
+
+        if defer_qty:
+            qty = 0
+        else:
+            try:
+                qty = int(qty_raw)
+            except (TypeError, ValueError):
+                flash("Quantity is required unless deferred for an admin.", "danger")
+                return redirect(url_for("inventory.receiving"))
 
         item = Item.query.filter_by(sku=sku).first()
         if not item:
@@ -2337,6 +2375,10 @@ def receiving():
             batch.purchase_order = po_number
 
         # Record movement
+        reference = "PO Receipt" if po_number else "Receipt"
+        if defer_qty:
+            reference += " (quantity pending)"
+
         mv = Movement(
             item_id=item.id,
             batch_id=batch_id,
@@ -2345,10 +2387,19 @@ def receiving():
             movement_type="RECEIPT",
             person=person,
             po_number=po_number,
-            reference="PO Receipt" if po_number else "Receipt"
+            reference=reference
         )
         db.session.add(mv)
         db.session.commit()
+
+        if defer_qty:
+            flash(f"Receiving recorded! Lot: {lot_number}", "success")
+            flash(
+                "Receiving recorded without a quantity. Update the batch once the count is known.",
+                "info",
+            )
+            return redirect(url_for("inventory.receiving"))
+
         try:
             location = Location.query.get(location_id)
             if not _print_batch_receipt_label(
@@ -2378,11 +2429,14 @@ def receiving():
         .all()
     )
 
+    can_defer_without_qty = current_user.is_authenticated and current_user.has_role("admin")
+
     return render_template(
         "inventory/receiving.html",
         records=records,
         locations=locations,
         form_defaults=form_defaults,
+        can_defer_without_qty=can_defer_without_qty,
     )
 
 

@@ -1,0 +1,154 @@
+{% set collapse_id = 'category-entries-' ~ category|lower|replace(' ', '-') %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Active Items</h2>
+  <div class="d-flex gap-2">
+    <button
+      class="btn btn-sm btn-outline-secondary"
+      type="button"
+      data-bs-toggle="collapse"
+      data-bs-target="#{{ collapse_id }}"
+      aria-expanded="true"
+      aria-controls="{{ collapse_id }}"
+      data-collapse-toggle="{{ collapse_id }}"
+    >
+      <i
+        class="bi bi-chevron-up me-1"
+        data-collapse-toggle-icon
+        data-icon-expanded="bi-chevron-up"
+        data-icon-collapsed="bi-chevron-down"
+      ></i>
+      <span
+        data-collapse-toggle-text
+        data-collapse-hide="Hide Entries"
+        data-collapse-show="Show Entries"
+      >Hide Entries</span>
+    </button>
+    <a class="btn btn-sm btn-primary" href="{{ url_for('mdi.report_entry') }}">
+      <i class="bi bi-plus-lg me-1"></i>
+      Log Entry
+    </a>
+  </div>
+</div>
+
+<div id="{{ collapse_id }}" class="collapse show">
+  {% if entries %}
+    <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 row-cols-xxl-4 g-4">
+      {% for entry in entries %}
+        <div class="col">
+          <div class="card shadow-sm border-0 h-100">
+            <div class="card-body d-flex flex-column">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+              <div class="d-flex gap-2">
+                {% if entry.priority %}
+                  <span class="badge text-bg-light border fw-semibold">{{ entry.priority }}</span>
+                {% endif %}
+              </div>
+              {% if entry.status %}
+                <span class="badge bg-{{ status_badges.get(entry.status, 'secondary') }}">{{ entry.status }}</span>
+              {% endif %}
+            </div>
+            <h5 class="card-title">
+              {% if entry.category == 'Delivery' %}
+                {{ entry.item_description or 'Delivery Item' }}
+              {% elif entry.category == 'People' %}
+                People Update
+              {% else %}
+                {{ entry.description or 'No description provided' }}
+              {% endif %}
+            </h5>
+
+            {% if entry.category == 'Safety' %}
+              <p class="card-text text-muted small mb-3">
+                <i class="bi bi-person-circle me-1"></i>{{ entry.owner or 'Unassigned' }}
+                &middot;
+                <i class="bi bi-geo-alt ms-2 me-1"></i>{{ entry.area or 'N/A' }}
+              </p>
+              <dl class="row small mb-3">
+                <dt class="col-5 text-muted">Date Logged</dt>
+                <dd class="col-7">{{ entry.date_logged.strftime('%b %d, %Y') if entry.date_logged else 'N/A' }}</dd>
+              </dl>
+            {% elif entry.category == 'Quality' %}
+              <p class="card-text text-muted small mb-3">
+                <i class="bi bi-person-circle me-1"></i>{{ entry.owner or 'Unassigned' }}
+                &middot;
+                <i class="bi bi-geo-alt ms-2 me-1"></i>{{ entry.area or 'N/A' }}
+              </p>
+              <dl class="row small mb-3">
+                <dt class="col-5 text-muted">Reference</dt>
+                <dd class="col-7">{{ entry.related_reference or 'N/A' }}</dd>
+                <dt class="col-5 text-muted">Date Logged</dt>
+                <dd class="col-7">{{ entry.date_logged.strftime('%b %d, %Y') if entry.date_logged else 'N/A' }}</dd>
+              </dl>
+            {% elif entry.category == 'Delivery' %}
+              <dl class="row small mb-3">
+                <dt class="col-5 text-muted">Owner</dt>
+                <dd class="col-7">{{ entry.owner or 'Unassigned' }}</dd>
+                <dt class="col-5 text-muted">Order #</dt>
+                <dd class="col-7">{{ entry.order_number or 'N/A' }}</dd>
+                <dt class="col-5 text-muted">Customer</dt>
+                <dd class="col-7">{{ entry.customer or 'N/A' }}</dd>
+                <dt class="col-5 text-muted">Due Date</dt>
+                <dd class="col-7">{{ entry.due_date.strftime('%b %d, %Y') if entry.due_date else 'N/A' }}</dd>
+                <dt class="col-5 text-muted">Logged</dt>
+                <dd class="col-7">{{ entry.date_logged.strftime('%b %d, %Y') if entry.date_logged else 'N/A' }}</dd>
+              </dl>
+              {% if entry.notes %}
+                <div class="card-text text-muted small mb-3">
+                  <strong>Notes:</strong> {{ entry.notes[:160] }}{% if entry.notes|length > 160 %}...{% endif %}
+                </div>
+              {% endif %}
+            {% elif entry.category == 'People' %}
+              <dl class="row small mb-3">
+                <dt class="col-5 text-muted">Absentees</dt>
+                <dd class="col-7">{{ entry.number_absentees if entry.number_absentees is not none else 'N/A' }}</dd>
+                <dt class="col-5 text-muted">Open Positions</dt>
+                <dd class="col-7">{{ entry.open_positions if entry.open_positions is not none else 'N/A' }}</dd>
+                <dt class="col-5 text-muted">Date Logged</dt>
+                <dd class="col-7">{{ entry.date_logged.strftime('%b %d, %Y') if entry.date_logged else 'N/A' }}</dd>
+              </dl>
+            {% elif entry.category == 'Materials' %}
+              <p class="card-text text-muted small mb-3">
+                <i class="bi bi-person-circle me-1"></i>{{ entry.owner or 'Unassigned' }}
+                {% if entry.area %}&middot;
+                  <i class="bi bi-geo-alt ms-2 me-1"></i>{{ entry.area }}
+                {% endif %}
+              </p>
+              <dl class="row small mb-3">
+                <dt class="col-5 text-muted">Item / Part</dt>
+                <dd class="col-7">{{ entry.item_part_number or 'N/A' }}</dd>
+                <dt class="col-5 text-muted">Vendor</dt>
+                <dd class="col-7">{{ entry.vendor or 'N/A' }}</dd>
+                <dt class="col-5 text-muted">ETA</dt>
+                <dd class="col-7">{{ entry.eta or 'N/A' }}</dd>
+                <dt class="col-5 text-muted">PO Number</dt>
+                <dd class="col-7">{{ entry.po_number or 'N/A' }}</dd>
+                <dt class="col-5 text-muted">Logged</dt>
+                <dd class="col-7">{{ entry.date_logged.strftime('%b %d, %Y') if entry.date_logged else 'N/A' }}</dd>
+              </dl>
+            {% endif %}
+            <div class="mt-auto d-flex gap-2">
+              <a class="btn btn-sm btn-outline-primary" href="{{ url_for('mdi.report_entry', id=entry.id) }}">
+                <i class="bi bi-pencil-square me-1"></i>
+                  Edit
+                </a>
+                <form
+                  method="post"
+                action="{{ url_for('mdi.report_delete_entry', entry_id=entry.id) }}"
+                  onsubmit="return confirm('Delete this entry?');"
+                >
+                  <button type="submit" class="btn btn-sm btn-outline-danger">
+                    <i class="bi bi-trash me-1"></i>
+                    Delete
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="alert alert-info mb-0">No entries logged for {{ category }} yet.</div>
+  {% endif %}
+</div>

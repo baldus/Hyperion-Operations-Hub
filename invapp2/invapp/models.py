@@ -155,6 +155,26 @@ class AccessLog(db.Model):
 
 
 
+class UsefulLink(db.Model):
+    __tablename__ = "useful_link"
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(255), nullable=False)
+    url = db.Column(db.String(2048), nullable=False)
+    description = db.Column(db.String(512), nullable=True)
+    display_order = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = (db.Index("ix_useful_link_display_order", "display_order"),)
+
+    @classmethod
+    def ordered(cls):
+        return cls.query.order_by(cls.display_order.asc(), cls.title.asc()).all()
+
+
 class ProductionChartSettings(db.Model):
     __tablename__ = "production_chart_settings"
 
@@ -275,7 +295,7 @@ class Batch(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
     lot_number = db.Column(db.String, nullable=True)  # supplier batch/lot reference
-    quantity = db.Column(db.Integer, default=0)
+    quantity = db.Column(db.Numeric(12, 3), default=0)
     received_date = db.Column(db.DateTime, default=datetime.utcnow)
     expiration_date = db.Column(db.Date, nullable=True)
     supplier_name = db.Column(db.String, nullable=True)
@@ -286,13 +306,14 @@ class Batch(db.Model):
     item = db.relationship("Item", backref="batches")
 
 
-class Movement(db.Model):
+class Movement(PrimaryKeySequenceMixin, db.Model):
     __tablename__ = "movement"
+    pk_constraint_name: ClassVar[str] = "movement_pkey"
     id = db.Column(db.Integer, primary_key=True)
     item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
     batch_id = db.Column(db.Integer, db.ForeignKey("batch.id"), nullable=True)
     location_id = db.Column(db.Integer, db.ForeignKey("location.id"), nullable=False)
-    quantity = db.Column(db.Integer, nullable=False)
+    quantity = db.Column(db.Numeric(12, 3), nullable=False)
     movement_type = db.Column(db.String, nullable=False)  # RECEIPT, ISSUE, MOVE, ADJUST
     person = db.Column(db.String, nullable=True)
     po_number = db.Column(db.String, nullable=True)
@@ -876,6 +897,10 @@ class Order(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     order_number = db.Column(db.String, unique=True, nullable=False)
+    order_type = db.Column(db.String, nullable=False, default="Gates")
+    purchase_order_number = db.Column(db.String, nullable=False, default="")
+    priority = db.Column(db.Integer, nullable=False, default=0)
+    scheduled_ship_date = db.Column(db.Date, nullable=True)
     status = db.Column(db.String, nullable=False, default=OrderStatus.SCHEDULED)
     customer_name = db.Column(db.String, nullable=True)
     created_by = db.Column(db.String, nullable=True)
@@ -902,6 +927,12 @@ class Order(db.Model):
         order_by="RoutingStep.sequence",
     )
     steps = synonym("routing_steps")
+    gate_details = db.relationship(
+        "GateOrderDetail",
+        back_populates="order",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
     def __repr__(self):
         return f"<Order {self.order_number} status={self.status}>"
@@ -995,7 +1026,7 @@ class OrderComponent(db.Model):
         "order_item_id", db.Integer, db.ForeignKey("order_item.id"), nullable=False
     )
     component_item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
-    quantity = db.Column(db.Integer, nullable=False)
+    quantity = db.Column(db.Numeric(10, 3), nullable=False)
 
     order_line = db.relationship("OrderLine", back_populates="components")
     order_item = synonym("order_line")
@@ -1014,6 +1045,24 @@ class OrderComponent(db.Model):
             f"<OrderComponent order_line={self.order_line_id} "
             f"component={self.component_item_id} qty={self.quantity}>"
         )
+
+
+class GateOrderDetail(db.Model):
+    __tablename__ = "gate_order_detail"
+
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("order.id"), nullable=False, unique=True)
+    item_number = db.Column(db.String, nullable=False)
+    production_quantity = db.Column(db.Integer, nullable=False)
+    panel_count = db.Column(db.Integer, nullable=False)
+    total_gate_height = db.Column(db.Numeric(10, 2), nullable=False)
+    al_color = db.Column(db.String, nullable=False)
+    insert_color = db.Column(db.String, nullable=False)
+    lead_post_direction = db.Column(db.String, nullable=False)
+    visi_panels = db.Column(db.String, nullable=False)
+    half_panel_color = db.Column(db.String, nullable=False)
+
+    order = db.relationship("Order", back_populates="gate_details")
 
 
 class BillOfMaterial(db.Model):
@@ -1060,7 +1109,7 @@ class BillOfMaterialComponent(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     bom_id = db.Column(db.Integer, db.ForeignKey("item_bom.id"), nullable=False)
     component_item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
-    quantity = db.Column(db.Integer, nullable=False)
+    quantity = db.Column(db.Numeric(10, 3), nullable=False)
 
     bom = db.relationship("BillOfMaterial", back_populates="components")
     component_item = db.relationship("Item")
@@ -1154,7 +1203,7 @@ class RoutingStepConsumption(db.Model):
         nullable=False,
     )
     movement_id = db.Column(db.Integer, db.ForeignKey("movement.id"), nullable=False)
-    quantity = db.Column(db.Integer, nullable=False)
+    quantity = db.Column(db.Numeric(12, 3), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     routing_step_component = db.relationship(
@@ -1181,7 +1230,7 @@ class Reservation(db.Model):
         "order_item_id", db.Integer, db.ForeignKey("order_item.id"), nullable=False
     )
     item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
-    quantity = db.Column(db.Integer, nullable=False)
+    quantity = db.Column(db.Numeric(10, 3), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     order_line = db.relationship("OrderLine", back_populates="reservations")

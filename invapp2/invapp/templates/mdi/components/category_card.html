@@ -1,0 +1,90 @@
+<article class="mdi-entry-card" data-entry-id="{{ entry.id }}">
+  <div class="p-3 d-flex flex-column gap-2 position-relative">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <div class="d-flex align-items-center gap-2">
+        {% if entry.priority %}
+          <span class="mdi-pill text-{{ meta.color }} bg-{{ meta.color }}-subtle">{{ entry.priority }}</span>
+        {% endif %}
+        <small class="text-muted">#{{ '%04d'|format(entry.id) }}</small>
+      </div>
+      {% if entry.status %}
+        <span class="mdi-pill mdi-pill--status bg-{{ status_badges.get(entry.status, 'secondary') }}">
+          {{ entry.status }}
+        </span>
+      {% endif %}
+    </div>
+
+    <h6 class="mdi-entry-card__title fw-semibold mb-0">
+      {% if entry.category == 'Delivery' %}
+        {{ entry.item_description or entry.description or 'Delivery Item' }}
+      {% elif entry.category == 'People' %}
+        People Update
+      {% else %}
+        {{ entry.description or 'No description provided' }}
+      {% endif %}
+    </h6>
+
+    <div class="mdi-entry-meta text-muted d-flex flex-wrap gap-2 align-items-center">
+      <span><i class="bi bi-person-circle me-1"></i>{{ entry.owner or 'Unassigned' }}</span>
+      {% if entry.area %}
+        <span class="text-muted">&middot; <i class="bi bi-geo-alt ms-1 me-1"></i>{{ entry.area }}</span>
+      {% endif %}
+    </div>
+
+    <div class="mdi-entry-divider"></div>
+
+    {% if entry.category == 'Safety' %}
+      <p class="text-muted small mb-0">Review focus: {{ entry.related_reference or 'Observation' }}</p>
+    {% elif entry.category == 'Quality' %}
+      <p class="text-muted small mb-0">
+        {% if entry.related_reference %}
+          Reference: {{ entry.related_reference }} &middot;
+        {% endif %}
+        Logged {{ entry.date_logged.strftime('%b %d, %Y') if entry.date_logged else 'N/A' }}
+      </p>
+    {% elif entry.category == 'Delivery' %}
+      <dl class="row row-cols-2 g-2 small text-muted mb-0">
+        <dt class="col">Order</dt>
+        <dd class="col mb-0">{{ entry.order_number or 'N/A' }}</dd>
+        <dt class="col">Due</dt>
+        <dd class="col mb-0">{{ entry.due_date.strftime('%b %d, %Y') if entry.due_date else 'N/A' }}</dd>
+      </dl>
+    {% elif entry.category == 'People' %}
+      <div class="d-flex flex-wrap gap-3 small text-muted mb-0">
+        <span><strong>Absentees:</strong> {{ entry.number_absentees if entry.number_absentees is not none else 'N/A' }}</span>
+        <span><strong>Open Roles:</strong> {{ entry.open_positions if entry.open_positions is not none else 'N/A' }}</span>
+      </div>
+    {% elif entry.category == 'Materials' %}
+      <div class="text-muted small mb-0 d-flex flex-wrap gap-2">
+        {% if entry.item_part_number %}<span>Part {{ entry.item_part_number }}</span>{% endif %}
+        {% if entry.vendor %}<span>Vendor {{ entry.vendor }}</span>{% endif %}
+        {% if entry.eta %}<span>ETA {{ entry.eta }}</span>{% endif %}
+        {% if entry.po_number %}<span>PO {{ entry.po_number }}</span>{% endif %}
+      </div>
+    {% endif %}
+
+    <div class="d-flex justify-content-between align-items-center text-muted small pt-1">
+      <span><i class="bi bi-calendar-event me-1"></i>{{ entry.date_logged.strftime('%b %d, %Y') if entry.date_logged else 'N/A' }}</span>
+      <span class="fw-semibold">View details →</span>
+    </div>
+
+    <a
+      href="{{ url_for('mdi.report_entry', id=entry.id) }}"
+      class="stretched-link"
+      aria-label="View entry #{{ '%04d'|format(entry.id) }}"
+    ></a>
+  </div>
+  {% if entry.status != 'Closed' %}
+    <div class="mdi-entry-card__actions">
+      <button
+        type="button"
+        class="btn btn-sm btn-outline-success w-100"
+        data-mark-complete
+        data-entry-id="{{ entry.id }}"
+      >
+        <i class="bi bi-check2-circle me-1"></i>
+        Mark Complete
+      </button>
+    </div>
+  {% endif %}
+</article>

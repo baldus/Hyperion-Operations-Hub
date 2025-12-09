@@ -1,0 +1,341 @@
+{% extends 'base.html' %}
+{% import 'mdi/components/assets.html' as mdi_assets %}
+
+{% block title %}MDI Report Entry{% endblock %}
+
+{% block content_card_class %}content-card--mdi{% endblock %}
+
+{% block extra_head %}
+  {{ super() }}
+  {{ mdi_assets.head_assets() }}
+{% endblock %}
+
+{% block content %}
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+      <div class="card shadow-sm">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+          <span>{% if entry %}Update{% else %}New{% endif %} MDI Entry</span>
+          {% if entry %}
+            <form method="post" action="{{ url_for('mdi.report_delete_entry', entry_id=entry.id) }}" class="d-inline" onsubmit="return confirm('Delete this entry?');">
+              <button type="submit" class="btn btn-outline-light btn-sm">
+                <i class="bi bi-trash"></i> Delete
+              </button>
+            </form>
+          {% endif %}
+        </div>
+        <div class="card-body">
+          {% set priority_options = ['High', 'Medium', 'Low'] %}
+          {% set active_category = entry.category if entry else initial_category %}
+          <form method="post" action="{% if entry %}{{ url_for('mdi.report_update_entry', entry_id=entry.id) }}{% else %}{{ url_for('mdi.report_add_entry') }}{% endif %}">
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label for="category" class="form-label">Category</label>
+                <select class="form-select" id="category" name="category" required>
+                  {% for category in category_meta.keys() %}
+                    {% set selected_category = (entry and entry.category == category) or (not entry and initial_category == category) %}
+                    <option value="{{ category }}" {% if selected_category %}selected{% endif %}>{{ category }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+
+            <div class="mt-4" id="category-section-container">
+              <div class="category-section{% if active_category != 'Safety' %} d-none{% endif %}" data-category-section="Safety">
+                <h5 class="mb-3">Safety Details</h5>
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <label for="safety-status" class="form-label">Status</label>
+                    <select class="form-select" id="safety-status" name="status" data-required="true" {% if active_category != 'Safety' %}disabled{% else %}required{% endif %}>
+                      {% for status in category_status_options['Safety'] %}
+                        {% set selected = entry and entry.category == 'Safety' and entry.status == status %}
+                        {% if not entry and initial_category == 'Safety' and status == 'Open' %}
+                          {% set selected = true %}
+                        {% endif %}
+                        <option value="{{ status }}" {% if selected %}selected{% endif %}>{{ status }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-md-6">
+                    <label for="safety-priority" class="form-label">Priority</label>
+                    <select class="form-select" id="safety-priority" name="priority" {% if active_category != 'Safety' %}disabled{% endif %}>
+                      {% for priority in priority_options %}
+                        {% set selected = entry and entry.category == 'Safety' and entry.priority == priority %}
+                        {% if not entry and initial_category == 'Safety' and priority == 'Medium' %}
+                          {% set selected = true %}
+                        {% endif %}
+                        <option value="{{ priority }}" {% if selected %}selected{% endif %}>{{ priority }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-md-6">
+                    <label for="safety-owner" class="form-label">Owner</label>
+                    <input type="text" class="form-control" id="safety-owner" name="owner" value="{% if entry and entry.category == 'Safety' %}{{ entry.owner }}{% endif %}" {% if active_category != 'Safety' %}disabled{% endif %} />
+                  </div>
+                  <div class="col-12">
+                    <label for="safety-description" class="form-label">Description</label>
+                    <textarea class="form-control" id="safety-description" name="description" rows="4" data-required="true" {% if active_category != 'Safety' %}disabled{% else %}required{% endif %}>{% if entry and entry.category == 'Safety' %}{{ entry.description }}{% endif %}</textarea>
+                  </div>
+                  <div class="col-12">
+                    <label for="safety-notes" class="form-label">Notes</label>
+                    <textarea class="form-control" id="safety-notes" name="notes" rows="3" {% if active_category != 'Safety' %}disabled{% endif %}>{% if entry and entry.category == 'Safety' %}{{ entry.notes }}{% endif %}</textarea>
+                  </div>
+                  <div class="col-md-6">
+                    <label for="safety-area" class="form-label">Area / Department</label>
+                    <input type="text" class="form-control" id="safety-area" name="area" value="{% if entry and entry.category == 'Safety' %}{{ entry.area }}{% endif %}" {% if active_category != 'Safety' %}disabled{% endif %} />
+                  </div>
+                </div>
+              </div>
+
+              <div class="category-section{% if active_category != 'Quality' %} d-none{% endif %}" data-category-section="Quality">
+                <h5 class="mb-3">Quality Details</h5>
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <label for="quality-status" class="form-label">Status</label>
+                    <select class="form-select" id="quality-status" name="status" data-required="true" {% if active_category != 'Quality' %}disabled{% else %}required{% endif %}>
+                      {% for status in category_status_options['Quality'] %}
+                        {% set selected = entry and entry.category == 'Quality' and entry.status == status %}
+                        {% if not entry and initial_category == 'Quality' and status == 'Open' %}
+                          {% set selected = true %}
+                        {% endif %}
+                        <option value="{{ status }}" {% if selected %}selected{% endif %}>{{ status }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-md-6">
+                    <label for="quality-priority" class="form-label">Priority</label>
+                    <select class="form-select" id="quality-priority" name="priority" {% if active_category != 'Quality' %}disabled{% endif %}>
+                      {% for priority in priority_options %}
+                        {% set selected = entry and entry.category == 'Quality' and entry.priority == priority %}
+                        {% if not entry and initial_category == 'Quality' and priority == 'Medium' %}
+                          {% set selected = true %}
+                        {% endif %}
+                        <option value="{{ priority }}" {% if selected %}selected{% endif %}>{{ priority }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-md-6">
+                    <label for="quality-owner" class="form-label">Owner</label>
+                    <input type="text" class="form-control" id="quality-owner" name="owner" value="{% if entry and entry.category == 'Quality' %}{{ entry.owner }}{% endif %}" {% if active_category != 'Quality' %}disabled{% endif %} />
+                  </div>
+                  <div class="col-12">
+                    <label for="quality-description" class="form-label">Description</label>
+                    <textarea class="form-control" id="quality-description" name="description" rows="4" data-required="true" {% if active_category != 'Quality' %}disabled{% else %}required{% endif %}>{% if entry and entry.category == 'Quality' %}{{ entry.description }}{% endif %}</textarea>
+                  </div>
+                  <div class="col-12">
+                    <label for="quality-notes" class="form-label">Notes</label>
+                    <textarea class="form-control" id="quality-notes" name="notes" rows="3" {% if active_category != 'Quality' %}disabled{% endif %}>{% if entry and entry.category == 'Quality' %}{{ entry.notes }}{% endif %}</textarea>
+                  </div>
+                  <div class="col-md-6">
+                    <label for="quality-area" class="form-label">Area / Department</label>
+                    <input type="text" class="form-control" id="quality-area" name="area" value="{% if entry and entry.category == 'Quality' %}{{ entry.area }}{% endif %}" {% if active_category != 'Quality' %}disabled{% endif %} />
+                  </div>
+                  <div class="col-md-6">
+                    <label for="quality-reference" class="form-label">Related Reference</label>
+                    <input type="text" class="form-control" id="quality-reference" name="related_reference" value="{% if entry and entry.category == 'Quality' %}{{ entry.related_reference }}{% endif %}" {% if active_category != 'Quality' %}disabled{% endif %} />
+                  </div>
+                </div>
+              </div>
+
+              <div class="category-section{% if active_category != 'Delivery' %} d-none{% endif %}" data-category-section="Delivery">
+                <h5 class="mb-3">Delivery Details</h5>
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <label for="delivery-status" class="form-label">Status</label>
+                    <select class="form-select" id="delivery-status" name="status" data-required="true" {% if active_category != 'Delivery' %}disabled{% else %}required{% endif %}>
+                      {% for status in category_status_options['Delivery'] %}
+                        {% set selected = entry and entry.category == 'Delivery' and entry.status == status %}
+                        {% if not entry and initial_category == 'Delivery' and status == 'Open' %}
+                          {% set selected = true %}
+                        {% endif %}
+                        <option value="{{ status }}" {% if selected %}selected{% endif %}>{{ status }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-md-6">
+                    <label for="delivery-priority" class="form-label">Priority</label>
+                    <select class="form-select" id="delivery-priority" name="priority" {% if active_category != 'Delivery' %}disabled{% endif %}>
+                      {% for priority in priority_options %}
+                        {% set selected = entry and entry.category == 'Delivery' and entry.priority == priority %}
+                        {% if not entry and initial_category == 'Delivery' and priority == 'Medium' %}
+                          {% set selected = true %}
+                        {% endif %}
+                        <option value="{{ priority }}" {% if selected %}selected{% endif %}>{{ priority }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-md-6">
+                    <label for="delivery-owner" class="form-label">Owner</label>
+                    <input type="text" class="form-control" id="delivery-owner" name="owner" value="{% if entry and entry.category == 'Delivery' %}{{ entry.owner }}{% endif %}" {% if active_category != 'Delivery' %}disabled{% endif %} />
+                  </div>
+                  <div class="col-12">
+                    <label for="delivery-notes" class="form-label">Notes</label>
+                    <textarea class="form-control" id="delivery-notes" name="notes" rows="3" {% if active_category != 'Delivery' %}disabled{% endif %}>{% if entry and entry.category == 'Delivery' %}{{ entry.notes }}{% endif %}</textarea>
+                  </div>
+                  <div class="col-md-6">
+                    <label for="delivery-item" class="form-label">Item Description</label>
+                    <input type="text" class="form-control" id="delivery-item" name="item_description" data-required="true" value="{% if entry and entry.category == 'Delivery' %}{{ entry.item_description }}{% endif %}" {% if active_category != 'Delivery' %}disabled{% else %}required{% endif %} />
+                  </div>
+                  <div class="col-md-6">
+                    <label for="delivery-order" class="form-label">Order Number</label>
+                    <input type="text" class="form-control" id="delivery-order" name="order_number" value="{% if entry and entry.category == 'Delivery' %}{{ entry.order_number }}{% endif %}" {% if active_category != 'Delivery' %}disabled{% endif %} />
+                  </div>
+                  <div class="col-md-6">
+                    <label for="delivery-customer" class="form-label">Customer</label>
+                    <input type="text" class="form-control" id="delivery-customer" name="customer" value="{% if entry and entry.category == 'Delivery' %}{{ entry.customer }}{% endif %}" {% if active_category != 'Delivery' %}disabled{% endif %} />
+                  </div>
+                  <div class="col-md-6">
+                    <label for="delivery-due-date" class="form-label">Due Date</label>
+                    <input type="date" class="form-control" id="delivery-due-date" name="due_date" value="{% if entry and entry.category == 'Delivery' and entry.due_date %}{{ entry.due_date.isoformat() }}{% endif %}" {% if active_category != 'Delivery' %}disabled{% endif %} />
+                  </div>
+                </div>
+              </div>
+
+              <div class="category-section{% if active_category != 'People' %} d-none{% endif %}" data-category-section="People">
+                <h5 class="mb-3">People Details</h5>
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <label for="people-absentees" class="form-label">Number of Absentees</label>
+                    <input type="number" min="0" class="form-control" id="people-absentees" name="number_absentees" data-required="true" value="{% if entry and entry.category == 'People' and entry.number_absentees is not none %}{{ entry.number_absentees }}{% endif %}" {% if active_category != 'People' %}disabled{% else %}required{% endif %} />
+                  </div>
+                  <div class="col-md-6">
+                    <label for="people-open-positions" class="form-label">Open Positions</label>
+                    <input
+                      type="number"
+                      min="0"
+                      class="form-control"
+                      id="people-open-positions"
+                      name="open_positions"
+                      data-required="true"
+                      data-default-open="{{ default_open_positions if default_open_positions is not none else '' }}"
+                      value="{% if entry and entry.category == 'People' and entry.open_positions is not none %}{{ entry.open_positions }}{% elif not entry and default_open_positions is not none %}{{ default_open_positions }}{% endif %}"
+                      {% if active_category != 'People' %}disabled{% else %}required{% endif %}
+                    />
+                  </div>
+                  <div class="col-12">
+                    <label for="people-notes" class="form-label">Notes</label>
+                    <textarea class="form-control" id="people-notes" name="notes" rows="3" {% if active_category != 'People' %}disabled{% endif %}>{% if entry and entry.category == 'People' %}{{ entry.notes }}{% endif %}</textarea>
+                  </div>
+                </div>
+              </div>
+
+              <div class="category-section{% if active_category != 'Materials' %} d-none{% endif %}" data-category-section="Materials">
+                <h5 class="mb-3">Materials Details</h5>
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <label for="materials-status" class="form-label">Status</label>
+                    <select class="form-select" id="materials-status" name="status" data-required="true" {% if active_category != 'Materials' %}disabled{% else %}required{% endif %}>
+                      {% for status in category_status_options['Materials'] %}
+                        {% set selected = entry and entry.category == 'Materials' and entry.status == status %}
+                        {% if not entry and initial_category == 'Materials' and status == 'Open' %}
+                          {% set selected = true %}
+                        {% endif %}
+                        <option value="{{ status }}" {% if selected %}selected{% endif %}>{{ status }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-md-6">
+                    <label for="materials-priority" class="form-label">Priority</label>
+                    <select class="form-select" id="materials-priority" name="priority" {% if active_category != 'Materials' %}disabled{% endif %}>
+                      {% for priority in priority_options %}
+                        {% set selected = entry and entry.category == 'Materials' and entry.priority == priority %}
+                        {% if not entry and initial_category == 'Materials' and priority == 'Medium' %}
+                          {% set selected = true %}
+                        {% endif %}
+                        <option value="{{ priority }}" {% if selected %}selected{% endif %}>{{ priority }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-md-6">
+                    <label for="materials-owner" class="form-label">Owner</label>
+                    <input type="text" class="form-control" id="materials-owner" name="owner" value="{% if entry and entry.category == 'Materials' %}{{ entry.owner }}{% endif %}" {% if active_category != 'Materials' %}disabled{% endif %} />
+                  </div>
+                  <div class="col-12">
+                    <label for="materials-description" class="form-label">Description</label>
+                    <textarea class="form-control" id="materials-description" name="description" rows="3" data-required="true" {% if active_category != 'Materials' %}disabled{% else %}required{% endif %}>{% if entry and entry.category == 'Materials' %}{{ entry.description }}{% endif %}</textarea>
+                  </div>
+                  <div class="col-12">
+                    <label for="materials-notes" class="form-label">Notes</label>
+                    <textarea class="form-control" id="materials-notes" name="notes" rows="3" {% if active_category != 'Materials' %}disabled{% endif %}>{% if entry and entry.category == 'Materials' %}{{ entry.notes }}{% endif %}</textarea>
+                  </div>
+                  <div class="col-md-6">
+                    <label for="materials-item" class="form-label">Item or Part Number</label>
+                    <input type="text" class="form-control" id="materials-item" name="item_part_number" value="{% if entry and entry.category == 'Materials' %}{{ entry.item_part_number }}{% endif %}" {% if active_category != 'Materials' %}disabled{% endif %} />
+                  </div>
+                  <div class="col-md-6">
+                    <label for="materials-area" class="form-label">Area / Department</label>
+                    <input type="text" class="form-control" id="materials-area" name="area" value="{% if entry and entry.category == 'Materials' %}{{ entry.area }}{% endif %}" {% if active_category != 'Materials' %}disabled{% endif %} />
+                  </div>
+                  <div class="col-md-6">
+                    <label for="materials-vendor" class="form-label">Vendor</label>
+                    <input type="text" class="form-control" id="materials-vendor" name="vendor" value="{% if entry and entry.category == 'Materials' %}{{ entry.vendor }}{% endif %}" {% if active_category != 'Materials' %}disabled{% endif %} />
+                  </div>
+                  <div class="col-md-6">
+                    <label for="materials-eta" class="form-label">ETA / Project LT</label>
+                    <input type="text" class="form-control" id="materials-eta" name="eta" value="{% if entry and entry.category == 'Materials' %}{{ entry.eta }}{% endif %}" {% if active_category != 'Materials' %}disabled{% endif %} />
+                  </div>
+                  <div class="col-md-6">
+                    <label for="materials-po" class="form-label">PO Number</label>
+                    <input type="text" class="form-control" id="materials-po" name="po_number" value="{% if entry and entry.category == 'Materials' %}{{ entry.po_number }}{% endif %}" {% if active_category != 'Materials' %}disabled{% endif %} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="row g-3 mt-3">
+              <div class="col-md-6">
+                <label for="date_logged" class="form-label">Date Logged</label>
+                <input type="date" class="form-control" id="date_logged" name="date_logged" value="{% if entry and entry.date_logged %}{{ entry.date_logged.isoformat() }}{% else %}{{ default_date.isoformat() }}{% endif %}" />
+              </div>
+            </div>
+
+            <div class="d-flex justify-content-end mt-4">
+              <a href="{{ url_for('mdi.meeting_view') }}" class="btn btn-outline-secondary me-2">Cancel</a>
+              <button type="submit" class="btn btn-primary">
+                <i class="bi bi-save"></i> Save Entry
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block extra_scripts %}
+  {{ super() }}
+  {{ mdi_assets.script_assets() }}
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const categorySelect = document.getElementById('category');
+      const sections = document.querySelectorAll('[data-category-section]');
+
+      function toggleSections() {
+        const selectedCategory = categorySelect.value;
+        sections.forEach((section) => {
+          const isActive = section.dataset.categorySection === selectedCategory;
+          section.classList.toggle('d-none', !isActive);
+          section.querySelectorAll('input, textarea, select').forEach((field) => {
+            field.disabled = !isActive;
+            if (field.dataset.required === 'true') {
+              field.required = isActive;
+            }
+          });
+        });
+
+        if (selectedCategory === 'People') {
+          const openPositionsInput = document.getElementById('people-open-positions');
+          if (openPositionsInput && !openPositionsInput.value) {
+            const defaultValue = openPositionsInput.dataset.defaultOpen;
+            if (defaultValue) {
+              openPositionsInput.value = defaultValue;
+            }
+          }
+        }
+      }
+
+      categorySelect.addEventListener('change', toggleSections);
+      toggleSections();
+    });
+  </script>
+{% endblock %}

@@ -1,0 +1,19 @@
+<div class="card shadow-sm border-0 h-100 chart-card">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-start mb-3">
+      <div>
+        <h5 class="card-title mb-1">{{ chart.title }}</h5>
+        {% if chart.subtitle %}
+          <p class="card-subtitle text-muted small mb-0">{{ chart.subtitle }}</p>
+        {% endif %}
+      </div>
+    </div>
+    <div class="chart-wrapper">
+      <canvas
+        id="{{ chart.id }}"
+        height="260"
+        data-chart-config='{{ chart.config | tojson | safe }}'
+      ></canvas>
+    </div>
+  </div>
+</div>

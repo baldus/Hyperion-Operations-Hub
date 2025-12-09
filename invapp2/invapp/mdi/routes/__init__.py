@@ -1,0 +1,13 @@
+"""Route package for the MDI blueprint."""
+
+from . import api, dashboard, meeting, reports
+
+__all__ = ["api", "dashboard", "meeting", "reports"]
+
+
+def register_routes(bp):
+    """Attach all route modules to the provided blueprint."""
+    for module in (meeting, dashboard, reports, api):
+        register = getattr(module, "register", None)
+        if register is not None:
+            register(bp)

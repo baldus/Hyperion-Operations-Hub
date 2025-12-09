@@ -1,9 +1,11 @@
+import csv
 import io
 import json
 import os
 import re
 import sys
 from datetime import date, timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -13,6 +15,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from invapp import create_app
 from invapp.extensions import db
+from invapp.routes import orders as orders_routes
 from sqlalchemy.exc import IntegrityError
 
 from invapp.models import (
@@ -700,3 +703,144 @@ def test_bom_library_csv_import_updates_template(client, app, items):
     with app.app_context():
         template = BillOfMaterial.query.filter_by(item_id=finished.id).one()
         assert template.components[0].quantity == 7
+
+
+def test_bom_bulk_import_creates_multiple_templates(client, app):
+    with app.app_context():
+        asm_one = Item(sku='ASM-1', name='Assembly One')
+        asm_two = Item(sku='ASM-2', name='Assembly Two')
+        cmp_a = Item(sku='CMP-A', name='Component A')
+        cmp_b = Item(sku='CMP-B', name='Component B')
+        db.session.add_all([asm_one, asm_two, cmp_a, cmp_b])
+        db.session.commit()
+
+    csv_content = (
+        "Assembly,Level,Action,Notes,BOM_SizeHint,Line,Component Qty,Component,Count of in Componet Column\n"
+        "ASM-1,0,,,,,,,\n"
+        ",1,,,,,2,CMP-A,\n"
+        ",1,,,,,3,CMP-B,\n"
+        "ASM-2,0,,,,,,,\n"
+        ",1,,,,,5,CMP-A,\n"
+    )
+    data = {
+        'csv_file': (io.BytesIO(csv_content.encode('utf-8')), 'bulk.csv'),
+    }
+
+    resp = client.post(
+        '/orders/bom-bulk-import',
+        data=data,
+        content_type='multipart/form-data',
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+
+    with app.app_context():
+        bom_one = BillOfMaterial.query.join(Item).filter(Item.sku == 'ASM-1').one()
+        bom_two = BillOfMaterial.query.join(Item).filter(Item.sku == 'ASM-2').one()
+        components_one = {
+            component.component_item.sku: component.quantity for component in bom_one.components
+        }
+        components_two = {
+            component.component_item.sku: component.quantity for component in bom_two.components
+        }
+        assert components_one == {'CMP-A': 2, 'CMP-B': 3}
+        assert components_two == {'CMP-A': 5}
+
+
+def test_bom_bulk_import_missing_components_skips_rows_without_errors(client, app):
+    with app.app_context():
+        asm_one = Item(sku='ASM-3', name='Assembly Three')
+        db.session.add(asm_one)
+        db.session.commit()
+
+    csv_content = (
+        "Assembly,Level,Action,Notes,BOM_SizeHint,Line,Component Qty,Component,Count of in Componet Column\n"
+        "ASM-3,1,,,,,4,UNKNOWN,\n"
+    )
+    data = {
+        'csv_file': (io.BytesIO(csv_content.encode('utf-8')), 'bulk.csv'),
+    }
+
+    resp = client.post(
+        '/orders/bom-bulk-import',
+        data=data,
+        content_type='multipart/form-data',
+        follow_redirects=True,
+    )
+    body = resp.get_data(as_text=True)
+
+    assert 'Component SKUs not found' not in body
+    assert 'Skipped missing components: UNKNOWN' in body
+    assert 'Removed empty BOM rows after filtering missing components for: ASM-3' in body
+
+    with app.app_context():
+        assert BillOfMaterial.query.count() == 0
+
+
+def test_bom_bulk_import_missing_component_abort_option(client, app):
+    with app.app_context():
+        asm_one = Item(sku='ASM-4', name='Assembly Four')
+        cmp_one = Item(sku='CMP-4', name='Component Four')
+        db.session.add_all([asm_one, cmp_one])
+        db.session.commit()
+
+    csv_content = (
+        "Assembly,Level,Action,Notes,BOM_SizeHint,Line,Component Qty,Component,Count of in Componet Column\n"
+        "ASM-4,1,,,,,2,CMP-4,\n"
+        "ASM-4,1,,,,,1,UNKNOWN,\n"
+    )
+    data = {
+        'csv_file': (io.BytesIO(csv_content.encode('utf-8')), 'bulk.csv'),
+        'missing_component_handling': 'abort',
+    }
+
+    resp = client.post(
+        '/orders/bom-bulk-import',
+        data=data,
+        content_type='multipart/form-data',
+        follow_redirects=True,
+    )
+    body = resp.get_data(as_text=True)
+
+    assert 'Import cancelled because required components are missing: UNKNOWN' in body
+
+    with app.app_context():
+        assert BillOfMaterial.query.count() == 0
+
+
+def test_bulk_import_column_override_parses_qty():
+    csv_text = "Assembly,Component,Qty\nFG-1,CMP-1,5\n"
+    reader = csv.DictReader(io.StringIO(csv_text))
+
+    bom_rows, errors = orders_routes._parse_bulk_bom_rows(
+        reader, column_overrides={"quantity": "qty"}
+    )
+
+    assert errors == []
+    assert bom_rows == {"FG-1": {"CMP-1": 5}}
+
+
+def test_bulk_import_column_override_missing_field_error():
+    csv_text = "Assembly,Component,Qty\nFG-1,CMP-1,5\n"
+    reader = csv.DictReader(io.StringIO(csv_text))
+
+    _, errors = orders_routes._parse_bulk_bom_rows(
+        reader, column_overrides={"quantity": "component qty"}
+    )
+
+    assert any("component qty" in error.lower() for error in errors)
+
+
+def test_bulk_import_allows_partial_quantity_and_skips_zero():
+    csv_text = (
+        "Assembly,Component,Component Qty\n"
+        "FG-1,CMP-1,0.5\n"
+        ",CMP-2,0\n"
+        ",CMP-3,1.25\n"
+    )
+    reader = csv.DictReader(io.StringIO(csv_text))
+
+    bom_rows, errors = orders_routes._parse_bulk_bom_rows(reader)
+
+    assert errors == []
+    assert bom_rows == {"FG-1": {"CMP-1": Decimal("0.5"), "CMP-3": Decimal("1.25")}}

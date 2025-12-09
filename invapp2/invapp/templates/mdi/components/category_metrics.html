@@ -1,0 +1,305 @@
+{% set metrics_collapse_id = 'metrics-log-' ~ category|lower|replace(' ', '-') %}
+{% set bulk_delete_form_id = 'metric-bulk-delete-' ~ category|lower|replace(' ', '-') %}
+
+<div class="card shadow-sm border-0 mb-4">
+  <div class="card-header bg-white border-bottom-0 d-flex flex-column flex-md-row justify-content-between align-items-md-center
+    gap-2">
+    <div>
+      <h2 class="h5 mb-0">{{ metric_config.title or (category ~ ' Metrics') }}</h2>
+      {% if metric_config.subtitle %}
+        <p class="text-muted small mb-0">{{ metric_config.subtitle }}</p>
+      {% endif %}
+    </div>
+    <div class="d-flex gap-2">
+      <button
+        class="btn btn-sm btn-outline-secondary"
+        type="button"
+        data-bs-toggle="collapse"
+        data-bs-target="#{{ metrics_collapse_id }}"
+        aria-expanded="true"
+        aria-controls="{{ metrics_collapse_id }}"
+        data-collapse-toggle="{{ metrics_collapse_id }}"
+      >
+        <i
+          class="bi bi-chevron-up me-1"
+          data-collapse-toggle-icon
+          data-icon-expanded="bi-chevron-up"
+          data-icon-collapsed="bi-chevron-down"
+        ></i>
+        <span
+          data-collapse-toggle-text
+          data-collapse-hide="Hide Data Log"
+          data-collapse-show="Show Data Log"
+        >Hide Data Log</span>
+      </button>
+    </div>
+  </div>
+  <div class="card-body">
+    <form method="post" class="row g-3 align-items-end">
+      <input type="hidden" name="form_id" value="add_metric" />
+      <div class="col-12 col-md-3">
+        <label class="form-label small text-uppercase text-muted">Date</label>
+        <input
+          type="date"
+          class="form-control"
+          name="recorded_date"
+          value="{{ metric_default_date }}"
+          max="{{ metric_default_date }}"
+          required
+        />
+      </div>
+      <div class="col-12 col-md-3">
+        <label class="form-label small text-uppercase text-muted">Metric</label>
+        <select class="form-select" name="metric_name" required>
+          {% for option in metric_config.metrics %}
+            <option value="{{ option.value }}">{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% if metric_config.dimension_label %}
+        <div class="col-12 col-md-3">
+          <label class="form-label small text-uppercase text-muted">{{ metric_config.dimension_label }}</label>
+          <input
+            type="text"
+            class="form-control"
+            name="dimension"
+            placeholder="{{ metric_config.dimension_placeholder or 'Enter value' }}"
+            value="{{ metric_config.dimension_default or '' }}"
+            required
+          />
+        </div>
+      {% endif %}
+      <div class="col-12 col-md-2">
+        <label class="form-label small text-uppercase text-muted">{{ metric_config.value_label or 'Value' }}</label>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          class="form-control"
+          name="value"
+          placeholder="{{ metric_config.value_placeholder or '' }}"
+          required
+        />
+      </div>
+      {% if metric_config.allow_target %}
+        <div class="col-12 col-md-2">
+          <label class="form-label small text-uppercase text-muted">Target</label>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            class="form-control"
+            name="target"
+            placeholder="{{ metric_config.target_placeholder or '' }}"
+          />
+        </div>
+      {% endif %}
+      <div class="col-12 col-md-auto">
+        <button type="submit" class="btn btn-primary w-100">
+          <i class="bi bi-plus-lg me-1"></i>
+          Add Metric
+        </button>
+      </div>
+    </form>
+
+    <div id="{{ metrics_collapse_id }}" class="collapse show">
+      <hr class="my-4" />
+
+      {% if metric_entries %}
+        <form
+          id="{{ bulk_delete_form_id }}"
+          method="post"
+          class="d-flex flex-wrap justify-content-end gap-2 mb-3"
+          data-metric-bulk-form
+        >
+          <input type="hidden" name="form_id" value="bulk_delete_metrics" />
+          <button
+            type="submit"
+            class="btn btn-outline-danger btn-sm"
+            data-metric-bulk-delete
+            disabled
+          >
+            <i class="bi bi-trash me-1"></i>
+            Delete Selected
+          </button>
+        </form>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr class="text-muted small text-uppercase">
+                <th scope="col" class="text-center" style="width: 2.5rem">
+                  <input
+                    type="checkbox"
+                    class="form-check-input"
+                    aria-label="Select all metrics"
+                    data-metric-select-all
+                    form="{{ bulk_delete_form_id }}"
+                  />
+                </th>
+                <th scope="col">Date</th>
+                <th scope="col">Metric</th>
+                {% if metric_config.dimension_label %}
+                  <th scope="col">{{ metric_config.dimension_label }}</th>
+                {% endif %}
+                <th scope="col">Value</th>
+                {% if metric_config.allow_target %}
+                  <th scope="col">Target</th>
+                {% endif %}
+                <th scope="col" class="text-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for metric in metric_entries %}
+                <tr>
+                  <td class="text-center">
+                    <input
+                      type="checkbox"
+                      class="form-check-input"
+                      name="metric_ids"
+                      value="{{ metric.id }}"
+                      aria-label="Select metric {{ loop.index }}"
+                      data-metric-select
+                      form="{{ bulk_delete_form_id }}"
+                    />
+                  </td>
+                  <td>{{ metric.recorded_date.strftime('%b %d, %Y') }}</td>
+                  <td>{{ metric.metric_name }}</td>
+                  {% if metric_config.dimension_label %}
+                    <td>{{ metric.dimension or 'N/A' }}</td>
+                  {% endif %}
+                  <td>
+                    <span class="fw-semibold">
+                      {{ metric.value|round(2) }}{% if metric.unit %} {{ metric.unit }}{% endif %}
+                    </span>
+                  </td>
+                  {% if metric_config.allow_target %}
+                    <td>
+                      {% if metric.target is not none %}
+                        {{ metric.target|round(2) }}{% if metric.unit %} {{ metric.unit }}{% endif %}
+                      {% else %}
+                        <span class="text-muted">--</span>
+                      {% endif %}
+                    </td>
+                  {% endif %}
+                  <td class="text-end">
+                    <div class="d-inline-flex gap-2">
+                      <button
+                        type="button"
+                        class="btn btn-sm btn-outline-secondary"
+                        data-bs-toggle="collapse"
+                        data-bs-target="#metric-edit-{{ metric.id }}"
+                        aria-expanded="false"
+                        aria-controls="metric-edit-{{ metric.id }}"
+                      >
+                        <i class="bi bi-pencil-square me-1"></i>
+                        Edit
+                      </button>
+                      <form method="post" class="d-inline mb-0">
+                        <input type="hidden" name="form_id" value="delete_metric" />
+                        <input type="hidden" name="metric_id" value="{{ metric.id }}" />
+                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                          <i class="bi bi-trash me-1"></i>
+                          Delete
+                        </button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+                <tr class="collapse" id="metric-edit-{{ metric.id }}">
+                  <td></td>
+                  <td
+                    colspan="{{ 4 + (1 if metric_config.dimension_label else 0) + (1 if metric_config.allow_target else 0) }}"
+                    class="bg-body-tertiary"
+                  >
+                    <form method="post" class="row g-2 align-items-end py-3">
+                      <input type="hidden" name="form_id" value="update_metric" />
+                      <input type="hidden" name="metric_id" value="{{ metric.id }}" />
+                      <div class="col-12 col-md-3">
+                        <label class="form-label small text-uppercase text-muted">Date</label>
+                        <input
+                          type="date"
+                          class="form-control"
+                          name="recorded_date"
+                          value="{{ metric.recorded_date.isoformat() }}"
+                          max="{{ metric_default_date }}"
+                          required
+                        />
+                      </div>
+                      <div class="col-12 col-md-3">
+                        <label class="form-label small text-uppercase text-muted">Metric</label>
+                        <select class="form-select" name="metric_name" required>
+                          {% for option in metric_config.metrics %}
+                            <option value="{{ option.value }}" {% if option.value == metric.metric_name %}selected{% endif %}>
+                              {{ option.label }}
+                            </option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                      {% if metric_config.dimension_label %}
+                        <div class="col-12 col-md-3">
+                          <label class="form-label small text-uppercase text-muted">{{ metric_config.dimension_label }}</label>
+                          <input
+                            type="text"
+                            class="form-control"
+                            name="dimension"
+                            placeholder="{{ metric_config.dimension_placeholder or 'Enter value' }}"
+                            value="{{ metric.dimension or '' }}"
+                            required
+                          />
+                        </div>
+                      {% endif %}
+                      <div class="col-12 col-md-2">
+                        <label class="form-label small text-uppercase text-muted">{{ metric_config.value_label or 'Value' }}</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          class="form-control"
+                          name="value"
+                          value="{{ metric.value|round(2) }}"
+                          required
+                        />
+                      </div>
+                      {% if metric_config.allow_target %}
+                        <div class="col-12 col-md-2">
+                          <label class="form-label small text-uppercase text-muted">Target</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            class="form-control"
+                            name="target"
+                            value="{{ metric.target|round(2) if metric.target is not none else '' }}"
+                          />
+                        </div>
+                      {% endif %}
+                      <div class="col-12 col-md-auto">
+                        <div class="d-flex gap-2">
+                          <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-check-lg me-1"></i>
+                            Save Changes
+                          </button>
+                          <button
+                            type="button"
+                            class="btn btn-outline-secondary"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#metric-edit-{{ metric.id }}"
+                            aria-controls="metric-edit-{{ metric.id }}"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="text-muted mb-0">No metrics captured for {{ category }} yet. Add the first data point above.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>

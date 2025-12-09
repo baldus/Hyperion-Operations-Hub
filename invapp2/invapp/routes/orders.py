@@ -1,8 +1,10 @@
 import csv
 import io
 import json
+import re
 from collections import defaultdict
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 from flask import (
     Blueprint,
@@ -23,6 +25,7 @@ from invapp.models import (
     BillOfMaterial,
     BillOfMaterialComponent,
     Batch,
+    GateOrderDetail,
     Item,
     Location,
     Movement,
@@ -40,13 +43,16 @@ bp = Blueprint("orders", __name__, url_prefix="/orders")
 
 bp.before_request(blueprint_page_guard("orders"))
 
+ORDER_TYPE_CHOICES = ("Gates", "COP's", "Operators", "Controllers")
+GATE_ROUTING_STEPS = ("Framing", "Assembly", "Inspection", "Packaging")
+
 
 def _search_filter(query, search_term):
     if not search_term:
         return query
 
     like_term = f"%{search_term}%"
-    return query.join(Order.order_lines).join(OrderLine.item).filter(
+    return query.outerjoin(Order.order_lines).outerjoin(OrderLine.item).filter(
         or_(
             Order.order_number.ilike(like_term),
             Item.sku.ilike(like_term),
@@ -55,33 +61,59 @@ def _search_filter(query, search_term):
     )
 
 
-def _available_quantity(item_id: int) -> int:
+def _rebalance_priorities():
+    """Normalize priority values for active, reorderable orders."""
+
+    reorderable_orders = (
+        Order.query.filter(Order.status.in_(OrderStatus.RESERVABLE_STATES))
+        .order_by(
+            Order.priority,
+            Order.promised_date.is_(None),
+            Order.promised_date,
+            Order.order_number,
+        )
+        .all()
+    )
+
+    for new_priority, order in enumerate(reorderable_orders, start=1):
+        if order.priority != new_priority:
+            order.priority = new_priority
+
+
+def _available_quantity(item_id: int) -> Decimal:
     """Return on-hand inventory minus active reservations for an item."""
 
-    total_on_hand = (
-        db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
-        .filter(Movement.item_id == item_id)
-        .scalar()
-    ) or 0
-
-    reserved_total = (
-        db.session.query(func.coalesce(func.sum(Reservation.quantity), 0))
-        .join(OrderLine)
-        .join(Order)
-        .filter(
-            Reservation.item_id == item_id,
-            Order.status.in_(OrderStatus.RESERVABLE_STATES),
+    total_on_hand = Decimal(
+        (
+            db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+            .filter(Movement.item_id == item_id)
+            .scalar()
         )
-        .scalar()
-    ) or 0
+        or 0
+    )
 
-    return max(0, int(total_on_hand) - int(reserved_total))
+    reserved_total = Decimal(
+        (
+            db.session.query(func.coalesce(func.sum(Reservation.quantity), 0))
+            .join(OrderLine)
+            .join(Order)
+            .filter(
+                Reservation.item_id == item_id,
+                Order.status.in_(OrderStatus.RESERVABLE_STATES),
+            )
+            .scalar()
+        )
+        or 0
+    )
+
+    available = total_on_hand - reserved_total
+    return available if available > 0 else Decimal("0")
 
 
-def _component_requirement(usage: RoutingStepComponent) -> int:
+def _component_requirement(usage: RoutingStepComponent) -> Decimal:
     bom_component = usage.bom_component
     order_line = bom_component.order_line
-    return int(bom_component.quantity) * int(order_line.quantity)
+    return Decimal(bom_component.quantity) * Decimal(order_line.quantity)
 
 
 def _position_balance(item_id: int, batch_id: int | None, location_id: int) -> int:
@@ -140,8 +172,8 @@ def _inventory_options(item_id: int):
                 "value": f"{batch_id if batch_id is not None else 'none'}::{location_id}",
                 "batch_id": batch_id,
                 "location_id": location_id,
-                "label": f"{batch_label} @ {location_label} (avail {int(on_hand)})",
-                "available": int(on_hand),
+                "label": f"{batch_label} @ {location_label} (avail {_format_quantity(on_hand)})",
+                "available": float(on_hand),
             }
         )
 
@@ -173,6 +205,60 @@ def _format_schedule_breakdown(buckets):
     return {"dates": date_labels, "series": series}
 
 
+def _parse_positive_quantity(raw_value, *, allow_zero=False):
+    if raw_value is None:
+        raise ValueError("Quantity is required")
+
+    if isinstance(raw_value, (int, float, Decimal)):
+        value = Decimal(str(raw_value))
+    else:
+        value = Decimal(str(raw_value).strip())
+
+    if value == 0:
+        if allow_zero:
+            return value
+        raise ValueError("Quantity must be greater than zero")
+    if value < 0:
+        raise ValueError("Quantity must be greater than zero")
+    return value
+
+
+def _parse_positive_int(raw_value, field_label, errors):
+    try:
+        value = int(str(raw_value).strip())
+    except (TypeError, ValueError):
+        errors.append(f"{field_label} must be a whole number.")
+        return None
+
+    if value <= 0:
+        errors.append(f"{field_label} must be greater than zero.")
+        return None
+    return value
+
+
+def _parse_decimal(raw_value, field_label, errors):
+    try:
+        value = Decimal(str(raw_value).strip())
+    except (TypeError, ValueError, InvalidOperation):
+        errors.append(f"{field_label} must be a valid number.")
+        return None
+
+    if value <= 0:
+        errors.append(f"{field_label} must be greater than zero.")
+        return None
+    return value
+
+
+def _format_quantity(value):
+    if isinstance(value, Decimal):
+        normalized = value.normalize()
+        text = format(normalized, "f")
+        if "." in text:
+            text = text.rstrip("0").rstrip(".")
+        return text or "0"
+    return str(value)
+
+
 def _save_bom_template(item: Item, component_entries, *, replace_existing=False):
     """Persist a BOM template for a finished good item."""
 
@@ -201,6 +287,132 @@ def _save_bom_template(item: Item, component_entries, *, replace_existing=False)
         )
 
     return template, created, (created or replaced)
+
+
+def _normalize_csv_key(field_name: str) -> str:
+    if not field_name:
+        return ""
+    return re.sub(r"[^a-z0-9]+", "_", field_name.strip().lower()).strip("_")
+
+
+def _resolve_csv_field(normalized_fields, override_name, fallback_keys, *, label):
+    if override_name:
+        normalized_override = _normalize_csv_key(override_name)
+        if normalized_override in normalized_fields:
+            return normalized_fields[normalized_override], None
+        return None, f"CSV does not include a column named '{override_name}' for {label}."
+
+    for key in fallback_keys:
+        if key in normalized_fields:
+            return normalized_fields[key], None
+
+    return None, None
+
+
+def _parse_bulk_bom_rows(reader: csv.DictReader, *, column_overrides=None):
+    if column_overrides is None:
+        column_overrides = {}
+
+    errors = []
+    normalized_fields = {
+        _normalize_csv_key(name): name for name in (reader.fieldnames or []) if name
+    }
+
+    assembly_field, assembly_error = _resolve_csv_field(
+        normalized_fields,
+        column_overrides.get("assembly"),
+        ["assembly"],
+        label="Assembly",
+    )
+    component_field, component_error = _resolve_csv_field(
+        normalized_fields,
+        column_overrides.get("component"),
+        ["component", "component_sku"],
+        label="Component",
+    )
+    quantity_field, quantity_error = _resolve_csv_field(
+        normalized_fields,
+        column_overrides.get("quantity"),
+        ["component_qty", "component_quantity", "componentqty"],
+        label="Component Qty",
+    )
+    level_field, level_error = _resolve_csv_field(
+        normalized_fields,
+        column_overrides.get("level"),
+        ["level"],
+        label="Level",
+    )
+
+    for field_error in (assembly_error, component_error, quantity_error, level_error):
+        if field_error:
+            errors.append(field_error)
+
+    if not assembly_field or not component_field or not quantity_field:
+        errors.append(
+            "CSV must include columns for Assembly, Component, and Component Qty."
+        )
+        return {}, errors
+
+    bom_rows = defaultdict(lambda: defaultdict(Decimal))
+    current_assembly = None
+
+    for row_index, row in enumerate(reader, start=2):
+        assembly_value = (row.get(assembly_field) or "").strip()
+        if assembly_value:
+            current_assembly = assembly_value
+
+        if not current_assembly:
+            meaningful_values = [
+                (value or "").strip() for value in row.values() if value is not None
+            ]
+            if not any(meaningful_values):
+                continue
+            errors.append(f"Row {row_index}: Assembly value is required.")
+            continue
+
+        component_value = (row.get(component_field) or "").strip()
+        quantity_value = (row.get(quantity_field) or "").strip()
+        level_value = (row.get(level_field) or "").strip() if level_field else ""
+
+        if not component_value and not quantity_value:
+            continue
+
+        try:
+            level_int = int(level_value) if level_value else None
+        except ValueError:
+            level_int = None
+
+        if level_int == 0 and not component_value:
+            continue
+
+        if not component_value:
+            errors.append(
+                f"Row {row_index}: Component value is required for assembly {current_assembly}."
+            )
+            continue
+
+        if not quantity_value:
+            errors.append(
+                f"Row {row_index}: Component quantity is required for assembly {current_assembly}."
+            )
+            continue
+
+        try:
+            quantity = _parse_positive_quantity(quantity_value, allow_zero=True)
+        except (TypeError, ValueError, InvalidOperation):
+            errors.append(
+                f"Row {row_index}: Component quantity for {component_value} must be a positive number."
+            )
+            continue
+        if quantity == 0:
+            continue
+
+        bom_rows[current_assembly][component_value] += quantity
+
+    if not bom_rows and not errors:
+        errors.append("No BOM component rows were found in the CSV file.")
+
+    return bom_rows, errors
 
 
 def _prepare_order_detail(order: Order, *, pending_completed_ids=None, selected_batches=None):
@@ -250,15 +462,17 @@ def _adjust_reservation(order_line: OrderLine, item_id: int, delta: int):
         None,
     )
 
+    delta_value = Decimal(delta)
+
     if reservation:
-        new_quantity = int(reservation.quantity) + int(delta)
+        new_quantity = Decimal(reservation.quantity) + delta_value
         if new_quantity <= 0:
             db.session.delete(reservation)
         else:
             reservation.quantity = new_quantity
-    elif delta > 0:
+    elif delta_value > 0:
         db.session.add(
-            Reservation(order_line=order_line, item_id=item_id, quantity=int(delta))
+            Reservation(order_line=order_line, item_id=item_id, quantity=delta_value)
         )
 
 
@@ -268,10 +482,79 @@ def orders_home():
     query = Order.query.options(
         joinedload(Order.order_lines).joinedload(OrderLine.item),
         joinedload(Order.routing_steps),
+        joinedload(Order.gate_details),
     ).filter(Order.status.in_(OrderStatus.RESERVABLE_STATES))
     query = _search_filter(query, search_term)
-    open_orders = query.order_by(Order.promised_date.is_(None), Order.promised_date, Order.order_number).all()
+    open_orders = query.order_by(
+        Order.priority,
+        Order.promised_date.is_(None),
+        Order.promised_date,
+        Order.order_number,
+    ).all()
     return render_template("orders/home.html", orders=open_orders, search_term=search_term)
+
+
+@bp.route("/priority", methods=["GET", "POST"])
+@require_roles("admin")
+def prioritize_orders():
+    reorderable_statuses = OrderStatus.RESERVABLE_STATES
+
+    if request.method == "POST":
+        payload = request.get_json(silent=True) or {}
+        order_ids = payload.get("order_ids")
+
+        if not isinstance(order_ids, list) or not order_ids:
+            return (
+                jsonify({"error": "Provide a list of order ids in priority order."}),
+                400,
+            )
+
+        try:
+            normalized_ids = [int(order_id) for order_id in order_ids]
+        except (TypeError, ValueError):
+            return jsonify({"error": "Order ids must be integers."}), 400
+
+        orders = (
+            Order.query.filter(Order.id.in_(normalized_ids))
+            .filter(Order.status.in_(reorderable_statuses))
+            .all()
+        )
+        order_lookup = {order.id: order for order in orders}
+
+        missing_ids = [order_id for order_id in normalized_ids if order_id not in order_lookup]
+        if missing_ids:
+            return (
+                jsonify(
+                    {
+                        "error": "Some orders could not be reprioritized.",
+                        "missing": missing_ids,
+                    }
+                ),
+                400,
+            )
+
+        for new_priority, order_id in enumerate(normalized_ids, start=1):
+            order_lookup[order_id].priority = new_priority
+
+        db.session.commit()
+        return jsonify({"updated": len(order_ids)})
+
+    orders = (
+        Order.query.options(
+            joinedload(Order.order_lines).joinedload(OrderLine.item),
+            joinedload(Order.gate_details),
+        )
+        .filter(Order.status.in_(reorderable_statuses))
+        .order_by(
+            Order.priority,
+            Order.promised_date.is_(None),
+            Order.promised_date,
+            Order.order_number,
+        )
+        .all()
+    )
+
+    return render_template("orders/priority.html", orders=orders)
 
 
 @bp.route("/schedule")
@@ -282,7 +565,12 @@ def schedule_view():
             joinedload(Order.routing_steps),
         )
         .filter(Order.status.in_(OrderStatus.ACTIVE_STATES))
-        .order_by(Order.scheduled_completion_date.is_(None), Order.scheduled_completion_date, Order.order_number)
+        .order_by(
+            Order.priority,
+            Order.scheduled_completion_date.is_(None),
+            Order.scheduled_completion_date,
+            Order.order_number,
+        )
         .all()
     )
 
@@ -338,9 +626,12 @@ def schedule_view():
 @bp.route("/open")
 def view_open_orders():
     orders = (
-        Order.query.options(joinedload(Order.order_lines).joinedload(OrderLine.item))
+        Order.query.options(
+            joinedload(Order.order_lines).joinedload(OrderLine.item),
+            joinedload(Order.gate_details),
+        )
         .filter(Order.status.in_(OrderStatus.RESERVABLE_STATES))
-        .order_by(Order.order_number)
+        .order_by(Order.priority, Order.order_number)
         .all()
     )
     return render_template("orders/open.html", orders=orders)
@@ -349,9 +640,12 @@ def view_open_orders():
 @bp.route("/closed")
 def view_closed_orders():
     orders = (
-        Order.query.options(joinedload(Order.order_lines).joinedload(OrderLine.item))
+        Order.query.options(
+            joinedload(Order.order_lines).joinedload(OrderLine.item),
+            joinedload(Order.gate_details),
+        )
         .filter(Order.status == OrderStatus.CLOSED)
-        .order_by(Order.order_number)
+        .order_by(Order.priority, Order.order_number)
         .all()
     )
     return render_template("orders/closed.html", orders=orders)
@@ -361,9 +655,12 @@ def view_closed_orders():
 @require_roles("admin")
 def view_waiting_orders():
     orders = (
-        Order.query.options(joinedload(Order.order_lines).joinedload(OrderLine.item))
+        Order.query.options(
+            joinedload(Order.order_lines).joinedload(OrderLine.item),
+            joinedload(Order.gate_details),
+        )
         .filter(Order.status == OrderStatus.WAITING_MATERIAL)
-        .order_by(Order.order_number)
+        .order_by(Order.priority, Order.order_number)
         .all()
     )
     return render_template("orders/waiting.html", orders=orders)
@@ -408,7 +705,7 @@ def fetch_bom_template(sku: str):
         {
             "sku": component.component_item.sku,
             "name": component.component_item.name,
-            "quantity": component.quantity,
+            "quantity": float(component.quantity),
         }
         for component in sorted(
             bom.components, key=lambda entry: entry.component_item.sku
@@ -580,12 +877,10 @@ def bom_library():
                     errors.append(f"BOM component SKU '{sku}' was not found.")
                     continue
                 try:
-                    component_quantity = int(quantity_value)
-                    if component_quantity <= 0:
-                        raise ValueError
-                except (TypeError, ValueError):
+                    component_quantity = _parse_positive_quantity(quantity_value)
+                except (TypeError, ValueError, InvalidOperation):
                     errors.append(
-                        f"BOM component quantity for {sku} must be a positive integer."
+                        f"BOM component quantity for {sku} must be a positive number."
                     )
                     continue
                 bom_components.append(
@@ -642,7 +937,7 @@ def bom_library():
                 form_data["bom"] = [
                     {
                         "sku": component.component_item.sku,
-                        "quantity": component.quantity,
+                        "quantity": float(component.quantity),
                     }
                     for component in editing_template.components
                 ]
@@ -661,380 +956,377 @@ def bom_library():
     )
 
 
+@bp.route("/bom-bulk-import", methods=["GET", "POST"])
+@require_roles("admin")
+def bom_bulk_import():
+    import_results = None
+    warnings: list[str] = []
+
+    if request.method == "POST":
+        errors = []
+        upload = request.files.get("csv_file")
+        bom_rows = {}
+        item_lookup = {}
+        column_overrides = {
+            "assembly": request.form.get("assembly_column", "").strip() or None,
+            "component": request.form.get("component_column", "").strip() or None,
+            "quantity": request.form.get("quantity_column", "").strip() or None,
+            "level": request.form.get("level_column", "").strip() or None,
+        }
+
+        assembly_missing_handling = (
+            request.form.get("missing_assembly_handling") or "skip"
+        ).lower()
+        component_missing_handling = (
+            request.form.get("missing_component_handling") or "skip"
+        ).lower()
+        missing_handling_choices = {"skip", "abort"}
+        if assembly_missing_handling not in missing_handling_choices:
+            assembly_missing_handling = "skip"
+        if component_missing_handling not in missing_handling_choices:
+            component_missing_handling = "skip"
+
+        if upload is None or not upload.filename:
+            errors.append("A CSV file is required to import BOM templates.")
+        else:
+            try:
+                raw_content = upload.read().decode("utf-8-sig")
+            except UnicodeDecodeError:
+                errors.append("CSV import files must be UTF-8 encoded.")
+            else:
+                stream = io.StringIO(raw_content)
+                reader = csv.DictReader(stream)
+                if not reader.fieldnames:
+                    errors.append("CSV file is empty.")
+                else:
+                    bom_rows, parse_errors = _parse_bulk_bom_rows(
+                        reader, column_overrides=column_overrides
+                    )
+                    errors.extend(parse_errors)
+
+        if not errors and bom_rows:
+            assembly_skus = set(bom_rows.keys())
+            component_skus = {
+                component
+                for components in bom_rows.values()
+                for component in components.keys()
+            }
+            required_skus = assembly_skus | component_skus
+            items = (
+                Item.query.filter(Item.sku.in_(required_skus)).all()
+                if required_skus
+                else []
+            )
+            item_lookup = {item.sku: item for item in items}
+
+            missing_assemblies = sorted(
+                sku for sku in assembly_skus if sku not in item_lookup
+            )
+            missing_components = sorted(
+                sku for sku in component_skus if sku not in item_lookup
+            )
+
+            import_cancelled = False
+
+            if missing_assemblies:
+                if assembly_missing_handling == "abort":
+                    import_cancelled = True
+                    warnings.append(
+                        "Import cancelled because required assemblies are missing: "
+                        + ", ".join(missing_assemblies)
+                    )
+                else:
+                    for missing_sku in missing_assemblies:
+                        bom_rows.pop(missing_sku, None)
+                    warnings.append(
+                        "Skipped missing assemblies: " + ", ".join(missing_assemblies)
+                    )
+
+            if missing_components and not import_cancelled:
+                if component_missing_handling == "abort":
+                    import_cancelled = True
+                    warnings.append(
+                        "Import cancelled because required components are missing: "
+                        + ", ".join(missing_components)
+                    )
+                else:
+                    removed_components = 0
+                    assemblies_with_removed_components = set()
+
+                    for assembly_sku, components in list(bom_rows.items()):
+                        for component_sku in list(components.keys()):
+                            if component_sku in missing_components:
+                                removed_components += 1
+                                components.pop(component_sku, None)
+                                assemblies_with_removed_components.add(assembly_sku)
+
+                        if not components:
+                            bom_rows.pop(assembly_sku, None)
+
+                    if removed_components:
+                        warnings.append(
+                            "Skipped missing components: " + ", ".join(missing_components)
+                        )
+                    if assemblies_with_removed_components:
+                        warnings.append(
+                            "Removed empty BOM rows after filtering missing components for: "
+                            + ", ".join(sorted(assemblies_with_removed_components))
+                        )
+
+            if import_cancelled:
+                bom_rows = {}
+
+        if not errors and bom_rows:
+            import_details = []
+            created_count = 0
+            updated_count = 0
+
+            for assembly_sku in sorted(bom_rows.keys()):
+                item = item_lookup[assembly_sku]
+                component_entries = [
+                    {"item": item_lookup[component_sku], "quantity": quantity}
+                    for component_sku, quantity in sorted(
+                        bom_rows[assembly_sku].items()
+                    )
+                ]
+
+                template, created, changed = _save_bom_template(
+                    item, component_entries, replace_existing=True
+                )
+                import_details.append(
+                    {
+                        "sku": assembly_sku,
+                        "component_count": len(component_entries),
+                        "created": created,
+                        "updated": (not created and changed),
+                    }
+                )
+                if created:
+                    created_count += 1
+                elif changed:
+                    updated_count += 1
+
+            if import_details:
+                db.session.commit()
+
+                unchanged_count = len(import_details) - created_count - updated_count
+                import_results = {
+                    "total": len(import_details),
+                    "created": created_count,
+                    "updated": updated_count,
+                    "unchanged": unchanged_count,
+                    "details": import_details,
+                }
+
+                flash(
+                    "Bulk import complete: "
+                    f"{created_count} created, {updated_count} updated, {unchanged_count} unchanged.",
+                    "success",
+                )
+            else:
+                warnings.append(
+                    "No BOM templates were imported because all rows were skipped or removed."
+                )
+        else:
+            for error in errors:
+                flash(error, "danger")
+
+        for warning in warnings:
+            flash(warning, "warning")
+
+    return render_template(
+        "orders/bom_bulk_import.html",
+        import_results=import_results,
+    )
+
+
 @bp.route("/new", methods=["GET", "POST"])
 @require_roles("admin")
 def new_order():
-    items = Item.query.order_by(Item.sku).all()
     form_data = {
         "order_number": "",
-        "finished_good_sku": "",
-        "quantity": "",
+        "purchase_order_number": "",
         "customer_name": "",
         "created_by": "",
         "general_notes": "",
         "promised_date": "",
-        "scheduled_start_date": "",
-        "scheduled_completion_date": "",
-        "bom": [],
-        "steps": [],
-        "save_bom_template": False,
+        "scheduled_ship_date": "",
+        "order_type": ORDER_TYPE_CHOICES[0],
+        "priority": "0",
+        "item_number": "",
+        "production_quantity": "",
+        "panel_count": "",
+        "total_gate_height": "",
+        "al_color": "",
+        "insert_color": "",
+        "lead_post_direction": "",
+        "visi_panels": "",
+        "half_panel_color": "",
     }
 
     if request.method == "POST":
         errors = []
         order_number = (request.form.get("order_number") or "").strip()
-        finished_good_sku = (request.form.get("finished_good_sku") or "").strip()
-        quantity_raw = (request.form.get("quantity") or "").strip()
+        purchase_order_number = (request.form.get("purchase_order_number") or "").strip()
         customer_name = (request.form.get("customer_name") or "").strip()
         created_by = (request.form.get("created_by") or "").strip()
         general_notes = request.form.get("general_notes") or ""
         general_notes_db_value = general_notes if general_notes.strip() else None
         promised_date_raw = (request.form.get("promised_date") or "").strip()
-        scheduled_start_raw = (
-            request.form.get("scheduled_start_date") or ""
-        ).strip()
-        scheduled_completion_raw = (
-            request.form.get("scheduled_completion_date") or ""
-        ).strip()
-        bom_raw = request.form.get("bom_data") or "[]"
-        routing_raw = request.form.get("routing_data") or "[]"
-        save_bom_template = request.form.get("save_bom_template") == "1"
+        scheduled_ship_raw = (request.form.get("scheduled_ship_date") or "").strip()
+        order_type = request.form.get("order_type") or ORDER_TYPE_CHOICES[0]
+        priority_raw = request.form.get("priority") or "0"
 
         form_data.update(
             {
                 "order_number": order_number,
-                "finished_good_sku": finished_good_sku,
-                "quantity": quantity_raw,
+                "purchase_order_number": purchase_order_number,
                 "customer_name": customer_name,
                 "created_by": created_by,
                 "general_notes": general_notes,
                 "promised_date": promised_date_raw,
-                "scheduled_start_date": scheduled_start_raw,
-                "scheduled_completion_date": scheduled_completion_raw,
-                "save_bom_template": save_bom_template,
+                "scheduled_ship_date": scheduled_ship_raw,
+                "order_type": order_type,
+                "priority": priority_raw,
             }
         )
 
         if not order_number:
-            errors.append("Order number is required.")
+            errors.append("Production Order Number is required.")
         elif Order.query.filter_by(order_number=order_number).first():
-            errors.append("Order number already exists.")
+            errors.append("Production Order Number already exists.")
+
+        if not purchase_order_number:
+            errors.append("Purchase Order Number is required.")
 
         if not customer_name:
-            errors.append("Customer name is required.")
+            errors.append("Customer Name is required.")
 
         if not created_by:
-            errors.append("Order creator name is required.")
+            errors.append("Order Created By is required.")
 
-        finished_good = None
-        if not finished_good_sku:
-            errors.append("Finished good part number is required.")
-        else:
-            finished_good = Item.query.filter_by(sku=finished_good_sku).first()
-            if finished_good is None:
-                errors.append(
-                    f"Finished good part number '{finished_good_sku}' was not found."
-                )
+        if order_type not in ORDER_TYPE_CHOICES:
+            errors.append("Select a valid order type.")
 
+        promised_date = _parse_date(promised_date_raw, "Promise Date", errors)
+        scheduled_ship_date = _parse_date(
+            scheduled_ship_raw, "Scheduled Ship Date", errors
+        )
+
+        priority_value = None
         try:
-            quantity = int(quantity_raw)
-            if quantity <= 0:
-                raise ValueError
+            priority_value = int(str(priority_raw).strip())
         except (TypeError, ValueError):
-            errors.append("Quantity must be a positive integer.")
-            quantity = None
+            errors.append("Priority must be a whole number.")
 
-        promised_date = _parse_date(promised_date_raw, "Promised ship date", errors)
-        scheduled_start_date = _parse_date(
-            scheduled_start_raw, "Scheduled start date", errors
-        )
-        scheduled_completion_date = _parse_date(
-            scheduled_completion_raw, "Scheduled completion date", errors
-        )
+        gate_detail = None
+        if order_type == "Gates":
+            gate_detail = {
+                "item_number": (request.form.get("item_number") or "").strip(),
+                "production_quantity": request.form.get("production_quantity"),
+                "panel_count": request.form.get("panel_count"),
+                "total_gate_height": request.form.get("total_gate_height"),
+                "al_color": (request.form.get("al_color") or "").strip(),
+                "insert_color": (request.form.get("insert_color") or "").strip(),
+                "lead_post_direction": (request.form.get("lead_post_direction") or "").strip(),
+                "visi_panels": (request.form.get("visi_panels") or "").strip(),
+                "half_panel_color": (request.form.get("half_panel_color") or "").strip(),
+            }
+            form_data.update(gate_detail)
 
-        if (
-            scheduled_start_date
-            and scheduled_completion_date
-            and scheduled_start_date > scheduled_completion_date
-        ):
-            errors.append("Scheduled start date must be on or before completion date.")
+            if not gate_detail["item_number"]:
+                errors.append("Item Number is required for gate orders.")
 
-        if (
-            promised_date
-            and scheduled_completion_date
-            and promised_date < scheduled_completion_date
-        ):
-            errors.append(
-                "Promised ship date must be on or after the scheduled completion date."
+            production_quantity = _parse_positive_int(
+                gate_detail["production_quantity"], "Production Quantity", errors
+            )
+            panel_count = _parse_positive_int(
+                gate_detail["panel_count"], "Panel Count", errors
+            )
+            total_gate_height = _parse_decimal(
+                gate_detail["total_gate_height"], "Total Gate Height", errors
             )
 
-        try:
-            bom_payload = json.loads(bom_raw)
-            if not isinstance(bom_payload, list):
-                raise ValueError
-        except ValueError:
-            bom_payload = []
-            errors.append("Unable to read the BOM component details submitted.")
-
-        try:
-            routing_payload = json.loads(routing_raw)
-            if not isinstance(routing_payload, list):
-                raise ValueError
-        except ValueError:
-            routing_payload = []
-            errors.append("Unable to read the routing information submitted.")
-
-        form_data["bom"] = bom_payload
-        form_data["steps"] = routing_payload
-
-        bom_components = []
-        component_lookup = {}
-        component_skus_seen = set()
-        if not bom_payload:
-            errors.append("At least one BOM component is required.")
+            if not gate_detail["al_color"]:
+                errors.append("AL Color is required for gate orders.")
+            if not gate_detail["insert_color"]:
+                errors.append("Acrylic/Wood/Vinyl Color is required for gate orders.")
+            if not gate_detail["lead_post_direction"]:
+                errors.append("Lead Post Direction is required for gate orders.")
+            if not gate_detail["visi_panels"]:
+                errors.append("Visi Panels selection is required for gate orders.")
+            if not gate_detail["half_panel_color"]:
+                errors.append("1/2 Panel Color is required for gate orders.")
         else:
-            for entry in bom_payload:
-                if not isinstance(entry, dict):
-                    errors.append("Each BOM component must include a SKU and quantity.")
-                    continue
-                sku = (entry.get("sku") or "").strip()
-                quantity_value = entry.get("quantity")
-                if not sku:
-                    errors.append("BOM components require a component SKU.")
-                    continue
-                if sku in component_skus_seen:
-                    errors.append(f"BOM component {sku} is listed more than once.")
-                    continue
-                component_item = Item.query.filter_by(sku=sku).first()
-                if component_item is None:
-                    errors.append(f"BOM component SKU '{sku}' was not found.")
-                    continue
-                try:
-                    component_quantity = int(quantity_value)
-                    if component_quantity <= 0:
-                        raise ValueError
-                except (TypeError, ValueError):
-                    errors.append(
-                        f"BOM component quantity for {sku} must be a positive integer."
-                    )
-                    continue
-
-                component_entry = {
-                    "sku": sku,
-                    "item": component_item,
-                    "quantity": component_quantity,
-                }
-                bom_components.append(component_entry)
-                component_lookup[sku] = component_entry
-                component_skus_seen.add(sku)
-
-        routing_steps = []
-        referenced_components = set()
-        sequences_seen = set()
-        if not routing_payload:
-            errors.append("At least one routing step is required.")
-        else:
-            for entry in routing_payload:
-                if not isinstance(entry, dict):
-                    errors.append("Invalid routing step definition submitted.")
-                    continue
-
-                raw_sequence = entry.get("sequence")
-                try:
-                    sequence = int(raw_sequence)
-                except (TypeError, ValueError):
-                    errors.append("Routing step sequences must be whole numbers.")
-                    continue
-                if sequence in sequences_seen:
-                    errors.append(
-                        f"Routing step sequence {sequence} is defined more than once."
-                    )
-                    continue
-                sequences_seen.add(sequence)
-
-                work_cell = (entry.get("work_cell") or "").strip()
-                instructions = (entry.get("instructions") or "").strip()
-                if not instructions:
-                    errors.append(
-                        f"Routing step {sequence} must include work instructions."
-                    )
-
-                component_values = entry.get("components") or []
-                if not isinstance(component_values, list):
-                    errors.append(
-                        f"Component usage for routing step {sequence} is not valid."
-                    )
-                    component_values = []
-
-                resolved_components = []
-                for sku in component_values:
-                    if sku not in component_lookup:
-                        errors.append(
-                            f"Routing step {sequence} references unknown component {sku}."
-                        )
-                        continue
-                    if sku in resolved_components:
-                        continue
-                    resolved_components.append(sku)
-                    referenced_components.add(sku)
-
-                routing_steps.append(
-                    {
-                        "sequence": sequence,
-                        "work_cell": work_cell,
-                        "instructions": instructions,
-                        "components": resolved_components,
-                    }
-                )
-
-        missing_component_usage = set(component_lookup) - referenced_components
-        if missing_component_usage:
-            missing_list = ", ".join(sorted(missing_component_usage))
-            errors.append(
-                "Each BOM component must be associated with at least one routing step. "
-                f"Missing usage for: {missing_list}."
-            )
+            production_quantity = None
+            panel_count = None
+            total_gate_height = None
 
         if errors:
             for error in errors:
                 flash(error, "danger")
             return render_template(
-                "orders/new.html", items=items, form_data=form_data
+                "orders/new.html",
+                form_data=form_data,
+                order_type_choices=ORDER_TYPE_CHOICES,
             )
 
-        shortages = []
-        reservations_needed = []
-        if quantity is not None:
-            for component_entry in bom_components:
-                component_item = component_entry["item"]
-                required_total = component_entry["quantity"] * quantity
-                available_quantity = _available_quantity(component_item.id)
-                component_entry["required_total"] = required_total
-                component_entry["available_quantity"] = available_quantity
-                if required_total > available_quantity:
-                    shortages.append(
-                        {
-                            "item": component_item,
-                            "required": required_total,
-                            "available": available_quantity,
-                        }
-                    )
-                else:
-                    reservations_needed.append(
-                        {
-                            "item": component_item,
-                            "quantity": required_total,
-                        }
-                    )
-
         today = datetime.utcnow().date()
-        if scheduled_start_date and scheduled_start_date > today:
+        order_status = OrderStatus.OPEN
+        if scheduled_ship_date and scheduled_ship_date > today:
             order_status = OrderStatus.SCHEDULED
-        else:
-            order_status = OrderStatus.OPEN
-        if shortages:
-            order_status = OrderStatus.WAITING_MATERIAL
-
-        existing_template = None
-        if finished_good is not None:
-            existing_template = BillOfMaterial.query.filter_by(
-                item_id=finished_good.id
-            ).first()
 
         order = Order(
             order_number=order_number,
+            order_type=order_type,
+            purchase_order_number=purchase_order_number,
             customer_name=customer_name,
             created_by=created_by,
             general_notes=general_notes_db_value,
             promised_date=promised_date,
-            scheduled_start_date=scheduled_start_date,
-            scheduled_completion_date=scheduled_completion_date,
+            scheduled_ship_date=scheduled_ship_date,
+            scheduled_completion_date=scheduled_ship_date,
             status=order_status,
+            priority=priority_value or 0,
         )
-        order_line = OrderLine(
-            order=order,
-            item_id=finished_good.id,
-            quantity=quantity,
-            promised_date=promised_date,
-            scheduled_start_date=scheduled_start_date,
-            scheduled_completion_date=scheduled_completion_date,
-        )
+
         db.session.add(order)
-        db.session.add(order_line)
 
-        bom_entities = {}
-        for component_entry in bom_components:
-            component_item = component_entry["item"]
-            component_quantity = component_entry["quantity"]
-            bom_component = OrderComponent(
-                order_line=order_line,
-                component_item_id=component_item.id,
-                quantity=component_quantity,
+        if order_type == "Gates":
+            db.session.add(
+                GateOrderDetail(
+                    order=order,
+                    item_number=gate_detail["item_number"],
+                    production_quantity=production_quantity,
+                    panel_count=panel_count,
+                    total_gate_height=total_gate_height,
+                    al_color=gate_detail["al_color"],
+                    insert_color=gate_detail["insert_color"],
+                    lead_post_direction=gate_detail["lead_post_direction"],
+                    visi_panels=gate_detail["visi_panels"],
+                    half_panel_color=gate_detail["half_panel_color"],
+                )
             )
-            db.session.add(bom_component)
-            bom_entities[component_entry["sku"]] = bom_component
 
-        if not shortages:
-            for reservation_entry in reservations_needed:
+            for sequence, step_name in enumerate(GATE_ROUTING_STEPS, start=1):
                 db.session.add(
-                    Reservation(
-                        order_line=order_line,
-                        item_id=reservation_entry["item"].id,
-                        quantity=reservation_entry["quantity"],
+                    RoutingStep(
+                        order=order,
+                        sequence=sequence,
+                        work_cell=step_name,
+                        description=f"{step_name} step",
                     )
                 )
-
-        for step in sorted(routing_steps, key=lambda step: step["sequence"]):
-            routing_step = RoutingStep(
-                order=order,
-                sequence=step["sequence"],
-                work_cell=step["work_cell"] or None,
-                description=step["instructions"],
-            )
-            db.session.add(routing_step)
-            for component_sku in step["components"]:
-                db.session.add(
-                    RoutingStepComponent(
-                        routing_step=routing_step,
-                        order_component=bom_entities[component_sku],
-                    )
-                )
-
-        bom_template_saved = False
-        if save_bom_template and finished_good is not None:
-            _, created_template, changed_template = _save_bom_template(
-                finished_good, bom_components, replace_existing=False
-            )
-            bom_template_saved = created_template or changed_template
 
         db.session.commit()
-        if shortages:
-            shortage_summary = ", ".join(
-                f"{entry['item'].sku} (required {entry['required']}, available {entry['available']})"
-                for entry in shortages
-            )
-            message = "Order created but waiting on material"
-            if shortage_summary:
-                message = f"{message}: {shortage_summary}"
-            if bom_template_saved:
-                message = f"{message} — BOM template saved for {finished_good.sku}."
-            flash(message, "warning")
-        else:
-            success_message = "Order created and materials reserved"
-            if bom_template_saved:
-                success_message = (
-                    f"{success_message}. BOM template saved for {finished_good.sku}."
-                )
-            elif save_bom_template and existing_template is not None:
-                success_message = (
-                    f"{success_message}. Existing BOM template for {finished_good.sku} "
-                    "remains unchanged."
-                )
-            flash(success_message, "success")
+        flash("Order created", "success")
         return redirect(url_for("orders.view_order", order_id=order.id))
 
-    return render_template("orders/new.html", items=items, form_data=form_data)
-
+    return render_template(
+        "orders/new.html",
+        form_data=form_data,
+        order_type_choices=ORDER_TYPE_CHOICES,
+    )
 
 @bp.route("/<int:order_id>")
 def view_order(order_id):
@@ -1207,9 +1499,28 @@ def update_routing(order_id):
             step.completed = False
             step.completed_at = None
 
-    if changes_made:
+    all_steps_completed = (
+        bool(order.routing_steps) and all(step.completed for step in order.routing_steps)
+    )
+    order_closed_now = False
+
+    if all_steps_completed and order.status != OrderStatus.CLOSED:
+        order.status = OrderStatus.CLOSED
+        order_closed_now = True
+    elif not all_steps_completed and order.status == OrderStatus.CLOSED:
+        order.status = OrderStatus.SCHEDULED
+
+    if changes_made or order_closed_now:
+        db.session.flush()
+        if order_closed_now:
+            _rebalance_priorities()
         db.session.commit()
-        flash("Routing progress updated", "success")
+        flash(
+            "Routing progress updated. Order completed and removed from prioritization."
+            if order_closed_now
+            else "Routing progress updated",
+            "success",
+        )
     else:
         flash("No routing updates were made.", "info")
 
@@ -1220,22 +1531,192 @@ def update_routing(order_id):
 def edit_order(order_id):
     order = Order.query.get_or_404(order_id)
     status_choices = OrderStatus.ALL_STATUSES
+
+    gate_detail = order.gate_details
+    form_data = {
+        "order_number": order.order_number,
+        "purchase_order_number": order.purchase_order_number or "",
+        "customer_name": order.customer_name or "",
+        "created_by": order.created_by or "",
+        "general_notes": order.general_notes or "",
+        "promised_date": order.promised_date.isoformat() if order.promised_date else "",
+        "scheduled_ship_date": order.scheduled_ship_date.isoformat() if order.scheduled_ship_date else "",
+        "order_type": order.order_type,
+        "priority": order.priority,
+        "status": order.status,
+        "item_number": gate_detail.item_number if gate_detail else "",
+        "production_quantity": gate_detail.production_quantity if gate_detail else "",
+        "panel_count": gate_detail.panel_count if gate_detail else "",
+        "total_gate_height": gate_detail.total_gate_height if gate_detail else "",
+        "al_color": gate_detail.al_color if gate_detail else "",
+        "insert_color": gate_detail.insert_color if gate_detail else "",
+        "lead_post_direction": gate_detail.lead_post_direction if gate_detail else "",
+        "visi_panels": gate_detail.visi_panels if gate_detail else "",
+        "half_panel_color": gate_detail.half_panel_color if gate_detail else "",
+    }
+
     if request.method == "POST":
-        status = request.form.get("status", order.status)
+        errors = []
+        order_number = (request.form.get("order_number") or "").strip()
+        purchase_order_number = (request.form.get("purchase_order_number") or "").strip()
+        customer_name = (request.form.get("customer_name") or "").strip()
+        created_by = (request.form.get("created_by") or "").strip()
         general_notes = request.form.get("general_notes") or ""
         general_notes_db_value = general_notes if general_notes.strip() else None
+        promised_date_raw = (request.form.get("promised_date") or "").strip()
+        scheduled_ship_raw = (request.form.get("scheduled_ship_date") or "").strip()
+        order_type = request.form.get("order_type") or order.order_type
+        priority_raw = request.form.get("priority") or "0"
+        status = request.form.get("status", order.status)
+
+        form_data.update(
+            {
+                "order_number": order_number,
+                "purchase_order_number": purchase_order_number,
+                "customer_name": customer_name,
+                "created_by": created_by,
+                "general_notes": general_notes,
+                "promised_date": promised_date_raw,
+                "scheduled_ship_date": scheduled_ship_raw,
+                "order_type": order_type,
+                "priority": priority_raw,
+                "status": status,
+            }
+        )
+
+        if not order_number:
+            errors.append("Production Order Number is required.")
+        elif (
+            order_number != order.order_number
+            and Order.query.filter_by(order_number=order_number).first()
+        ):
+            errors.append("Production Order Number already exists.")
+
+        if not purchase_order_number:
+            errors.append("Purchase Order Number is required.")
+
+        if not customer_name:
+            errors.append("Customer Name is required.")
+
+        if not created_by:
+            errors.append("Order Created By is required.")
+
+        if order_type not in ORDER_TYPE_CHOICES:
+            errors.append("Select a valid order type.")
+
+        promised_date = _parse_date(promised_date_raw, "Promise Date", errors)
+        scheduled_ship_date = _parse_date(
+            scheduled_ship_raw, "Scheduled Ship Date", errors
+        )
+
+        priority_value = None
+        try:
+            priority_value = int(str(priority_raw).strip())
+        except (TypeError, ValueError):
+            errors.append("Priority must be a whole number.")
+
         if status not in set(status_choices):
-            flash("Invalid status", "danger")
-            order.general_notes = general_notes_db_value
+            errors.append("Invalid status")
+
+        gate_detail_payload = None
+        if order_type == "Gates":
+            gate_detail_payload = {
+                "item_number": (request.form.get("item_number") or "").strip(),
+                "production_quantity": request.form.get("production_quantity"),
+                "panel_count": request.form.get("panel_count"),
+                "total_gate_height": request.form.get("total_gate_height"),
+                "al_color": (request.form.get("al_color") or "").strip(),
+                "insert_color": (request.form.get("insert_color") or "").strip(),
+                "lead_post_direction": (request.form.get("lead_post_direction") or "").strip(),
+                "visi_panels": (request.form.get("visi_panels") or "").strip(),
+                "half_panel_color": (request.form.get("half_panel_color") or "").strip(),
+            }
+            form_data.update(gate_detail_payload)
+
+            if not gate_detail_payload["item_number"]:
+                errors.append("Item Number is required for gate orders.")
+
+            production_quantity = _parse_positive_int(
+                gate_detail_payload["production_quantity"],
+                "Production Quantity",
+                errors,
+            )
+            panel_count = _parse_positive_int(
+                gate_detail_payload["panel_count"], "Panel Count", errors
+            )
+            total_gate_height = _parse_decimal(
+                gate_detail_payload["total_gate_height"], "Total Gate Height", errors
+            )
+
+            if not gate_detail_payload["al_color"]:
+                errors.append("AL Color is required for gate orders.")
+            if not gate_detail_payload["insert_color"]:
+                errors.append("Acrylic/Wood/Vinyl Color is required for gate orders.")
+            if not gate_detail_payload["lead_post_direction"]:
+                errors.append("Lead Post Direction is required for gate orders.")
+            if not gate_detail_payload["visi_panels"]:
+                errors.append("Visi Panels selection is required for gate orders.")
+            if not gate_detail_payload["half_panel_color"]:
+                errors.append("1/2 Panel Color is required for gate orders.")
+        else:
+            production_quantity = None
+            panel_count = None
+            total_gate_height = None
+
+        if errors:
+            for error in errors:
+                flash(error, "danger")
             return render_template(
                 "orders/edit.html",
                 order=order,
                 statuses=status_choices,
                 status_labels=OrderStatus.LABELS,
+                form_data=form_data,
+                order_type_choices=ORDER_TYPE_CHOICES,
             )
 
-        order.status = status
+        order.order_number = order_number
+        order.order_type = order_type
+        order.purchase_order_number = purchase_order_number
+        order.customer_name = customer_name
+        order.created_by = created_by
         order.general_notes = general_notes_db_value
+        order.promised_date = promised_date
+        order.scheduled_ship_date = scheduled_ship_date
+        order.scheduled_completion_date = scheduled_ship_date
+        order.priority = priority_value or 0
+        order.status = status
+
+        if order_type == "Gates":
+            if gate_detail is None:
+                gate_detail = GateOrderDetail(order=order)
+                db.session.add(gate_detail)
+
+            gate_detail.item_number = gate_detail_payload["item_number"]
+            gate_detail.production_quantity = production_quantity
+            gate_detail.panel_count = panel_count
+            gate_detail.total_gate_height = total_gate_height
+            gate_detail.al_color = gate_detail_payload["al_color"]
+            gate_detail.insert_color = gate_detail_payload["insert_color"]
+            gate_detail.lead_post_direction = gate_detail_payload["lead_post_direction"]
+            gate_detail.visi_panels = gate_detail_payload["visi_panels"]
+            gate_detail.half_panel_color = gate_detail_payload["half_panel_color"]
+
+            if not order.routing_steps:
+                for sequence, step_name in enumerate(GATE_ROUTING_STEPS, start=1):
+                    db.session.add(
+                        RoutingStep(
+                            order=order,
+                            sequence=sequence,
+                            work_cell=step_name,
+                            description=f"{step_name} step",
+                        )
+                    )
+        else:
+            if gate_detail is not None:
+                db.session.delete(gate_detail)
+                gate_detail = None
+
         db.session.commit()
         flash("Order updated", "success")
         return redirect(url_for("orders.view_order", order_id=order.id))
@@ -1245,8 +1726,9 @@ def edit_order(order_id):
         order=order,
         statuses=status_choices,
         status_labels=OrderStatus.LABELS,
+        form_data=form_data,
+        order_type_choices=ORDER_TYPE_CHOICES,
     )
-
 
 @bp.route("/<int:order_id>/delete", methods=["POST"])
 def delete_order(order_id):
