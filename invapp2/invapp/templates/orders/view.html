@@ -3,49 +3,51 @@
 <h2>Order {{ order.order_number }}</h2>
 <p>Status: {{ order.status_label }}</p>
 <div class="order-metadata">
-    <p><strong>Promised Ship Date:</strong> {{ order.promised_date or 'TBD' }}</p>
-    <p><strong>Scheduled Start:</strong> {{ order.scheduled_start_date or 'TBD' }}</p>
-    <p><strong>Scheduled Completion:</strong> {{ order.scheduled_completion_date or 'TBD' }}</p>
+    <p><strong>Order Type:</strong> {{ order.order_type }}</p>
+    <p><strong>Priority:</strong> {{ order.priority }}</p>
+    <p><strong>Purchase Order #:</strong> {{ order.purchase_order_number }}</p>
     <p><strong>Customer:</strong> {{ order.customer_name or '—' }}</p>
     <p><strong>Created By:</strong> {{ order.created_by or '—' }}</p>
+    <p><strong>Promise Date:</strong> {{ order.promised_date or 'TBD' }}</p>
+    <p><strong>Scheduled Ship:</strong> {{ order.scheduled_ship_date or 'TBD' }}</p>
 </div>
 {% if order.general_notes %}
 <section class="order-notes">
-    <h3>General Notes</h3>
+    <h3>Notes</h3>
     <p>{{ order.general_notes | e | replace('\n', '<br>') | safe }}</p>
 </section>
 {% endif %}
+
+{% if order.gate_details %}
+<section class="order-notes">
+    <h3>Gate Details</h3>
+    <div class="form-grid">
+        <div><strong>Item Number:</strong> {{ order.gate_details.item_number }}</div>
+        <div><strong>Production Quantity:</strong> {{ order.gate_details.production_quantity }}</div>
+        <div><strong>Panel Count:</strong> {{ order.gate_details.panel_count }}</div>
+        <div><strong>Total Gate Height:</strong> {{ order.gate_details.total_gate_height }}</div>
+        <div><strong>AL Color:</strong> {{ order.gate_details.al_color }}</div>
+        <div><strong>Acrylic/Wood/Vinyl Color:</strong> {{ order.gate_details.insert_color }}</div>
+        <div><strong>Lead Post Direction:</strong> {{ order.gate_details.lead_post_direction }}</div>
+        <div><strong>Visi Panels:</strong> {{ order.gate_details.visi_panels }}</div>
+        <div><strong>1/2 Panel Color:</strong> {{ order.gate_details.half_panel_color }}</div>
+    </div>
+</section>
+{% endif %}
+
 {% if order.routing_progress is not none %}
     {% set percent = (order.routing_progress * 100) | round(0, 'floor') %}
     <p><strong>Routing Progress:</strong> {{ percent | int }}% complete</p>
 {% else %}
     <p><strong>Routing Progress:</strong> Not started</p>
 {% endif %}
+
 <a href="{{ url_for('orders.edit_order', order_id=order.id) }}" class="action-btn">Edit</a>
 <form method="post" action="{{ url_for('orders.delete_order', order_id=order.id) }}" style="display:inline;">
     <button type="submit">Delete</button>
 </form>
-<h3>Items</h3>
-<ul>
-{% for item in order.items %}
-<li>{{ item.item.sku }} - Qty {{ item.quantity }}
-    {% if item.bom_components %}
-    <ul>
-        {% for comp in item.bom_components %}
-        <li>BOM: {{ comp.component_item.sku }} x {{ comp.quantity }}</li>
-        {% endfor %}
-    </ul>
-    {% endif %}
-    {% if item.reservations %}
-    <ul>
-        {% for res in item.reservations %}
-        <li>Reserved: {{ res.item.sku }} x {{ res.quantity }}</li>
-        {% endfor %}
-    </ul>
-    {% endif %}
-</li>
-{% endfor %}
-</ul>
+
+{% if order.routing_steps %}
 <h3>Routing Steps</h3>
 <form method="post" action="{{ url_for('orders.update_routing', order_id=order.id) }}" class="form-stack">
     <table class="form-table">
@@ -54,7 +56,6 @@
                 <th>Sequence</th>
                 <th>Work Cell</th>
                 <th>Instructions</th>
-                <th>Components</th>
                 <th>Completed</th>
             </tr>
         </thead>
@@ -64,55 +65,6 @@
                 <td>{{ step.sequence }}</td>
                 <td>{{ step.work_cell or '—' }}</td>
                 <td>{{ step.description }}</td>
-                <td>
-                    {% if step.component_usages %}
-                        <ul>
-                        {% for usage in step.component_usages %}
-                            {% set requirement = component_requirements[usage.id] %}
-                            {% set options = component_options.get(usage.id, []) %}
-                            {% set consumption_rows = component_consumptions.get(usage.id, []) %}
-                            <li class="component-consumption">
-                                <div>
-                                    <strong>{{ usage.bom_component.component_item.sku }}</strong>
-                                    ({{ usage.bom_component.quantity }} per unit / total {{ requirement }})
-                                </div>
-                                {% if step.completed %}
-                                    {% if consumption_rows %}
-                                        <div class="consumption-summary">
-                                            <strong>Consumed:</strong>
-                                            <ul>
-                                                {% for row in consumption_rows %}
-                                                    <li>{{ row.batch_label }} @ {{ row.location_label }} — {{ row.quantity }}</li>
-                                                {% endfor %}
-                                            </ul>
-                                        </div>
-                                    {% else %}
-                                        <em>No consumption recorded.</em>
-                                    {% endif %}
-                                {% else %}
-                                    {% set selected_value = selected_batches.get(usage.id) %}
-                                    {% if options %}
-                                        <label class="sr-only" for="usage-{{ usage.id }}">
-                                            Select batch for {{ usage.bom_component.component_item.sku }}
-                                        </label>
-                                        <select id="usage-{{ usage.id }}" name="usage_{{ usage.id }}">
-                                            <option value="">-- Select batch --</option>
-                                            {% for option in options %}
-                                                <option value="{{ option.value }}" {% if selected_value == option.value %}selected{% endif %}>{{ option.label }}</option>
-                                            {% endfor %}
-                                        </select>
-                                    {% else %}
-                                        <em>No stock available to issue.</em>
-                                    {% endif %}
-                                {% endif %}
-                                <div class="requirement-note">Total required: {{ requirement }}</div>
-                            </li>
-                        {% endfor %}
-                        </ul>
-                    {% else %}
-                        —
-                    {% endif %}
-                </td>
                 <td class="numeric">
                     <label class="sr-only" for="step-{{ step.id }}">Mark step {{ step.sequence }} complete</label>
                     {% set pending = pending_completed_ids %}
@@ -131,4 +83,5 @@
         <button type="submit" class="action-btn">Update Routing Status</button>
     </div>
 </form>
+{% endif %}
 {% endblock %}
