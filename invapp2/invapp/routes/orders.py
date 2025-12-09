@@ -475,6 +475,69 @@ def orders_home():
     return render_template("orders/home.html", orders=open_orders, search_term=search_term)
 
 
+@bp.route("/priority", methods=["GET", "POST"])
+@require_roles("admin")
+def prioritize_orders():
+    reorderable_statuses = OrderStatus.RESERVABLE_STATES
+
+    if request.method == "POST":
+        payload = request.get_json(silent=True) or {}
+        order_ids = payload.get("order_ids")
+
+        if not isinstance(order_ids, list) or not order_ids:
+            return (
+                jsonify({"error": "Provide a list of order ids in priority order."}),
+                400,
+            )
+
+        try:
+            normalized_ids = [int(order_id) for order_id in order_ids]
+        except (TypeError, ValueError):
+            return jsonify({"error": "Order ids must be integers."}), 400
+
+        orders = (
+            Order.query.filter(Order.id.in_(normalized_ids))
+            .filter(Order.status.in_(reorderable_statuses))
+            .all()
+        )
+        order_lookup = {order.id: order for order in orders}
+
+        missing_ids = [order_id for order_id in normalized_ids if order_id not in order_lookup]
+        if missing_ids:
+            return (
+                jsonify(
+                    {
+                        "error": "Some orders could not be reprioritized.",
+                        "missing": missing_ids,
+                    }
+                ),
+                400,
+            )
+
+        for new_priority, order_id in enumerate(normalized_ids, start=1):
+            order_lookup[order_id].priority = new_priority
+
+        db.session.commit()
+        return jsonify({"updated": len(order_ids)})
+
+    orders = (
+        Order.query.options(
+            joinedload(Order.order_lines).joinedload(OrderLine.item),
+            joinedload(Order.gate_details),
+        )
+        .filter(Order.status.in_(reorderable_statuses))
+        .order_by(
+            Order.priority,
+            Order.promised_date.is_(None),
+            Order.promised_date,
+            Order.order_number,
+        )
+        .all()
+    )
+
+    return render_template("orders/priority.html", orders=orders)
+
+
 @bp.route("/schedule")
 def schedule_view():
     orders = (
