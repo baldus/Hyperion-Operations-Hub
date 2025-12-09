@@ -61,6 +61,25 @@ def _search_filter(query, search_term):
     )
 
 
+def _rebalance_priorities():
+    """Normalize priority values for active, reorderable orders."""
+
+    reorderable_orders = (
+        Order.query.filter(Order.status.in_(OrderStatus.RESERVABLE_STATES))
+        .order_by(
+            Order.priority,
+            Order.promised_date.is_(None),
+            Order.promised_date,
+            Order.order_number,
+        )
+        .all()
+    )
+
+    for new_priority, order in enumerate(reorderable_orders, start=1):
+        if order.priority != new_priority:
+            order.priority = new_priority
+
+
 def _available_quantity(item_id: int) -> Decimal:
     """Return on-hand inventory minus active reservations for an item."""
 
@@ -1480,9 +1499,28 @@ def update_routing(order_id):
             step.completed = False
             step.completed_at = None
 
-    if changes_made:
+    all_steps_completed = (
+        bool(order.routing_steps) and all(step.completed for step in order.routing_steps)
+    )
+    order_closed_now = False
+
+    if all_steps_completed and order.status != OrderStatus.CLOSED:
+        order.status = OrderStatus.CLOSED
+        order_closed_now = True
+    elif not all_steps_completed and order.status == OrderStatus.CLOSED:
+        order.status = OrderStatus.SCHEDULED
+
+    if changes_made or order_closed_now:
+        db.session.flush()
+        if order_closed_now:
+            _rebalance_priorities()
         db.session.commit()
-        flash("Routing progress updated", "success")
+        flash(
+            "Routing progress updated. Order completed and removed from prioritization."
+            if order_closed_now
+            else "Routing progress updated",
+            "success",
+        )
     else:
         flash("No routing updates were made.", "info")
 
