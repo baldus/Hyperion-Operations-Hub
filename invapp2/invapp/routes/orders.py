@@ -425,6 +425,7 @@ def _prepare_order_detail(
     if selected_batches is None:
         selected_batches = {}
 
+    gate_detail = order.gate_details
     default_inspection = {
         "panel_count": "",
         "gate_height": "",
@@ -433,6 +434,23 @@ def _prepare_order_detail(
         "lead_post_direction": "",
         "visi_panels": "",
     }
+    if gate_detail is not None:
+        default_inspection.update(
+            {
+                "panel_count": (
+                    "" if gate_detail.inspection_panel_count is None else gate_detail.inspection_panel_count
+                ),
+                "gate_height": (
+                    ""
+                    if gate_detail.inspection_gate_height is None
+                    else gate_detail.inspection_gate_height
+                ),
+                "al_color": gate_detail.inspection_al_color or "",
+                "insert_color": gate_detail.inspection_insert_color or "",
+                "lead_post_direction": gate_detail.inspection_lead_post_direction or "",
+                "visi_panels": gate_detail.inspection_visi_panels or "",
+            }
+        )
     inspection_entries = {**default_inspection, **(inspection_values or {})}
 
     component_options = {}
@@ -1392,6 +1410,7 @@ def update_routing(order_id):
         .first_or_404()
     )
 
+    inspection_record = None
     selected_ids = set()
     for raw_id in request.form.getlist("completed_steps"):
         try:
@@ -1426,6 +1445,8 @@ def update_routing(order_id):
         if desired_state and not step.completed:
             if step.work_cell == "Inspection" and order.gate_details is not None:
                 gate_detail = order.gate_details
+                inspection_errors_before = len(errors)
+                inspection_record_candidate = {}
 
                 try:
                     entered_panel_count = int(inspection_values["panel_count"])
@@ -1435,13 +1456,12 @@ def update_routing(order_id):
                     )
                     entered_panel_count = None
 
-                if (
-                    entered_panel_count is not None
-                    and entered_panel_count != gate_detail.panel_count
-                ):
-                    errors.append(
-                        "Panel Count must match the order to complete Inspection."
-                    )
+                if entered_panel_count is not None:
+                    inspection_record_candidate["panel_count"] = entered_panel_count
+                    if entered_panel_count != gate_detail.panel_count:
+                        errors.append(
+                            "Panel Count must match the order to complete Inspection."
+                        )
 
                 try:
                     entered_height = Decimal(inspection_values["gate_height"])
@@ -1452,6 +1472,7 @@ def update_routing(order_id):
                     entered_height = None
 
                 if entered_height is not None:
+                    inspection_record_candidate["gate_height"] = entered_height
                     expected_height = Decimal(gate_detail.total_gate_height)
                     if abs(entered_height - expected_height) > Decimal("0.125"):
                         errors.append(
@@ -1465,10 +1486,13 @@ def update_routing(order_id):
                             f"Provide {label} to complete Inspection."
                         )
                         return
-                    if provided.strip().casefold() != str(expected).strip().casefold():
+                    cleaned = provided.strip()
+                    if cleaned.casefold() != str(expected).strip().casefold():
                         errors.append(
                             f"{label} must match the order to complete Inspection."
                         )
+                        return
+                    inspection_record_candidate[provided_key] = cleaned
 
                 _matches(gate_detail.al_color, "al_color", "AL Color")
                 _matches(
@@ -1482,6 +1506,9 @@ def update_routing(order_id):
                     "Lead Post Direction",
                 )
                 _matches(gate_detail.visi_panels, "visi_panels", "Visi Panels")
+
+                if len(errors) == inspection_errors_before:
+                    inspection_record = inspection_record_candidate
 
             for usage in step.component_usages:
                 field_name = f"usage_{usage.id}"
@@ -1546,6 +1573,21 @@ def update_routing(order_id):
         if desired_state:
             step.completed = True
             step.completed_at = current_time
+            if (
+                step.work_cell == "Inspection"
+                and order.gate_details is not None
+                and inspection_record is not None
+            ):
+                gate_detail = order.gate_details
+                gate_detail.inspection_panel_count = inspection_record.get("panel_count")
+                gate_detail.inspection_gate_height = inspection_record.get("gate_height")
+                gate_detail.inspection_al_color = inspection_record.get("al_color")
+                gate_detail.inspection_insert_color = inspection_record.get("insert_color")
+                gate_detail.inspection_lead_post_direction = inspection_record.get(
+                    "lead_post_direction"
+                )
+                gate_detail.inspection_visi_panels = inspection_record.get("visi_panels")
+                gate_detail.inspection_recorded_at = current_time
             for action in planned_consumptions.get(step.id, []):
                 usage = action["usage"]
                 movement = Movement(

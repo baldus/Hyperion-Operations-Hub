@@ -33,6 +33,26 @@
         <div><strong>1/2 Panel Color:</strong> {{ order.gate_details.half_panel_color }}</div>
     </div>
 </section>
+    {% set inspection = order.gate_details %}
+    {% if inspection.inspection_panel_count is not none
+        or inspection.inspection_gate_height is not none
+        or inspection.inspection_al_color
+        or inspection.inspection_insert_color
+        or inspection.inspection_lead_post_direction
+        or inspection.inspection_visi_panels %}
+    <section class="order-notes">
+        <h3>Inspection Results</h3>
+        <div class="form-grid">
+            <div><strong>Recorded At:</strong> {{ inspection.inspection_recorded_at or '—' }}</div>
+            <div><strong>Panel Count:</strong> {{ inspection.inspection_panel_count or '—' }}</div>
+            <div><strong>Gate Height:</strong> {{ inspection.inspection_gate_height or '—' }}</div>
+            <div><strong>AL Color:</strong> {{ inspection.inspection_al_color or '—' }}</div>
+            <div><strong>Acrylic/Wood/Vinyl Color:</strong> {{ inspection.inspection_insert_color or '—' }}</div>
+            <div><strong>Lead Post Direction:</strong> {{ inspection.inspection_lead_post_direction or '—' }}</div>
+            <div><strong>Visi Panels:</strong> {{ inspection.inspection_visi_panels or '—' }}</div>
+        </div>
+    </section>
+    {% endif %}
 {% endif %}
 
 {% if order.routing_progress is not none %}
