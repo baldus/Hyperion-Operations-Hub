@@ -41,6 +41,7 @@ from invapp.models import (
 )
 from invapp.login import current_user
 from invapp.superuser import is_superuser
+from invapp.gate_parser import GatePartNumberError, parse_gate_part_number
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
 
@@ -194,6 +195,43 @@ def _inventory_options(item_id: int):
         )
 
     return sorted(options, key=lambda entry: entry["label"])
+
+
+@bp.route("/api/parse_gate_part_number", methods=["POST"])
+def parse_gate_part_number_api():
+    guard_response = _ensure_order_management_access()
+    if guard_response is not None:
+        return guard_response
+
+    payload = request.get_json(silent=True) or {}
+    part_number = (payload.get("part_number") or "").strip()
+
+    try:
+        parsed = parse_gate_part_number(part_number)
+    except GatePartNumberError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    response = {
+        "material": parsed.material,
+        "panel_material_color": parsed.panel_material_color,
+        "handing": parsed.handing,
+        "panel_count": parsed.panel_count,
+        "vision_panel_qty": parsed.vision_panel_qty,
+        "vision_panel_color": parsed.vision_panel_color,
+        "hardware_option": parsed.hardware_option,
+        "door_height_inches": parsed.door_height_inches,
+        "door_height_display": parsed.door_height_display,
+        # Provide a direct numeric value for the Total Gate Height form field.
+        "total_gate_height": parsed.door_height_inches,
+        "adders": parsed.adders,
+        # Direct mappings to form field names for convenience
+        "al_color": parsed.material,
+        "insert_color": parsed.panel_material_color,
+        "lead_post_direction": parsed.handing,
+        "visi_panels": str(parsed.vision_panel_qty),
+        "half_panel_color": parsed.vision_panel_color,
+    }
+    return jsonify(response)
 
 
 def _format_schedule_breakdown(buckets):
@@ -1225,6 +1263,8 @@ def new_order():
         "lead_post_direction": "",
         "visi_panels": "",
         "half_panel_color": "",
+        "hardware_option": "",
+        "adders": "",
     }
 
     if request.method == "POST":
@@ -1294,6 +1334,8 @@ def new_order():
                 "lead_post_direction": (request.form.get("lead_post_direction") or "").strip(),
                 "visi_panels": (request.form.get("visi_panels") or "").strip(),
                 "half_panel_color": (request.form.get("half_panel_color") or "").strip(),
+                "hardware_option": (request.form.get("hardware_option") or "").strip(),
+                "adders": (request.form.get("adders") or "").strip(),
             }
             form_data.update(gate_detail)
 
@@ -1368,6 +1410,8 @@ def new_order():
                     lead_post_direction=gate_detail["lead_post_direction"],
                     visi_panels=gate_detail["visi_panels"],
                     half_panel_color=gate_detail["half_panel_color"],
+                    hardware_option=gate_detail["hardware_option"] or None,
+                    adders=gate_detail["adders"] or None,
                 )
             )
 
@@ -1731,6 +1775,8 @@ def edit_order(order_id):
         "lead_post_direction": gate_detail.lead_post_direction if gate_detail else "",
         "visi_panels": gate_detail.visi_panels if gate_detail else "",
         "half_panel_color": gate_detail.half_panel_color if gate_detail else "",
+        "hardware_option": gate_detail.hardware_option if gate_detail else "",
+        "adders": gate_detail.adders if gate_detail else "",
     }
 
     if request.method == "POST":
@@ -1808,6 +1854,8 @@ def edit_order(order_id):
                 "lead_post_direction": (request.form.get("lead_post_direction") or "").strip(),
                 "visi_panels": (request.form.get("visi_panels") or "").strip(),
                 "half_panel_color": (request.form.get("half_panel_color") or "").strip(),
+                "hardware_option": (request.form.get("hardware_option") or "").strip(),
+                "adders": (request.form.get("adders") or "").strip(),
             }
             form_data.update(gate_detail_payload)
 
@@ -1879,6 +1927,8 @@ def edit_order(order_id):
             gate_detail.lead_post_direction = gate_detail_payload["lead_post_direction"]
             gate_detail.visi_panels = gate_detail_payload["visi_panels"]
             gate_detail.half_panel_color = gate_detail_payload["half_panel_color"]
+            gate_detail.hardware_option = gate_detail_payload["hardware_option"] or None
+            gate_detail.adders = gate_detail_payload["adders"] or None
 
             if not order.routing_steps:
                 for sequence, step_name in enumerate(GATE_ROUTING_STEPS, start=1):

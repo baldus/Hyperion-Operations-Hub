@@ -232,6 +232,8 @@ def _ensure_order_schema(engine):
         "inspection_lead_post_direction": "VARCHAR",
         "inspection_visi_panels": "VARCHAR",
         "inspection_recorded_at": "TIMESTAMP",
+        "hardware_option": "VARCHAR",
+        "adders": "VARCHAR",
     }
 
     for column_name, column_type in required_gate_columns.items():
