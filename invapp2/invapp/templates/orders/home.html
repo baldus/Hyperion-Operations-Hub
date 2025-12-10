@@ -18,7 +18,12 @@
     <form method="get" class="orders-filter">
         <label for="orders-search" class="sr-only">Search orders</label>
         <input id="orders-search" type="search" name="q" placeholder="Search by order # or finished good" value="{{ search_term }}">
+        <label for="orders-customer" class="sr-only">Filter by customer</label>
+        <input id="orders-customer" type="search" name="customer" placeholder="Filter by customer" value="{{ customer_filter }}">
         <button type="submit">Filter</button>
+        {% if search_term or customer_filter %}
+        <a class="action-btn subtle-action" href="{{ url_for('orders.orders_home') }}">Clear</a>
+        {% endif %}
     </form>
 </div>
 

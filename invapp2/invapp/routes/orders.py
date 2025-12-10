@@ -519,19 +519,27 @@ def _adjust_reservation(order_line: OrderLine, item_id: int, delta: int):
 @bp.route("/")
 def orders_home():
     search_term = request.args.get("q", "").strip()
+    customer_filter = request.args.get("customer", "").strip()
     query = Order.query.options(
         joinedload(Order.order_lines).joinedload(OrderLine.item),
         joinedload(Order.routing_steps),
         joinedload(Order.gate_details),
-    ).filter(Order.status.in_(OrderStatus.RESERVABLE_STATES))
+    ).filter(Order.status.in_(OrderStatus.ACTIVE_STATES))
     query = _search_filter(query, search_term)
+    if customer_filter:
+        query = query.filter(Order.customer_name.ilike(f"%{customer_filter}%"))
     open_orders = query.order_by(
         Order.priority,
         Order.promised_date.is_(None),
         Order.promised_date,
         Order.order_number,
     ).all()
-    return render_template("orders/home.html", orders=open_orders, search_term=search_term)
+    return render_template(
+        "orders/home.html",
+        orders=open_orders,
+        search_term=search_term,
+        customer_filter=customer_filter,
+    )
 
 
 @bp.route("/priority", methods=["GET", "POST"])

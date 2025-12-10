@@ -4,11 +4,27 @@
 <h2>{{ station.name }} Queue</h2>
 <p class="page-intro">Jobs that are ready for this workstation to process.</p>
 
+<form method="get" class="orders-filter">
+    <label for="queue-detail-customer" class="sr-only">Filter by customer</label>
+    <input
+        id="queue-detail-customer"
+        type="search"
+        name="customer"
+        placeholder="Filter by customer"
+        value="{{ customer_filter }}"
+    >
+    <button type="submit">Apply</button>
+    {% if customer_filter %}
+    <a class="action-btn subtle-action" href="{{ url_for('work.station_detail', station_slug=station.slug) }}">Clear</a>
+    {% endif %}
+</form>
+
 {% if station.entries %}
 <table class="data-table">
     <thead>
         <tr>
             <th scope="col">Order</th>
+            <th scope="col">Customer</th>
             <th scope="col">Item</th>
             <th scope="col">Quantity</th>
             <th scope="col">Step</th>
@@ -29,6 +45,7 @@
                 {{ entry['order_number'] }}
                 {% endif %}
             </th>
+            <td>{{ entry['customer_name'] or '—' }}</td>
             <td>
                 {% if entry['item_sku'] %}
                 <span class="badge">{{ entry['item_sku'] }}</span>
