@@ -67,6 +67,12 @@ def report_entry():
         initial_category=initial_category,
         default_date=date.today(),
     )
+
+
+def mdi_item_redirect(entry_id):
+    """Direct link target used by email summaries to open a specific item."""
+
+    return redirect(url_for("mdi.report_entry", id=entry_id))
 def add_entry():
     entry = MDIEntry()
     _populate_entry_from_form(entry, request.form)
@@ -380,6 +386,12 @@ def register(bp):
         view_func=update_entry,
         methods=["POST"],
         endpoint="report_update_entry",
+    )
+    bp.add_url_rule(
+        "/mdi/item/<int:entry_id>",
+        view_func=mdi_item_redirect,
+        methods=["GET"],
+        endpoint="mdi_item_redirect",
     )
     bp.add_url_rule(
         "/mdi/report/delete/<int:entry_id>",

@@ -1,0 +1,98 @@
+"""Utilities for generating MDI email content without sending mail."""
+from __future__ import annotations
+
+from datetime import datetime
+from email import policy
+from email.message import EmailMessage
+from typing import Callable, Iterable, List, Sequence
+
+from flask import current_app, render_template
+
+from invapp.mdi.models import CATEGORY_DISPLAY, MDIEntry
+
+
+def suggested_recipients() -> List[str]:
+    """Return a cleaned list of default recipients from configuration."""
+
+    raw_value = current_app.config.get("MDI_DEFAULT_RECIPIENTS", "")
+
+    if isinstance(raw_value, str):
+        recipients: Sequence[str] = [part.strip() for part in raw_value.split(",") if part.strip()]
+    elif isinstance(raw_value, (list, tuple, set)):
+        recipients = [str(part).strip() for part in raw_value if str(part).strip()]
+    else:
+        recipients = []
+
+    return list(recipients)
+
+
+def render_mdi_email_html(
+    entries: Iterable[MDIEntry],
+    dashboard_url: str,
+    item_link_factory: Callable[[MDIEntry], str],
+) -> str:
+    """Render the HTML body for the active-item summary email."""
+
+    prepared_entries = [
+        {
+            "id": entry.id,
+            "title": entry.item_description or entry.description or "MDI Item",
+            "owner": entry.owner or "Unassigned",
+            "due_date": entry.due_date,
+            "date_logged": entry.date_logged,
+            "status": entry.status or "Unknown",
+            "priority": entry.priority,
+            "area": entry.area,
+            "related_reference": entry.related_reference,
+            "description": entry.notes or entry.description or "No description provided.",
+            "order_number": entry.order_number,
+            "customer": entry.customer,
+            "number_absentees": entry.number_absentees,
+            "open_positions": entry.open_positions,
+            "item_part_number": entry.item_part_number,
+            "vendor": entry.vendor,
+            "eta": entry.eta,
+            "po_number": entry.po_number,
+            "category": entry.category,
+            "url": item_link_factory(entry),
+        }
+        for entry in entries
+    ]
+
+    ordered_categories = list(CATEGORY_DISPLAY.keys())
+    category_sections = [
+        {
+            "name": category,
+            "entries": [item for item in prepared_entries if item.get("category") == category],
+            "meta": CATEGORY_DISPLAY.get(category, {}),
+        }
+        for category in ordered_categories
+    ]
+
+    return render_template(
+        "email_mdi.html",
+        category_sections=category_sections,
+        dashboard_url=dashboard_url,
+        generated_at=datetime.utcnow(),
+    )
+
+
+def build_eml_message(subject: str, recipients: Sequence[str], html_body: str) -> EmailMessage:
+    """Create a standards-compliant email message containing the HTML body."""
+
+    sender = current_app.config.get("MDI_DEFAULT_SENDER") or None
+    message = EmailMessage(policy=policy.default)
+    # Mark as draft for Outlook/desktop clients so it opens ready to send instead of as a
+    # received message. The X-Unsent header is understood by Outlook and other clients.
+    message["X-Unsent"] = "1"
+    message["Subject"] = subject
+    if sender:
+        message["From"] = sender
+    if recipients:
+        message["To"] = ", ".join(recipients)
+
+    message.set_content(
+        "Open this message in an HTML-capable mail client to view the MDI summary.",
+    )
+    message.add_alternative(html_body, subtype="html")
+    return message

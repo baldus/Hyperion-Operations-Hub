@@ -266,6 +266,61 @@ function markEntryComplete(entryId, button, board, onComplete) {
     });
 }
 
+function decodeBase64ToBytes(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function triggerEmailDownload(payload) {
+  if (!payload?.eml_base64) {
+    return;
+  }
+  const bytes = decodeBase64ToBytes(payload.eml_base64);
+  const blob = new Blob([bytes], { type: 'message/rfc822' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = payload.download_name || 'mdi_active_items.eml';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function generateEmailDraft(button) {
+  const originalLabel = button.innerHTML;
+  button.disabled = true;
+  button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Preparing…';
+
+  fetch('/generate_mdi_email', { method: 'POST' })
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error('Unable to build email');
+      }
+      return response.json();
+    })
+    .then((data) => {
+      triggerEmailDownload(data);
+      const recipientList = (data.recipients && data.recipients.length)
+        ? ` for ${data.recipients.join(', ')}`
+        : '';
+      const itemCount = typeof data.item_count === 'number' ? data.item_count : 'all';
+      alert(`Email draft generated${recipientList}. Includes ${itemCount} active items.`);
+    })
+    .catch((error) => {
+      console.error('Failed to generate email', error);
+      alert('Unable to generate the email draft right now. Please try again.');
+    })
+    .finally(() => {
+      button.disabled = false;
+      button.innerHTML = originalLabel;
+    });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const board = document.getElementById('category-grid');
   if (!board) {
@@ -276,6 +331,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const refreshButton = document.getElementById('refresh-btn');
   if (refreshButton) {
     refreshButton.addEventListener('click', refresh);
+  }
+
+  const emailButton = document.getElementById('email-active-btn');
+  if (emailButton) {
+    emailButton.addEventListener('click', () => generateEmailDraft(emailButton));
   }
 
   board.addEventListener('click', (event) => {
