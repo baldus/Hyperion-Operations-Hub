@@ -108,6 +108,7 @@ def _build_queue_entry(step: RoutingStep) -> dict[str, object]:
         "order_id": order.id,
         "order_number": order.order_number,
         "order_status": order.status_label,
+        "customer_name": order.customer_name,
         "sequence": step.sequence,
         "description": step.description,
         "promised_date": promised_date,
@@ -118,13 +119,15 @@ def _build_queue_entry(step: RoutingStep) -> dict[str, object]:
     }
 
 
-def _gather_station_queues() -> tuple[list[StationQueue], dict[str, StationQueue], int]:
+def _gather_station_queues(
+    customer_filter: str | None = None,
+) -> tuple[list[StationQueue], dict[str, StationQueue], int]:
     active_statuses = (
         OrderStatus.SCHEDULED,
         OrderStatus.OPEN,
     )
 
-    steps = (
+    steps_query = (
         RoutingStep.query.join(Order)
         .options(
             joinedload(RoutingStep.order)
@@ -132,8 +135,15 @@ def _gather_station_queues() -> tuple[list[StationQueue], dict[str, StationQueue
             .joinedload(OrderLine.item)
         )
         .filter(Order.status.in_(active_statuses))
-        .order_by(RoutingStep.order_id.asc(), RoutingStep.sequence.asc())
-        .all()
+    )
+
+    if customer_filter:
+        steps_query = steps_query.filter(
+            Order.customer_name.ilike(f"%{customer_filter}%")
+        )
+
+    steps = (
+        steps_query.order_by(RoutingStep.order_id.asc(), RoutingStep.sequence.asc()).all()
     )
 
     steps_by_order: dict[int, list[RoutingStep]] = defaultdict(list)
@@ -195,23 +205,27 @@ def list_instructions():
 
 @bp.route("/stations")
 def station_overview():
-    stations, _, total_waiting = _gather_station_queues()
+    customer_filter = request.args.get("customer", "").strip()
+    stations, _, total_waiting = _gather_station_queues(customer_filter)
     return render_template(
         "work/home.html",
         stations=stations,
         total_waiting=total_waiting,
+        customer_filter=customer_filter,
     )
 
 
 @bp.route("/stations/<string:station_slug>")
 def station_detail(station_slug: str):
-    _, by_slug, _ = _gather_station_queues()
+    customer_filter = request.args.get("customer", "").strip()
+    _, by_slug, _ = _gather_station_queues(customer_filter)
     station = by_slug.get(station_slug)
     if station is None:
         abort(404)
     return render_template(
         "work/station_detail.html",
         station=station,
+        customer_filter=customer_filter,
     )
 
 
