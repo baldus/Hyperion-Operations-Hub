@@ -61,39 +61,48 @@
         <div class="form-grid">
             <label class="form-field">
                 <span class="field-label">Item Number</span>
-                <input type="text" name="item_number" value="{{ form_data.item_number }}" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+                <input id="item-number" type="text" name="item_number" value="{{ form_data.item_number }}" data-gate-required="true" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+                <p class="field-note" id="item-number-error" role="alert" hidden></p>
             </label>
             <label class="form-field">
                 <span class="field-label">Production Quantity</span>
-                <input type="number" name="production_quantity" min="1" value="{{ form_data.production_quantity }}" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+                <input type="number" name="production_quantity" min="1" value="{{ form_data.production_quantity }}" data-gate-required="true" {% if form_data.order_type == 'Gates' %}required{% endif %}>
             </label>
             <label class="form-field">
                 <span class="field-label">Panel Count</span>
-                <input type="number" name="panel_count" min="1" value="{{ form_data.panel_count }}" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+                <input type="number" name="panel_count" min="1" value="{{ form_data.panel_count }}" data-gate-required="true" {% if form_data.order_type == 'Gates' %}required{% endif %}>
             </label>
             <label class="form-field">
                 <span class="field-label">Total Gate Height</span>
-                <input type="number" name="total_gate_height" step="0.01" min="0" value="{{ form_data.total_gate_height }}" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+                <input type="number" name="total_gate_height" step="0.01" min="0" value="{{ form_data.total_gate_height }}" data-gate-required="true" {% if form_data.order_type == 'Gates' %}required{% endif %}>
             </label>
             <label class="form-field">
                 <span class="field-label">AL Color</span>
-                <input type="text" name="al_color" value="{{ form_data.al_color }}" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+                <input type="text" name="al_color" value="{{ form_data.al_color }}" data-gate-required="true" {% if form_data.order_type == 'Gates' %}required{% endif %}>
             </label>
             <label class="form-field">
                 <span class="field-label">Acrylic/Wood/Vinyl Color</span>
-                <input type="text" name="insert_color" value="{{ form_data.insert_color }}" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+                <input type="text" name="insert_color" value="{{ form_data.insert_color }}" data-gate-required="true" {% if form_data.order_type == 'Gates' %}required{% endif %}>
             </label>
             <label class="form-field">
                 <span class="field-label">Lead Post Direction</span>
-                <input type="text" name="lead_post_direction" value="{{ form_data.lead_post_direction }}" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+                <input type="text" name="lead_post_direction" value="{{ form_data.lead_post_direction }}" data-gate-required="true" {% if form_data.order_type == 'Gates' %}required{% endif %}>
             </label>
             <label class="form-field">
                 <span class="field-label">Visi Panels</span>
-                <input type="text" name="visi_panels" value="{{ form_data.visi_panels }}" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+                <input type="text" name="visi_panels" value="{{ form_data.visi_panels }}" data-gate-required="true" {% if form_data.order_type == 'Gates' %}required{% endif %}>
             </label>
             <label class="form-field">
                 <span class="field-label">1/2 Panel Color</span>
-                <input type="text" name="half_panel_color" value="{{ form_data.half_panel_color }}" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+                <input type="text" name="half_panel_color" value="{{ form_data.half_panel_color }}" data-gate-required="true" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+            </label>
+            <label class="form-field">
+                <span class="field-label">Hardware Option</span>
+                <input type="text" name="hardware_option" value="{{ form_data.hardware_option }}">
+            </label>
+            <label class="form-field">
+                <span class="field-label">Adders / Options</span>
+                <textarea name="adders" rows="2">{{ form_data.adders }}</textarea>
             </label>
         </div>
         <p class="section-help">Gate orders will automatically remain on the Framing → Assembly → Inspection → Packaging routing.</p>
@@ -113,11 +122,87 @@
     function toggleGateFields() {
         const isGate = orderTypeSelect.value === 'Gates';
         gateDetails.hidden = !isGate;
-        gateDetails.querySelectorAll('input').forEach(input => {
+        gateDetails.querySelectorAll('[data-gate-required="true"]').forEach(input => {
             if (isGate) {
                 input.setAttribute('required', 'required');
             } else {
                 input.removeAttribute('required');
+            }
+        });
+    }
+
+    const itemNumberInput = document.getElementById('item-number');
+    const itemNumberError = document.getElementById('item-number-error');
+    const gateFieldMap = {
+        panel_count: gateDetails.querySelector('input[name="panel_count"]'),
+        total_gate_height: gateDetails.querySelector('input[name="total_gate_height"]'),
+        al_color: gateDetails.querySelector('input[name="al_color"]'),
+        insert_color: gateDetails.querySelector('input[name="insert_color"]'),
+        lead_post_direction: gateDetails.querySelector('input[name="lead_post_direction"]'),
+        visi_panels: gateDetails.querySelector('input[name="visi_panels"]'),
+        half_panel_color: gateDetails.querySelector('input[name="half_panel_color"]'),
+        hardware_option: gateDetails.querySelector('input[name="hardware_option"]'),
+        adders: gateDetails.querySelector('textarea[name="adders"]'),
+    };
+
+    function showItemError(message) {
+        if (!itemNumberError) return;
+        if (message) {
+            itemNumberError.textContent = message;
+            itemNumberError.hidden = false;
+            if (itemNumberInput) {
+                itemNumberInput.style.borderColor = 'var(--error-color, #c0392b)';
+            }
+        } else {
+            itemNumberError.textContent = '';
+            itemNumberError.hidden = true;
+            if (itemNumberInput) {
+                itemNumberInput.style.borderColor = '';
+            }
+        }
+    }
+
+    async function fetchGateDefaults() {
+        if (!itemNumberInput || orderTypeSelect.value !== 'Gates') {
+            return;
+        }
+
+        const value = itemNumberInput.value.trim();
+        if (!value) {
+            showItemError('');
+            return;
+        }
+
+        try {
+            const response = await fetch('{{ url_for("orders.parse_gate_part_number_api") }}', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({part_number: value})
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || 'Unable to parse Item Number.');
+            }
+
+            const data = await response.json();
+            Object.entries(gateFieldMap).forEach(([key, input]) => {
+                if (input && data[key] !== undefined && data[key] !== null) {
+                    input.value = data[key];
+                }
+            });
+            showItemError('');
+        } catch (error) {
+            showItemError(error.message);
+        }
+    }
+
+    if (itemNumberInput) {
+        itemNumberInput.addEventListener('blur', fetchGateDefaults);
+        itemNumberInput.addEventListener('keydown', event => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                fetchGateDefaults();
             }
         });
     }

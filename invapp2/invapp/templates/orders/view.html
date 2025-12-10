@@ -31,6 +31,12 @@
         <div><strong>Lead Post Direction:</strong> {{ order.gate_details.lead_post_direction }}</div>
         <div><strong>Visi Panels:</strong> {{ order.gate_details.visi_panels }}</div>
         <div><strong>1/2 Panel Color:</strong> {{ order.gate_details.half_panel_color }}</div>
+        {% if order.gate_details.hardware_option %}
+        <div><strong>Hardware Option:</strong> {{ order.gate_details.hardware_option }}</div>
+        {% endif %}
+        {% if order.gate_details.adders %}
+        <div><strong>Adders / Options:</strong> {{ order.gate_details.adders }}</div>
+        {% endif %}
     </div>
 </section>
     {% set inspection = order.gate_details %}

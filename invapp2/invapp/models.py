@@ -1061,6 +1061,8 @@ class GateOrderDetail(db.Model):
     lead_post_direction = db.Column(db.String, nullable=False)
     visi_panels = db.Column(db.String, nullable=False)
     half_panel_color = db.Column(db.String, nullable=False)
+    hardware_option = db.Column(db.String, nullable=True)
+    adders = db.Column(db.String, nullable=True)
     inspection_panel_count = db.Column(db.Integer, nullable=True)
     inspection_gate_height = db.Column(db.Numeric(10, 3), nullable=True)
     inspection_al_color = db.Column(db.String, nullable=True)
