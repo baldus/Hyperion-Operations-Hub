@@ -221,6 +221,8 @@ def parse_gate_part_number_api():
         "hardware_option": parsed.hardware_option,
         "door_height_inches": parsed.door_height_inches,
         "door_height_display": parsed.door_height_display,
+        # Provide a direct numeric value for the Total Gate Height form field.
+        "total_gate_height": parsed.door_height_inches,
         "adders": parsed.adders,
         # Direct mappings to form field names for convenience
         "al_color": parsed.material,
