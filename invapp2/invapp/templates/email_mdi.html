@@ -8,28 +8,33 @@
       :root {
         --primary: #0d6efd;
         --primary-soft: #e8f1ff;
+        --primary-strong: #0b5ed7;
         --danger: #d6336c;
         --danger-soft: #ffe6f1;
+        --danger-strong: #b02a61;
         --warning: #f59f00;
         --warning-soft: #fff4e0;
+        --warning-strong: #c97b00;
         --success: #2b8a3e;
         --success-soft: #e8f8ed;
+        --success-strong: #1f6b30;
         --info: #0ea5e9;
         --info-soft: #e7f6fd;
+        --info-strong: #0a89c2;
         --slate: #1b2430;
         --muted: #5f6b7a;
       }
 
       body {
         font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-        background-color: #f6f8fb;
+        background-color: #f5f7fb;
         color: var(--slate);
         margin: 0;
         padding: 24px;
       }
 
       .email-card {
-        max-width: 840px;
+        max-width: 960px;
         margin: 0 auto;
         background: #ffffff;
         border-radius: 16px;
@@ -67,10 +72,6 @@
         border-radius: 10px;
         font-weight: 600;
         box-shadow: 0 8px 18px rgba(13, 110, 253, 0.28);
-      }
-
-      .cta-button:hover {
-        background: #0b5ed7;
       }
 
       .summary-grid {
@@ -111,36 +112,136 @@
         display: inline-block;
       }
 
-      .item-card {
-        border: 1px solid #e9edf4;
-        border-radius: 10px;
-        padding: 16px;
-        margin-bottom: 12px;
-        background: #fbfdff;
+      .lane {
+        border: 1px solid #e5e9f0;
+        border-radius: 12px;
+        overflow: hidden;
+        margin-top: 22px;
       }
 
-      .item-header {
+      .lane-header {
+        padding: 14px 16px;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 8px;
+        gap: 10px;
+        color: #ffffff;
       }
 
-      .item-title {
-        font-size: 16px;
-        font-weight: 700;
-        margin: 0;
+      .lane-title {
+        font-size: 15px;
+        font-weight: 800;
+        letter-spacing: 0.4px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        text-transform: uppercase;
       }
 
-      .item-meta {
-        color: var(--muted);
+      .lane-count {
+        color: rgba(255, 255, 255, 0.9);
         font-size: 13px;
       }
 
-      .item-description {
-        margin: 10px 0 0;
+      .tile-stack {
+        padding: 14px 16px;
+        background: #f8fbff;
+      }
+
+      .tile-card {
+        background: #ffffff;
+        border: 1px solid #e9edf4;
+        border-radius: 10px;
+        padding: 14px 14px 12px;
+        margin-bottom: 12px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+      }
+
+      .tile-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .pill {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        border: 1px solid transparent;
+      }
+
+      .pill-muted {
+        background: #f1f3f5;
+        color: var(--muted);
+        border-color: #e5e9f0;
+      }
+
+      .status-pill {
+        background: #ecf5ff;
+        color: #0d6efd;
+        border-color: #d7e6ff;
+      }
+
+      .title-row {
+        margin: 10px 0 6px;
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .tile-title {
+        font-size: 15px;
+        font-weight: 700;
+        margin: 0;
+        color: var(--slate);
+      }
+
+      .tile-title a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .tile-title a:hover {
+        text-decoration: underline;
+      }
+
+      .tile-meta {
+        color: var(--muted);
+        font-size: 13px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .tile-divider {
+        border: 0;
+        border-top: 1px dashed #e5e9f0;
+        margin: 10px 0;
+      }
+
+      .tile-notes {
+        margin: 0 0 4px;
         color: #27303f;
-        line-height: 1.5;
+        line-height: 1.45;
+      }
+
+      .tile-footer {
+        color: var(--muted);
+        font-size: 12px;
+        display: flex;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .category-empty {
+        margin: 0;
+        padding: 14px 16px;
+        color: #6c757d;
+        font-style: italic;
       }
 
       .footer {
@@ -149,65 +250,6 @@
         color: var(--muted);
         font-size: 13px;
         border-top: 1px solid #e9edf4;
-      }
-
-      .badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 6px 10px;
-        border-radius: 999px;
-        background: #e7f1ff;
-        color: #0d6efd;
-        font-weight: 600;
-        font-size: 12px;
-      }
-
-      .item-link {
-        color: #0d6efd;
-        text-decoration: none;
-        font-weight: 600;
-      }
-
-      .item-link:hover {
-        text-decoration: underline;
-      }
-
-      .category-block {
-        margin-top: 24px;
-        border: 1px solid #e5e9f0;
-        border-radius: 12px;
-        overflow: hidden;
-      }
-
-      .category-header {
-        padding: 14px 16px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 10px;
-      }
-
-      .category-title {
-        font-size: 15px;
-        font-weight: 800;
-        letter-spacing: 0.4px;
-        color: var(--slate);
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-      }
-
-      .category-count {
-        color: var(--muted);
-        font-size: 13px;
-      }
-
-      .category-empty {
-        margin: 0;
-        padding: 14px 16px;
-        color: #6c757d;
-        font-style: italic;
       }
 
       /* Accent helpers */
@@ -222,6 +264,12 @@
       .pill-warning { background: var(--warning-soft); color: var(--warning); }
       .pill-success { background: var(--success-soft); color: var(--success); }
       .pill-info { background: var(--info-soft); color: var(--info); }
+
+      .lane-primary { background: linear-gradient(90deg, var(--primary), var(--primary-strong)); }
+      .lane-danger { background: linear-gradient(90deg, var(--danger), var(--danger-strong)); }
+      .lane-warning { background: linear-gradient(90deg, var(--warning), var(--warning-strong)); }
+      .lane-success { background: linear-gradient(90deg, var(--success), var(--success-strong)); }
+      .lane-info { background: linear-gradient(90deg, var(--info), var(--info-strong)); }
     </style>
   </head>
   <body>
@@ -234,7 +282,7 @@
 
       <div class="content">
         <p style="margin-top: 0;">Hello,</p>
-        <p>Here are the currently active MDI items. Click any item title to jump directly to it.</p>
+        <p>Here are the currently active MDI tiles exactly as they appear on the dashboard.</p>
         <a class="cta-button" href="{{ dashboard_url }}">View Dashboard</a>
 
         <div class="summary-grid">
@@ -253,40 +301,103 @@
 
         {% for section in category_sections %}
           {% set color = section.meta.get('color', 'primary') %}
-          <div class="category-block">
-            <div class="category-header accent-{{ color }}">
-              <span class="category-title">
-                <span class="color-dot" style="background-color: var(--{{ color }});"></span>
+          <div class="lane">
+            <div class="lane-header lane-{{ color }}">
+              <span class="lane-title">
+                <span class="color-dot" style="background-color: rgba(255,255,255,0.9);"></span>
                 {{ section.name }}
               </span>
-              <span class="category-count">
+              <span class="lane-count">
                 {% set count = section.entries|length %}
                 {% if count %}
-                  {{ count }} active item{% if count != 1 %}s{% endif %}
+                  {{ count }} active tile{% if count != 1 %}s{% endif %}
                 {% else %}
-                  No active items
+                  No active tiles
                 {% endif %}
               </span>
             </div>
 
             {% if section.entries %}
-              {% for entry in section.entries %}
-                <div class="item-card accent-{{ color }}">
-                  <div class="item-header">
-                    <p class="item-title">
-                      <a class="item-link" href="{{ entry.url }}">{{ entry.title }}</a>
-                    </p>
-                    <span class="badge pill-{{ color }}">{{ entry.status }}</span>
-                  </div>
-                  <p class="item-meta">
-                    <strong>Owner:</strong> {{ entry.owner }}
-                    {% if entry.due_date %}
-                      &middot; <strong>Due:</strong> {{ entry.due_date.strftime('%b %d, %Y') }}
+              <div class="tile-stack">
+                {% for entry in section.entries %}
+                  <div class="tile-card">
+                    <div class="tile-top">
+                      <div class="tile-meta" style="gap: 6px;">
+                        <span class="pill pill-muted">#{{ '%04d'|format(entry.id) }}</span>
+                        {% if entry.priority %}
+                          <span class="pill pill-{{ color }}">{{ entry.priority }}</span>
+                        {% endif %}
+                      </div>
+                      <span class="pill status-pill">{{ entry.status }}</span>
+                    </div>
+
+                    <div class="title-row">
+                      <p class="tile-title">
+                        <a href="{{ entry.url }}">{{ entry.title }}</a>
+                      </p>
+                    </div>
+
+                    <div class="tile-meta">
+                      <span><strong>Owner:</strong> {{ entry.owner }}</span>
+                      {% if entry.area %}
+                        <span>&middot; <strong>Area:</strong> {{ entry.area }}</span>
+                      {% endif %}
+                      {% if entry.due_date %}
+                        <span>&middot; <strong>Due:</strong> {{ entry.due_date.strftime('%b %d, %Y') }}</span>
+                      {% endif %}
+                    </div>
+
+                    <hr class="tile-divider" />
+
+                    {% if entry.category == 'Safety' %}
+                      <p class="tile-notes">{{ entry.description }}</p>
+                      {% if entry.related_reference %}
+                        <p class="tile-footer"><span>Reference: {{ entry.related_reference }}</span></p>
+                      {% endif %}
+                    {% elif entry.category == 'Quality' %}
+                      <p class="tile-notes">{{ entry.description }}</p>
+                      <div class="tile-footer">
+                        <span>
+                          {% if entry.related_reference %}
+                            Ref {{ entry.related_reference }}
+                          {% endif %}
+                        </span>
+                        <span>
+                          Logged {{ entry.date_logged.strftime('%b %d, %Y') if entry.date_logged else 'N/A' }}
+                        </span>
+                      </div>
+                    {% elif entry.category == 'Delivery' %}
+                      <p class="tile-notes">{{ entry.description }}</p>
+                      <div class="tile-footer">
+                        <span>Order: {{ entry.order_number or 'N/A' }}</span>
+                        <span>Customer: {{ entry.customer or 'N/A' }}</span>
+                        <span>Due: {{ entry.due_date.strftime('%b %d, %Y') if entry.due_date else 'N/A' }}</span>
+                      </div>
+                    {% elif entry.category == 'People' %}
+                      <p class="tile-notes">People Update</p>
+                      <div class="tile-footer">
+                        <span>Absentees: {{ entry.number_absentees if entry.number_absentees is not none else 'N/A' }}</span>
+                        <span>Open Roles: {{ entry.open_positions if entry.open_positions is not none else 'N/A' }}</span>
+                      </div>
+                    {% elif entry.category == 'Materials' %}
+                      <p class="tile-notes">{{ entry.description }}</p>
+                      <div class="tile-footer">
+                        {% if entry.item_part_number %}<span>Part {{ entry.item_part_number }}</span>{% endif %}
+                        {% if entry.vendor %}<span>Vendor {{ entry.vendor }}</span>{% endif %}
+                        {% if entry.eta %}<span>ETA {{ entry.eta }}</span>{% endif %}
+                        {% if entry.po_number %}<span>PO {{ entry.po_number }}</span>{% endif %}
+                      </div>
+                    {% else %}
+                      <p class="tile-notes">{{ entry.description }}</p>
                     {% endif %}
-                  </p>
-                  <p class="item-description">{{ entry.description }}</p>
-                </div>
-              {% endfor %}
+
+                    <div class="tile-footer" style="margin-top: 6px;">
+                      <span>Logged {{ entry.date_logged.strftime('%b %d, %Y') if entry.date_logged else 'N/A' }}</span>
+                      <span>View details →</span>
+                    </div>
+                  </div>
+                {% endfor %}
+              </div>
             {% else %}
               <p class="category-empty">No active items for {{ section.name }}.</p>
             {% endif %}
