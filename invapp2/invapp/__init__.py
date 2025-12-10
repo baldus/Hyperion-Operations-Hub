@@ -218,6 +218,35 @@ def _ensure_order_schema(engine):
                     )
                 )
 
+    try:
+        gate_columns = {col["name"] for col in inspector.get_columns("gate_order_detail")}
+    except (NoSuchTableError, OperationalError):
+        gate_columns = set()
+
+    gate_columns_to_add = []
+    required_gate_columns = {
+        "inspection_panel_count": "INTEGER",
+        "inspection_gate_height": "NUMERIC(10, 3)",
+        "inspection_al_color": "VARCHAR",
+        "inspection_insert_color": "VARCHAR",
+        "inspection_lead_post_direction": "VARCHAR",
+        "inspection_visi_panels": "VARCHAR",
+        "inspection_recorded_at": "TIMESTAMP",
+    }
+
+    for column_name, column_type in required_gate_columns.items():
+        if column_name not in gate_columns:
+            gate_columns_to_add.append((column_name, column_type))
+
+    if gate_columns_to_add:
+        with engine.begin() as conn:
+            for column_name, column_type in gate_columns_to_add:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE gate_order_detail ADD COLUMN {column_name} {column_type}"
+                    )
+                )
+
 
 def _ensure_production_schema(engine):
     """Align legacy production tables with the current model definitions."""
