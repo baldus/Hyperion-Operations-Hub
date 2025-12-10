@@ -1061,6 +1061,13 @@ class GateOrderDetail(db.Model):
     lead_post_direction = db.Column(db.String, nullable=False)
     visi_panels = db.Column(db.String, nullable=False)
     half_panel_color = db.Column(db.String, nullable=False)
+    inspection_panel_count = db.Column(db.Integer, nullable=True)
+    inspection_gate_height = db.Column(db.Numeric(10, 3), nullable=True)
+    inspection_al_color = db.Column(db.String, nullable=True)
+    inspection_insert_color = db.Column(db.String, nullable=True)
+    inspection_lead_post_direction = db.Column(db.String, nullable=True)
+    inspection_visi_panels = db.Column(db.String, nullable=True)
+    inspection_recorded_at = db.Column(db.DateTime, nullable=True)
 
     order = db.relationship("Order", back_populates="gate_details")
 
