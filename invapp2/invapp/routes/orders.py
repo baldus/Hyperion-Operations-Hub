@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 
 from flask import (
     Blueprint,
+    abort,
     flash,
     jsonify,
     redirect,
@@ -426,6 +427,7 @@ def _prepare_order_detail(
         selected_batches = {}
 
     gate_detail = order.gate_details
+    inspection_completed = False
     default_inspection = {
         "panel_count": "",
         "gate_height": "",
@@ -435,6 +437,7 @@ def _prepare_order_detail(
         "visi_panels": "",
     }
     if gate_detail is not None:
+        inspection_completed = bool(gate_detail.inspection_recorded_at)
         default_inspection.update(
             {
                 "panel_count": (
@@ -486,6 +489,8 @@ def _prepare_order_detail(
         "pending_completed_ids": pending_completed_ids,
         "selected_batches": selected_batches,
         "inspection_values": inspection_entries,
+        "inspection_completed": inspection_completed,
+        "inspection_recorded_at": gate_detail.inspection_recorded_at if gate_detail else None,
     }
 
 
@@ -1378,12 +1383,30 @@ def view_order(order_id):
             .joinedload(RoutingStep.component_links)
             .joinedload(RoutingStepComponent.order_component)
             .joinedload(OrderComponent.component_item),
+            joinedload(Order.gate_details),
         )
         .filter_by(id=order_id)
         .first_or_404()
     )
     context = _prepare_order_detail(order)
     return render_template("orders/view.html", **context)
+
+
+@bp.route("/<int:order_id>/inspection-report")
+def inspection_report(order_id):
+    order = (
+        Order.query.options(joinedload(Order.gate_details))
+        .filter_by(id=order_id)
+        .first_or_404()
+    )
+    if order.gate_details is None:
+        abort(404)
+
+    return render_template(
+        "orders/inspection_report.html",
+        order=order,
+        inspection=order.gate_details,
+    )
 
 
 @bp.route("/<int:order_id>/routing", methods=["POST"])

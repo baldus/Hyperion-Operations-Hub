@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="order-notes">
+    <h2>Inspection Report</h2>
+    <p><strong>Order:</strong> {{ order.order_number }} | <strong>Status:</strong> {{ order.status_label }}</p>
+    <p><strong>Recorded At:</strong> {{ inspection.inspection_recorded_at or '—' }}</p>
+</div>
+
+<section class="order-notes">
+    <h3>Ordered Gate Details</h3>
+    <div class="form-grid">
+        <div><strong>Item Number:</strong> {{ inspection.item_number }}</div>
+        <div><strong>Production Quantity:</strong> {{ inspection.production_quantity }}</div>
+        <div><strong>Panel Count:</strong> {{ inspection.panel_count }}</div>
+        <div><strong>Total Gate Height:</strong> {{ inspection.total_gate_height }}</div>
+        <div><strong>AL Color:</strong> {{ inspection.al_color }}</div>
+        <div><strong>Acrylic/Wood/Vinyl Color:</strong> {{ inspection.insert_color }}</div>
+        <div><strong>Lead Post Direction:</strong> {{ inspection.lead_post_direction }}</div>
+        <div><strong>Visi Panels:</strong> {{ inspection.visi_panels }}</div>
+        <div><strong>1/2 Panel Color:</strong> {{ inspection.half_panel_color }}</div>
+    </div>
+</section>
+
+<section class="order-notes">
+    <h3>Inspection Results</h3>
+    <div class="form-grid">
+        <div><strong>Panel Count:</strong> {{ inspection.inspection_panel_count or '—' }}</div>
+        <div><strong>Gate Height:</strong> {{ inspection.inspection_gate_height or '—' }}</div>
+        <div><strong>AL Color:</strong> {{ inspection.inspection_al_color or '—' }}</div>
+        <div><strong>Acrylic/Wood/Vinyl Color:</strong> {{ inspection.inspection_insert_color or '—' }}</div>
+        <div><strong>Lead Post Direction:</strong> {{ inspection.inspection_lead_post_direction or '—' }}</div>
+        <div><strong>Visi Panels:</strong> {{ inspection.inspection_visi_panels or '—' }}</div>
+    </div>
+</section>
+
+<p class="field-note">Print this page to archive the inspection with the production order.</p>
+{% endblock %}

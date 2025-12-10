@@ -42,6 +42,16 @@
         or inspection.inspection_visi_panels %}
     <section class="order-notes">
         <h3>Inspection Results</h3>
+        <p>
+            <a
+                href="{{ url_for('orders.inspection_report', order_id=order.id) }}"
+                class="action-btn"
+                target="_blank"
+                rel="noopener"
+            >
+                Open Printable Inspection Sheet
+            </a>
+        </p>
         <div class="form-grid">
             <div><strong>Recorded At:</strong> {{ inspection.inspection_recorded_at or '—' }}</div>
             <div><strong>Panel Count:</strong> {{ inspection.inspection_panel_count or '—' }}</div>
@@ -94,6 +104,12 @@
                 <td>{{ step.description }}</td>
                 <td>
                     {% if step.work_cell == 'Inspection' and order.gate_details %}
+                        {% if inspection_completed %}
+                            <p class="field-note">
+                                Inspection recorded at {{ inspection_recorded_at }}. Values reflect the
+                                completed inspection.
+                            </p>
+                        {% endif %}
                         <div class="form-grid">
                             <div class="form-field">
                                 <label for="inspection_panel_count" class="field-label">Panel Count (Order: {{ order.gate_details.panel_count }})</label>
