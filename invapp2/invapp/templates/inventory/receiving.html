@@ -3,6 +3,16 @@
 {% set defaults = form_defaults or {} %}
 <h2>Receiving</h2>
 
+<section class="card">
+  <h3>Item Lookup</h3>
+  <p>Search by item name or SKU, then apply the result to the form.</p>
+  <div class="form-row">
+    <input type="text" id="item-lookup-query" placeholder="Search items...">
+    <button type="button" id="item-lookup-btn" class="bubble-btn">Search</button>
+  </div>
+  <div id="item-lookup-results" class="table-container" aria-live="polite"></div>
+</section>
+
 <form method="POST">
   <label>SKU:</label><br>
   <input type="text" name="sku" value="{{ defaults.get('sku', '') }}" required><br><br>
@@ -80,26 +90,97 @@
 {% block extra_scripts %}
 <script>
   document.addEventListener('DOMContentLoaded', function () {
+    const skuInput = document.querySelector('input[name="sku"]');
     const qtyInput = document.querySelector('input[name="qty"]');
     const deferCheckbox = document.getElementById('defer_qty');
+    const lookupInput = document.getElementById('item-lookup-query');
+    const lookupButton = document.getElementById('item-lookup-btn');
+    const lookupResults = document.getElementById('item-lookup-results');
 
-    if (!qtyInput || !deferCheckbox) {
-      return;
+    if (qtyInput && deferCheckbox) {
+      const syncQtyState = () => {
+        if (deferCheckbox.checked) {
+          qtyInput.required = false;
+          qtyInput.placeholder = 'Quantity will be entered later';
+          qtyInput.value = '';
+        } else {
+          qtyInput.required = true;
+          qtyInput.placeholder = '';
+        }
+      };
+
+      deferCheckbox.addEventListener('change', syncQtyState);
+      syncQtyState();
     }
 
-    const syncQtyState = () => {
-      if (deferCheckbox.checked) {
-        qtyInput.required = false;
-        qtyInput.placeholder = 'Quantity will be entered later';
-        qtyInput.value = '';
-      } else {
-        qtyInput.required = true;
-        qtyInput.placeholder = '';
+    const renderLookupResults = (items) => {
+      if (!Array.isArray(items) || !items.length) {
+        lookupResults.innerHTML = '<p>No items found. Try a different search.</p>';
+        return;
+      }
+
+      const rows = items.map(item => `
+        <tr>
+          <td>${item.sku}</td>
+          <td>${item.name || ''}</td>
+          <td><button type="button" class="bubble-btn use-sku" data-sku="${item.sku}">Use SKU</button></td>
+        </tr>
+      `).join('');
+
+      lookupResults.innerHTML = `
+        <table class="inventory-table">
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Name</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      `;
+
+      lookupResults.querySelectorAll('.use-sku').forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+          const sku = event.currentTarget.getAttribute('data-sku');
+          if (skuInput) {
+            skuInput.value = sku;
+            skuInput.focus();
+          }
+        });
+      });
+    };
+
+    const performLookup = async () => {
+      const query = (lookupInput?.value || '').trim();
+      if (!query) {
+        lookupResults.innerHTML = '<p>Please enter a search term.</p>';
+        return;
+      }
+
+      lookupResults.innerHTML = '<p>Searching…</p>';
+      try {
+        const response = await fetch(`/inventory/api/items/search?q=${encodeURIComponent(query)}`);
+        if (!response.ok) {
+          lookupResults.innerHTML = '<p>Search failed. Please try again.</p>';
+          return;
+        }
+        const data = await response.json();
+        renderLookupResults(data.results || []);
+      } catch (error) {
+        lookupResults.innerHTML = '<p>Unable to search right now. Please try again.</p>';
       }
     };
 
-    deferCheckbox.addEventListener('change', syncQtyState);
-    syncQtyState();
+    lookupButton?.addEventListener('click', performLookup);
+    lookupInput?.addEventListener('keypress', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        performLookup();
+      }
+    });
   });
 </script>
 {% endblock %}

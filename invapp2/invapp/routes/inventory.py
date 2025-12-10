@@ -774,6 +774,36 @@ def scan_inventory():
     )
 
 
+@bp.get("/api/items/search")
+def search_items_api():
+    """Search items by SKU or name for quick lookups."""
+
+    query = request.args.get("q", "").strip()
+    if not query:
+        return jsonify({"error": "Query is required"}), 400
+
+    like_pattern = f"%{query}%"
+    matches = (
+        Item.query.options(load_only(Item.sku, Item.name))
+        .filter(or_(Item.sku.ilike(like_pattern), Item.name.ilike(like_pattern)))
+        .order_by(Item.sku)
+        .limit(20)
+        .all()
+    )
+
+    return jsonify(
+        {
+            "results": [
+                {
+                    "sku": item.sku,
+                    "name": item.name,
+                }
+                for item in matches
+            ]
+        }
+    )
+
+
 @bp.route("/api/items/<sku>")
 def lookup_item_api(sku):
     sku = sku.strip()
