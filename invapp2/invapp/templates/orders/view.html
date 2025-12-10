@@ -72,10 +72,13 @@
     <p><strong>Routing Progress:</strong> Not started</p>
 {% endif %}
 
-<a href="{{ url_for('orders.edit_order', order_id=order.id) }}" class="action-btn">Edit</a>
-<form method="post" action="{{ url_for('orders.delete_order', order_id=order.id) }}" style="display:inline;">
-    <button type="submit">Delete</button>
-</form>
+{% set can_manage_order = current_user.is_authenticated and (is_superuser() or current_user.has_role('admin')) %}
+{% if can_manage_order %}
+    <a href="{{ url_for('orders.edit_order', order_id=order.id) }}" class="action-btn">Edit</a>
+    <form method="post" action="{{ url_for('orders.delete_order', order_id=order.id) }}" style="display:inline;">
+        <button type="submit">Delete</button>
+    </form>
+{% endif %}
 
 {% if order.routing_steps %}
 <h3>Routing Steps</h3>

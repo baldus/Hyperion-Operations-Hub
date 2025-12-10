@@ -19,7 +19,7 @@ from flask import (
 from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload
 
-from invapp.extensions import db
+from invapp.extensions import db, login_manager
 from invapp.auth import blueprint_page_guard
 from invapp.security import require_roles
 from invapp.models import (
@@ -39,6 +39,8 @@ from invapp.models import (
     RoutingStepComponent,
     RoutingStepConsumption,
 )
+from invapp.login import current_user
+from invapp.superuser import is_superuser
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
 
@@ -46,6 +48,19 @@ bp.before_request(blueprint_page_guard("orders"))
 
 ORDER_TYPE_CHOICES = ("Gates", "COP's", "Operators", "Controllers")
 GATE_ROUTING_STEPS = ("Framing", "Assembly", "Inspection", "Packaging")
+
+
+def _ensure_order_management_access():
+    if is_superuser():
+        return None
+
+    if current_user.is_authenticated and current_user.has_role("admin"):
+        return None
+
+    if not current_user.is_authenticated:
+        return login_manager.unauthorized()
+
+    abort(403)
 
 
 def _search_filter(query, search_term):
@@ -1688,6 +1703,10 @@ def update_routing(order_id):
 
 @bp.route("/<int:order_id>/edit", methods=["GET", "POST"])
 def edit_order(order_id):
+    guard_response = _ensure_order_management_access()
+    if guard_response is not None:
+        return guard_response
+
     order = Order.query.get_or_404(order_id)
     status_choices = OrderStatus.ALL_STATUSES
 
@@ -1891,6 +1910,10 @@ def edit_order(order_id):
 
 @bp.route("/<int:order_id>/delete", methods=["POST"])
 def delete_order(order_id):
+    guard_response = _ensure_order_management_access()
+    if guard_response is not None:
+        return guard_response
+
     order = Order.query.get_or_404(order_id)
     db.session.delete(order)
     db.session.commit()
