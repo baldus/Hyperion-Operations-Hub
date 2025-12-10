@@ -44,6 +44,23 @@ function parseJsonAttribute(attributeValue, fallback = {}) {
   }
 }
 
+function showToast(message, type = 'success') {
+  const existing = document.getElementById('mdi-toast');
+  if (existing) {
+    existing.remove();
+  }
+
+  const toast = document.createElement('div');
+  toast.id = 'mdi-toast';
+  toast.className = `alert alert-${type} shadow position-fixed top-0 end-0 m-3`;
+  toast.style.zIndex = '1080';
+  toast.role = 'status';
+  toast.textContent = message;
+
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 4000);
+}
+
 function renderCategoryDetails(entry) {
   switch (entry.category) {
     case 'Safety':
@@ -81,6 +98,33 @@ function renderCategoryDetails(entry) {
     default:
       return '';
   }
+}
+
+function sendActiveItemsEmail(button) {
+  const originalLabel = button.innerHTML;
+  button.disabled = true;
+  button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Sending…';
+
+  fetch('/send_mdi_email', { method: 'POST' })
+    .then((response) => {
+      if (!response.ok) {
+        return response.json().catch(() => ({})).then((data) => {
+          throw new Error(data.message || 'Unable to send email');
+        });
+      }
+      return response.json();
+    })
+    .then((data) => {
+      showToast(data.message || 'Email sent successfully');
+    })
+    .catch((error) => {
+      console.error('Failed to send active items email', error);
+      showToast(error.message || 'Failed to send email', 'danger');
+    })
+    .finally(() => {
+      button.disabled = false;
+      button.innerHTML = originalLabel;
+    });
 }
 
 function statusToBadge(status, statusBadges) {
@@ -276,6 +320,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const refreshButton = document.getElementById('refresh-btn');
   if (refreshButton) {
     refreshButton.addEventListener('click', refresh);
+  }
+
+  const sendEmailButton = document.getElementById('send-email-btn');
+  if (sendEmailButton) {
+    sendEmailButton.addEventListener('click', () => sendActiveItemsEmail(sendEmailButton));
   }
 
   board.addEventListener('click', (event) => {

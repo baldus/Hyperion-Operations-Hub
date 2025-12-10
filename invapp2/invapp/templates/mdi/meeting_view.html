@@ -27,6 +27,9 @@
         <a class="btn btn-outline-success" href="{{ url_for('mdi.report_export_csv') }}">
           <i class="bi bi-download"></i> Export CSV
         </a>
+        <button class="btn btn-outline-info" id="send-email-btn" type="button">
+          📧 Send Active Items Email
+        </button>
         <form class="btn-group" action="{{ url_for('mdi.report_import_csv') }}" method="post" enctype="multipart/form-data">
           <label class="btn btn-outline-secondary mb-0">
             <i class="bi bi-upload"></i> Upload CSV

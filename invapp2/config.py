@@ -40,3 +40,12 @@ class Config:
 
     ZEBRA_PRINTER_HOST = os.getenv("ZEBRA_PRINTER_HOST", "localhost")
     ZEBRA_PRINTER_PORT = int(os.getenv("ZEBRA_PRINTER_PORT", 9100))
+
+    # Email configuration for MDI summaries
+    MDI_SMTP_SERVER = os.getenv("MDI_SMTP_SERVER")
+    MDI_SMTP_PORT = int(os.getenv("MDI_SMTP_PORT", 587))
+    MDI_SMTP_USERNAME = os.getenv("MDI_SMTP_USERNAME")
+    MDI_SMTP_PASSWORD = os.getenv("MDI_SMTP_PASSWORD")
+    MDI_SMTP_USE_TLS = os.getenv("MDI_SMTP_USE_TLS", "true")
+    MDI_EMAIL_SENDER = os.getenv("MDI_EMAIL_SENDER")
+    MDI_EMAIL_RECIPIENTS = os.getenv("MDI_EMAIL_RECIPIENTS", "")
