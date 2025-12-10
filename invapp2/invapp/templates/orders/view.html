@@ -56,23 +56,57 @@
                 <th>Sequence</th>
                 <th>Work Cell</th>
                 <th>Instructions</th>
+                <th>Inspection Details</th>
                 <th>Completed</th>
             </tr>
         </thead>
         <tbody>
         {% for step in order.steps %}
+            {% set pending = pending_completed_ids %}
+            {% if pending is not none %}
+                {% set is_checked = step.id in pending %}
+            {% else %}
+                {% set is_checked = step.completed %}
+            {% endif %}
             <tr>
                 <td>{{ step.sequence }}</td>
                 <td>{{ step.work_cell or '—' }}</td>
                 <td>{{ step.description }}</td>
+                <td>
+                    {% if step.work_cell == 'Inspection' and order.gate_details %}
+                        <div class="form-grid">
+                            <div class="form-field">
+                                <label for="inspection_panel_count" class="field-label">Panel Count (Order: {{ order.gate_details.panel_count }})</label>
+                                <input id="inspection_panel_count" type="number" name="inspection_panel_count" value="{{ inspection_values.panel_count }}" min="0" step="1">
+                            </div>
+                            <div class="form-field">
+                                <label for="inspection_gate_height" class="field-label">Gate Height (Order: {{ order.gate_details.total_gate_height }})</label>
+                                <input id="inspection_gate_height" type="text" name="inspection_gate_height" value="{{ inspection_values.gate_height }}">
+                                <p class="field-note">Must be within ±0.125 of the ordered value.</p>
+                            </div>
+                            <div class="form-field">
+                                <label for="inspection_al_color" class="field-label">AL Color (Order: {{ order.gate_details.al_color }})</label>
+                                <input id="inspection_al_color" type="text" name="inspection_al_color" value="{{ inspection_values.al_color }}">
+                            </div>
+                            <div class="form-field">
+                                <label for="inspection_insert_color" class="field-label">Acrylic/Wood/Vinyl Color (Order: {{ order.gate_details.insert_color }})</label>
+                                <input id="inspection_insert_color" type="text" name="inspection_insert_color" value="{{ inspection_values.insert_color }}">
+                            </div>
+                            <div class="form-field">
+                                <label for="inspection_lead_post_direction" class="field-label">Lead Post Direction (Order: {{ order.gate_details.lead_post_direction }})</label>
+                                <input id="inspection_lead_post_direction" type="text" name="inspection_lead_post_direction" value="{{ inspection_values.lead_post_direction }}">
+                            </div>
+                            <div class="form-field">
+                                <label for="inspection_visi_panels" class="field-label">Visi Panels (Order: {{ order.gate_details.visi_panels }})</label>
+                                <input id="inspection_visi_panels" type="text" name="inspection_visi_panels" value="{{ inspection_values.visi_panels }}">
+                            </div>
+                        </div>
+                    {% else %}
+                        <span class="field-note">—</span>
+                    {% endif %}
+                </td>
                 <td class="numeric">
                     <label class="sr-only" for="step-{{ step.id }}">Mark step {{ step.sequence }} complete</label>
-                    {% set pending = pending_completed_ids %}
-                    {% if pending is not none %}
-                        {% set is_checked = step.id in pending %}
-                    {% else %}
-                        {% set is_checked = step.completed %}
-                    {% endif %}
                     <input id="step-{{ step.id }}" type="checkbox" name="completed_steps" value="{{ step.id }}" {% if is_checked %}checked{% endif %}>
                 </td>
             </tr>

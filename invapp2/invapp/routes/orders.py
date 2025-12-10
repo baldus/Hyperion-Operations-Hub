@@ -415,9 +415,25 @@ def _parse_bulk_bom_rows(reader: csv.DictReader, *, column_overrides=None):
     return bom_rows, errors
 
 
-def _prepare_order_detail(order: Order, *, pending_completed_ids=None, selected_batches=None):
+def _prepare_order_detail(
+    order: Order,
+    *,
+    pending_completed_ids=None,
+    selected_batches=None,
+    inspection_values=None,
+):
     if selected_batches is None:
         selected_batches = {}
+
+    default_inspection = {
+        "panel_count": "",
+        "gate_height": "",
+        "al_color": "",
+        "insert_color": "",
+        "lead_post_direction": "",
+        "visi_panels": "",
+    }
+    inspection_entries = {**default_inspection, **(inspection_values or {})}
 
     component_options = {}
     component_requirements = {}
@@ -451,6 +467,7 @@ def _prepare_order_detail(order: Order, *, pending_completed_ids=None, selected_
         "component_consumptions": component_consumptions,
         "pending_completed_ids": pending_completed_ids,
         "selected_batches": selected_batches,
+        "inspection_values": inspection_entries,
     }
 
 
@@ -1392,12 +1409,80 @@ def update_routing(order_id):
             continue
         selected_batches[usage_id] = value
 
+    inspection_values = {
+        "panel_count": (request.form.get("inspection_panel_count") or "").strip(),
+        "gate_height": (request.form.get("inspection_gate_height") or "").strip(),
+        "al_color": (request.form.get("inspection_al_color") or "").strip(),
+        "insert_color": (request.form.get("inspection_insert_color") or "").strip(),
+        "lead_post_direction": (request.form.get("inspection_lead_post_direction") or "").strip(),
+        "visi_panels": (request.form.get("inspection_visi_panels") or "").strip(),
+    }
+
     errors = []
     planned_consumptions = defaultdict(list)
 
     for step in order.routing_steps:
         desired_state = step.id in selected_ids
         if desired_state and not step.completed:
+            if step.work_cell == "Inspection" and order.gate_details is not None:
+                gate_detail = order.gate_details
+
+                try:
+                    entered_panel_count = int(inspection_values["panel_count"])
+                except (TypeError, ValueError):
+                    errors.append(
+                        "Enter a whole number for Panel Count to complete Inspection."
+                    )
+                    entered_panel_count = None
+
+                if (
+                    entered_panel_count is not None
+                    and entered_panel_count != gate_detail.panel_count
+                ):
+                    errors.append(
+                        "Panel Count must match the order to complete Inspection."
+                    )
+
+                try:
+                    entered_height = Decimal(inspection_values["gate_height"])
+                except (InvalidOperation, TypeError):
+                    errors.append(
+                        "Enter a valid number for Gate Height to complete Inspection."
+                    )
+                    entered_height = None
+
+                if entered_height is not None:
+                    expected_height = Decimal(gate_detail.total_gate_height)
+                    if abs(entered_height - expected_height) > Decimal("0.125"):
+                        errors.append(
+                            "Gate Height must be within ±0.125 of the order to complete Inspection."
+                        )
+
+                def _matches(expected: str, provided_key: str, label: str):
+                    provided = inspection_values[provided_key]
+                    if not provided:
+                        errors.append(
+                            f"Provide {label} to complete Inspection."
+                        )
+                        return
+                    if provided.strip().casefold() != str(expected).strip().casefold():
+                        errors.append(
+                            f"{label} must match the order to complete Inspection."
+                        )
+
+                _matches(gate_detail.al_color, "al_color", "AL Color")
+                _matches(
+                    gate_detail.insert_color,
+                    "insert_color",
+                    "Acrylic/Wood/Vinyl Color",
+                )
+                _matches(
+                    gate_detail.lead_post_direction,
+                    "lead_post_direction",
+                    "Lead Post Direction",
+                )
+                _matches(gate_detail.visi_panels, "visi_panels", "Visi Panels")
+
             for usage in step.component_usages:
                 field_name = f"usage_{usage.id}"
                 selection = (request.form.get(field_name) or "").strip()
@@ -1446,6 +1531,7 @@ def update_routing(order_id):
             order,
             pending_completed_ids=selected_ids,
             selected_batches=selected_batches,
+            inspection_values=inspection_values,
         )
         return render_template("orders/view.html", **context), 400
 
