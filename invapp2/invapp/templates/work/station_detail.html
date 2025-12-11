@@ -28,7 +28,6 @@
             <th scope="col">Order</th>
             <th scope="col">Customer</th>
             <th scope="col">Item</th>
-            <th scope="col">Quantity</th>
             {% if is_framing %}
             <th scope="col">Panels Needed</th>
             <th scope="col">Panel Material</th>
@@ -61,7 +60,6 @@
                 —
                 {% endif %}
             </td>
-            <td>{{ entry['quantity'] or '—' }}</td>
             {% if is_framing %}
             <td>{{ entry['panels_needed'] if entry['panels_needed'] is not none else '—' }}</td>
             <td>{{ entry['panel_material'] or '—' }}</td>

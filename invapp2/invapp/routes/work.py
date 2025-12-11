@@ -138,10 +138,13 @@ def _build_queue_entry(step: RoutingStep, framing_offset: Decimal | None) -> dic
 
         panel_material = gate_detail.insert_color or gate_detail.half_panel_color
 
-        if gate_detail.total_gate_height is not None and framing_offset is not None:
+        if gate_detail.total_gate_height is not None:
             try:
                 total_height = Decimal(gate_detail.total_gate_height)
-                panel_length = (total_height - framing_offset).quantize(
+                effective_offset = framing_offset if framing_offset is not None else Decimal(
+                    "0"
+                )
+                panel_length = (total_height - effective_offset).quantize(
                     Decimal("0.01"), rounding=ROUND_HALF_UP
                 )
             except (InvalidOperation, TypeError):
