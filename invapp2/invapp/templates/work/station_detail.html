@@ -16,6 +16,9 @@
         step="0.01"
         value="{{ framing_offset|default('', true) }}"
     >
+    <p class="form-help">
+        Amount subtracted from the base panel length when cutting panels. Same units as panel length.
+    </p>
     <button type="submit">Save Offset</button>
 </form>
 {% endif %}
@@ -45,7 +48,7 @@
             {% if is_framing %}
             <th scope="col">Panels Needed</th>
             <th scope="col">Panel Material</th>
-            <th scope="col">Panel Length</th>
+            <th scope="col">Panel Length (cut size)</th>
             {% endif %}
             <th scope="col">Step</th>
             <th scope="col">Promised</th>
