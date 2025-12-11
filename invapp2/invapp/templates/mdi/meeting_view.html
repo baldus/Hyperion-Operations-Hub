@@ -91,6 +91,7 @@
       data-status-badges='{{ status_badges | tojson }}'
       data-category-meta='{{ category_meta | tojson }}'
       data-active-status="{{ active_status_filter }}"
+      data-completed-statuses='{{ completed_statuses | tojson }}'
     >
       {% for category, meta in category_meta.items() %}
         <section class="mdi-lane" data-category="{{ category }}">
@@ -111,19 +112,19 @@
                 {% endif %}
               </span>
             </div>
-            {% set trend_values = category_trends.get(category, []) %}
+            {% set trend_series = category_trends.get(category, {}) %}
             <div class="mdi-lane-trend">
               <div class="d-flex justify-content-between align-items-center mb-1">
                 <small class="text-white text-opacity-75 text-uppercase fw-semibold">Last 14 days</small>
-                <small class="text-white text-opacity-75">Daily cards</small>
+                <small class="text-white text-opacity-75">Logged vs open cards</small>
               </div>
               <div class="mdi-lane-trend__chart">
                 <canvas
                   data-trend-chart
                   data-chart-labels='{{ trend_labels | tojson }}'
-                  data-chart-values='{{ trend_values | tojson }}'
+                  data-chart-series='{{ trend_series | tojson }}'
                   data-chart-color="{{ meta.color }}"
-                  aria-label="Daily {{ category }} items for the past two weeks"
+                  aria-label="Daily logged vs open {{ category }} items for the past two weeks"
                 ></canvas>
               </div>
             </div>

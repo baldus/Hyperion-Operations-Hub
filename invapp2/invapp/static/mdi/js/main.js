@@ -88,6 +88,14 @@ function calculateTrendValues(entries) {
   return trendKeys.map((key) => totals.get(key) || 0);
 }
 
+function isEntryOpen(entry, completedStatuses) {
+  if (!entry) return false;
+  if (!completedStatuses || typeof completedStatuses.has !== 'function') {
+    return entry.status !== 'Closed';
+  }
+  return !completedStatuses.has(entry.status);
+}
+
 function resolveBootstrapColor(colorName) {
   const style = getComputedStyle(document.documentElement);
   const colorValue = style.getPropertyValue(`--bs-${colorName || 'primary'}`)?.trim();
@@ -107,30 +115,64 @@ function hexToRgba(hexColor, alpha = 0.18) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-function renderTrendChart(canvas, labels, values, colorName) {
+function renderTrendChart(canvas, labels, series, colorName) {
   if (typeof Chart === 'undefined') {
     return;
   }
 
   const color = resolveBootstrapColor(colorName);
   const background = color.startsWith('#') ? hexToRgba(color, 0.18) : color;
-  const maxValue = values.length ? Math.max(...values) : 0;
+  const openColor = 'rgba(255, 255, 255, 0.92)';
+  const datasets = [];
+
+  if (Array.isArray(series)) {
+    datasets.push({
+      label: 'Logged',
+      data: series,
+      borderColor: color,
+      backgroundColor: background,
+      fill: true,
+    });
+  } else {
+    const loggedValues = Array.isArray(series?.logged) ? series.logged : [];
+    const openValues = Array.isArray(series?.open) ? series.open : [];
+
+    if (loggedValues.length) {
+      datasets.push({
+        label: 'Logged',
+        data: loggedValues,
+        borderColor: color,
+        backgroundColor: background,
+        fill: true,
+      });
+    }
+
+    if (openValues.length) {
+      datasets.push({
+        label: 'Open',
+        data: openValues,
+        borderColor: openColor,
+        backgroundColor: 'transparent',
+        borderDash: [4, 2],
+        fill: false,
+      });
+    }
+  }
+
+  const maxValue = datasets.length
+    ? Math.max(...datasets.flatMap((dataset) => dataset.data || [0]))
+    : 0;
   const config = {
     type: 'line',
     data: {
       labels,
-      datasets: [
-        {
-          data: values,
-          borderColor: color,
-          backgroundColor: background,
-          borderWidth: 2,
-          tension: 0.35,
-          fill: true,
-          pointRadius: 0,
-          pointHoverRadius: 3,
-        },
-      ],
+      datasets: datasets.map((dataset) => ({
+        borderWidth: 2,
+        tension: 0.35,
+        pointRadius: 0,
+        pointHoverRadius: 3,
+        ...dataset,
+      })),
     },
     options: {
       responsive: true,
@@ -156,9 +198,8 @@ function renderTrendChart(canvas, labels, values, colorName) {
   const existing = trendCharts.get(canvas);
   if (existing) {
     existing.data.labels = labels;
-    existing.data.datasets[0].data = values;
-    existing.data.datasets[0].borderColor = color;
-    existing.data.datasets[0].backgroundColor = background;
+    existing.data.datasets = config.data.datasets;
+    existing.options.scales.y.suggestedMax = Math.max(maxValue, 1);
     existing.update();
     return;
   }
@@ -173,22 +214,26 @@ function hydrateTrendCharts(board) {
   const canvases = board.querySelectorAll('[data-trend-chart]');
   canvases.forEach((canvas) => {
     const labels = parseJsonAttribute(canvas.dataset.chartLabels, trendLabels);
-    const values = parseJsonAttribute(canvas.dataset.chartValues, []);
-    renderTrendChart(canvas, labels, values, canvas.dataset.chartColor);
+    const series = parseJsonAttribute(canvas.dataset.chartSeries, {});
+    renderTrendChart(canvas, labels, series, canvas.dataset.chartColor);
   });
 }
 
 function updateTrendCharts(board, grouped) {
   if (!board) return;
   const canvases = board.querySelectorAll('[data-trend-chart]');
+  const completedStatuses = new Set(parseJsonAttribute(board.dataset.completedStatuses, []));
   canvases.forEach((canvas) => {
     const category = canvas.closest('[data-category]')?.dataset.category;
     if (!category) return;
     const items = grouped[category] || [];
-    const values = calculateTrendValues(items);
-    canvas.dataset.chartValues = JSON.stringify(values);
+    const series = {
+      logged: calculateTrendValues(items),
+      open: calculateTrendValues(items.filter((entry) => isEntryOpen(entry, completedStatuses))),
+    };
+    canvas.dataset.chartSeries = JSON.stringify(series);
     const labels = parseJsonAttribute(canvas.dataset.chartLabels, trendLabels);
-    renderTrendChart(canvas, labels, values, canvas.dataset.chartColor);
+    renderTrendChart(canvas, labels, series, canvas.dataset.chartColor);
   });
 }
 
