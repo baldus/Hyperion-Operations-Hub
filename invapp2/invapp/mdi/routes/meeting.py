@@ -48,6 +48,9 @@ def meeting_view():
 
     date_range, trend_labels = _chart_date_range()
     category_trends = _build_category_trends(grouped_entries, date_range)
+    open_card_count = (
+        MDIEntry.query.filter(MDIEntry.status.notin_(COMPLETED_STATUSES)).count()
+    )
 
     return render_template(
         "meeting_view.html",
@@ -62,6 +65,7 @@ def meeting_view():
             "category": category_filter,
             "date": date_filter,
         },
+        open_card_count=open_card_count,
         active_status_filter=ACTIVE_STATUS_FILTER,
         current_time=datetime.utcnow(),
     )

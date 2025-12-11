@@ -192,6 +192,22 @@ function updateTrendCharts(board, grouped) {
   });
 }
 
+function updateOpenCardTotal(apiUrl, activeStatus, target) {
+  if (!target || !activeStatus) return Promise.resolve();
+
+  const params = new URLSearchParams({ status: activeStatus });
+  return fetch(`${apiUrl}?${params.toString()}`)
+    .then((response) => response.json())
+    .then((entries) => {
+      const total = entries.length;
+      const label = total === 1 ? 'open card' : 'open cards';
+      target.textContent = `${total} ${label}`;
+    })
+    .catch((error) => {
+      console.error('Failed to update open card total', error);
+    });
+}
+
 function renderCategoryDetails(entry) {
   switch (entry.category) {
     case 'Safety':
@@ -337,7 +353,7 @@ function refreshBoard(board) {
   const queryString = params.toString();
   const url = queryString ? `${apiUrl}?${queryString}` : apiUrl;
 
-  return fetch(url)
+  const mainRequest = fetch(url)
     .then((response) => response.json())
     .then((entries) => {
       const grouped = entries.reduce((acc, entry) => {
@@ -373,8 +389,15 @@ function refreshBoard(board) {
       });
 
       updateTrendCharts(board, grouped);
+
+      return entries;
     })
     .catch((error) => console.error('Failed to refresh entries', error));
+
+  const openTotalTarget = document.querySelector('[data-open-total]');
+  const openTotalRequest = updateOpenCardTotal(apiUrl, defaultStatus, openTotalTarget);
+
+  return Promise.all([mainRequest, openTotalRequest]).then(([entries]) => entries);
 }
 
 function markEntryComplete(entryId, button, board, onComplete) {

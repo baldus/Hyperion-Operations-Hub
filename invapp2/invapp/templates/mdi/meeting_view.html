@@ -20,6 +20,12 @@
         <h1 class="display-6 fw-bold">MDI Meeting Dashboard</h1>
         <p class="text-muted mb-0">Live updates across Safety, Quality, Delivery, People, and Materials</p>
         <small class="text-muted">Last refreshed {{ current_time.strftime('%Y-%m-%d %H:%M UTC') }}</small>
+        <div class="mdi-overview mt-2">
+          <div class="mdi-overview__stat" aria-live="polite">
+            <div class="mdi-overview__label text-uppercase text-muted small">Open cards</div>
+            <div class="mdi-overview__value" data-open-total>{{ open_card_count }} open cards</div>
+          </div>
+        </div>
       </div>
       <div class="mdi-toolbar btn-group mt-3 mt-md-0" role="group">
         <a class="btn btn-outline-primary" href="{{ url_for('mdi.report_entry') }}">
