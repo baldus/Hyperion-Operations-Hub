@@ -42,6 +42,60 @@
       </div>
     </div>
 
+    <div class="card my-4">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
+          <div>
+            <p class="text-uppercase text-muted small mb-1">Overview</p>
+            <h5 class="mb-0">Outstanding MDI Items by Category – Last 14 Days</h5>
+          </div>
+        </div>
+        <div class="row g-3 align-items-stretch">
+          <div class="col-12 col-lg-8">
+            <div class="ratio ratio-21x9">
+              <canvas id="mdi-trend-chart" aria-label="Outstanding MDI Items by Category chart"></canvas>
+            </div>
+          </div>
+          <div class="col-12 col-lg-4">
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th scope="col">Category</th>
+                    <th scope="col" class="text-end">14 days ago</th>
+                    <th scope="col" class="text-end">Today</th>
+                    <th scope="col" class="text-end">Trend</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for category in category_meta.keys() %}
+                    {% set summary = mdi_trend_summary.get(category, {}) %}
+                    {% set direction = summary.get('direction', 'flat') %}
+                    {% if direction == 'up' %}
+                      {% set arrow = '↑' %}
+                      {% set trend_class = 'text-danger' %}
+                    {% elif direction == 'down' %}
+                      {% set arrow = '↓' %}
+                      {% set trend_class = 'text-success' %}
+                    {% else %}
+                      {% set arrow = '→' %}
+                      {% set trend_class = 'text-muted' %}
+                    {% endif %}
+                    <tr>
+                      <th scope="row" class="fw-semibold">{{ category }}</th>
+                      <td class="text-end">{{ summary.get('start', 0) }}</td>
+                      <td class="text-end">{{ summary.get('latest', 0) }}</td>
+                      <td class="text-end {{ trend_class }}">{{ arrow }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <form class="row gy-2 gx-3 align-items-end mb-4 mdi-filter-form" method="get">
       <div class="col-sm-3">
         <label for="filter-category" class="form-label">Category</label>
@@ -126,6 +180,72 @@
 
 {% block extra_scripts %}
   {{ super() }}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha256-XY+oTr4Wr9PXgC7cmkQCLOuwqL9WPHyQUZ/VF3LFdPw=" crossorigin="anonymous"></script>
   {{ mdi_assets.script_assets() }}
   <script src="{{ url_for('mdi.static', filename='js/main.js') }}" defer></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const labels = {{ mdi_trend_labels | tojson }};
+      const series = {{ mdi_trend_series | tojson }};
+      const colors = {{ mdi_trend_colors | tojson }};
+
+      const datasets = Object.entries(series).map(([category, data]) => ({
+        label: category,
+        data,
+        tension: 0.35,
+        borderColor: colors[category] || '#0d6efd',
+        backgroundColor: colors[category] || '#0d6efd',
+        borderWidth: 2,
+        pointRadius: 2,
+        pointHoverRadius: 4,
+        fill: false,
+      }));
+
+      const ctx = document.getElementById('mdi-trend-chart');
+      if (ctx && typeof Chart !== 'undefined') {
+        new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels,
+            datasets,
+          },
+          options: {
+            maintainAspectRatio: false,
+            responsive: true,
+            plugins: {
+              legend: {
+                position: 'bottom',
+                labels: {
+                  usePointStyle: true,
+                  boxWidth: 8,
+                },
+              },
+              tooltip: {
+                mode: 'index',
+                intersect: false,
+              },
+            },
+            interaction: {
+              mode: 'nearest',
+              intersect: false,
+            },
+            scales: {
+              x: {
+                ticks: {
+                  maxRotation: 0,
+                  autoSkip: true,
+                },
+              },
+              y: {
+                beginAtZero: true,
+                ticks: {
+                  precision: 0,
+                },
+              },
+            },
+          },
+        });
+      }
+    });
+  </script>
 {% endblock %}
