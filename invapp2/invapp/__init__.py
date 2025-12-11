@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from flask import Flask, current_app, render_template, request, session, url_for
 from sqlalchemy import func, inspect, text
@@ -250,6 +250,61 @@ def _ensure_order_schema(engine):
                 )
 
 
+def _ensure_app_settings_schema(engine):
+    inspector = inspect(engine)
+    existing_tables = {table.lower() for table in inspector.get_table_names()}
+    if "app_setting" not in existing_tables:
+        metadata = db.Model.metadata
+        app_setting_table = metadata.tables.get("app_setting")
+        if app_setting_table is not None:
+            app_setting_table.create(bind=engine)
+    else:
+        try:
+            setting_columns = {col["name"] for col in inspector.get_columns("app_setting")}
+        except (NoSuchTableError, OperationalError):
+            setting_columns = set()
+
+        columns_to_add: list[tuple[str, str]] = []
+        desired_columns = {
+            "key": "VARCHAR(128)",
+            "value": "VARCHAR",
+            "updated_by_id": "INTEGER",
+            "updated_at": "TIMESTAMP",
+        }
+
+        for column_name, column_type in desired_columns.items():
+            if column_name not in setting_columns:
+                columns_to_add.append((column_name, column_type))
+
+        if columns_to_add:
+            with engine.begin() as conn:
+                for column_name, column_type in columns_to_add:
+                    conn.execute(
+                        text(
+                            f"ALTER TABLE app_setting ADD COLUMN {column_name} {column_type}"
+                        )
+                    )
+
+    with engine.begin() as conn:
+        existing_value = conn.execute(
+            text("SELECT value FROM app_setting WHERE key = :key"),
+            {"key": "framing_cut_offset"},
+        ).scalar_one_or_none()
+
+        if existing_value is None:
+            conn.execute(
+                text(
+                    "INSERT INTO app_setting (key, value, updated_at) "
+                    "VALUES (:key, :value, :updated_at)"
+                ),
+                {
+                    "key": "framing_cut_offset",
+                    "value": "0.0",
+                    "updated_at": datetime.utcnow(),
+                },
+            )
+
+
 def _ensure_production_schema(engine):
     """Align legacy production tables with the current model definitions."""
 
@@ -491,6 +546,7 @@ def create_app(config_override=None):
                 db.create_all()
                 _ensure_inventory_schema(db.engine)
                 _ensure_order_schema(db.engine)
+                _ensure_app_settings_schema(db.engine)
                 _ensure_production_schema(db.engine)
                 mdi_models.ensure_schema()
                 mdi_models.seed_data()

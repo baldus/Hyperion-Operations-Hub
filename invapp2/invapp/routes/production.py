@@ -12,20 +12,30 @@ from typing import Any, Dict, List
 from flask import (
     Blueprint,
     Response,
+    abort,
     current_app,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
     url_for,
 )
-from sqlalchemy import func
+from sqlalchemy import func, inspect
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import joinedload
+from sqlalchemy.orm.exc import DetachedInstanceError
 
 from invapp.extensions import db
 from invapp.auth import blueprint_page_guard
+from invapp.login import current_user
 from invapp.models import (
+    AppSetting,
+    GateOrderDetail,
+    Order,
+    OrderStatus,
+    RoutingStep,
+    User,
     ProductionChartSettings,
     ProductionCustomer,
     ProductionDailyCustomerTotal,
@@ -33,6 +43,8 @@ from invapp.models import (
     ProductionDailyRecord,
     ProductionOutputFormula,
 )
+from invapp.security import require_roles
+from invapp.settings_service import get_decimal, set_decimal
 
 bp = Blueprint("production", __name__, url_prefix="/production")
 
@@ -152,6 +164,7 @@ FORMULA_METRIC_HINTS: List[Dict[str, str]] = [
 
 DECIMAL_ZERO = Decimal("0")
 DECIMAL_QUANT = Decimal("0.01")
+FRAMING_OFFSET_KEY = "framing_cut_offset"
 
 
 def _ensure_default_customers() -> None:
@@ -386,6 +399,98 @@ def _format_optional_decimal(value: Decimal | None) -> str:
     if value is None:
         return ""
     return format(value.quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP), "f")
+
+
+def _first_incomplete_step(order: Order) -> RoutingStep | None:
+    for step in order.routing_steps:
+        if not step.completed:
+            return step
+    return None
+
+
+def _build_framing_rows(offset: Decimal) -> tuple[list[dict[str, object]], int]:
+    active_orders = (
+        Order.query.options(
+            joinedload(Order.gate_details),
+            joinedload(Order.routing_steps),
+        )
+        .filter(
+            Order.order_type == "Gates",
+            Order.status.in_(OrderStatus.ACTIVE_STATES),
+        )
+        .order_by(
+            Order.priority.asc(),
+            Order.promised_date.is_(None),
+            Order.promised_date.asc(),
+            Order.order_number.asc(),
+        )
+        .all()
+    )
+
+    rows: list[dict[str, object]] = []
+    total_panels = 0
+
+    for order in active_orders:
+        gate_detail: GateOrderDetail | None = order.gate_details
+        if gate_detail is None:
+            continue
+
+        next_step = _first_incomplete_step(order)
+        if next_step is None or next_step.work_cell != "Framing":
+            continue
+
+        missing_fields: list[str] = []
+        production_qty = gate_detail.production_quantity
+        panel_count = gate_detail.panel_count
+        total_height = gate_detail.total_gate_height
+
+        if production_qty is None:
+            missing_fields.append("Production Quantity")
+        if panel_count is None:
+            missing_fields.append("Panel Count")
+        if total_height is None:
+            missing_fields.append("Total Gate Height")
+
+        panels_needed: int | None = None
+        if production_qty is not None and panel_count is not None:
+            panels_needed = int(production_qty) * int(panel_count)
+            total_panels += panels_needed
+
+        panel_length: Decimal | None = None
+        offset_warning = False
+        if total_height is not None:
+            try:
+                height_value = Decimal(total_height)
+                length_value = height_value - offset
+                if length_value < 0:
+                    offset_warning = True
+                    length_value = DECIMAL_ZERO
+                panel_length = length_value.quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
+            except (InvalidOperation, TypeError):
+                panel_length = None
+                missing_fields.append("Total Gate Height")
+
+        missing_warning: str | None = None
+        if missing_fields:
+            missing_warning = "Missing or invalid: " + ", ".join(sorted(set(missing_fields)))
+
+        rows.append(
+            {
+                "order": order,
+                "order_number": order.order_number,
+                "item_number": gate_detail.item_number,
+                "panel_material": gate_detail.insert_color,
+                "production_quantity": production_qty,
+                "panel_count": panel_count,
+                "panels_needed": panels_needed,
+                "total_height": total_height,
+                "panel_length": panel_length,
+                "missing_warning": missing_warning,
+                "offset_warning": offset_warning,
+            }
+        )
+
+    return rows, total_panels
 
 
 def _empty_form_values(customers: List[ProductionCustomer]) -> Dict[str, object]:
@@ -1940,5 +2045,118 @@ def production_settings():
         formula_metric_hints=FORMULA_METRIC_HINTS,
         chart_settings_form=chart_settings_form_values,
 
+    )
+
+
+@bp.route("/framing", methods=["GET"])
+def framing_queue():
+    offset_value = get_decimal(FRAMING_OFFSET_KEY, default=DECIMAL_ZERO)
+    offset_value = offset_value.quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
+    framing_rows, total_panels = _build_framing_rows(offset_value)
+
+    offset_setting: AppSetting | None = AppSetting.query.filter_by(
+        key=FRAMING_OFFSET_KEY
+    ).first()
+    last_updated_at = offset_setting.updated_at if offset_setting else None
+    last_updated_by = (
+        offset_setting.updated_by.username if offset_setting and offset_setting.updated_by else None
+    )
+    last_updated_label = (
+        last_updated_at.strftime("%Y-%m-%d %H:%M") if last_updated_at else "—"
+    )
+
+    is_admin = current_user.is_authenticated and current_user.has_role("admin")
+
+    return render_template(
+        "production/framing.html",
+        rows=framing_rows,
+        total_panels=total_panels,
+        offset_value=offset_value,
+        offset_display=_format_decimal(offset_value),
+        last_updated_at=last_updated_at,
+        last_updated_by=last_updated_by,
+        last_updated_label=last_updated_label,
+        is_admin=is_admin,
+    )
+
+
+@bp.route("/framing/offset", methods=["POST"])
+@require_roles("admin")
+def update_framing_offset():
+    payload = request.get_json(silent=True) or {}
+    new_value = payload.get("value")
+
+    session_cookie_name = (
+        current_app.session_cookie_name
+        if hasattr(current_app, "session_cookie_name")
+        else current_app.config.get("SESSION_COOKIE_NAME", "session")
+    )
+    if not request.cookies.get(session_cookie_name):
+        return jsonify({"error": "Forbidden"}), 403
+
+    user_record: User | None = None
+    try:
+        user_identifier = current_user.get_id()
+        if user_identifier is not None:
+            user_record = db.session.get(User, int(user_identifier))
+    except (DetachedInstanceError, TypeError, ValueError):
+        user_record = None
+
+    if user_record is None and current_user.is_authenticated:
+        user_record = current_user  # type: ignore[assignment]
+
+    if user_record is not None:
+        try:
+            state = inspect(user_record)
+            if state.detached and state.identity:
+                user_record = db.session.get(User, state.identity[0])
+        except Exception:
+            user_record = None
+
+    try:
+        role_names = {role.name for role in user_record.roles} if user_record else set()
+    except DetachedInstanceError:
+        role_names = set()
+
+    if "admin" not in role_names:
+        return jsonify({"error": "Forbidden"}), 403
+
+    user_id = None
+    updated_by_name = None
+    if user_record is not None:
+        try:
+            user_id = user_record.id
+            updated_by_name = user_record.username
+        except DetachedInstanceError:
+            identity = inspect(user_record).identity
+            if identity:
+                refreshed = db.session.get(User, identity[0])
+                if refreshed is not None:
+                    user_record = refreshed
+                    user_id = refreshed.id
+                    updated_by_name = refreshed.username
+
+    try:
+        setting = set_decimal(
+            FRAMING_OFFSET_KEY, new_value, user_id
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    try:
+        normalized_value = Decimal(setting.value or "0").quantize(
+            DECIMAL_QUANT, rounding=ROUND_HALF_UP
+        )
+    except (InvalidOperation, TypeError):
+        normalized_value = DECIMAL_ZERO
+
+    updated_by_name = user_record.username if user_record else None
+
+    return jsonify(
+        {
+            "value": _format_decimal(normalized_value),
+            "updated_at": setting.updated_at.isoformat() if setting.updated_at else None,
+            "updated_by": updated_by_name,
+        }
     )
 

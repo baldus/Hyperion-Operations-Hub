@@ -772,6 +772,69 @@ body.light .status-pill.warning {
     opacity: 0.85;
 }
 
+.framing-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-start;
+}
+
+.framing-offset-panel {
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+    padding: 12px 14px;
+    min-width: 280px;
+}
+
+body.light .framing-offset-panel {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+.offset-label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.offset-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 10px;
+}
+
+.offset-controls input[type="number"] {
+    width: 110px;
+}
+
+.offset-meta {
+    font-size: 0.9rem;
+    opacity: 0.8;
+}
+
+.warning-icon {
+    margin-left: 6px;
+    color: #fca5a5;
+    font-size: 0.95rem;
+}
+
+.warning-icon.critical {
+    color: #ef4444;
+}
+
+body.light .warning-icon {
+    color: #c53030;
+}
+
+body.light .warning-icon.critical {
+    color: #b91c1c;
+}
+
+.panel-length-cell {
+    white-space: nowrap;
+}
+
 .settings-grid {
     display: grid;
     gap: 24px;

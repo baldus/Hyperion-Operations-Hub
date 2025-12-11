@@ -4,7 +4,7 @@ from datetime import date, datetime
 from typing import ClassVar
 
 from sqlalchemy import func, inspect, select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.orm import synonym
 from sqlalchemy.orm.exc import DetachedInstanceError
@@ -86,14 +86,18 @@ class PrimaryKeySequenceMixin:
                 max_identifier = connection.execute(
                     select(func.coalesce(func.max(pk_column), 0))
                 ).scalar_one()
-                connection.execute(
-                    text(
-                        "UPDATE sqlite_sequence "
-                        "SET seq = :max_identifier "
-                        "WHERE name = :table_name"
-                    ),
-                    {"max_identifier": max_identifier, "table_name": table.name},
-                )
+                try:
+                    connection.execute(
+                        text(
+                            "UPDATE sqlite_sequence "
+                            "SET seq = :max_identifier "
+                            "WHERE name = :table_name"
+                        ),
+                        {"max_identifier": max_identifier, "table_name": table.name},
+                    )
+                except OperationalError:
+                    # In-memory SQLite databases may not have sqlite_sequence created yet.
+                    return
 
     @classmethod
     def commit_with_sequence_retry(cls, instance) -> None:
@@ -153,6 +157,20 @@ class AccessLog(db.Model):
     def label_for_event(cls, event_type: str) -> str:
         return cls.EVENT_LABELS.get(event_type, event_type.title())
 
+
+class AppSetting(db.Model):
+    __tablename__ = "app_setting"
+
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(128), unique=True, nullable=False)
+    value = db.Column(db.String, nullable=True)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    updated_by = db.relationship("User")
+
+    def __repr__(self):  # pragma: no cover - debug helper
+        return f"<AppSetting {self.key}={self.value}>"
 
 
 class UsefulLink(db.Model):

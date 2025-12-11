@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block content %}
+<nav class="production-nav" aria-label="Production pages">
+    <a href="{{ url_for('production.daily_entry') }}" class="production-nav-link">Daily Summary</a>
+    <a href="{{ url_for('production.gates_entry') }}" class="production-nav-link">Gates Packaged Entry</a>
+    <a href="{{ url_for('production.additional_entry') }}" class="production-nav-link">Additional Production Entry</a>
+    <a href="{{ url_for('production.final_process_entry') }}" class="production-nav-link">Final Process Entry</a>
+    <a href="{{ url_for('production.framing_queue') }}" class="production-nav-link is-active">Framing Queue</a>
+    <a href="{{ url_for('production.history') }}" class="production-nav-link">History</a>
+    <a href="{{ url_for('production.production_settings') }}" class="production-nav-link">Settings</a>
+</nav>
+
+<div class="section-header framing-header">
+    <div>
+        <h2>Framing Queue</h2>
+        <p class="page-intro">Gate orders currently staged for framing with panel requirements and calculated panel lengths.</p>
+        <p class="section-help">Applied offset: <strong id="appliedOffsetValue">{{ offset_display }}</strong></p>
+    </div>
+    <div class="framing-offset-panel">
+        <div class="offset-label-row">
+            <span class="field-label">Framing Cut Offset</span>
+            <span class="offset-meta" id="offsetUpdatedBadge">Last updated: {{ last_updated_label }}{% if last_updated_by %} by {{ last_updated_by }}{% endif %}</span>
+        </div>
+        {% if is_admin %}
+        <div class="offset-controls">
+            <label for="framingOffsetInput" class="sr-only">Framing cut offset</label>
+            <input type="number" step="0.01" id="framingOffsetInput" value="{{ offset_display }}" min="0" max="12" aria-describedby="offsetUpdatedBadge">
+            <button type="button" class="action-btn" id="framingOffsetSave">Save</button>
+        </div>
+        {% else %}
+        <p class="section-help">Administrators manage this value. Current offset is read-only.</p>
+        {% endif %}
+    </div>
+</div>
+
+{% if rows %}
+<div class="table-scroll">
+    <table class="inventory-table framing-table">
+        <thead>
+            <tr>
+                <th scope="col">Order / Work Order #</th>
+                <th scope="col">Item Number</th>
+                <th scope="col">Panel Material</th>
+                <th scope="col">Panels Needed</th>
+                <th scope="col">Panel Length</th>
+                <th scope="col">Notes / Flags</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <th scope="row">
+                    {% if can_access_page('orders') %}
+                    <a href="{{ url_for('orders.view_order', order_id=row['order'].id) }}">{{ row['order_number'] }}</a>
+                    {% else %}
+                    {{ row['order_number'] }}
+                    {% endif %}
+                </th>
+                <td>{{ row['item_number'] or '—' }}</td>
+                <td>{{ row['panel_material'] or '—' }}</td>
+                <td>
+                    {% if row['panels_needed'] is not none %}
+                        {{ row['panels_needed'] }}
+                    {% else %}
+                        —
+                    {% endif %}
+                    {% if row['missing_warning'] %}<span class="warning-icon" title="{{ row['missing_warning'] }}">⚠</span>{% endif %}
+                </td>
+                <td class="panel-length-cell" data-panel-length-cell data-total-height="{{ row['total_height'] if row['total_height'] is not none else '' }}">
+                    <span class="panel-length-value">
+                        {% if row['panel_length'] is not none %}
+                            {{ '%.2f'|format(row['panel_length']) }}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </span>
+                    <span class="warning-icon critical offset-warning" title="Offset exceeds total height." {% if not row['offset_warning'] %}hidden{% endif %}>⚠</span>
+                    {% if row['missing_warning'] and row['panel_length'] is none %}<span class="warning-icon" title="{{ row['missing_warning'] }}">⚠</span>{% endif %}
+                </td>
+                <td>
+                    {% if row['offset_warning'] %}<span class="status-pill warning">Offset exceeds total height</span>{% endif %}
+                    {% if row['missing_warning'] %}<span class="status-pill warning">{{ row['missing_warning'] }}</span>{% endif %}
+                    {% if not row['offset_warning'] and not row['missing_warning'] %}—{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<p class="section-help"><strong>Total panels required in this queue:</strong> {{ total_panels }}</p>
+{% else %}
+<p>No gate orders are currently waiting on Framing.</p>
+{% endif %}
+
+{% if not is_admin %}
+<p class="section-help">Applied offset: {{ offset_display }}</p>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    window.framingQueueConfig = {
+        offsetValue: "{{ offset_display }}"
+    };
+</script>
+<script src="{{ url_for('static', filename='js/framing-queue.js') }}" defer></script>
+{% endblock %}
