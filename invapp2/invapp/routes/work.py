@@ -269,7 +269,7 @@ def station_overview():
     )
 
 
-@bp.route("/stations/<string:station_slug>")
+@bp.route("/stations/<string:station_slug>", methods=["GET", "POST"])
 def station_detail(station_slug: str):
     customer_filter = request.args.get("customer", "").strip()
     framing_offset = _get_framing_offset()
@@ -277,11 +277,37 @@ def station_detail(station_slug: str):
     station = by_slug.get(station_slug)
     if station is None:
         abort(404)
+
+    is_admin = current_user.is_authenticated and current_user.has_role("admin")
+
+    if request.method == "POST":
+        if not is_admin:
+            abort(403)
+
+        new_offset_raw = request.form.get("framing_offset", "").strip()
+        if new_offset_raw == "":
+            session["framing_offset"] = ""
+        else:
+            try:
+                new_offset = Decimal(new_offset_raw)
+                session["framing_offset"] = str(new_offset)
+            except (InvalidOperation, TypeError):
+                session["framing_offset"] = ""
+
+        return redirect(
+            url_for(
+                "work.station_detail",
+                station_slug=station_slug,
+                customer=customer_filter or None,
+            )
+        )
+
     return render_template(
         "work/station_detail.html",
         station=station,
         customer_filter=customer_filter,
         framing_offset=framing_offset,
+        is_admin=is_admin,
     )
 
 
