@@ -4,6 +4,8 @@
 <h2>{{ station.name }} Queue</h2>
 <p class="page-intro">Jobs that are ready for this workstation to process.</p>
 
+{% set is_framing = station.name|default('', true)|lower == 'framing' %}
+
 <form method="get" class="orders-filter">
     <label for="queue-detail-customer" class="sr-only">Filter by customer</label>
     <input
@@ -27,6 +29,11 @@
             <th scope="col">Customer</th>
             <th scope="col">Item</th>
             <th scope="col">Quantity</th>
+            {% if is_framing %}
+            <th scope="col">Panels Needed</th>
+            <th scope="col">Panel Material</th>
+            <th scope="col">Panel Length</th>
+            {% endif %}
             <th scope="col">Step</th>
             <th scope="col">Promised</th>
             <th scope="col">Scheduled Completion</th>
@@ -55,6 +62,17 @@
                 {% endif %}
             </td>
             <td>{{ entry['quantity'] or '—' }}</td>
+            {% if is_framing %}
+            <td>{{ entry['panels_needed'] if entry['panels_needed'] is not none else '—' }}</td>
+            <td>{{ entry['panel_material'] or '—' }}</td>
+            <td>
+                {% if entry['panel_length'] is not none %}
+                {{ '%.2f' % entry['panel_length'] }}
+                {% else %}
+                —
+                {% endif %}
+            </td>
+            {% endif %}
             <td>
                 <strong>Step {{ entry['sequence'] }}</strong><br>
                 {{ entry['description'] }}
