@@ -4,6 +4,7 @@ import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from flask import (
     Blueprint,
@@ -12,6 +13,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    session,
     url_for,
 )
 from sqlalchemy.orm import joinedload
@@ -79,9 +81,28 @@ def _slugify_station_name(name: str, used: set[str]) -> str:
     return slug
 
 
-def _build_queue_entry(step: RoutingStep) -> dict[str, object]:
+def _get_framing_offset() -> Decimal | None:
+    raw_value = session.get("framing_offset")
+    if raw_value in (None, ""):
+        raw_value = session.get("framing_panel_offset")
+    if raw_value in (None, ""):
+        raw_value = current_app.config.get("FRAMING_PANEL_OFFSET")
+
+    if raw_value in (None, ""):
+        return None
+
+    try:
+        return Decimal(str(raw_value))
+    except (InvalidOperation, TypeError):
+        return None
+
+
+def _build_queue_entry(step: RoutingStep, framing_offset: Decimal | None) -> dict[str, object]:
     order = step.order
     primary_line: OrderLine | None = order.primary_line
+    gate_detail = order.gate_details
+
+    gate_item_number = gate_detail.item_number if gate_detail is not None else None
 
     promised_date = (
         order.promised_date.isoformat() if order.promised_date else None
@@ -104,6 +125,38 @@ def _build_queue_entry(step: RoutingStep) -> dict[str, object]:
         else None
     )
 
+    if not item_sku and gate_item_number:
+        item_sku = gate_item_number
+    if not item_name and gate_item_number and gate_item_number != item_sku:
+        item_name = gate_item_number
+
+    panels_needed: int | None = None
+    panel_material: str | None = None
+    panel_length: Decimal | None = None
+
+    is_framing_step = (step.work_cell or "").lower() == "framing"
+
+    if is_framing_step and gate_detail is not None:
+        if (
+            gate_detail.production_quantity is not None
+            and gate_detail.panel_count is not None
+        ):
+            panels_needed = gate_detail.production_quantity * gate_detail.panel_count
+
+        panel_material = gate_detail.insert_color or gate_detail.half_panel_color
+
+        if gate_detail.total_gate_height is not None:
+            try:
+                total_height = Decimal(gate_detail.total_gate_height)
+                if framing_offset is None:
+                    panel_length = None
+                else:
+                    panel_length = (total_height - framing_offset).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    )
+            except (InvalidOperation, TypeError):
+                panel_length = None
+
     return {
         "order_id": order.id,
         "order_number": order.order_number,
@@ -116,11 +169,15 @@ def _build_queue_entry(step: RoutingStep) -> dict[str, object]:
         "quantity": quantity,
         "item_sku": item_sku,
         "item_name": item_name,
+        "panels_needed": panels_needed,
+        "panel_material": panel_material,
+        "panel_length": panel_length,
     }
 
 
 def _gather_station_queues(
     customer_filter: str | None = None,
+    framing_offset: Decimal | None = None,
 ) -> tuple[list[StationQueue], dict[str, StationQueue], int]:
     active_statuses = (
         OrderStatus.SCHEDULED,
@@ -132,7 +189,8 @@ def _gather_station_queues(
         .options(
             joinedload(RoutingStep.order)
             .joinedload(Order.order_lines)
-            .joinedload(OrderLine.item)
+            .joinedload(OrderLine.item),
+            joinedload(RoutingStep.order).joinedload(Order.gate_details),
         )
         .filter(Order.status.in_(active_statuses))
     )
@@ -176,7 +234,7 @@ def _gather_station_queues(
         station_steps.items(), key=lambda item: (-len(item[1]), item[0].lower())
     ):
         queue_steps.sort(key=_sort_key)
-        entries = [_build_queue_entry(step) for step in queue_steps]
+        entries = [_build_queue_entry(step, framing_offset) for step in queue_steps]
         slug = _slugify_station_name(name, used_slugs)
         station = StationQueue(name=name, slug=slug, entries=entries)
         stations.append(station)
@@ -206,7 +264,10 @@ def list_instructions():
 @bp.route("/stations")
 def station_overview():
     customer_filter = request.args.get("customer", "").strip()
-    stations, _, total_waiting = _gather_station_queues(customer_filter)
+    framing_offset = _get_framing_offset()
+    stations, _, total_waiting = _gather_station_queues(
+        customer_filter, framing_offset
+    )
     return render_template(
         "work/home.html",
         stations=stations,
@@ -215,17 +276,48 @@ def station_overview():
     )
 
 
-@bp.route("/stations/<string:station_slug>")
+@bp.route("/stations/<string:station_slug>", methods=["GET", "POST"])
 def station_detail(station_slug: str):
     customer_filter = request.args.get("customer", "").strip()
-    _, by_slug, _ = _gather_station_queues(customer_filter)
+    framing_offset = _get_framing_offset()
+    _, by_slug, _ = _gather_station_queues(customer_filter, framing_offset)
     station = by_slug.get(station_slug)
     if station is None:
         abort(404)
+
+    is_admin = current_user.is_authenticated and current_user.has_role("admin")
+    station_name = station.name or ""
+    is_framing_station = station.slug == "framing" or station_name.lower() == "framing"
+
+    if request.method == "POST":
+        if not is_admin or not is_framing_station:
+            abort(403)
+
+        new_offset_raw = request.form.get("framing_offset", "").strip()
+        if new_offset_raw == "":
+            session["framing_offset"] = ""
+        else:
+            try:
+                new_offset = Decimal(new_offset_raw)
+                session["framing_offset"] = str(new_offset)
+            except (InvalidOperation, TypeError):
+                session["framing_offset"] = ""
+
+        return redirect(
+            url_for(
+                "work.station_detail",
+                station_slug=station_slug,
+                customer=customer_filter or None,
+            )
+        )
+
     return render_template(
         "work/station_detail.html",
         station=station,
+        is_framing=is_framing_station,
         customer_filter=customer_filter,
+        framing_offset=framing_offset,
+        is_admin=is_admin,
     )
 
 
