@@ -21,6 +21,8 @@ class Config:
     # automatically when the draft is opened. Configure via env var if desired.
     MDI_DEFAULT_SENDER = os.getenv("MDI_DEFAULT_SENDER", "")
 
+    FRAMING_PANEL_OFFSET = os.getenv("FRAMING_PANEL_OFFSET", 0)
+
     ITEM_ATTACHMENT_UPLOAD_FOLDER = os.path.join(
         BASE_DIR, "invapp", "static", "item_attachments"
     )

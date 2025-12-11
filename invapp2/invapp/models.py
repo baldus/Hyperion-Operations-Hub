@@ -198,6 +198,26 @@ class ProductionChartSettings(db.Model):
         return settings
 
 
+class FramingSettings(db.Model):
+    __tablename__ = "framing_settings"
+
+    id = db.Column(db.Integer, primary_key=True)
+    panel_length_offset = db.Column(db.Numeric(10, 2), nullable=False, default=0)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    @classmethod
+    def get_or_create(cls):
+        settings = cls.query.first()
+        if settings is None:
+            settings = cls()
+            db.session.add(settings)
+            db.session.commit()
+        return settings
+
+
 class Printer(db.Model):
     __tablename__ = "printer"
 

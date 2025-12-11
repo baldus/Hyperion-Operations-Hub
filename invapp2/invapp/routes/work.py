@@ -13,7 +13,6 @@ from flask import (
     redirect,
     render_template,
     request,
-    session,
     url_for,
 )
 from sqlalchemy.orm import joinedload
@@ -22,6 +21,7 @@ from werkzeug.utils import secure_filename
 from invapp.auth import blueprint_page_guard
 from invapp.login import current_user
 from invapp.models import (
+    FramingSettings,
     Order,
     OrderLine,
     OrderStatus,
@@ -82,19 +82,19 @@ def _slugify_station_name(name: str, used: set[str]) -> str:
 
 
 def _get_framing_offset() -> Decimal | None:
-    raw_value = session.get("framing_offset")
-    if raw_value in (None, ""):
-        raw_value = session.get("framing_panel_offset")
+    settings = FramingSettings.get_or_create()
+    raw_value = settings.panel_length_offset
+
     if raw_value in (None, ""):
         raw_value = current_app.config.get("FRAMING_PANEL_OFFSET")
 
     if raw_value in (None, ""):
-        return None
+        return Decimal("0")
 
     try:
         return Decimal(str(raw_value))
     except (InvalidOperation, TypeError):
-        return None
+        return Decimal("0")
 
 
 def _build_queue_entry(step: RoutingStep, framing_offset: Decimal | None) -> dict[str, object]:
@@ -132,6 +132,7 @@ def _build_queue_entry(step: RoutingStep, framing_offset: Decimal | None) -> dic
 
     panels_needed: int | None = None
     panel_material: str | None = None
+    base_panel_length: Decimal | None = None
     panel_length: Decimal | None = None
 
     is_framing_step = (step.work_cell or "").lower() == "framing"
@@ -148,13 +149,15 @@ def _build_queue_entry(step: RoutingStep, framing_offset: Decimal | None) -> dic
         if gate_detail.total_gate_height is not None:
             try:
                 total_height = Decimal(gate_detail.total_gate_height)
-                if framing_offset is None:
-                    panel_length = None
-                else:
-                    panel_length = (total_height - framing_offset).quantize(
-                        Decimal("0.01"), rounding=ROUND_HALF_UP
-                    )
+                base_panel_length = total_height.quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+                offset = framing_offset or Decimal("0")
+                panel_length = (base_panel_length - offset).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
             except (InvalidOperation, TypeError):
+                base_panel_length = None
                 panel_length = None
 
     return {
@@ -171,6 +174,7 @@ def _build_queue_entry(step: RoutingStep, framing_offset: Decimal | None) -> dic
         "item_name": item_name,
         "panels_needed": panels_needed,
         "panel_material": panel_material,
+        "base_panel_length": base_panel_length,
         "panel_length": panel_length,
     }
 
@@ -294,14 +298,17 @@ def station_detail(station_slug: str):
             abort(403)
 
         new_offset_raw = request.form.get("framing_offset", "").strip()
-        if new_offset_raw == "":
-            session["framing_offset"] = ""
-        else:
-            try:
-                new_offset = Decimal(new_offset_raw)
-                session["framing_offset"] = str(new_offset)
-            except (InvalidOperation, TypeError):
-                session["framing_offset"] = ""
+        settings = FramingSettings.get_or_create()
+        try:
+            new_offset = Decimal(new_offset_raw or "0").quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            settings.panel_length_offset = new_offset
+        except (InvalidOperation, TypeError):
+            settings.panel_length_offset = Decimal("0")
+
+        db.session.add(settings)
+        db.session.commit()
 
         return redirect(
             url_for(
