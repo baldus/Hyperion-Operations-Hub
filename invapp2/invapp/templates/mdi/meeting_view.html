@@ -9,6 +9,7 @@
   {{ super() }}
   {{ mdi_assets.head_assets() }}
   <meta http-equiv="refresh" content="300" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
 {% endblock %}
 
 {% block content %}
@@ -103,6 +104,22 @@
                   No metrics logged yet
                 {% endif %}
               </span>
+            </div>
+            {% set trend_values = category_trends.get(category, []) %}
+            <div class="mdi-lane-trend">
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <small class="text-white text-opacity-75 text-uppercase fw-semibold">Last 14 days</small>
+                <small class="text-white text-opacity-75">Daily cards</small>
+              </div>
+              <div class="mdi-lane-trend__chart">
+                <canvas
+                  data-trend-chart
+                  data-chart-labels='{{ trend_labels | tojson }}'
+                  data-chart-values='{{ trend_values | tojson }}'
+                  data-chart-color="{{ meta.color }}"
+                  aria-label="Daily {{ category }} items for the past two weeks"
+                ></canvas>
+              </div>
             </div>
           </header>
           <div class="mdi-entry-stack" data-category-stack>

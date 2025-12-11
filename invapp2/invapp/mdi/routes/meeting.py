@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from flask import render_template, request
 from sqlalchemy import case
@@ -46,12 +46,17 @@ def meeting_view():
         metric_count = sum(1 for item in category_entries if item.metric_value is not None)
         metrics_overview.setdefault(category, {})["metric_count"] = metric_count
 
+    date_range, trend_labels = _chart_date_range()
+    category_trends = _build_category_trends(grouped_entries, date_range)
+
     return render_template(
         "meeting_view.html",
         grouped_entries=grouped_entries,
         metrics_overview=metrics_overview,
         category_meta=CATEGORY_DISPLAY,
         status_badges=STATUS_BADGES,
+        trend_labels=trend_labels,
+        category_trends=category_trends,
         filters={
             "status": status_filter,
             "category": category_filter,
@@ -60,6 +65,24 @@ def meeting_view():
         active_status_filter=ACTIVE_STATUS_FILTER,
         current_time=datetime.utcnow(),
     )
+
+
+def _chart_date_range(days: int = 14):
+    today = date.today()
+    dates = [today - timedelta(days=offset) for offset in range(days - 1, -1, -1)]
+    labels = [day.strftime("%b %d") for day in dates]
+    return dates, labels
+
+
+def _build_category_trends(grouped_entries, date_range):
+    trends = {}
+    for category, entries in grouped_entries.items():
+        totals = {day: 0 for day in date_range}
+        for entry in entries:
+            if entry.date_logged in totals:
+                totals[entry.date_logged] += 1
+        trends[category] = [totals[day] for day in date_range]
+    return trends
 
 
 def register(bp):

@@ -1,4 +1,25 @@
 const AUTO_REFRESH_INTERVAL = 60000;
+const TREND_WINDOW_DAYS = 14;
+const trendCharts = new WeakMap();
+const trendScale = buildTrendScale(TREND_WINDOW_DAYS);
+const trendLabels = trendScale.map((item) => item.label);
+const trendKeys = trendScale.map((item) => item.iso);
+
+function buildTrendScale(days = TREND_WINDOW_DAYS) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const values = [];
+  for (let offset = days - 1; offset >= 0; offset -= 1) {
+    const day = new Date(today);
+    day.setDate(today.getDate() - offset);
+    day.setHours(0, 0, 0, 0);
+    values.push({
+      iso: day.toISOString().slice(0, 10),
+      label: day.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+    });
+  }
+  return values;
+}
 
 function formatDate(dateStr) {
   if (!dateStr) return 'N/A';
@@ -42,6 +63,133 @@ function parseJsonAttribute(attributeValue, fallback = {}) {
     console.warn('Failed to parse attribute', error);
     return fallback;
   }
+}
+
+function normalizeIsoDate(value) {
+  if (!value) return null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
+    return value.slice(0, 10);
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed.toISOString().slice(0, 10);
+}
+
+function calculateTrendValues(entries) {
+  const totals = trendKeys.reduce((acc, key) => acc.set(key, 0), new Map());
+  entries.forEach((entry) => {
+    const dateKey = normalizeIsoDate(entry.date_logged);
+    if (dateKey && totals.has(dateKey)) {
+      totals.set(dateKey, totals.get(dateKey) + 1);
+    }
+  });
+  return trendKeys.map((key) => totals.get(key) || 0);
+}
+
+function resolveBootstrapColor(colorName) {
+  const style = getComputedStyle(document.documentElement);
+  const colorValue = style.getPropertyValue(`--bs-${colorName || 'primary'}`)?.trim();
+  return colorValue || '#0d6efd';
+}
+
+function hexToRgba(hexColor, alpha = 0.18) {
+  if (!hexColor) return `rgba(13, 110, 253, ${alpha})`;
+  const hex = hexColor.replace('#', '');
+  if (![3, 6].includes(hex.length)) return hexColor;
+
+  const normalized = hex.length === 3 ? hex.split('').map((char) => char + char).join('') : hex;
+  const int = parseInt(normalized, 16);
+  const r = (int >> 16) & 255;
+  const g = (int >> 8) & 255;
+  const b = int & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function renderTrendChart(canvas, labels, values, colorName) {
+  if (typeof Chart === 'undefined') {
+    return;
+  }
+
+  const color = resolveBootstrapColor(colorName);
+  const background = color.startsWith('#') ? hexToRgba(color, 0.18) : color;
+  const maxValue = values.length ? Math.max(...values) : 0;
+  const config = {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          data: values,
+          borderColor: color,
+          backgroundColor: background,
+          borderWidth: 2,
+          tension: 0.35,
+          fill: true,
+          pointRadius: 0,
+          pointHoverRadius: 3,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          mode: 'index',
+          intersect: false,
+          callbacks: {
+            title: (tooltipItems) => tooltipItems[0]?.label || '',
+            label: (tooltipItem) => `${tooltipItem.formattedValue} cards`,
+          },
+        },
+      },
+      scales: {
+        x: { display: false },
+        y: { display: false, beginAtZero: true, suggestedMax: Math.max(maxValue, 1) },
+      },
+    },
+  };
+
+  const existing = trendCharts.get(canvas);
+  if (existing) {
+    existing.data.labels = labels;
+    existing.data.datasets[0].data = values;
+    existing.data.datasets[0].borderColor = color;
+    existing.data.datasets[0].backgroundColor = background;
+    existing.update();
+    return;
+  }
+
+  const context = canvas.getContext('2d');
+  const chart = new Chart(context, config);
+  trendCharts.set(canvas, chart);
+}
+
+function hydrateTrendCharts(board) {
+  if (!board) return;
+  const canvases = board.querySelectorAll('[data-trend-chart]');
+  canvases.forEach((canvas) => {
+    const labels = parseJsonAttribute(canvas.dataset.chartLabels, trendLabels);
+    const values = parseJsonAttribute(canvas.dataset.chartValues, []);
+    renderTrendChart(canvas, labels, values, canvas.dataset.chartColor);
+  });
+}
+
+function updateTrendCharts(board, grouped) {
+  if (!board) return;
+  const canvases = board.querySelectorAll('[data-trend-chart]');
+  canvases.forEach((canvas) => {
+    const category = canvas.closest('[data-category]')?.dataset.category;
+    if (!category) return;
+    const items = grouped[category] || [];
+    const values = calculateTrendValues(items);
+    canvas.dataset.chartValues = JSON.stringify(values);
+    const labels = parseJsonAttribute(canvas.dataset.chartLabels, trendLabels);
+    renderTrendChart(canvas, labels, values, canvas.dataset.chartColor);
+  });
 }
 
 function renderCategoryDetails(entry) {
@@ -223,6 +371,8 @@ function refreshBoard(board) {
             : renderEmptyState(category);
         }
       });
+
+      updateTrendCharts(board, grouped);
     })
     .catch((error) => console.error('Failed to refresh entries', error));
 }
@@ -326,6 +476,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (!board) {
     return;
   }
+
+  hydrateTrendCharts(board);
 
   const refresh = () => refreshBoard(board);
   const refreshButton = document.getElementById('refresh-btn');
