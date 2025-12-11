@@ -21,10 +21,11 @@ logging stack.
 5. [Developer Setup](#developer-setup)
 6. [Database Initialization](#database-initialization)
 7. [Running the Application](#running-the-application)
-8. [Accessing the MDI Dashboards](#accessing-the-mdi-dashboards)
-9. [MDI Meeting Dashboard Experience](#mdi-meeting-dashboard-experience)
-10. [Extending the MDI Module](#extending-the-mdi-module)
-11. [Operational Tips](#operational-tips)
+8. [Workstation Queues](#workstation-queues)
+9. [Accessing the MDI Dashboards](#accessing-the-mdi-dashboards)
+10. [MDI Meeting Dashboard Experience](#mdi-meeting-dashboard-experience)
+11. [Extending the MDI Module](#extending-the-mdi-module)
+12. [Operational Tips](#operational-tips)
 
 ---
 
@@ -204,6 +205,18 @@ checks database connectivity, and launches gunicorn pointed at `app:app`.
 When PostgreSQL is unavailable the UI surfaces recovery guidance (service status
 checks, restarting the DB, confirming `DB_URL`) while still allowing emergency
 admin access so you can correct the outage.
+
+---
+
+## Workstation Queues
+
+Framing operators can manage panel cutting directly from `/work/stations/framing`.
+Admins see a **Panel Length Offset** input to control how much is subtracted from
+each gate's total height when calculating the **Panel Length** shown in the
+queue. The page also surfaces **Panels Needed** and **Panel Material** alongside
+order and item details (falling back to the gate item number when SKU data is
+missing). See [docs/workstations.md](docs/workstations.md) for a full breakdown
+of the columns and offset workflow.
 
 ---
 

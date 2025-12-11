@@ -102,6 +102,8 @@ def _build_queue_entry(step: RoutingStep, framing_offset: Decimal | None) -> dic
     primary_line: OrderLine | None = order.primary_line
     gate_detail = order.gate_details
 
+    gate_item_number = gate_detail.item_number if gate_detail is not None else None
+
     promised_date = (
         order.promised_date.isoformat() if order.promised_date else None
     )
@@ -123,6 +125,11 @@ def _build_queue_entry(step: RoutingStep, framing_offset: Decimal | None) -> dic
         else None
     )
 
+    if not item_sku and gate_item_number:
+        item_sku = gate_item_number
+    if not item_name and gate_item_number and gate_item_number != item_sku:
+        item_name = gate_item_number
+
     panels_needed: int | None = None
     panel_material: str | None = None
     panel_length: Decimal | None = None
@@ -141,12 +148,12 @@ def _build_queue_entry(step: RoutingStep, framing_offset: Decimal | None) -> dic
         if gate_detail.total_gate_height is not None:
             try:
                 total_height = Decimal(gate_detail.total_gate_height)
-                effective_offset = framing_offset if framing_offset is not None else Decimal(
-                    "0"
-                )
-                panel_length = (total_height - effective_offset).quantize(
-                    Decimal("0.01"), rounding=ROUND_HALF_UP
-                )
+                if framing_offset is None:
+                    panel_length = None
+                else:
+                    panel_length = (total_height - framing_offset).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    )
             except (InvalidOperation, TypeError):
                 panel_length = None
 
@@ -279,9 +286,11 @@ def station_detail(station_slug: str):
         abort(404)
 
     is_admin = current_user.is_authenticated and current_user.has_role("admin")
+    station_name = station.name or ""
+    is_framing_station = station.slug == "framing" or station_name.lower() == "framing"
 
     if request.method == "POST":
-        if not is_admin:
+        if not is_admin or not is_framing_station:
             abort(403)
 
         new_offset_raw = request.form.get("framing_offset", "").strip()
@@ -305,6 +314,7 @@ def station_detail(station_slug: str):
     return render_template(
         "work/station_detail.html",
         station=station,
+        is_framing=is_framing_station,
         customer_filter=customer_filter,
         framing_offset=framing_offset,
         is_admin=is_admin,

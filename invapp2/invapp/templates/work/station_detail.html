@@ -4,7 +4,7 @@
 <h2>{{ station.name }} Queue</h2>
 <p class="page-intro">Jobs that are ready for this workstation to process.</p>
 
-{% set is_framing = station.name|default('', true)|lower == 'framing' %}
+{% set is_framing = is_framing|default(station.name|default('', true)|lower == 'framing', true) %}
 
 {% if is_framing and is_admin %}
 <form method="post" class="orders-filter" aria-label="Set panel length offset">
@@ -14,7 +14,7 @@
         name="framing_offset"
         type="number"
         step="0.01"
-        value="{{ framing_offset or '' }}"
+        value="{{ framing_offset|default('', true) }}"
     >
     <button type="submit">Save Offset</button>
 </form>
