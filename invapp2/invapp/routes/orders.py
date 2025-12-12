@@ -215,22 +215,58 @@ def parse_gate_part_number_api():
         "material": parsed.material,
         "panel_material_color": parsed.panel_material_color,
         "handing": parsed.handing,
-        "panel_count": parsed.panel_count,
-        "vision_panel_qty": parsed.vision_panel_qty,
-        "vision_panel_color": parsed.vision_panel_color,
-        "hardware_option": parsed.hardware_option,
         "door_height_inches": parsed.door_height_inches,
         "door_height_display": parsed.door_height_display,
-        # Provide a direct numeric value for the Total Gate Height form field.
         "total_gate_height": parsed.door_height_inches,
-        "adders": parsed.adders,
-        # Direct mappings to form field names for convenience
-        "al_color": parsed.material,
-        "insert_color": parsed.panel_material_color,
-        "lead_post_direction": parsed.handing,
-        "visi_panels": str(parsed.vision_panel_qty),
-        "half_panel_color": parsed.vision_panel_color,
+        "parsed_format": parsed.parsed_format,
+        "warnings": parsed.warnings,
     }
+
+    autofill_fields = []
+    if parsed.parsed_format == "SHORT":
+        response.update(
+            {
+                "al_color": parsed.material,
+                "insert_color": parsed.panel_material_color,
+                "lead_post_direction": parsed.handing,
+            }
+        )
+        autofill_fields = [
+            "total_gate_height",
+            "al_color",
+            "insert_color",
+            "lead_post_direction",
+        ]
+    else:
+        response.update(
+            {
+                "panel_count": parsed.panel_count,
+                "vision_panel_qty": parsed.vision_panel_qty,
+                "vision_panel_color": parsed.vision_panel_color,
+                "hardware_option": parsed.hardware_option,
+                "adders": parsed.adders,
+                "al_color": parsed.material,
+                "insert_color": parsed.panel_material_color,
+                "lead_post_direction": parsed.handing,
+                "visi_panels": str(parsed.vision_panel_qty),
+                "half_panel_color": parsed.vision_panel_color,
+            }
+        )
+        autofill_fields = list(
+            {
+                "panel_count",
+                "total_gate_height",
+                "al_color",
+                "insert_color",
+                "lead_post_direction",
+                "visi_panels",
+                "half_panel_color",
+                "hardware_option",
+                "adders",
+            }
+        )
+
+    response["autofill_fields"] = autofill_fields
     return jsonify(response)
 
 
