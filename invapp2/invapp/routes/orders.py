@@ -1208,6 +1208,31 @@ def bom_bulk_import():
             )
             item_lookup = {item.sku: item for item in items}
 
+            created_from_names = False
+            missing_by_sku = required_skus - set(item_lookup.keys())
+            if missing_by_sku:
+                name_matches = (
+                    Item.query.filter(Item.name.in_(missing_by_sku)).all()
+                    if missing_by_sku
+                    else []
+                )
+                rekeyed_skus = []
+                for match in name_matches:
+                    name_as_sku = (match.name or "").strip()
+                    if not name_as_sku or name_as_sku in item_lookup:
+                        continue
+
+                    match.sku = name_as_sku
+                    item_lookup[name_as_sku] = match
+                    rekeyed_skus.append(name_as_sku)
+                    created_from_names = True
+
+                if rekeyed_skus:
+                    warnings.append(
+                        "Updated items whose Assembly IDs were in the Name column: "
+                        + ", ".join(sorted(rekeyed_skus))
+                    )
+
             missing_assemblies = sorted(
                 sku for sku in assembly_skus if sku not in item_lookup
             )
@@ -1272,12 +1297,22 @@ def bom_bulk_import():
 
             for assembly_sku in sorted(bom_rows.keys()):
                 item = item_lookup[assembly_sku]
-                component_entries = [
-                    {"item": item_lookup[component_sku], "quantity": quantity}
-                    for component_sku, quantity in sorted(
-                        bom_rows[assembly_sku].items()
+                skipped_components = []
+                component_entries = []
+                for component_sku, quantity in sorted(bom_rows[assembly_sku].items()):
+                    if quantity <= 0:
+                        skipped_components.append(component_sku)
+                        continue
+
+                    component_entries.append(
+                        {"item": item_lookup[component_sku], "quantity": quantity}
                     )
-                ]
+
+                if skipped_components:
+                    warnings.append(
+                        "Skipped components with non-positive quantity for assembly "
+                        f"{assembly_sku}: " + ", ".join(skipped_components)
+                    )
 
                 template, created, changed = _save_bom_template(
                     item, component_entries, replace_existing=True
@@ -1313,6 +1348,8 @@ def bom_bulk_import():
                     "success",
                 )
             else:
+                if created_from_names:
+                    db.session.commit()
                 warnings.append(
                     "No BOM templates were imported because all rows were skipped or removed."
                 )
