@@ -121,3 +121,41 @@ def test_parse_gate_part_number_api_returns_materials(client):
     assert response_slim_hardwood.status_code == 200
     assert response_slim_hardwood.get_json()["material"] == "Slim Hardwood"
 
+
+def test_full_format_examples_classified_correctly():
+    full_examples = ["DYDP400279PIG", "DYWN11C2800A", "BKP100183K", "DWF01C2800A"]
+    for value in full_examples:
+        parsed = parse_gate_part_number(value)
+        assert parsed.parsed_format == "FULL"
+        assert parsed.warnings == []
+
+
+def test_short_format_examples_classified_correctly():
+    short_examples = {
+        "DBF000184": ("Vinyl", 18.25),
+        "DWF000284": ("Vinyl", 28.25),
+        "DLF000184": ("Vinyl", 18.25),
+        "DKF000195": ("Vinyl", 19.5),
+        "BKF000195": ("Acrylic", 19.5),
+        "CYKF000195": ("Slim Hardwood", 19.5),
+    }
+
+    for value, (material, height) in short_examples.items():
+        parsed = parse_gate_part_number(value)
+        assert parsed.parsed_format == "SHORT"
+        assert parsed.material == material
+        assert parsed.panel_count is None
+        assert parsed.vision_panel_qty is None
+        assert parsed.hardware_option is None
+        assert parsed.adders == []
+        assert parsed.warnings
+        assert pytest.approx(parsed.door_height_inches, rel=1e-5) == height
+
+
+def test_material_prefix_longest_match():
+    parsed_cy = parse_gate_part_number("CYKF000195")
+    assert parsed_cy.material == "Slim Hardwood"
+
+    parsed_d = parse_gate_part_number("DKF000195")
+    assert parsed_d.material == "Vinyl"
+

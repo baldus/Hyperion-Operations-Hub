@@ -9,7 +9,7 @@ input cannot be interpreted.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 
 class GatePartNumberError(ValueError):
@@ -202,6 +202,19 @@ _FRACTION_MAP = {
     "R": 5 / 6,
 }
 
+LEGACY_FRACTION_DIGIT_MAP = {
+    "0": 0,
+    "1": 1 / 16,
+    "2": 1 / 8,
+    "3": 3 / 16,
+    "4": 1 / 4,
+    "5": 1 / 2,
+    "6": 5 / 8,
+    "7": 3 / 4,
+    "8": 7 / 8,
+    "9": 15 / 16,
+}
+
 _ADDERS = {
     "A": "Gate Arm",
     "C": "Custom Pin Position",
@@ -219,20 +232,22 @@ _ADDERS = {
 class ParsedGatePart:
     material_code: str
     material: str
-    panel_type_code: str
-    panel_material_color: str
-    handing_code: str
-    handing: str
-    panel_count: int
-    vision_panel_qty: int
-    vision_panel_color: str
-    hardware_option: str
+    panel_type_code: Optional[str]
+    panel_material_color: Optional[str]
+    handing_code: Optional[str]
+    handing: Optional[str]
+    panel_count: Optional[int]
+    vision_panel_qty: Optional[int]
+    vision_panel_color: Optional[str]
+    hardware_option: Optional[str]
     door_height_inches: float
     door_height_display: str
     adders: List[str]
+    parsed_format: str
+    warnings: List[str]
 
 
-def _parse_material(part_number: str) -> tuple[str, str, int]:
+def parse_material_prefix(part_number: str) -> tuple[str, str, int]:
     if len(part_number) < 2:
         raise GatePartNumberError("Part number too short to determine material.")
 
@@ -278,6 +293,15 @@ def _format_height(integer_inches: int, fraction_value: float) -> tuple[float, s
     return total_height, f"{integer_inches} {fraction_str}\""
 
 
+def _parse_panel_type(material: str, panel_type_code: str) -> str:
+    material_key = material
+    if material_key not in _PANEL_TYPE_MAP or panel_type_code not in _PANEL_TYPE_MAP[material_key]:
+        raise GatePartNumberError(
+            f"Panel type code '{panel_type_code}' is not valid for material {material}."
+        )
+    return _PANEL_TYPE_MAP[material_key][panel_type_code]
+
+
 def _parse_adders(segment: str) -> List[str]:
     adders: List[str] = []
     idx = 0
@@ -308,30 +332,23 @@ def _parse_adders(segment: str) -> List[str]:
     return adders
 
 
-def parse_gate_part_number(part_number: str) -> ParsedGatePart:
-    """Parse a gate part number into structured attributes.
+def _looks_like_short_format(remaining: str) -> bool:
+    return (
+        len(remaining) == 8
+        and remaining[2:5] == "000"
+        and remaining[-3:].isdigit()
+    )
 
-    Raises:
-        GatePartNumberError: if the part number fails validation.
-    """
 
-    normalized = (part_number or "").strip().upper()
-    if not normalized:
-        raise GatePartNumberError("Item Number is required.")
-
-    material_code, material, idx = _parse_material(normalized)
-
+def parse_full_format(
+    normalized: str, material_code: str, material: str, idx: int
+) -> ParsedGatePart:
     if idx >= len(normalized):
         raise GatePartNumberError("Part number ended before panel type was defined.")
 
     panel_type_code = normalized[idx]
     idx += 1
-    material_key = material
-    if material_key not in _PANEL_TYPE_MAP or panel_type_code not in _PANEL_TYPE_MAP[material_key]:
-        raise GatePartNumberError(
-            f"Panel type code '{panel_type_code}' is not valid for material {material}."
-        )
-    panel_material_color = _PANEL_TYPE_MAP[material_key][panel_type_code]
+    panel_material_color = _parse_panel_type(material, panel_type_code)
 
     try:
         handing_code = normalized[idx]
@@ -431,5 +448,90 @@ def parse_gate_part_number(part_number: str) -> ParsedGatePart:
         door_height_inches=door_height_inches,
         door_height_display=door_height_display,
         adders=adders,
+        parsed_format="FULL",
+        warnings=[],
     )
+
+
+def parse_short_format(
+    normalized: str, material_code: str, material: str, idx: int
+) -> ParsedGatePart:
+    if len(normalized) - idx != 8:
+        raise GatePartNumberError("Short format part numbers must be 8 characters after material.")
+
+    panel_type_code = normalized[idx]
+    panel_material_color = _parse_panel_type(material, panel_type_code)
+    idx += 1
+
+    try:
+        handing_code = normalized[idx]
+    except IndexError as exc:
+        raise GatePartNumberError("Missing handing code.") from exc
+    idx += 1
+    if handing_code not in _HANDING_MAP:
+        raise GatePartNumberError(f"Unknown handing code '{handing_code}'.")
+    handing = _HANDING_MAP[handing_code]
+
+    if normalized[idx : idx + 3] != "000":
+        raise GatePartNumberError("Short format must include '000' panel/vision placeholders.")
+    idx += 3
+
+    height_digits = normalized[idx : idx + 2]
+    if not height_digits.isdigit():
+        raise GatePartNumberError("Door height inches must be numeric.")
+    integer_inches = int(height_digits)
+    idx += 2
+
+    try:
+        fraction_digit = normalized[idx]
+    except IndexError as exc:
+        raise GatePartNumberError("Missing height fraction digit.") from exc
+
+    warnings: List[str] = [
+        "Short/legacy part number: panel qty/vision/hardware/adders not encoded"
+    ]
+    if fraction_digit not in LEGACY_FRACTION_DIGIT_MAP:
+        warnings.append("Unrecognized legacy fraction digit; treating as 0")
+    fraction_value = LEGACY_FRACTION_DIGIT_MAP.get(fraction_digit, 0)
+    door_height_inches, door_height_display = _format_height(
+        integer_inches, fraction_value
+    )
+
+    return ParsedGatePart(
+        material_code=material_code,
+        material=material,
+        panel_type_code=panel_type_code,
+        panel_material_color=panel_material_color,
+        handing_code=handing_code,
+        handing=handing,
+        panel_count=None,
+        vision_panel_qty=None,
+        vision_panel_color=None,
+        hardware_option=None,
+        door_height_inches=door_height_inches,
+        door_height_display=door_height_display,
+        adders=[],
+        parsed_format="SHORT",
+        warnings=warnings,
+    )
+
+
+def parse_gate_part_number(part_number: str) -> ParsedGatePart:
+    """Parse a gate part number into structured attributes.
+
+    Raises:
+        GatePartNumberError: if the part number fails validation.
+    """
+
+    normalized = (part_number or "").strip().upper()
+    if not normalized:
+        raise GatePartNumberError("Item Number is required.")
+
+    material_code, material, idx = parse_material_prefix(normalized)
+    remaining = normalized[idx:]
+
+    if _looks_like_short_format(remaining):
+        return parse_short_format(normalized, material_code, material, idx)
+
+    return parse_full_format(normalized, material_code, material, idx)
 

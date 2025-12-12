@@ -145,6 +145,13 @@
         adders: gateDetails.querySelector('textarea[name="adders"]'),
     };
 
+    const shortFormatFields = new Set([
+        'total_gate_height',
+        'al_color',
+        'insert_color',
+        'lead_post_direction',
+    ]);
+
     function showItemError(message) {
         if (!itemNumberError) return;
         if (message) {
@@ -186,12 +193,28 @@
             }
 
             const data = await response.json();
+            const isShort = data.parsed_format === 'SHORT';
             Object.entries(gateFieldMap).forEach(([key, input]) => {
-                if (input && data[key] !== undefined && data[key] !== null) {
-                    input.value = data[key];
+                if (!input) return;
+                const value = data[key];
+                if (value === undefined || value === null) return;
+
+                if (isShort && !shortFormatFields.has(key)) {
+                    return;
                 }
+
+                input.value = value;
             });
-            showItemError('');
+
+            if (data.warnings && data.warnings.length) {
+                itemNumberError.textContent = data.warnings.join(' ');
+                itemNumberError.hidden = false;
+                if (itemNumberInput) {
+                    itemNumberInput.style.borderColor = '';
+                }
+            } else {
+                showItemError('');
+            }
         } catch (error) {
             showItemError(error.message);
         }
