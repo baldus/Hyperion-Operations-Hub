@@ -54,6 +54,7 @@
             <label class="form-field">
                 <span class="field-label">Item Number</span>
                 <input id="item-number" type="text" name="item_number" value="{{ form_data.item_number }}" data-gate-required="true" {% if form_data.order_type == 'Gates' %}required{% endif %}>
+                <p class="field-note" id="item-number-warning" hidden></p>
                 <p class="field-note" id="item-number-error" role="alert" hidden></p>
             </label>
             <label class="form-field">
@@ -124,6 +125,7 @@
     }
 
     const itemNumberInput = document.getElementById('item-number');
+    const itemNumberWarning = document.getElementById('item-number-warning');
     const itemNumberError = document.getElementById('item-number-error');
     const gateFieldMap = {
         panel_count: gateDetails.querySelector('input[name="panel_count"]'),
@@ -154,6 +156,17 @@
         }
     }
 
+    function showItemWarning(message) {
+        if (!itemNumberWarning) return;
+        if (message) {
+            itemNumberWarning.textContent = message;
+            itemNumberWarning.hidden = false;
+        } else {
+            itemNumberWarning.textContent = '';
+            itemNumberWarning.hidden = true;
+        }
+    }
+
     async function fetchGateDefaults() {
         if (!itemNumberInput || orderTypeSelect.value !== 'Gates') {
             return;
@@ -178,14 +191,20 @@
             }
 
             const data = await response.json();
+            const allowedFields = Array.isArray(data.autofill_fields) ? new Set(data.autofill_fields) : null;
+
             Object.entries(gateFieldMap).forEach(([key, input]) => {
-                if (input && data[key] !== undefined && data[key] !== null) {
+                if (!input) return;
+                if (allowedFields && !allowedFields.has(key)) return;
+                if (data[key] !== undefined && data[key] !== null) {
                     input.value = data[key];
                 }
             });
             showItemError('');
+            showItemWarning((data.warnings || []).join(' '));
         } catch (error) {
             showItemError(error.message);
+            showItemWarning('');
         }
     }
 
