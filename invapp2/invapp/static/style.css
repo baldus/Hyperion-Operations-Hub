@@ -2594,6 +2594,22 @@ body.light .orders-table tbody tr:hover td {
     background-color: rgba(104, 164, 255, 0.14);
 }
 
+.orders-table tbody tr.order-ship-overdue td {
+    background-color: rgba(255, 223, 128, 0.3);
+}
+
+body.light .orders-table tbody tr.order-ship-overdue td {
+    background-color: rgba(255, 215, 64, 0.32);
+}
+
+.orders-table tbody tr.order-promise-overdue td {
+    background-color: rgba(255, 128, 128, 0.32);
+}
+
+body.light .orders-table tbody tr.order-promise-overdue td {
+    background-color: rgba(255, 107, 107, 0.3);
+}
+
 .orders-table td.numeric,
 .orders-table th.numeric {
     text-align: right;

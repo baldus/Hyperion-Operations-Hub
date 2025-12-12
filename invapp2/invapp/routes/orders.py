@@ -3,7 +3,7 @@ import io
 import json
 import re
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
 from flask import (
@@ -16,7 +16,7 @@ from flask import (
     request,
     url_for,
 )
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import joinedload
 
 from invapp.extensions import db, login_manager
@@ -76,6 +76,21 @@ def _search_filter(query, search_term):
             Item.name.ilike(like_term),
         )
     )
+
+
+def _overdue_ordering():
+    """Return ordering expressions to place overdue orders first."""
+
+    promise_overdue = case(
+        (Order.promised_date < func.current_date(), 1),
+        else_=0,
+    )
+    ship_overdue = case(
+        (Order.scheduled_ship_date < func.current_date(), 1),
+        else_=0,
+    )
+
+    return promise_overdue.desc(), ship_overdue.desc()
 
 
 def _rebalance_priorities():
@@ -635,6 +650,7 @@ def orders_home():
     if customer_filter:
         query = query.filter(Order.customer_name.ilike(f"%{customer_filter}%"))
     open_orders = query.order_by(
+        *_overdue_ordering(),
         Order.priority,
         Order.promised_date.is_(None),
         Order.promised_date,
@@ -645,6 +661,7 @@ def orders_home():
         orders=open_orders,
         search_term=search_term,
         customer_filter=customer_filter,
+        today=date.today(),
     )
 
 
@@ -785,10 +802,16 @@ def view_open_orders():
             joinedload(Order.gate_details),
         )
         .filter(Order.status.in_(OrderStatus.RESERVABLE_STATES))
-        .order_by(Order.priority, Order.order_number)
+        .order_by(
+            *_overdue_ordering(),
+            Order.priority,
+            Order.promised_date.is_(None),
+            Order.promised_date,
+            Order.order_number,
+        )
         .all()
     )
-    return render_template("orders/open.html", orders=orders)
+    return render_template("orders/open.html", orders=orders, today=date.today())
 
 
 @bp.route("/closed")
@@ -799,10 +822,16 @@ def view_closed_orders():
             joinedload(Order.gate_details),
         )
         .filter(Order.status == OrderStatus.CLOSED)
-        .order_by(Order.priority, Order.order_number)
+        .order_by(
+            *_overdue_ordering(),
+            Order.priority,
+            Order.promised_date.is_(None),
+            Order.promised_date,
+            Order.order_number,
+        )
         .all()
     )
-    return render_template("orders/closed.html", orders=orders)
+    return render_template("orders/closed.html", orders=orders, today=date.today())
 
 
 @bp.route("/waiting")
@@ -814,10 +843,16 @@ def view_waiting_orders():
             joinedload(Order.gate_details),
         )
         .filter(Order.status == OrderStatus.WAITING_MATERIAL)
-        .order_by(Order.priority, Order.order_number)
+        .order_by(
+            *_overdue_ordering(),
+            Order.priority,
+            Order.promised_date.is_(None),
+            Order.promised_date,
+            Order.order_number,
+        )
         .all()
     )
-    return render_template("orders/waiting.html", orders=orders)
+    return render_template("orders/waiting.html", orders=orders, today=date.today())
 
 
 @bp.route("/bom-template/<string:sku>")
