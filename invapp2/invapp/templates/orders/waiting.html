@@ -15,7 +15,7 @@
 </div>
 
 {% if orders %}
-{{ render_orders_table(orders) }}
+{{ render_orders_table(orders, today) }}
 {% else %}
 <div class="empty-state">
     <p>No orders are currently waiting on material.</p>

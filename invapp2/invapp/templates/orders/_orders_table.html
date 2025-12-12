@@ -1,4 +1,4 @@
-{% macro render_orders_table(orders) %}
+{% macro render_orders_table(orders, today) %}
 <div class="table-scroll orders-table-wrap">
     <table class="orders-table">
         <thead>
@@ -15,7 +15,13 @@
         </thead>
         <tbody>
             {% for order in orders %}
-                <tr>
+                {% set row_class = '' %}
+                {% if order.promised_date and order.promised_date < today %}
+                    {% set row_class = 'order-promise-overdue' %}
+                {% elif order.scheduled_ship_date and order.scheduled_ship_date < today %}
+                    {% set row_class = 'order-ship-overdue' %}
+                {% endif %}
+                <tr{% if row_class %} class="{{ row_class }}"{% endif %}>
                     <td data-label="Priority" class="numeric">{{ order.priority }}</td>
                     <td data-label="Order #">
                         <a href="{{ url_for('orders.view_order', order_id=order.id) }}" class="order-link">{{ order.order_number }}</a>
