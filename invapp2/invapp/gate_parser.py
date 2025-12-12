@@ -147,9 +147,22 @@ _PANEL_COUNT_MAP = {
     "5": 15,
 }
 
-LEGACY_SKU_OVERRIDES: Dict[str, Dict[str, Optional[int]]] = {
+LEGACY_PANEL_CODE_TO_COUNT: Dict[str, int] = {
+    "0": 10,
+    "1": 11,
+    "2": 12,
+    "3": 13,
+    "4": 14,
+    "5": 15,
+    "6": 6,
+    "7": 7,
+    "8": 8,
+    "9": 9,
+}
+
+LEGACY_SKU_OVERRIDES: Dict[str, Dict[str, Optional[int | str]]] = {
     # SKU-specific corrections to avoid guessing when legacy formats omit data.
-    "DWF000284": {"panel_count": 10},
+    "DWF000284": {"panel_count": 10, "hardware_option": "Nickle"},
     "DBF000184": {"panel_count": 10},
     "DLF000184": {"panel_count": 10},
     "DKF000195": {"panel_count": 10},
@@ -322,13 +335,47 @@ def _parse_adders(segment: str) -> List[str]:
     return adders
 
 
-def detect_format(part_number: str, offset_index: int) -> str:
-    """Detect whether the part number uses the FULL or LEGACY format."""
+def split_prefix_digits(part_number: str) -> tuple[str, str]:
+    """Split a part number into its leading letters and trailing digits."""
 
-    rest = part_number[offset_index:]
-    if len(rest) == 8 and rest[2:5] == "000" and rest[6:8].isdigit():
-        return "LEGACY"
-    return "FULL"
+    first_digit_index = next((i for i, ch in enumerate(part_number) if ch.isdigit()), None)
+    if first_digit_index is None:
+        return part_number, ""
+
+    return part_number[:first_digit_index], part_number[first_digit_index:]
+
+
+def parse_prefix(prefix: str) -> tuple[str, str, str, str, str, str, List[str]]:
+    material_code, material, consumed = parse_material_prefix(prefix)
+
+    try:
+        panel_type_code = prefix[consumed]
+        handing_code = prefix[consumed + 1]
+    except IndexError as exc:
+        raise GatePartNumberError("Legacy part number missing panel type or handing.") from exc
+
+    if material not in _PANEL_TYPE_MAP or panel_type_code not in _PANEL_TYPE_MAP[material]:
+        raise GatePartNumberError(
+            f"Panel type code '{panel_type_code}' is not valid for material {material}."
+        )
+    panel_material_color = _PANEL_TYPE_MAP[material][panel_type_code]
+
+    if handing_code not in _HANDING_MAP:
+        raise GatePartNumberError(f"Unknown handing code '{handing_code}'.")
+    handing = _HANDING_MAP[handing_code]
+
+    remaining = prefix[consumed + 2 :]
+    adders = _parse_adders(remaining) if remaining else []
+
+    return (
+        material_code,
+        material,
+        panel_type_code,
+        panel_material_color,
+        handing_code,
+        handing,
+        adders,
+    )
 
 
 def parse_full_format(rest: str, *, material_code: str, material: str) -> ParsedGatePart:
@@ -450,52 +497,27 @@ def parse_full_format(rest: str, *, material_code: str, material: str) -> Parsed
     )
 
 
-def parse_short_format(
-    rest: str, *, material_code: str, material: str, full_part_number: str
+def parse_legacy_numeric(
+    *,
+    material_code: str,
+    material: str,
+    panel_type_code: str,
+    panel_material_color: str,
+    handing_code: str,
+    handing: str,
+    adders: List[str],
+    digits: str,
+    full_part_number: str,
 ) -> ParsedGatePart:
-    """Parse the LEGACY format (panel_type, handing, 000, hardware, height)."""
+    panel_code = digits[0]
+    height_digits = digits[-2:]
 
-    if len(rest) != 8 or rest[2:5] != "000" or not rest[6:8].isdigit():
-        raise GatePartNumberError("Legacy part number did not match expected pattern.")
-
-    panel_type_code = rest[0]
-    handing_code = rest[1]
-    hardware_code = rest[5]
-    height_digits = rest[6:8]
-
-    if material not in _PANEL_TYPE_MAP or panel_type_code not in _PANEL_TYPE_MAP[material]:
-        raise GatePartNumberError(
-            f"Panel type code '{panel_type_code}' is not valid for material {material}."
-        )
-    panel_material_color = _PANEL_TYPE_MAP[material][panel_type_code]
-
-    if handing_code not in _HANDING_MAP:
-        raise GatePartNumberError(f"Unknown handing code '{handing_code}'.")
-    handing = _HANDING_MAP[handing_code]
-
-    is_center_pin = handing_code in {"L", "R", "E"}
-    hardware_map = _CENTER_PIN_HARDWARE if is_center_pin else _OFFSET_PIN_HARDWARE
-    if hardware_code not in hardware_map:
-        raise GatePartNumberError(
-            f"Unknown hardware code '{hardware_code}' for {'center' if is_center_pin else 'offset'} pin handing."
-        )
-    hardware_option = hardware_map[hardware_code]
-
-    panel_count: Optional[int] = None
-    warnings = ["Legacy SKU: vision panels not encoded; defaulted to none"]
-
-    if handing_code in {"E", "F"}:
-        panel_count = 10
+    panel_count = LEGACY_PANEL_CODE_TO_COUNT.get(panel_code)
+    warnings = ["Legacy numeric SKU: defaulted vision panels to none"]
+    if panel_count is None:
         warnings.append(
-            "Legacy SKU: panel count not encoded; defaulted to 10 for double-lead-post handing"
+            f"Legacy numeric SKU: unknown panel code '{panel_code}'; enter panel count manually"
         )
-    else:
-        warnings.append("Legacy SKU: panel count not encoded; enter manually.")
-
-    override = LEGACY_SKU_OVERRIDES.get(full_part_number)
-    if override and "panel_count" in override and override["panel_count"] is not None:
-        panel_count = override["panel_count"]
-        warnings = [warning for warning in warnings if "enter manually" not in warning]
 
     vision_panel_qty = 0
     vision_panel_color = "0"
@@ -503,6 +525,16 @@ def parse_short_format(
     integer_inches = int(height_digits)
     door_height_inches = integer_inches
     door_height_display = str(integer_inches)
+
+    hardware_option: Optional[str] = None
+
+    override = LEGACY_SKU_OVERRIDES.get(full_part_number)
+    if override:
+        if override.get("panel_count") is not None:
+            panel_count = override["panel_count"]
+            warnings = [warning for warning in warnings if "panel code" not in warning]
+        if override.get("hardware_option") is not None:
+            hardware_option = override["hardware_option"]
 
     return ParsedGatePart(
         material_code=material_code,
@@ -512,14 +544,14 @@ def parse_short_format(
         handing_code=handing_code,
         handing=handing,
         panel_count=panel_count,
-        legacy_panel_code=None,
+        legacy_panel_code=panel_code,
         vision_panel_qty=vision_panel_qty,
         vision_panel_color=vision_panel_color,
         hardware_option=hardware_option,
         door_height_inches=door_height_inches,
         door_height_display=door_height_display,
-        adders=[],
-        parsed_format="LEGACY",
+        adders=adders,
+        parsed_format="LEGACY_NUMERIC",
         warnings=warnings,
     )
 
@@ -535,14 +567,33 @@ def parse_gate_part_number(part_number: str) -> ParsedGatePart:
     if not normalized:
         raise GatePartNumberError("Item Number is required.")
 
-    material_code, material, offset_idx = parse_material_prefix(normalized)
-    format_type = detect_format(normalized, offset_idx)
-    rest = normalized[offset_idx:]
+    prefix, digits = split_prefix_digits(normalized)
 
-    if format_type == "LEGACY":
-        return parse_short_format(
-            rest, material_code=material_code, material=material, full_part_number=normalized
+    if digits and digits.isdigit() and len(digits) >= 3 and prefix:
+        (
+            material_code,
+            material,
+            panel_type_code,
+            panel_material_color,
+            handing_code,
+            handing,
+            adders,
+        ) = parse_prefix(prefix)
+
+        return parse_legacy_numeric(
+            material_code=material_code,
+            material=material,
+            panel_type_code=panel_type_code,
+            panel_material_color=panel_material_color,
+            handing_code=handing_code,
+            handing=handing,
+            adders=adders,
+            digits=digits,
+            full_part_number=normalized,
         )
+
+    material_code, material, offset_idx = parse_material_prefix(normalized)
+    rest = normalized[offset_idx:]
 
     parsed = parse_full_format(rest, material_code=material_code, material=material)
 

@@ -123,7 +123,7 @@ def test_parse_gate_part_number_api_returns_materials(client):
     assert response_slim_hardwood.get_json()["material"] == "Slim Hardwood"
 
 
-def test_legacy_gate_decodes_hardware_and_defaults():
+def test_legacy_numeric_gate_decodes_fields():
     parsed = parse_gate_part_number("DWF000284")
 
     assert parsed.material == "Vinyl"
@@ -134,18 +134,20 @@ def test_legacy_gate_decodes_hardware_and_defaults():
     assert parsed.vision_panel_color == "0"
     assert parsed.hardware_option == "Nickle"
     assert parsed.door_height_inches == 84
-    assert parsed.parsed_format == "LEGACY"
-    assert any("vision panels not encoded" in warning for warning in parsed.warnings)
+    assert parsed.parsed_format == "LEGACY_NUMERIC"
+    assert any("vision panels" in warning for warning in parsed.warnings)
 
 
-def test_legacy_gate_overrides_apply():
+def test_legacy_numeric_gate_overrides_apply():
     parsed_dbf = parse_gate_part_number("DBF000184")
     assert parsed_dbf.panel_count == 10
-    assert parsed_dbf.parsed_format == "LEGACY"
+    assert parsed_dbf.door_height_inches == 84
+    assert parsed_dbf.parsed_format == "LEGACY_NUMERIC"
 
-    parsed_bk = parse_gate_part_number("BKF000195")
-    assert parsed_bk.panel_count == 10
-    assert parsed_bk.parsed_format == "LEGACY"
+    parsed_dk = parse_gate_part_number("DKF000195")
+    assert parsed_dk.panel_count == 10
+    assert parsed_dk.door_height_inches == 95
+    assert parsed_dk.parsed_format == "LEGACY_NUMERIC"
 
 
 def test_full_format_examples_unaffected():

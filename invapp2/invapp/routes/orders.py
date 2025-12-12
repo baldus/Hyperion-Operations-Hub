@@ -225,7 +225,7 @@ def parse_gate_part_number_api():
     }
 
     autofill_fields = []
-    if parsed.parsed_format == "LEGACY":
+    if parsed.parsed_format.startswith("LEGACY"):
         response.update(
             {
                 "panel_count": parsed.panel_count,
@@ -250,7 +250,7 @@ def parse_gate_part_number_api():
                 "lead_post_direction",
                 "visi_panels",
                 "half_panel_color",
-                "hardware_option",
+                "hardware_option" if parsed.hardware_option is not None else None,
             ]
             if field is not None
         ]
