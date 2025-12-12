@@ -121,3 +121,44 @@ def test_parse_gate_part_number_api_returns_materials(client):
     assert response_slim_hardwood.status_code == 200
     assert response_slim_hardwood.get_json()["material"] == "Slim Hardwood"
 
+
+@pytest.mark.parametrize(
+    "part_number",
+    ["DYDP400279PIG", "DYWN11C2800A", "BKP100183K", "DWF01C2800A"],
+)
+def test_full_format_detection(part_number):
+    parsed = parse_gate_part_number(part_number)
+
+    assert parsed.parsed_format == "FULL"
+    assert parsed.warnings == []
+
+
+@pytest.mark.parametrize(
+    "part_number,expected_height",
+    [
+        ("DBF000184", 18.25),
+        ("DWF000284", 28.25),
+        ("DLF000184", 18.25),
+        ("DKF000195", 19.5),
+        ("BKF000195", 19.5),
+        ("CYKF000195", 19.5),
+    ],
+)
+def test_short_format_detection(part_number, expected_height):
+    parsed = parse_gate_part_number(part_number)
+
+    assert parsed.parsed_format == "SHORT"
+    assert parsed.door_height_inches == expected_height
+    assert parsed.panel_count is None
+    assert parsed.vision_panel_qty is None
+    assert parsed.hardware_option is None
+    assert parsed.warnings
+
+
+def test_material_prefix_longest_match():
+    slim_hardwood = parse_gate_part_number("CYKF000195")
+    assert slim_hardwood.material == "Slim Hardwood"
+
+    vinyl = parse_gate_part_number("DKF000195")
+    assert vinyl.material == "Vinyl"
+

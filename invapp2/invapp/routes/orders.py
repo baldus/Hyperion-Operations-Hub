@@ -224,11 +224,15 @@ def parse_gate_part_number_api():
         # Provide a direct numeric value for the Total Gate Height form field.
         "total_gate_height": parsed.door_height_inches,
         "adders": parsed.adders,
+        "parsed_format": parsed.parsed_format,
+        "warnings": parsed.warnings,
         # Direct mappings to form field names for convenience
         "al_color": parsed.material,
         "insert_color": parsed.panel_material_color,
         "lead_post_direction": parsed.handing,
-        "visi_panels": str(parsed.vision_panel_qty),
+        "visi_panels": str(parsed.vision_panel_qty)
+        if parsed.vision_panel_qty is not None
+        else None,
         "half_panel_color": parsed.vision_panel_color,
     }
     return jsonify(response)
