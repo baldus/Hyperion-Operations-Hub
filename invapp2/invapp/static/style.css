@@ -198,6 +198,86 @@ body.light .icon-btn:hover {
     display: none !important;
 }
 
+/* --- Order detail layout --- */
+.order-sheet-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+    gap: 20px;
+    align-items: start;
+}
+
+.order-sheet-main {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.order-header h2 {
+    margin: 0 0 6px;
+}
+
+.order-sheet-notes {
+    background-color: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    padding: 16px;
+}
+
+body.light .order-sheet-notes {
+    background-color: #fff;
+    border-color: #e1e1e1;
+}
+
+.order-notes-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.note-entry {
+    padding: 10px 12px;
+    border-radius: 10px;
+    background-color: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+body.light .note-entry {
+    background-color: #f7f7f7;
+    border-color: #e5e5e5;
+}
+
+.order-note-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.order-note-form textarea {
+    width: 100%;
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background-color: rgba(255, 255, 255, 0.03);
+    color: inherit;
+    resize: vertical;
+    min-height: 100px;
+}
+
+body.light .order-note-form textarea {
+    background-color: #fff;
+    border-color: #cfcfcf;
+}
+
+@media (max-width: 960px) {
+    .order-sheet-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
 body.light .upload-status {
     background-color: rgba(0, 0, 0, 0.05);
     border-color: rgba(0, 0, 0, 0.12);

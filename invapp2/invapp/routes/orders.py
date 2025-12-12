@@ -1512,6 +1512,32 @@ def view_order(order_id):
     return render_template("orders/view.html", **context)
 
 
+@bp.route("/<int:order_id>/notes", methods=["POST"])
+def add_order_note(order_id):
+    if not current_user.is_authenticated:
+        return login_manager.unauthorized()
+
+    order = Order.query.filter_by(id=order_id).first_or_404()
+    new_note = (request.form.get("new_note") or "").strip()
+
+    if not new_note:
+        flash("Please enter a note before adding it to the order.", "warning")
+        return redirect(url_for("orders.view_order", order_id=order.id))
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    note_entry = f"[{timestamp}] {new_note}"
+
+    if order.general_notes:
+        order.general_notes = f"{order.general_notes.strip()}\n{note_entry}"
+    else:
+        order.general_notes = note_entry
+
+    db.session.commit()
+    flash("Note added to the order.", "success")
+
+    return redirect(url_for("orders.view_order", order_id=order.id))
+
+
 @bp.route("/<int:order_id>/inspection-report")
 def inspection_report(order_id):
     order = (

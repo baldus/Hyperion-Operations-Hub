@@ -1,166 +1,196 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Order {{ order.order_number }}</h2>
-<p>Status: {{ order.status_label }}</p>
-<div class="order-metadata">
-    <p><strong>Order Type:</strong> {{ order.order_type }}</p>
-    <p><strong>Priority:</strong> {{ order.priority }}</p>
-    <p><strong>Purchase Order #:</strong> {{ order.purchase_order_number }}</p>
-    <p><strong>Customer:</strong> {{ order.customer_name or '—' }}</p>
-    <p><strong>Created By:</strong> {{ order.created_by or '—' }}</p>
-    <p><strong>Promise Date:</strong> {{ order.promised_date or 'TBD' }}</p>
-    <p><strong>Scheduled Ship:</strong> {{ order.scheduled_ship_date or 'TBD' }}</p>
-</div>
-{% if order.general_notes %}
-<section class="order-notes">
-    <h3>Notes</h3>
-    <p>{{ order.general_notes | e | replace('\n', '<br>') | safe }}</p>
-</section>
-{% endif %}
-
-{% if order.gate_details %}
-<section class="order-notes">
-    <h3>Gate Details</h3>
-    <div class="form-grid">
-        <div><strong>Item Number:</strong> {{ order.gate_details.item_number }}</div>
-        <div><strong>Production Quantity:</strong> {{ order.gate_details.production_quantity }}</div>
-        <div><strong>Panel Count:</strong> {{ order.gate_details.panel_count }}</div>
-        <div><strong>Total Gate Height:</strong> {{ order.gate_details.total_gate_height }}</div>
-        <div><strong>AL Color:</strong> {{ order.gate_details.al_color }}</div>
-        <div><strong>Acrylic/Wood/Vinyl Color:</strong> {{ order.gate_details.insert_color }}</div>
-        <div><strong>Lead Post Direction:</strong> {{ order.gate_details.lead_post_direction }}</div>
-        <div><strong>Visi Panels:</strong> {{ order.gate_details.visi_panels }}</div>
-        <div><strong>1/2 Panel Color:</strong> {{ order.gate_details.half_panel_color }}</div>
-        {% if order.gate_details.hardware_option %}
-        <div><strong>Hardware Option:</strong> {{ order.gate_details.hardware_option }}</div>
-        {% endif %}
-        {% if order.gate_details.adders %}
-        <div><strong>Adders / Options:</strong> {{ order.gate_details.adders }}</div>
-        {% endif %}
-    </div>
-</section>
-    {% set inspection = order.gate_details %}
-    {% if inspection.inspection_panel_count is not none
-        or inspection.inspection_gate_height is not none
-        or inspection.inspection_al_color
-        or inspection.inspection_insert_color
-        or inspection.inspection_lead_post_direction
-        or inspection.inspection_visi_panels %}
-    <section class="order-notes">
-        <h3>Inspection Results</h3>
-        <p>
-            <a
-                href="{{ url_for('orders.inspection_report', order_id=order.id) }}"
-                class="action-btn"
-                target="_blank"
-                rel="noopener"
-            >
-                Open Printable Inspection Sheet
-            </a>
-        </p>
-        <div class="form-grid">
-            <div><strong>Recorded At:</strong> {{ inspection.inspection_recorded_at or '—' }}</div>
-            <div><strong>Panel Count:</strong> {{ inspection.inspection_panel_count or '—' }}</div>
-            <div><strong>Gate Height:</strong> {{ inspection.inspection_gate_height or '—' }}</div>
-            <div><strong>AL Color:</strong> {{ inspection.inspection_al_color or '—' }}</div>
-            <div><strong>Acrylic/Wood/Vinyl Color:</strong> {{ inspection.inspection_insert_color or '—' }}</div>
-            <div><strong>Lead Post Direction:</strong> {{ inspection.inspection_lead_post_direction or '—' }}</div>
-            <div><strong>Visi Panels:</strong> {{ inspection.inspection_visi_panels or '—' }}</div>
+<div class="order-sheet-layout">
+    <div class="order-sheet-main">
+        <div class="order-header">
+            <h2>Order {{ order.order_number }}</h2>
+            <p>Status: {{ order.status_label }}</p>
         </div>
-    </section>
-    {% endif %}
-{% endif %}
 
-{% if order.routing_progress is not none %}
-    {% set percent = (order.routing_progress * 100) | round(0, 'floor') %}
-    <p><strong>Routing Progress:</strong> {{ percent | int }}% complete</p>
-{% else %}
-    <p><strong>Routing Progress:</strong> Not started</p>
-{% endif %}
+        <div class="order-metadata">
+            <p><strong>Order Type:</strong> {{ order.order_type }}</p>
+            <p><strong>Priority:</strong> {{ order.priority }}</p>
+            <p><strong>Purchase Order #:</strong> {{ order.purchase_order_number }}</p>
+            <p><strong>Customer:</strong> {{ order.customer_name or '—' }}</p>
+            <p><strong>Created By:</strong> {{ order.created_by or '—' }}</p>
+            <p><strong>Promise Date:</strong> {{ order.promised_date or 'TBD' }}</p>
+            <p><strong>Scheduled Ship:</strong> {{ order.scheduled_ship_date or 'TBD' }}</p>
+        </div>
 
-{% set can_manage_order = current_user.is_authenticated and (is_superuser() or current_user.has_role('admin')) %}
-{% if can_manage_order %}
-    <a href="{{ url_for('orders.edit_order', order_id=order.id) }}" class="action-btn">Edit</a>
-    <form method="post" action="{{ url_for('orders.delete_order', order_id=order.id) }}" style="display:inline;">
-        <button type="submit">Delete</button>
-    </form>
-{% endif %}
-
-{% if order.routing_steps %}
-<h3>Routing Steps</h3>
-<form method="post" action="{{ url_for('orders.update_routing', order_id=order.id) }}" class="form-stack">
-    <table class="form-table">
-        <thead>
-            <tr>
-                <th>Sequence</th>
-                <th>Work Cell</th>
-                <th>Instructions</th>
-                <th>Inspection Details</th>
-                <th>Completed</th>
-            </tr>
-        </thead>
-        <tbody>
-        {% for step in order.steps %}
-            {% set pending = pending_completed_ids %}
-            {% if pending is not none %}
-                {% set is_checked = step.id in pending %}
-            {% else %}
-                {% set is_checked = step.completed %}
+        {% if order.gate_details %}
+        <section class="order-notes">
+            <h3>Gate Details</h3>
+            <div class="form-grid">
+                <div><strong>Item Number:</strong> {{ order.gate_details.item_number }}</div>
+                <div><strong>Production Quantity:</strong> {{ order.gate_details.production_quantity }}</div>
+                <div><strong>Panel Count:</strong> {{ order.gate_details.panel_count }}</div>
+                <div><strong>Total Gate Height:</strong> {{ order.gate_details.total_gate_height }}</div>
+                <div><strong>AL Color:</strong> {{ order.gate_details.al_color }}</div>
+                <div><strong>Acrylic/Wood/Vinyl Color:</strong> {{ order.gate_details.insert_color }}</div>
+                <div><strong>Lead Post Direction:</strong> {{ order.gate_details.lead_post_direction }}</div>
+                <div><strong>Visi Panels:</strong> {{ order.gate_details.visi_panels }}</div>
+                <div><strong>1/2 Panel Color:</strong> {{ order.gate_details.half_panel_color }}</div>
+                {% if order.gate_details.hardware_option %}
+                <div><strong>Hardware Option:</strong> {{ order.gate_details.hardware_option }}</div>
+                {% endif %}
+                {% if order.gate_details.adders %}
+                <div><strong>Adders / Options:</strong> {{ order.gate_details.adders }}</div>
+                {% endif %}
+            </div>
+        </section>
+            {% set inspection = order.gate_details %}
+            {% if inspection.inspection_panel_count is not none
+                or inspection.inspection_gate_height is not none
+                or inspection.inspection_al_color
+                or inspection.inspection_insert_color
+                or inspection.inspection_lead_post_direction
+                or inspection.inspection_visi_panels %}
+            <section class="order-notes">
+                <h3>Inspection Results</h3>
+                <p>
+                    <a
+                        href="{{ url_for('orders.inspection_report', order_id=order.id) }}"
+                        class="action-btn"
+                        target="_blank"
+                        rel="noopener"
+                    >
+                        Open Printable Inspection Sheet
+                    </a>
+                </p>
+                <div class="form-grid">
+                    <div><strong>Recorded At:</strong> {{ inspection.inspection_recorded_at or '—' }}</div>
+                    <div><strong>Panel Count:</strong> {{ inspection.inspection_panel_count or '—' }}</div>
+                    <div><strong>Gate Height:</strong> {{ inspection.inspection_gate_height or '—' }}</div>
+                    <div><strong>AL Color:</strong> {{ inspection.inspection_al_color or '—' }}</div>
+                    <div><strong>Acrylic/Wood/Vinyl Color:</strong> {{ inspection.inspection_insert_color or '—' }}</div>
+                    <div><strong>Lead Post Direction:</strong> {{ inspection.inspection_lead_post_direction or '—' }}</div>
+                    <div><strong>Visi Panels:</strong> {{ inspection.inspection_visi_panels or '—' }}</div>
+                </div>
+            </section>
             {% endif %}
-            <tr>
-                <td>{{ step.sequence }}</td>
-                <td>{{ step.work_cell or '—' }}</td>
-                <td>{{ step.description }}</td>
-                <td>
-                    {% if step.work_cell == 'Inspection' and order.gate_details %}
-                        {% if inspection_completed %}
-                            <p class="field-note">
-                                Inspection recorded at {{ inspection_recorded_at }}. Values reflect the
-                                completed inspection.
-                            </p>
-                        {% endif %}
-                        <div class="form-grid">
-                            <div class="form-field">
-                                <label for="inspection_panel_count" class="field-label">Panel Count (Order: {{ order.gate_details.panel_count }})</label>
-                                <input id="inspection_panel_count" type="number" name="inspection_panel_count" value="{{ inspection_values.panel_count }}" min="0" step="1">
-                            </div>
-                            <div class="form-field">
-                                <label for="inspection_gate_height" class="field-label">Gate Height (Order: {{ order.gate_details.total_gate_height }})</label>
-                                <input id="inspection_gate_height" type="text" name="inspection_gate_height" value="{{ inspection_values.gate_height }}">
-                                <p class="field-note">Must be within ±0.125 of the ordered value.</p>
-                            </div>
-                            <div class="form-field">
-                                <label for="inspection_al_color" class="field-label">AL Color (Order: {{ order.gate_details.al_color }})</label>
-                                <input id="inspection_al_color" type="text" name="inspection_al_color" value="{{ inspection_values.al_color }}">
-                            </div>
-                            <div class="form-field">
-                                <label for="inspection_insert_color" class="field-label">Acrylic/Wood/Vinyl Color (Order: {{ order.gate_details.insert_color }})</label>
-                                <input id="inspection_insert_color" type="text" name="inspection_insert_color" value="{{ inspection_values.insert_color }}">
-                            </div>
-                            <div class="form-field">
-                                <label for="inspection_lead_post_direction" class="field-label">Lead Post Direction (Order: {{ order.gate_details.lead_post_direction }})</label>
-                                <input id="inspection_lead_post_direction" type="text" name="inspection_lead_post_direction" value="{{ inspection_values.lead_post_direction }}">
-                            </div>
-                            <div class="form-field">
-                                <label for="inspection_visi_panels" class="field-label">Visi Panels (Order: {{ order.gate_details.visi_panels }})</label>
-                                <input id="inspection_visi_panels" type="text" name="inspection_visi_panels" value="{{ inspection_values.visi_panels }}">
-                            </div>
-                        </div>
+        {% endif %}
+
+        {% if order.routing_progress is not none %}
+            {% set percent = (order.routing_progress * 100) | round(0, 'floor') %}
+            <p><strong>Routing Progress:</strong> {{ percent | int }}% complete</p>
+        {% else %}
+            <p><strong>Routing Progress:</strong> Not started</p>
+        {% endif %}
+
+        {% set can_manage_order = current_user.is_authenticated and (is_superuser() or current_user.has_role('admin')) %}
+        {% if can_manage_order %}
+            <a href="{{ url_for('orders.edit_order', order_id=order.id) }}" class="action-btn">Edit</a>
+            <form method="post" action="{{ url_for('orders.delete_order', order_id=order.id) }}" style="display:inline;">
+                <button type="submit">Delete</button>
+            </form>
+        {% endif %}
+
+        {% if order.routing_steps %}
+        <h3>Routing Steps</h3>
+        <form method="post" action="{{ url_for('orders.update_routing', order_id=order.id) }}" class="form-stack">
+            <table class="form-table">
+                <thead>
+                    <tr>
+                        <th>Sequence</th>
+                        <th>Work Cell</th>
+                        <th>Instructions</th>
+                        <th>Inspection Details</th>
+                        <th>Completed</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for step in order.steps %}
+                    {% set pending = pending_completed_ids %}
+                    {% if pending is not none %}
+                        {% set is_checked = step.id in pending %}
                     {% else %}
-                        <span class="field-note">—</span>
+                        {% set is_checked = step.completed %}
                     {% endif %}
-                </td>
-                <td class="numeric">
-                    <label class="sr-only" for="step-{{ step.id }}">Mark step {{ step.sequence }} complete</label>
-                    <input id="step-{{ step.id }}" type="checkbox" name="completed_steps" value="{{ step.id }}" {% if is_checked %}checked{% endif %}>
-                </td>
-            </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    <div class="form-actions">
-        <button type="submit" class="action-btn">Update Routing Status</button>
+                    <tr>
+                        <td>{{ step.sequence }}</td>
+                        <td>{{ step.work_cell or '—' }}</td>
+                        <td>{{ step.description }}</td>
+                        <td>
+                            {% if step.work_cell == 'Inspection' and order.gate_details %}
+                                {% if inspection_completed %}
+                                    <p class="field-note">
+                                        Inspection recorded at {{ inspection_recorded_at }}. Values reflect the
+                                        completed inspection.
+                                    </p>
+                                {% endif %}
+                                <div class="form-grid">
+                                    <div class="form-field">
+                                        <label for="inspection_panel_count" class="field-label">Panel Count (Order: {{ order.gate_details.panel_count }})</label>
+                                        <input id="inspection_panel_count" type="number" name="inspection_panel_count" value="{{ inspection_values.panel_count }}" min="0" step="1">
+                                    </div>
+                                    <div class="form-field">
+                                        <label for="inspection_gate_height" class="field-label">Gate Height (Order: {{ order.gate_details.total_gate_height }})</label>
+                                        <input id="inspection_gate_height" type="text" name="inspection_gate_height" value="{{ inspection_values.gate_height }}">
+                                        <p class="field-note">Must be within ±0.125 of the ordered value.</p>
+                                    </div>
+                                    <div class="form-field">
+                                        <label for="inspection_al_color" class="field-label">AL Color (Order: {{ order.gate_details.al_color }})</label>
+                                        <input id="inspection_al_color" type="text" name="inspection_al_color" value="{{ inspection_values.al_color }}">
+                                    </div>
+                                    <div class="form-field">
+                                        <label for="inspection_insert_color" class="field-label">Acrylic/Wood/Vinyl Color (Order: {{ order.gate_details.insert_color }})</label>
+                                        <input id="inspection_insert_color" type="text" name="inspection_insert_color" value="{{ inspection_values.insert_color }}">
+                                    </div>
+                                    <div class="form-field">
+                                        <label for="inspection_lead_post_direction" class="field-label">Lead Post Direction (Order: {{ order.gate_details.lead_post_direction }})</label>
+                                        <input id="inspection_lead_post_direction" type="text" name="inspection_lead_post_direction" value="{{ inspection_values.lead_post_direction }}">
+                                    </div>
+                                    <div class="form-field">
+                                        <label for="inspection_visi_panels" class="field-label">Visi Panels (Order: {{ order.gate_details.visi_panels }})</label>
+                                        <input id="inspection_visi_panels" type="text" name="inspection_visi_panels" value="{{ inspection_values.visi_panels }}">
+                                    </div>
+                                </div>
+                            {% else %}
+                                <span class="field-note">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="numeric">
+                            <label class="sr-only" for="step-{{ step.id }}">Mark step {{ step.sequence }} complete</label>
+                            <input id="step-{{ step.id }}" type="checkbox" name="completed_steps" value="{{ step.id }}" {% if is_checked %}checked{% endif %}>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            <div class="form-actions">
+                <button type="submit" class="action-btn">Update Routing Status</button>
+            </div>
+        </form>
+        {% endif %}
     </div>
-</form>
-{% endif %}
+
+    <aside class="order-sheet-notes">
+        <h3>Notes</h3>
+        {% set note_lines = order.general_notes.split('\n') if order.general_notes else [] %}
+        {% if note_lines %}
+            <div class="order-notes-list">
+                {% for line in note_lines %}
+                    <div class="note-entry">{{ line | e }}</div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="field-note">No notes recorded for this order yet.</p>
+        {% endif %}
+
+        {% if current_user.is_authenticated %}
+        <form class="order-note-form" method="post" action="{{ url_for('orders.add_order_note', order_id=order.id) }}">
+            <label class="field-label" for="new_note">Add a note</label>
+            <textarea
+                id="new_note"
+                name="new_note"
+                rows="4"
+                placeholder="Document progress, customer updates, or requests."
+                required
+            ></textarea>
+            <p class="field-note">New notes are time-stamped automatically.</p>
+            <button type="submit" class="action-btn">Save Note</button>
+        </form>
+        {% endif %}
+    </aside>
+</div>
 {% endblock %}
