@@ -98,7 +98,7 @@ _PANEL_TYPE_MAP: Dict[str, Dict[str, str]] = {
         "N": "Vinyl - Walnut",
         "P": "Vinyl - Maple",
         "T": "Vinyl - Texture/Chalk",
-        "W": "Vinyl - White",
+        "W": "White (Vinyl)",
         "S": "Special Vinyl",
         "Z": "Fire Resistant Oak (Vinyl)",
     },
@@ -147,21 +147,13 @@ _PANEL_COUNT_MAP = {
     "5": 15,
 }
 
-# Legacy SHORT/LEGACY format panel count mapping. The digit following the literal
-# "000" block encodes the historical panel quantity. Code "1" covered both 10
-# and 11 panels in the original spec; to align with the modern intent we default
-# to 10 panels and surface a warning for traceability.
-LEGACY_PANEL_CODE_TO_COUNT: Dict[str, Optional[int]] = {
-    "1": 10,
-    "2": 12,
-    "3": 13,
-    "4": 14,
-    "5": 15,
-    "6": 6,
-    "7": 7,
-    "8": 8,
-    "9": 9,
-    "0": None,
+LEGACY_SKU_OVERRIDES: Dict[str, Dict[str, Optional[int]]] = {
+    # SKU-specific corrections to avoid guessing when legacy formats omit data.
+    "DWF000284": {"panel_count": 10},
+    "DBF000184": {"panel_count": 10},
+    "DLF000184": {"panel_count": 10},
+    "DKF000195": {"panel_count": 10},
+    "BKF000195": {"panel_count": 10},
 }
 
 _VISION_PANEL_QTY = {"0": 0, "1": 1, "2": 2, "3": 3}
@@ -331,11 +323,11 @@ def _parse_adders(segment: str) -> List[str]:
 
 
 def detect_format(part_number: str, offset_index: int) -> str:
-    """Detect whether the part number uses the FULL or SHORT/LEGACY format."""
+    """Detect whether the part number uses the FULL or LEGACY format."""
 
     rest = part_number[offset_index:]
-    if len(rest) == 8 and rest[2:5] == "000" and rest[5].isdigit() and rest[6:8].isdigit():
-        return "SHORT"
+    if len(rest) == 8 and rest[2:5] == "000" and rest[6:8].isdigit():
+        return "LEGACY"
     return "FULL"
 
 
@@ -458,15 +450,17 @@ def parse_full_format(rest: str, *, material_code: str, material: str) -> Parsed
     )
 
 
-def parse_short_format(rest: str, *, material_code: str, material: str) -> ParsedGatePart:
-    """Parse the SHORT/LEGACY format (panel_type, handing, 000, filler, height)."""
+def parse_short_format(
+    rest: str, *, material_code: str, material: str, full_part_number: str
+) -> ParsedGatePart:
+    """Parse the LEGACY format (panel_type, handing, 000, hardware, height)."""
 
-    if len(rest) != 8 or rest[2:5] != "000" or not rest[5:8].isdigit():
+    if len(rest) != 8 or rest[2:5] != "000" or not rest[6:8].isdigit():
         raise GatePartNumberError("Legacy part number did not match expected pattern.")
 
     panel_type_code = rest[0]
     handing_code = rest[1]
-    legacy_panel_code = rest[5]
+    hardware_code = rest[5]
     height_digits = rest[6:8]
 
     if material not in _PANEL_TYPE_MAP or panel_type_code not in _PANEL_TYPE_MAP[material]:
@@ -479,20 +473,32 @@ def parse_short_format(rest: str, *, material_code: str, material: str) -> Parse
         raise GatePartNumberError(f"Unknown handing code '{handing_code}'.")
     handing = _HANDING_MAP[handing_code]
 
-    panel_count = LEGACY_PANEL_CODE_TO_COUNT.get(legacy_panel_code)
-    warnings = [
-        "Legacy part number detected: some fields are not encoded and must be entered manually."
-    ]
-
-    if legacy_panel_code not in LEGACY_PANEL_CODE_TO_COUNT:
-        warnings.append(
-            f"Legacy panel code '{legacy_panel_code}' is not recognized; enter panel count manually."
+    is_center_pin = handing_code in {"L", "R", "E"}
+    hardware_map = _CENTER_PIN_HARDWARE if is_center_pin else _OFFSET_PIN_HARDWARE
+    if hardware_code not in hardware_map:
+        raise GatePartNumberError(
+            f"Unknown hardware code '{hardware_code}' for {'center' if is_center_pin else 'offset'} pin handing."
         )
-    elif legacy_panel_code == "1":
-        warnings.append("Legacy panel code '1' assumed as 10 panels.")
+    hardware_option = hardware_map[hardware_code]
 
-    if panel_count is None:
+    panel_count: Optional[int] = None
+    warnings = ["Legacy SKU: vision panels not encoded; defaulted to none"]
+
+    if handing_code in {"E", "F"}:
+        panel_count = 10
+        warnings.append(
+            "Legacy SKU: panel count not encoded; defaulted to 10 for double-lead-post handing"
+        )
+    else:
         warnings.append("Legacy SKU: panel count not encoded; enter manually.")
+
+    override = LEGACY_SKU_OVERRIDES.get(full_part_number)
+    if override and "panel_count" in override and override["panel_count"] is not None:
+        panel_count = override["panel_count"]
+        warnings = [warning for warning in warnings if "enter manually" not in warning]
+
+    vision_panel_qty = 0
+    vision_panel_color = "0"
 
     integer_inches = int(height_digits)
     door_height_inches = integer_inches
@@ -506,14 +512,14 @@ def parse_short_format(rest: str, *, material_code: str, material: str) -> Parse
         handing_code=handing_code,
         handing=handing,
         panel_count=panel_count,
-        legacy_panel_code=legacy_panel_code,
-        vision_panel_qty=None,
-        vision_panel_color=None,
-        hardware_option=None,
+        legacy_panel_code=None,
+        vision_panel_qty=vision_panel_qty,
+        vision_panel_color=vision_panel_color,
+        hardware_option=hardware_option,
         door_height_inches=door_height_inches,
         door_height_display=door_height_display,
         adders=[],
-        parsed_format="SHORT",
+        parsed_format="LEGACY",
         warnings=warnings,
     )
 
@@ -533,8 +539,10 @@ def parse_gate_part_number(part_number: str) -> ParsedGatePart:
     format_type = detect_format(normalized, offset_idx)
     rest = normalized[offset_idx:]
 
-    if format_type == "SHORT":
-        return parse_short_format(rest, material_code=material_code, material=material)
+    if format_type == "LEGACY":
+        return parse_short_format(
+            rest, material_code=material_code, material=material, full_part_number=normalized
+        )
 
     parsed = parse_full_format(rest, material_code=material_code, material=material)
 

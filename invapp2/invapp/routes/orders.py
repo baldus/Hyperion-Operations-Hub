@@ -225,13 +225,19 @@ def parse_gate_part_number_api():
     }
 
     autofill_fields = []
-    if parsed.parsed_format == "SHORT":
+    if parsed.parsed_format == "LEGACY":
         response.update(
             {
                 "panel_count": parsed.panel_count,
+                "vision_panel_qty": parsed.vision_panel_qty,
+                "vision_panel_color": parsed.vision_panel_color,
+                "hardware_option": parsed.hardware_option,
+                "adders": parsed.adders,
                 "al_color": parsed.material,
                 "insert_color": parsed.panel_material_color,
                 "lead_post_direction": parsed.handing,
+                "visi_panels": str(parsed.vision_panel_qty),
+                "half_panel_color": parsed.vision_panel_color,
             }
         )
         autofill_fields = [
@@ -242,6 +248,9 @@ def parse_gate_part_number_api():
                 "al_color",
                 "insert_color",
                 "lead_post_direction",
+                "visi_panels",
+                "half_panel_color",
+                "hardware_option",
             ]
             if field is not None
         ]

@@ -123,38 +123,32 @@ def test_parse_gate_part_number_api_returns_materials(client):
     assert response_slim_hardwood.get_json()["material"] == "Slim Hardwood"
 
 
-def test_short_format_gate_numbers_parse_height_and_format():
-    parsed = parse_gate_part_number("DBF000184")
-    assert parsed.door_height_inches == 84
-    assert parsed.parsed_format == "SHORT"
+def test_legacy_gate_decodes_hardware_and_defaults():
+    parsed = parse_gate_part_number("DWF000284")
+
+    assert parsed.material == "Vinyl"
+    assert parsed.panel_material_color == "White (Vinyl)"
+    assert parsed.handing == "Offset Pin Double Lead Post"
     assert parsed.panel_count == 10
-    assert parsed.legacy_panel_code == "1"
-    assert any("assumed as 10 panels" in warning for warning in parsed.warnings)
+    assert parsed.vision_panel_qty == 0
+    assert parsed.vision_panel_color == "0"
+    assert parsed.hardware_option == "Nickle"
+    assert parsed.door_height_inches == 84
+    assert parsed.parsed_format == "LEGACY"
+    assert any("vision panels not encoded" in warning for warning in parsed.warnings)
 
-    parsed_dw = parse_gate_part_number("DWF000284")
-    assert parsed_dw.door_height_inches == 84
-    assert parsed_dw.parsed_format == "SHORT"
-    assert parsed_dw.panel_count == 12
-    assert parsed_dw.legacy_panel_code == "2"
 
-    parsed_dl = parse_gate_part_number("DLF000184")
-    assert parsed_dl.door_height_inches == 84
-    assert parsed_dl.parsed_format == "SHORT"
-    assert parsed_dl.panel_count == 10
-    assert parsed_dl.legacy_panel_code == "1"
-
-    parsed_dk = parse_gate_part_number("DKF000195")
-    assert parsed_dk.door_height_inches == 95
-    assert parsed_dk.parsed_format == "SHORT"
-    assert parsed_dk.panel_count == 10
-    assert parsed_dk.legacy_panel_code == "1"
+def test_legacy_gate_overrides_apply():
+    parsed_dbf = parse_gate_part_number("DBF000184")
+    assert parsed_dbf.panel_count == 10
+    assert parsed_dbf.parsed_format == "LEGACY"
 
     parsed_bk = parse_gate_part_number("BKF000195")
-    assert parsed_bk.door_height_inches == 95
-    assert parsed_bk.parsed_format == "SHORT"
     assert parsed_bk.panel_count == 10
-    assert parsed_bk.legacy_panel_code == "1"
+    assert parsed_bk.parsed_format == "LEGACY"
 
+
+def test_full_format_examples_unaffected():
     parsed_full = parse_gate_part_number("DYDP400279PIG")
     assert int(parsed_full.door_height_inches) == 79
     assert parsed_full.parsed_format == "FULL"
