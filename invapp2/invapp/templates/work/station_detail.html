@@ -1,10 +1,34 @@
 {% extends "base.html" %}
 
+{% block content_card_class %}content-card--wide{% endblock %}
+
 {% block content %}
 <h2>{{ station.name }} Queue</h2>
 <p class="page-intro">Jobs that are ready for this workstation to process.</p>
 
 {% set is_framing = is_framing|default(station.name|default('', true)|lower == 'framing', true) %}
+
+{% set base_columns = [
+    {"id": "order", "label": "Order", "type": "string", "locked": true},
+    {"id": "customer", "label": "Customer", "type": "string"},
+    {"id": "item", "label": "Item", "type": "string"},
+    {"id": "step", "label": "Step", "type": "number"},
+    {"id": "promised", "label": "Promised", "type": "date"},
+    {"id": "scheduled", "label": "Scheduled Completion", "type": "date"},
+    {"id": "status", "label": "Status", "type": "string"},
+] %}
+
+{% set framing_columns = [
+    {"id": "panels", "label": "Panels Needed", "type": "number"},
+    {"id": "material", "label": "Panel Material", "type": "string"},
+    {"id": "panel_length", "label": "Panel Length (cut size)", "type": "number"},
+] %}
+
+{% if is_framing %}
+    {% set columns = base_columns[:3] + framing_columns + base_columns[3:] %}
+{% else %}
+    {% set columns = base_columns %}
+{% endif %}
 
 {% if is_framing and is_admin %}
 <form method="post" class="orders-filter" aria-label="Set panel length offset">
@@ -39,68 +63,117 @@
 </form>
 
 {% if station.entries %}
-<table class="data-table">
-    <thead>
-        <tr>
-            <th scope="col">Order</th>
-            <th scope="col">Customer</th>
-            <th scope="col">Item</th>
-            {% if is_framing %}
-            <th scope="col">Panels Needed</th>
-            <th scope="col">Panel Material</th>
-            <th scope="col">Panel Length (cut size)</th>
-            {% endif %}
-            <th scope="col">Step</th>
-            <th scope="col">Promised</th>
-            <th scope="col">Scheduled Completion</th>
-            <th scope="col">Status</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for entry in station.entries %}
-        <tr>
-            <th scope="row">
-                {% if can_access_page('orders') %}
-                <a href="{{ url_for('orders.view_order', order_id=entry['order_id']) }}">
-                    {{ entry['order_number'] }}
-                </a>
-                {% else %}
-                {{ entry['order_number'] }}
-                {% endif %}
-            </th>
-            <td>{{ entry['customer_name'] or '—' }}</td>
-            <td>
-                {% if entry['item_sku'] or entry['item_name'] %}
-                    {% if entry['item_sku'] %}
-                    <span class="badge">{{ entry['item_sku'] }}</span>
+<div class="table-enhancer">
+    {% if is_framing %}
+    <div class="table-enhancer__toolbar">
+        <label class="table-enhancer__filter">
+            <span>Filter rows</span>
+            <input
+                id="framing-table-filter"
+                type="search"
+                name="framing_filter"
+                placeholder="Search within the table"
+                aria-label="Filter framing queue rows"
+            >
+        </label>
+        <fieldset class="table-enhancer__columns" aria-label="Toggle visible columns">
+            <legend>Columns</legend>
+            <div class="table-enhancer__column-list">
+                {% for column in columns %}
+                <label>
+                    <input
+                        type="checkbox"
+                        value="{{ column.id }}"
+                        data-column-toggle
+                        {% if column.locked %}checked disabled{% else %}checked{% endif %}
+                    >
+                    {{ column.label }}
+                </label>
+                {% endfor %}
+            </div>
+        </fieldset>
+    </div>
+    {% endif %}
+
+    <table
+        class="data-table"
+        id="framing-queue-table"
+        {% if is_framing %}data-enhanced="true"{% endif %}
+    >
+        <thead>
+            <tr>
+                {% for column in columns %}
+                <th
+                    scope="col"
+                    data-column-id="{{ column.id }}"
+                    data-sort-type="{{ column.type }}"
+                    {% if column.locked %}data-locked="true"{% endif %}
+                    {% if is_framing %}tabindex="0" role="button" aria-label="Sort by {{ column.label }}"{% endif %}
+                >
+                    {{ column.label }}
+                </th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for entry in station.entries %}
+            <tr>
+                {% for column in columns %}
+                    {% if column.id == 'order' %}
+                        <th scope="row" data-column-id="order" data-sort-value="{{ entry['order_number'] }}">
+                            {% if can_access_page('orders') %}
+                            <a href="{{ url_for('orders.view_order', order_id=entry['order_id']) }}">
+                                {{ entry['order_number'] }}
+                            </a>
+                            {% else %}
+                            {{ entry['order_number'] }}
+                            {% endif %}
+                        </th>
+                    {% elif column.id == 'customer' %}
+                        <td data-column-id="customer" data-sort-value="{{ entry['customer_name'] or '' }}">{{ entry['customer_name'] or '—' }}</td>
+                    {% elif column.id == 'item' %}
+                        <td data-column-id="item" data-sort-value="{{ (entry['item_sku'] or '') ~ ' ' ~ (entry['item_name'] or '') }}">
+                            {% if entry['item_sku'] or entry['item_name'] %}
+                                {% if entry['item_sku'] %}
+                                <span class="badge">{{ entry['item_sku'] }}</span>
+                                {% endif %}
+                                {{ entry['item_name'] or '' }}
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+                    {% elif column.id == 'panels' %}
+                        <td data-column-id="panels" data-sort-value="{{ entry['panels_needed'] if entry['panels_needed'] is not none else '' }}">
+                            {{ entry['panels_needed'] if entry['panels_needed'] is not none else '—' }}
+                        </td>
+                    {% elif column.id == 'material' %}
+                        <td data-column-id="material" data-sort-value="{{ entry['panel_material'] or '' }}">{{ entry['panel_material'] or '—' }}</td>
+                    {% elif column.id == 'panel_length' %}
+                        <td data-column-id="panel_length" data-sort-value="{{ entry['panel_length'] if entry['panel_length'] is not none else '' }}">
+                            {% if entry['panel_length'] is not none %}
+                            {{ '%.2f' % entry['panel_length'] }}
+                            {% else %}
+                            —
+                            {% endif %}
+                        </td>
+                    {% elif column.id == 'step' %}
+                        <td data-column-id="step" data-sort-value="{{ entry['sequence'] }}">
+                            <strong>Step {{ entry['sequence'] }}</strong><br>
+                            {{ entry['description'] }}
+                        </td>
+                    {% elif column.id == 'promised' %}
+                        <td data-column-id="promised" data-sort-value="{{ entry['promised_date'] or '' }}">{{ entry['promised_date'] or '—' }}</td>
+                    {% elif column.id == 'scheduled' %}
+                        <td data-column-id="scheduled" data-sort-value="{{ entry['scheduled_completion'] or '' }}">{{ entry['scheduled_completion'] or '—' }}</td>
+                    {% elif column.id == 'status' %}
+                        <td data-column-id="status" data-sort-value="{{ entry['order_status'] or '' }}">{{ entry['order_status'] }}</td>
                     {% endif %}
-                    {{ entry['item_name'] or '' }}
-                {% else %}
-                    —
-                {% endif %}
-            </td>
-            {% if is_framing %}
-            <td>{{ entry['panels_needed'] if entry['panels_needed'] is not none else '—' }}</td>
-            <td>{{ entry['panel_material'] or '—' }}</td>
-            <td>
-                {% if entry['panel_length'] is not none %}
-                {{ '%.2f' % entry['panel_length'] }}
-                {% else %}
-                —
-                {% endif %}
-            </td>
-            {% endif %}
-            <td>
-                <strong>Step {{ entry['sequence'] }}</strong><br>
-                {{ entry['description'] }}
-            </td>
-            <td>{{ entry['promised_date'] or '—' }}</td>
-            <td>{{ entry['scheduled_completion'] or '—' }}</td>
-            <td>{{ entry['order_status'] }}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
 {% else %}
 <p>No jobs are currently waiting on this workstation.</p>
 {% endif %}
@@ -108,4 +181,11 @@
 <p>
     <a class="nav-btn" href="{{ url_for('work.station_overview') }}">Back to Workstation Overview</a>
 </p>
+{% endblock %}
+
+{% block extra_scripts %}
+{{ super() }}
+{% if is_framing %}
+<script defer src="{{ url_for('static', filename='js/framing-queue.js') }}"></script>
+{% endif %}
 {% endblock %}

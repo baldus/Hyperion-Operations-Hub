@@ -523,6 +523,10 @@ body.light .content-card {
     padding: clamp(20px, 2.5vw, 48px);
 }
 
+.content-card--wide {
+    width: min(1800px, 98vw);
+}
+
 .content-card--flush {
     width: 100%;
     max-width: none;
@@ -1420,6 +1424,79 @@ body.light .data-table tbody tr:hover td {
 .purchasing-table th,
 .purchasing-table td {
     vertical-align: top;
+}
+
+.table-enhancer {
+    margin-top: 12px;
+}
+
+.table-enhancer__toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+    align-items: flex-end;
+    margin-bottom: 12px;
+}
+
+.table-enhancer__filter {
+    display: grid;
+    gap: 6px;
+    font-weight: 600;
+}
+
+.table-enhancer__filter input {
+    min-width: 240px;
+}
+
+.table-enhancer__columns {
+    padding: 10px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+body.light .table-enhancer__columns {
+    border-color: rgba(0, 0, 0, 0.12);
+    background: rgba(0, 0, 0, 0.02);
+}
+
+.table-enhancer__columns legend {
+    padding: 0 6px;
+    font-size: 0.95rem;
+    font-weight: 700;
+}
+
+.table-enhancer__column-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    margin-top: 8px;
+}
+
+.table-enhancer__column-list label {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    font-size: 0.95rem;
+}
+
+.data-table thead th.is-sorted-asc::after,
+.data-table thead th.is-sorted-desc::after {
+    content: "";
+    display: inline-block;
+    margin-left: 8px;
+    width: 0;
+    height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+}
+
+.data-table thead th.is-sorted-asc::after {
+    border-bottom: 6px solid #68a4ff;
+}
+
+.data-table thead th.is-sorted-desc::after {
+    border-top: 6px solid #68a4ff;
 }
 
 .purchasing-detail-header {
