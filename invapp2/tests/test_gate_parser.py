@@ -123,27 +123,34 @@ def test_parse_gate_part_number_api_returns_materials(client):
     assert response_slim_hardwood.get_json()["material"] == "Slim Hardwood"
 
 
-def test_short_format_gate_numbers_parse_height_and_format():
-    parsed = parse_gate_part_number("DBF000184")
+def test_legacy_numeric_gate_decodes_fields():
+    parsed = parse_gate_part_number("DWF000284")
+
+    assert parsed.material == "Vinyl"
+    assert parsed.panel_material_color == "White (Vinyl)"
+    assert parsed.handing == "Offset Pin Double Lead Post"
+    assert parsed.panel_count == 10
+    assert parsed.vision_panel_qty == 0
+    assert parsed.vision_panel_color == "0"
+    assert parsed.hardware_option == "Nickle"
     assert parsed.door_height_inches == 84
-    assert parsed.parsed_format == "SHORT"
+    assert parsed.parsed_format == "LEGACY_NUMERIC"
+    assert any("vision panels" in warning for warning in parsed.warnings)
 
-    parsed_dw = parse_gate_part_number("DWF000284")
-    assert parsed_dw.door_height_inches == 84
-    assert parsed_dw.parsed_format == "SHORT"
 
-    parsed_dl = parse_gate_part_number("DLF000184")
-    assert parsed_dl.door_height_inches == 84
-    assert parsed_dl.parsed_format == "SHORT"
+def test_legacy_numeric_gate_overrides_apply():
+    parsed_dbf = parse_gate_part_number("DBF000184")
+    assert parsed_dbf.panel_count == 10
+    assert parsed_dbf.door_height_inches == 84
+    assert parsed_dbf.parsed_format == "LEGACY_NUMERIC"
 
     parsed_dk = parse_gate_part_number("DKF000195")
+    assert parsed_dk.panel_count == 10
     assert parsed_dk.door_height_inches == 95
-    assert parsed_dk.parsed_format == "SHORT"
+    assert parsed_dk.parsed_format == "LEGACY_NUMERIC"
 
-    parsed_bk = parse_gate_part_number("BKF000195")
-    assert parsed_bk.door_height_inches == 95
-    assert parsed_bk.parsed_format == "SHORT"
 
+def test_full_format_examples_unaffected():
     parsed_full = parse_gate_part_number("DYDP400279PIG")
     assert int(parsed_full.door_height_inches) == 79
     assert parsed_full.parsed_format == "FULL"
