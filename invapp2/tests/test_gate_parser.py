@@ -127,22 +127,33 @@ def test_short_format_gate_numbers_parse_height_and_format():
     parsed = parse_gate_part_number("DBF000184")
     assert parsed.door_height_inches == 84
     assert parsed.parsed_format == "SHORT"
+    assert parsed.panel_count == 10
+    assert parsed.legacy_panel_code == "1"
+    assert any("assumed as 10 panels" in warning for warning in parsed.warnings)
 
     parsed_dw = parse_gate_part_number("DWF000284")
     assert parsed_dw.door_height_inches == 84
     assert parsed_dw.parsed_format == "SHORT"
+    assert parsed_dw.panel_count == 12
+    assert parsed_dw.legacy_panel_code == "2"
 
     parsed_dl = parse_gate_part_number("DLF000184")
     assert parsed_dl.door_height_inches == 84
     assert parsed_dl.parsed_format == "SHORT"
+    assert parsed_dl.panel_count == 10
+    assert parsed_dl.legacy_panel_code == "1"
 
     parsed_dk = parse_gate_part_number("DKF000195")
     assert parsed_dk.door_height_inches == 95
     assert parsed_dk.parsed_format == "SHORT"
+    assert parsed_dk.panel_count == 10
+    assert parsed_dk.legacy_panel_code == "1"
 
     parsed_bk = parse_gate_part_number("BKF000195")
     assert parsed_bk.door_height_inches == 95
     assert parsed_bk.parsed_format == "SHORT"
+    assert parsed_bk.panel_count == 10
+    assert parsed_bk.legacy_panel_code == "1"
 
     parsed_full = parse_gate_part_number("DYDP400279PIG")
     assert int(parsed_full.door_height_inches) == 79

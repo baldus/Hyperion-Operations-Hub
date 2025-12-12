@@ -147,6 +147,23 @@ _PANEL_COUNT_MAP = {
     "5": 15,
 }
 
+# Legacy SHORT/LEGACY format panel count mapping. The digit following the literal
+# "000" block encodes the historical panel quantity. Code "1" covered both 10
+# and 11 panels in the original spec; to align with the modern intent we default
+# to 10 panels and surface a warning for traceability.
+LEGACY_PANEL_CODE_TO_COUNT: Dict[str, Optional[int]] = {
+    "1": 10,
+    "2": 12,
+    "3": 13,
+    "4": 14,
+    "5": 15,
+    "6": 6,
+    "7": 7,
+    "8": 8,
+    "9": 9,
+    "0": None,
+}
+
 _VISION_PANEL_QTY = {"0": 0, "1": 1, "2": 2, "3": 3}
 
 _VISION_PANEL_COLOR = {
@@ -224,6 +241,7 @@ class ParsedGatePart:
     handing_code: str
     handing: str
     panel_count: Optional[int]
+    legacy_panel_code: Optional[str]
     vision_panel_qty: Optional[int]
     vision_panel_color: Optional[str]
     hardware_option: Optional[str]
@@ -428,6 +446,7 @@ def parse_full_format(rest: str, *, material_code: str, material: str) -> Parsed
         handing_code=handing_code,
         handing=handing,
         panel_count=panel_count,
+        legacy_panel_code=None,
         vision_panel_qty=vision_panel_qty,
         vision_panel_color=vision_panel_color,
         hardware_option=hardware_option,
@@ -447,6 +466,7 @@ def parse_short_format(rest: str, *, material_code: str, material: str) -> Parse
 
     panel_type_code = rest[0]
     handing_code = rest[1]
+    legacy_panel_code = rest[5]
     height_digits = rest[6:8]
 
     if material not in _PANEL_TYPE_MAP or panel_type_code not in _PANEL_TYPE_MAP[material]:
@@ -459,6 +479,21 @@ def parse_short_format(rest: str, *, material_code: str, material: str) -> Parse
         raise GatePartNumberError(f"Unknown handing code '{handing_code}'.")
     handing = _HANDING_MAP[handing_code]
 
+    panel_count = LEGACY_PANEL_CODE_TO_COUNT.get(legacy_panel_code)
+    warnings = [
+        "Legacy part number detected: some fields are not encoded and must be entered manually."
+    ]
+
+    if legacy_panel_code not in LEGACY_PANEL_CODE_TO_COUNT:
+        warnings.append(
+            f"Legacy panel code '{legacy_panel_code}' is not recognized; enter panel count manually."
+        )
+    elif legacy_panel_code == "1":
+        warnings.append("Legacy panel code '1' assumed as 10 panels.")
+
+    if panel_count is None:
+        warnings.append("Legacy SKU: panel count not encoded; enter manually.")
+
     integer_inches = int(height_digits)
     door_height_inches = integer_inches
     door_height_display = str(integer_inches)
@@ -470,7 +505,8 @@ def parse_short_format(rest: str, *, material_code: str, material: str) -> Parse
         panel_material_color=panel_material_color,
         handing_code=handing_code,
         handing=handing,
-        panel_count=None,
+        panel_count=panel_count,
+        legacy_panel_code=legacy_panel_code,
         vision_panel_qty=None,
         vision_panel_color=None,
         hardware_option=None,
@@ -478,9 +514,7 @@ def parse_short_format(rest: str, *, material_code: str, material: str) -> Parse
         door_height_display=door_height_display,
         adders=[],
         parsed_format="SHORT",
-        warnings=[
-            "Legacy part number detected: some fields are not encoded and must be entered manually."
-        ],
+        warnings=warnings,
     )
 
 

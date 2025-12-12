@@ -215,6 +215,8 @@ def parse_gate_part_number_api():
         "material": parsed.material,
         "panel_material_color": parsed.panel_material_color,
         "handing": parsed.handing,
+        "panel_count": parsed.panel_count,
+        "legacy_panel_code": parsed.legacy_panel_code,
         "door_height_inches": parsed.door_height_inches,
         "door_height_display": parsed.door_height_display,
         "total_gate_height": parsed.door_height_inches,
@@ -226,16 +228,22 @@ def parse_gate_part_number_api():
     if parsed.parsed_format == "SHORT":
         response.update(
             {
+                "panel_count": parsed.panel_count,
                 "al_color": parsed.material,
                 "insert_color": parsed.panel_material_color,
                 "lead_post_direction": parsed.handing,
             }
         )
         autofill_fields = [
-            "total_gate_height",
-            "al_color",
-            "insert_color",
-            "lead_post_direction",
+            field
+            for field in [
+                "panel_count" if parsed.panel_count is not None else None,
+                "total_gate_height",
+                "al_color",
+                "insert_color",
+                "lead_post_direction",
+            ]
+            if field is not None
         ]
     else:
         response.update(
