@@ -1,15 +1,57 @@
-"""Utilities for generating MDI email content without sending mail."""
+"""Utilities for generating and sending MDI email content."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from email import policy
 from email.message import EmailMessage
+import smtplib
+from ssl import create_default_context
 from typing import Callable, Iterable, List, Sequence
 
 from flask import current_app, render_template
 
 from invapp.mdi.models import CATEGORY_DISPLAY, MDIEntry
 
+
+@dataclass
+class SMTPConfig:
+    host: str
+    port: int
+    username: str | None
+    password: str | None
+    use_tls: bool
+    use_ssl: bool
+    sender: str | None
+
+
+def _as_bool(value: object, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def load_smtp_config() -> SMTPConfig:
+    """Build an SMTP configuration object from Flask settings."""
+
+    host = current_app.config.get("MDI_SMTP_HOST") or ""
+    if not host:
+        raise RuntimeError("MDI_SMTP_HOST must be configured to send email")
+
+    sender = current_app.config.get("MDI_DEFAULT_SENDER") or None
+    username = current_app.config.get("MDI_SMTP_USERNAME") or None
+
+    return SMTPConfig(
+        host=host,
+        port=int(current_app.config.get("MDI_SMTP_PORT", 587)),
+        username=username,
+        password=current_app.config.get("MDI_SMTP_PASSWORD") or None,
+        use_tls=_as_bool(current_app.config.get("MDI_SMTP_USE_TLS"), default=True),
+        use_ssl=_as_bool(current_app.config.get("MDI_SMTP_USE_SSL"), default=False),
+        sender=sender or username,
+    )
 
 def suggested_recipients() -> List[str]:
     """Return a cleaned list of default recipients from configuration."""
@@ -30,6 +72,7 @@ def render_mdi_email_html(
     entries: Iterable[MDIEntry],
     dashboard_url: str,
     item_link_factory: Callable[[MDIEntry], str],
+    template_name: str = "email_mdi_summary.html",
 ) -> str:
     """Render the HTML body for the active-item summary email."""
 
@@ -70,21 +113,28 @@ def render_mdi_email_html(
     ]
 
     return render_template(
-        "email_mdi.html",
+        template_name,
         category_sections=category_sections,
         dashboard_url=dashboard_url,
         generated_at=datetime.utcnow(),
     )
 
 
-def build_eml_message(subject: str, recipients: Sequence[str], html_body: str) -> EmailMessage:
+def build_eml_message(
+    subject: str,
+    recipients: Sequence[str],
+    html_body: str,
+    *,
+    draft: bool = True,
+) -> EmailMessage:
     """Create a standards-compliant email message containing the HTML body."""
 
     sender = current_app.config.get("MDI_DEFAULT_SENDER") or None
     message = EmailMessage(policy=policy.default)
-    # Mark as draft for Outlook/desktop clients so it opens ready to send instead of as a
-    # received message. The X-Unsent header is understood by Outlook and other clients.
-    message["X-Unsent"] = "1"
+    if draft:
+        # Mark as draft for Outlook/desktop clients so it opens ready to send instead of as a
+        # received message. The X-Unsent header is understood by Outlook and other clients.
+        message["X-Unsent"] = "1"
     message["Subject"] = subject
     if sender:
         message["From"] = sender
@@ -96,3 +146,24 @@ def build_eml_message(subject: str, recipients: Sequence[str], html_body: str) -
     )
     message.add_alternative(html_body, subtype="html")
     return message
+
+
+def send_email_via_smtp(message: EmailMessage, smtp_config: SMTPConfig | None = None) -> None:
+    """Send the provided message using the configured SMTP server."""
+
+    config = smtp_config or load_smtp_config()
+    if not config.sender:
+        raise RuntimeError("MDI_DEFAULT_SENDER or SMTP username must be configured for sending email")
+
+    if "From" not in message:
+        message["From"] = config.sender
+
+    smtp_class = smtplib.SMTP_SSL if config.use_ssl else smtplib.SMTP
+    with smtp_class(config.host, config.port, timeout=10) as client:
+        client.ehlo()
+        if config.use_tls and not config.use_ssl:
+            client.starttls(context=create_default_context())
+            client.ehlo()
+        if config.username and config.password:
+            client.login(config.username, config.password)
+        client.send_message(message)

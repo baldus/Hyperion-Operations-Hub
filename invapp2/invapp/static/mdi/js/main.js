@@ -96,6 +96,28 @@ function countMetricEntries(entries) {
   ).length;
 }
 
+function showToast(message, variant = 'primary') {
+  const container = document.getElementById('mdi-toast-container');
+  if (!container || typeof bootstrap === 'undefined') {
+    alert(message);
+    return;
+  }
+
+  const toast = document.createElement('div');
+  toast.className = `toast align-items-center text-bg-${variant} border-0 mdi-toast`;
+  toast.role = 'status';
+  toast.innerHTML = `
+    <div class="d-flex">
+      <div class="toast-body">${message}</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+    </div>
+  `;
+  container.appendChild(toast);
+  const toastInstance = new bootstrap.Toast(toast, { delay: 4000 });
+  toastInstance.show();
+  toast.addEventListener('hidden.bs.toast', () => toast.remove());
+}
+
 function renderEntryCard(entry, categoryMeta, statusBadges, entryUrl) {
   const meta = categoryMeta[entry.category] || {};
   const color = meta.color || 'primary';
@@ -266,54 +288,31 @@ function markEntryComplete(entryId, button, board, onComplete) {
     });
 }
 
-function decodeBase64ToBytes(base64) {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
-function triggerEmailDownload(payload) {
-  if (!payload?.eml_base64) {
-    return;
-  }
-  const bytes = decodeBase64ToBytes(payload.eml_base64);
-  const blob = new Blob([bytes], { type: 'message/rfc822' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = payload.download_name || 'mdi_active_items.eml';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function generateEmailDraft(button) {
+function sendActiveItemsEmail(button) {
   const originalLabel = button.innerHTML;
+  const endpoint = button.dataset.emailEndpoint || '/mdi/send_active_email';
   button.disabled = true;
-  button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Preparing…';
+  button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Sending…';
 
-  fetch('/generate_mdi_email', { method: 'POST' })
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error('Unable to build email');
+  fetch(endpoint, { method: 'POST' })
+    .then((response) => response.json()
+      .then((data) => ({ ok: response.ok, data })))
+    .then(({ ok, data }) => {
+      if (!ok) {
+        const errorMessage = data?.error || 'Unable to send email';
+        throw new Error(errorMessage);
       }
-      return response.json();
-    })
-    .then((data) => {
-      triggerEmailDownload(data);
-      const recipientList = (data.recipients && data.recipients.length)
-        ? ` for ${data.recipients.join(', ')}`
-        : '';
-      const itemCount = typeof data.item_count === 'number' ? data.item_count : 'all';
-      alert(`Email draft generated${recipientList}. Includes ${itemCount} active items.`);
+      const recipientText = data.recipient_count === 1
+        ? '1 recipient'
+        : `${data.recipient_count || 0} recipients`;
+      const itemText = typeof data.item_count === 'number'
+        ? `${data.item_count} active item${data.item_count === 1 ? '' : 's'}`
+        : 'active items';
+      showToast(`MDI summary sent to ${recipientText} (${itemText}).`, 'success');
     })
     .catch((error) => {
-      console.error('Failed to generate email', error);
-      alert('Unable to generate the email draft right now. Please try again.');
+      console.error('Failed to send active items email', error);
+      showToast(error.message || 'Unable to send the email right now.', 'danger');
     })
     .finally(() => {
       button.disabled = false;
@@ -335,7 +334,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const emailButton = document.getElementById('email-active-btn');
   if (emailButton) {
-    emailButton.addEventListener('click', () => generateEmailDraft(emailButton));
+    emailButton.addEventListener('click', () => sendActiveItemsEmail(emailButton));
   }
 
   board.addEventListener('click', (event) => {
