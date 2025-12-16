@@ -898,6 +898,30 @@ class OrderStatus:
     }
 
 
+class ImportBatch(db.Model):
+    __tablename__ = "import_batch"
+
+    id = db.Column(db.Integer, primary_key=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    filename = db.Column(db.String, nullable=True)
+    uploaded_by = db.Column(db.String, nullable=True)
+    row_count = db.Column(db.Integer, nullable=False, default=0)
+    created_count = db.Column(db.Integer, nullable=False, default=0)
+    updated_count = db.Column(db.Integer, nullable=False, default=0)
+    skipped_count = db.Column(db.Integer, nullable=False, default=0)
+    error_count = db.Column(db.Integer, nullable=False, default=0)
+
+    orders = db.relationship(
+        "Order", foreign_keys="Order.last_import_batch_id", back_populates="last_import_batch"
+    )
+    reviewed_orders = db.relationship(
+        "Order", foreign_keys="Order.review_batch_id", back_populates="review_batch"
+    )
+
+    def __repr__(self):  # pragma: no cover - debug helper
+        return f"<ImportBatch {self.id} rows={self.row_count}>"
+
+
 class Order(db.Model):
     __tablename__ = "order"
 
@@ -928,6 +952,14 @@ class Order(db.Model):
     promised_date = db.Column(db.Date, nullable=True)
     scheduled_start_date = db.Column(db.Date, nullable=True)
     scheduled_completion_date = db.Column(db.Date, nullable=True)
+    needs_review = db.Column(db.Boolean, nullable=False, default=False)
+    review_reason = db.Column(db.String, nullable=True)
+    last_import_batch_id = db.Column(
+        db.Integer, db.ForeignKey("import_batch.id", ondelete="SET NULL"), nullable=True
+    )
+    review_batch_id = db.Column(
+        db.Integer, db.ForeignKey("import_batch.id", ondelete="SET NULL"), nullable=True
+    )
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
@@ -952,6 +984,12 @@ class Order(db.Model):
         back_populates="order",
         cascade="all, delete-orphan",
         uselist=False,
+    )
+    last_import_batch = db.relationship(
+        "ImportBatch", foreign_keys=[last_import_batch_id], back_populates="orders"
+    )
+    review_batch = db.relationship(
+        "ImportBatch", foreign_keys=[review_batch_id], back_populates="reviewed_orders"
     )
 
     def __repr__(self):
@@ -1074,13 +1112,13 @@ class GateOrderDetail(db.Model):
     order_id = db.Column(db.Integer, db.ForeignKey("order.id"), nullable=False, unique=True)
     item_number = db.Column(db.String, nullable=False)
     production_quantity = db.Column(db.Integer, nullable=False)
-    panel_count = db.Column(db.Integer, nullable=False)
-    total_gate_height = db.Column(db.Numeric(10, 2), nullable=False)
-    al_color = db.Column(db.String, nullable=False)
-    insert_color = db.Column(db.String, nullable=False)
-    lead_post_direction = db.Column(db.String, nullable=False)
-    visi_panels = db.Column(db.String, nullable=False)
-    half_panel_color = db.Column(db.String, nullable=False)
+    panel_count = db.Column(db.Integer, nullable=True)
+    total_gate_height = db.Column(db.Numeric(10, 2), nullable=True)
+    al_color = db.Column(db.String, nullable=True)
+    insert_color = db.Column(db.String, nullable=True)
+    lead_post_direction = db.Column(db.String, nullable=True)
+    visi_panels = db.Column(db.String, nullable=True)
+    half_panel_color = db.Column(db.String, nullable=True)
     hardware_option = db.Column(db.String, nullable=True)
     adders = db.Column(db.String, nullable=True)
     inspection_panel_count = db.Column(db.Integer, nullable=True)

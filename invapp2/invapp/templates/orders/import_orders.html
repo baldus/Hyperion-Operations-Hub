@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Import Orders</h2>
+<p>Upload a CSV or Excel file with the required columns to create or update orders. Only admin users may run imports.</p>
+<form method="post" enctype="multipart/form-data" class="import-form">
+    <label for="orders_file" class="field-label">Upload file (.csv or .xlsx)</label>
+    <input type="file" name="orders_file" id="orders_file" accept=".csv,.xlsx" required>
+    <div class="form-actions">
+        <button type="submit" name="action" value="preview" class="action-btn subtle-action">Preview</button>
+        <button type="submit" name="action" value="import" class="action-btn primary-action">Import</button>
+    </div>
+</form>
+
+{% if preview_rows %}
+<div class="card-section">
+    <h3>Preview (first {{ preview_rows|length }} rows)</h3>
+    <div class="table-scroll">
+        <table>
+            <thead>
+                <tr>
+                    <th>Row #</th>
+                    {% for label, key in display_columns %}
+                    <th>{{ label }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in preview_rows %}
+                <tr>
+                    <td>{{ row.row_number }}</td>
+                    {% for label, key in display_columns %}
+                    <td>{{ row[key] }}</td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if results %}
+<div class="card-section">
+    <h3>Import Summary</h3>
+    <ul>
+        <li>Batch ID: {{ results.batch.id }}</li>
+        <li>Rows processed: {{ results.batch.row_count }}</li>
+        <li>Created: {{ results.created }}</li>
+        <li>Updated: {{ results.updated }}</li>
+        <li>Skipped: {{ results.skipped }}</li>
+        <li>Errors: {{ results.errors|length }}</li>
+        <li>Flagged for review: {{ results.flagged }}</li>
+    </ul>
+    {% if results.errors %}
+    <h4>Row Errors</h4>
+    <div class="table-scroll">
+        <table>
+            <thead>
+                <tr><th>Row</th><th>Message</th></tr>
+            </thead>
+            <tbody>
+                {% for error in results.errors %}
+                <tr>
+                    <td>{{ error.row }}</td>
+                    <td>{{ error.message }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if error_report %}
+    <p><a href="{{ error_report }}" download="import-errors.csv">Download error report</a></p>
+    {% endif %}
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}

@@ -181,6 +181,7 @@ def _ensure_order_schema(engine):
         "item_bom",
         "item_bom_component",
         "gate_order_detail",
+        "import_batch",
     }
     missing_tables = required_tables - existing_tables
     if missing_tables:
@@ -198,6 +199,14 @@ def _ensure_order_schema(engine):
         columns_to_add.append(("customer_name", "VARCHAR"))
     if "created_by" not in order_columns:
         columns_to_add.append(("created_by", "VARCHAR"))
+    if "needs_review" not in order_columns:
+        columns_to_add.append(("needs_review", "BOOLEAN NOT NULL DEFAULT FALSE"))
+    if "review_reason" not in order_columns:
+        columns_to_add.append(("review_reason", "VARCHAR"))
+    if "last_import_batch_id" not in order_columns:
+        columns_to_add.append(("last_import_batch_id", "INTEGER"))
+    if "review_batch_id" not in order_columns:
+        columns_to_add.append(("review_batch_id", "INTEGER"))
     if "general_notes" not in order_columns:
         columns_to_add.append(("general_notes", "TEXT"))
     if "order_type" not in order_columns:
