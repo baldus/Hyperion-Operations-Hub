@@ -233,6 +233,7 @@ def _ensure_order_schema(engine):
         gate_columns = set()
 
     gate_columns_to_add = []
+    gate_column_metadata = {col["name"]: col for col in inspector.get_columns("gate_order_detail")}
     required_gate_columns = {
         "inspection_panel_count": "INTEGER",
         "inspection_gate_height": "NUMERIC(10, 3)",
@@ -257,6 +258,16 @@ def _ensure_order_schema(engine):
                         f"ALTER TABLE gate_order_detail ADD COLUMN {column_name} {column_type}"
                     )
                 )
+
+    panel_count_column = gate_column_metadata.get("panel_count")
+    if panel_count_column and not panel_count_column.get("nullable", True):
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE gate_order_detail "
+                    "ALTER COLUMN panel_count DROP NOT NULL"
+                )
+            )
 
 
 def _ensure_production_schema(engine):
