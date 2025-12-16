@@ -259,15 +259,35 @@ def _ensure_order_schema(engine):
                     )
                 )
 
-    panel_count_column = gate_column_metadata.get("panel_count")
-    if panel_count_column and not panel_count_column.get("nullable", True):
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    "ALTER TABLE gate_order_detail "
-                    "ALTER COLUMN panel_count DROP NOT NULL"
+    nullable_gate_columns = {
+        "panel_count",
+        "total_gate_height",
+        "al_color",
+        "insert_color",
+        "lead_post_direction",
+        "visi_panels",
+        "half_panel_color",
+        "hardware_option",
+        "adders",
+        "inspection_panel_count",
+        "inspection_gate_height",
+        "inspection_al_color",
+        "inspection_insert_color",
+        "inspection_lead_post_direction",
+        "inspection_visi_panels",
+        "inspection_recorded_at",
+    }
+
+    for column_name in nullable_gate_columns:
+        column_metadata = gate_column_metadata.get(column_name)
+        if column_metadata and not column_metadata.get("nullable", True):
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE gate_order_detail "
+                        f"ALTER COLUMN {column_name} DROP NOT NULL"
+                    )
                 )
-            )
 
 
 def _ensure_production_schema(engine):
