@@ -1011,6 +1011,19 @@ def list_items():
 
     pagination = query.paginate(page=page, per_page=size, error_out=False)
 
+    on_hand_totals = {}
+    if pagination.items:
+        item_ids = [item.id for item in pagination.items]
+        quantity_totals = (
+            db.session.query(
+                Movement.item_id, func.sum(Movement.quantity).label("on_hand")
+            )
+            .filter(Movement.item_id.in_(item_ids))
+            .group_by(Movement.item_id)
+            .all()
+        )
+        on_hand_totals = {row.item_id: row.on_hand for row in quantity_totals}
+
     types_query = (
         db.session.query(Item.type)
         .filter(Item.type.isnot(None))
@@ -1031,6 +1044,7 @@ def list_items():
         sort=sort_param,
         search=search,
         delete_all_prompt=delete_all_prompt,
+        on_hand_totals=on_hand_totals,
     )
 
 

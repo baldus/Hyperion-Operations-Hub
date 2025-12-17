@@ -88,6 +88,7 @@
         <th>List Price</th>
         <th>Last Unit Cost</th>
         <th>Item Class</th>
+        <th>On Hand</th>
         <th>Notes</th>
       </tr>
     </thead>
@@ -115,6 +116,7 @@
           {% endif %}
         </td>
         <td>{{ item.item_class or '-' }}</td>
+        <td>{{ on_hand_totals.get(item.id, 0) }}</td>
         <td>
           {% if item.notes %}
             {{ item.notes|truncate(80) }}
