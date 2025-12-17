@@ -183,6 +183,16 @@ body.light .icon-btn:hover {
     display: inline;
 }
 
+.compact-list {
+    list-style: none;
+    padding-left: 0;
+    margin: 0;
+}
+
+.compact-list li + li {
+    margin-top: 0.25rem;
+}
+
 .upload-status {
     display: flex;
     align-items: center;

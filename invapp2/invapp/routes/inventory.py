@@ -1663,13 +1663,87 @@ def export_items():
 def list_locations():
     page = request.args.get("page", 1, type=int)
     size = request.args.get("size", 20, type=int)
-    pagination = Location.query.paginate(page=page, per_page=size, error_out=False)
+    search = (request.args.get("search") or "").strip()
+    like_pattern = f"%{search}%" if search else None
+
+    locations_query = Location.query
+    if like_pattern:
+        matching_location_ids = (
+            db.session.query(Movement.location_id)
+            .join(Item, Item.id == Movement.item_id)
+            .group_by(Movement.location_id, Movement.item_id)
+            .having(func.sum(Movement.quantity) != 0)
+            .filter(
+                or_(
+                    Item.sku.ilike(like_pattern),
+                    Item.name.ilike(like_pattern),
+                )
+            )
+        )
+
+        locations_query = locations_query.filter(
+            or_(
+                Location.code.ilike(like_pattern),
+                Location.description.ilike(like_pattern),
+                Location.id.in_(matching_location_ids),
+            )
+        )
+
+    pagination = locations_query.paginate(page=page, per_page=size, error_out=False)
+
+    balances_query = (
+        db.session.query(
+            Movement.location_id,
+            Movement.item_id,
+            func.sum(Movement.quantity).label("on_hand"),
+        )
+        .join(Item, Item.id == Movement.item_id)
+        .join(Location, Location.id == Movement.location_id)
+        .group_by(Movement.location_id, Movement.item_id)
+        .having(func.sum(Movement.quantity) != 0)
+    )
+
+    if like_pattern:
+        balances_query = balances_query.filter(
+            or_(
+                Item.sku.ilike(like_pattern),
+                Item.name.ilike(like_pattern),
+                Location.code.ilike(like_pattern),
+                Location.description.ilike(like_pattern),
+            )
+        )
+
+    balances = balances_query.all()
+    item_ids = {item_id for _, item_id, _ in balances}
+    items = (
+        {i.id: i for i in Item.query.filter(Item.id.in_(item_ids)).all()}
+        if item_ids
+        else {}
+    )
+
+    balances_by_location: dict[int, list[dict[str, Union[Item, int]]]] = defaultdict(list)
+    for location_id, item_id, on_hand in balances:
+        item = items.get(item_id)
+        if not item:
+            continue
+        balances_by_location[location_id].append(
+            {
+                "item": item,
+                "quantity": int(on_hand),
+            }
+        )
+
+    for location_balances in balances_by_location.values():
+        location_balances.sort(key=lambda entry: entry["item"].sku)
+
     return render_template(
         "inventory/list_locations.html",
         locations=pagination.items,
         page=page,
         size=size,
         pages=pagination.pages,
+        search=search,
+        balances_by_location=balances_by_location,
     )
 
 
