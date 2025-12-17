@@ -14,12 +14,29 @@
 </div>
 <br>
 
+<form method="get" class="inline-form">
+  <input
+    type="text"
+    name="search"
+    placeholder="Search by SKU, item name, or location"
+    value="{{ search }}"
+  >
+  <button type="submit" class="bubble-btn">Search</button>
+  {% if search %}
+    <a href="{{ url_for('inventory.list_locations') }}" class="bubble-btn">Clear</a>
+  {% endif %}
+</form>
+
+<br>
+<br>
+
 <div class="table-container">
   <table class="inventory-table">
     <thead>
       <tr>
         <th>Code</th>
         <th>Description</th>
+        <th>Stock</th>
         {% if current_user.is_authenticated and current_user.has_role('admin') %}
         <th>Actions</th>
         {% endif %}
@@ -30,6 +47,22 @@
       <tr>
         <td><a href="{{ url_for('inventory.edit_location', location_id=loc.id) }}">{{ loc.code }}</a></td>
         <td>{{ loc.description }}</td>
+        <td>
+          {% set balances = balances_by_location.get(loc.id, []) %}
+          {% if balances %}
+            <ul class="compact-list">
+              {% for balance in balances %}
+                <li>
+                  <strong>{{ balance.item.sku }}</strong>
+                  ({{ balance.quantity }})
+                  - {{ balance.item.description or balance.item.name }}
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <span class="muted">No stock</span>
+          {% endif %}
+        </td>
         {% if current_user.is_authenticated and current_user.has_role('admin') %}
         <td>
           <form method="POST" action="{{ url_for('inventory.print_location_label', location_id=loc.id) }}">
