@@ -2478,9 +2478,15 @@ def receiving():
     }
 
     default_location = None
+    item_details = None
     if form_defaults["sku"]:
         item_for_defaults = Item.query.filter_by(sku=form_defaults["sku"]).first()
         default_location = getattr(item_for_defaults, "default_location", None)
+        if item_for_defaults:
+            item_details = {
+                "name": item_for_defaults.name or "",
+                "description": item_for_defaults.description or "",
+            }
         if not form_defaults["location_id"] and default_location:
             form_defaults["location_id"] = str(default_location.id)
 
@@ -2594,6 +2600,7 @@ def receiving():
         locations=locations,
         form_defaults=form_defaults,
         default_location=default_location,
+        item_details=item_details,
         can_defer_without_qty=can_defer_without_qty,
     )
 

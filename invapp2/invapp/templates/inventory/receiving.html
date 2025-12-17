@@ -37,6 +37,12 @@
     {% endfor %}
   </select><br><br>
 
+  {% if item_details %}
+    <p id="item-details-display" class="form-hint">Item: {{ item_details.name or 'Unnamed' }}{% if item_details.description %} — {{ item_details.description }}{% endif %}</p>
+  {% else %}
+    <p id="item-details-display" class="form-hint">Enter a SKU to see the item name and description.</p>
+  {% endif %}
+
   {% if default_location %}
     <p id="default-location-display" class="form-hint">Default location: {{ default_location.code }}{% if default_location.description %} ({{ default_location.description }}){% endif %}</p>
   {% elif defaults.get('sku') %}
@@ -105,6 +111,7 @@
     const lookupButton = document.getElementById('item-lookup-btn');
     const lookupResults = document.getElementById('item-lookup-results');
     const defaultLocationDisplay = document.getElementById('default-location-display');
+    const itemDetailsDisplay = document.getElementById('item-details-display');
     const locationSelect = document.querySelector('select[name="location_id"]');
 
     if (qtyInput && deferCheckbox) {
@@ -170,6 +177,12 @@
       }
     };
 
+    const setItemDetailsMessage = (message) => {
+      if (itemDetailsDisplay) {
+        itemDetailsDisplay.textContent = message;
+      }
+    };
+
     const applyDefaultLocation = (location) => {
       if (!defaultLocationDisplay) return;
 
@@ -184,11 +197,24 @@
       }
     };
 
+    const applyItemDetails = (item) => {
+      if (!itemDetailsDisplay) return;
+
+      if (item && (item.name || item.description)) {
+        const name = item.name || 'Unnamed';
+        const description = item.description ? ` — ${item.description}` : '';
+        itemDetailsDisplay.textContent = `Item: ${name}${description}`;
+      } else {
+        setItemDetailsMessage('Enter a SKU to see the item name and description.');
+      }
+    };
+
     const lookupDefaultLocation = async () => {
       if (!skuInput) return;
       const sku = (skuInput.value || '').trim();
       if (!sku) {
         setDefaultLocationMessage('Enter a SKU to see its default location.');
+        setItemDetailsMessage('Enter a SKU to see the item name and description.');
         return;
       }
 
@@ -196,12 +222,15 @@
         const response = await fetch(`/inventory/api/items/${encodeURIComponent(sku)}`);
         if (!response.ok) {
           setDefaultLocationMessage('Item not found. Please verify the SKU.');
+          setItemDetailsMessage('Item not found. Please verify the SKU.');
           return;
         }
         const data = await response.json();
         applyDefaultLocation(data.default_location);
+        applyItemDetails(data);
       } catch (error) {
         setDefaultLocationMessage('Unable to load default location right now.');
+        setItemDetailsMessage('Unable to load item details right now.');
       }
     };
 
@@ -239,6 +268,7 @@
     skuInput?.addEventListener('input', (event) => {
       if (!event.target.value) {
         setDefaultLocationMessage('Enter a SKU to see its default location.');
+        setItemDetailsMessage('Enter a SKU to see the item name and description.');
       }
     });
   });
