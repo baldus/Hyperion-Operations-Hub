@@ -29,6 +29,16 @@
   <label for="item_class">Item Class:</label>
   <input type="text" name="item_class" value="{{ item.item_class or '' }}"><br>
 
+  <label for="default_location_id">Default Stock Location:</label>
+  <select name="default_location_id">
+    <option value="">-- None --</option>
+    {% for loc in locations %}
+      {% set selected = 'selected' if item.default_location_id == loc.id else '' %}
+      <option value="{{ loc.id }}" {{ selected }}>{{ loc.code }}{% if loc.description %} - {{ loc.description }}{% endif %}</option>
+    {% endfor %}
+  </select>
+  <small class="form-text text-muted">Shown when receiving this SKU to guide put-away.</small><br>
+
   <label for="notes">Notes:</label>
   <textarea name="notes" rows="4">{{ item.notes or '' }}</textarea><br>
 

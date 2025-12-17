@@ -282,6 +282,15 @@ class Item(db.Model):
     list_price = db.Column(db.Numeric(12, 2))
     last_unit_cost = db.Column(db.Numeric(12, 2))
     item_class = db.Column(db.String)
+    default_location_id = db.Column(
+        db.Integer, db.ForeignKey("location.id"), nullable=True
+    )
+
+    default_location = db.relationship(
+        "Location",
+        foreign_keys=[default_location_id],
+        lazy="joined",
+    )
 
     attachments = db.relationship(
         "ItemAttachment",

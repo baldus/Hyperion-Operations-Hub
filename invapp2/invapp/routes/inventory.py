@@ -821,7 +821,11 @@ def lookup_item_api(sku):
                 Item.last_unit_cost,
                 Item.item_class,
                 Item.type,
-            )
+                Item.default_location_id,
+            ),
+            joinedload(Item.default_location).load_only(
+                Location.id, Location.code, Location.description
+            ),
         )
         .filter(func.lower(Item.sku) == sku.lower())
         .first()
@@ -840,6 +844,15 @@ def lookup_item_api(sku):
             "list_price": _decimal_to_string(item.list_price),
             "last_unit_cost": _decimal_to_string(item.last_unit_cost),
             "item_class": item.item_class or "",
+            "default_location": (
+                {
+                    "id": item.default_location.id,
+                    "code": item.default_location.code,
+                    "description": item.default_location.description,
+                }
+                if item.default_location
+                else None
+            ),
         }
     )
 
@@ -1036,6 +1049,8 @@ def list_items():
 
 @bp.route("/item/add", methods=["GET", "POST"])
 def add_item():
+    locations = Location.query.order_by(Location.code.asc()).all()
+
     if request.method == "POST":
         next_sku = _next_auto_sku()
 
@@ -1052,13 +1067,27 @@ def add_item():
         name = request.form.get("name", "").strip()
         if not name:
             flash("Name is required.", "danger")
-            return render_template("inventory/add_item.html", next_sku=next_sku)
+            return render_template(
+                "inventory/add_item.html", next_sku=next_sku, locations=locations
+            )
         unit = request.form.get("unit", "ea") or "ea"
         description = request.form.get("description", "")
         item_type = request.form.get("type", "").strip() or None
         item_class = request.form.get("item_class", "").strip() or None
 
         attachment_saved = False
+
+        default_location_id_raw = request.form.get("default_location_id")
+        default_location_id = None
+        if default_location_id_raw:
+            try:
+                default_location_id = int(default_location_id_raw)
+            except (TypeError, ValueError):
+                default_location_id = None
+
+        default_location = (
+            Location.query.get(default_location_id) if default_location_id else None
+        )
 
         item = Item(
             sku=next_sku,
@@ -1071,6 +1100,7 @@ def add_item():
             list_price=_parse_decimal(request.form.get("list_price")),
             last_unit_cost=_parse_decimal(request.form.get("last_unit_cost")),
             item_class=item_class,
+            default_location=default_location,
         )
         db.session.add(item)
         db.session.flush()
@@ -1091,7 +1121,9 @@ def add_item():
         )
         return redirect(url_for("inventory.list_items"))
 
-    return render_template("inventory/add_item.html", next_sku=_next_auto_sku())
+    return render_template(
+        "inventory/add_item.html", next_sku=_next_auto_sku(), locations=locations
+    )
 
 
 @bp.route("/item/<int:item_id>/edit", methods=["GET", "POST"])
@@ -1104,12 +1136,15 @@ def edit_item(item_id):
     @guard
     def _edit_item(item_id):
         item = Item.query.get_or_404(item_id)
+        locations = Location.query.order_by(Location.code.asc()).all()
 
         if request.method == "POST":
             name_value = request.form.get("name", "").strip()
             if not name_value:
                 flash("Name is required.", "danger")
-                return render_template("inventory/edit_item.html", item=item)
+                return render_template(
+                    "inventory/edit_item.html", item=item, locations=locations
+                )
 
             item.name = name_value
             item.type = request.form.get("type", "").strip() or None
@@ -1130,6 +1165,17 @@ def edit_item(item_id):
             item.list_price = _parse_decimal(request.form.get("list_price"))
             item.last_unit_cost = _parse_decimal(request.form.get("last_unit_cost"))
             item.item_class = request.form.get("item_class", "").strip() or None
+
+            default_location_id_raw = request.form.get("default_location_id")
+            if default_location_id_raw:
+                try:
+                    parsed_id = int(default_location_id_raw)
+                    location_choice = Location.query.get(parsed_id)
+                    item.default_location_id = location_choice.id if location_choice else None
+                except (TypeError, ValueError):
+                    item.default_location_id = None
+            else:
+                item.default_location_id = None
 
             attachment_file = request.files.get("attachment")
             attachment_saved, error_message = _save_item_attachment(item, attachment_file)
@@ -1153,7 +1199,7 @@ def edit_item(item_id):
             )
             return redirect(url_for("inventory.list_items"))
 
-        return render_template("inventory/edit_item.html", item=item)
+        return render_template("inventory/edit_item.html", item=item, locations=locations)
 
     return _edit_item(item_id)
 
@@ -2431,6 +2477,13 @@ def receiving():
         "location_id": request.args.get("location_id", "").strip(),
     }
 
+    default_location = None
+    if form_defaults["sku"]:
+        item_for_defaults = Item.query.filter_by(sku=form_defaults["sku"]).first()
+        default_location = getattr(item_for_defaults, "default_location", None)
+        if not form_defaults["location_id"] and default_location:
+            form_defaults["location_id"] = str(default_location.id)
+
     if request.method == "POST":
         sku = request.form["sku"].strip()
         defer_qty = (
@@ -2540,6 +2593,7 @@ def receiving():
         records=records,
         locations=locations,
         form_defaults=form_defaults,
+        default_location=default_location,
         can_defer_without_qty=can_defer_without_qty,
     )
 
