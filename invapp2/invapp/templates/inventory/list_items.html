@@ -66,6 +66,7 @@
     <option value="list_price" {% if sort == 'list_price' %}selected{% endif %}>List Price</option>
     <option value="last_unit_cost" {% if sort == 'last_unit_cost' %}selected{% endif %}>Last Unit Cost</option>
     <option value="item_class" {% if sort == 'item_class' %}selected{% endif %}>Item Class</option>
+    <option value="on_hand" {% if sort == 'on_hand' %}selected{% endif %}>On Hand</option>
   </select>
 
   <input type="hidden" name="search" value="{{ search }}">

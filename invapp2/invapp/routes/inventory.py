@@ -988,7 +988,18 @@ def list_items():
     sort_param = request.args.get("sort", "sku")
     search = request.args.get("search", "")
 
-    query = Item.query
+    on_hand_subquery = (
+        db.session.query(
+            Movement.item_id.label("item_id"),
+            func.sum(Movement.quantity).label("on_hand"),
+        )
+        .group_by(Movement.item_id)
+        .subquery()
+    )
+
+    on_hand_coalesced = func.coalesce(on_hand_subquery.c.on_hand, 0)
+
+    query = Item.query.outerjoin(on_hand_subquery, Item.id == on_hand_subquery.c.item_id)
     if selected_type:
         query = query.filter(Item.type == selected_type)
     if search:
@@ -1006,6 +1017,7 @@ def list_items():
         "list_price": Item.list_price.asc(),
         "last_unit_cost": Item.last_unit_cost.asc(),
         "item_class": Item.item_class.asc(),
+        "on_hand": on_hand_coalesced.asc(),
     }
     query = query.order_by(sort_columns.get(sort_param, Item.sku.asc()))
 
