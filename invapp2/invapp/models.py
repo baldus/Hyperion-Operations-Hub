@@ -291,6 +291,8 @@ class Item(db.Model):
         foreign_keys=[default_location_id],
         lazy="joined",
     )
+    # NOTE: ``default_location_id`` is backfilled for legacy databases in
+    # ``_ensure_inventory_schema`` to avoid model/schema drift.
 
     attachments = db.relationship(
         "ItemAttachment",

@@ -129,6 +129,11 @@ def _ensure_inventory_schema(engine):
     except (NoSuchTableError, OperationalError):
         item_columns = set()
 
+    try:
+        item_foreign_keys = inspector.get_foreign_keys("item")
+    except (NoSuchTableError, OperationalError):
+        item_foreign_keys = []
+
     item_columns_to_add = []
     item_required_columns = {
         "type": "VARCHAR",
@@ -136,11 +141,22 @@ def _ensure_inventory_schema(engine):
         "list_price": "NUMERIC(12, 2)",
         "last_unit_cost": "NUMERIC(12, 2)",
         "item_class": "VARCHAR",
+        "default_location_id": "INTEGER",
     }
 
     for column_name, column_type in item_required_columns.items():
         if column_name not in item_columns:
             item_columns_to_add.append(("item", column_name, column_type))
+
+    has_default_location_fk = any(
+        set(fk.get("constrained_columns", []) or []) == {"default_location_id"}
+        and fk.get("referred_table") == "location"
+        for fk in item_foreign_keys
+    )
+    default_location_column_exists = "default_location_id" in item_columns or any(
+        table_name == "item" and column_name == "default_location_id"
+        for table_name, column_name, _ in item_columns_to_add
+    )
 
     try:
         batch_columns = {col["name"] for col in inspector.get_columns("batch")}
@@ -167,6 +183,22 @@ def _ensure_inventory_schema(engine):
                         f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
                     )
                 )
+
+    # Align legacy ``item`` tables with the new optional default location field
+    # so model queries do not reference a missing column or constraint.
+    if (
+        default_location_column_exists
+        and not has_default_location_fk
+        and engine.dialect.name != "sqlite"
+        and "location" in inspector.get_table_names()
+    ):
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE item ADD CONSTRAINT fk_item_default_location "
+                    "FOREIGN KEY (default_location_id) REFERENCES location(id)"
+                )
+            )
 
 
 def _ensure_order_schema(engine):
