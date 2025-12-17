@@ -999,9 +999,21 @@ def list_items():
     size = request.args.get("size", 20, type=int)
     selected_type = request.args.get("type", type=str)
     sort_param = request.args.get("sort", "sku")
+    order = request.args.get("order", "asc")
     search = request.args.get("search", "")
 
-    query = Item.query
+    on_hand_subquery = (
+        db.session.query(
+            Movement.item_id.label("item_id"),
+            func.sum(Movement.quantity).label("on_hand"),
+        )
+        .group_by(Movement.item_id)
+        .subquery()
+    )
+
+    on_hand_coalesced = func.coalesce(on_hand_subquery.c.on_hand, 0)
+
+    query = Item.query.outerjoin(on_hand_subquery, Item.id == on_hand_subquery.c.item_id)
     if selected_type:
         query = query.filter(Item.type == selected_type)
     if search:
@@ -1011,18 +1023,40 @@ def list_items():
         )
 
     sort_columns = {
-        "sku": Item.sku.asc(),
-        "name": Item.name.asc(),
-        "type": Item.type.asc(),
-        "unit": Item.unit.asc(),
-        "min_stock": Item.min_stock.asc(),
-        "list_price": Item.list_price.asc(),
-        "last_unit_cost": Item.last_unit_cost.asc(),
-        "item_class": Item.item_class.asc(),
+        "sku": Item.sku,
+        "name": Item.name,
+        "type": Item.type,
+        "unit": Item.unit,
+        "min_stock": Item.min_stock,
+        "list_price": Item.list_price,
+        "last_unit_cost": Item.last_unit_cost,
+        "item_class": Item.item_class,
+        "on_hand": on_hand_coalesced,
     }
-    query = query.order_by(sort_columns.get(sort_param, Item.sku.asc()))
+
+    sort_expression = sort_columns.get(sort_param, Item.sku)
+    if order == "desc":
+        sort_expression = sort_expression.desc()
+    else:
+        order = "asc"
+        sort_expression = sort_expression.asc()
+
+    query = query.order_by(sort_expression)
 
     pagination = query.paginate(page=page, per_page=size, error_out=False)
+
+    on_hand_totals = {}
+    if pagination.items:
+        item_ids = [item.id for item in pagination.items]
+        quantity_totals = (
+            db.session.query(
+                Movement.item_id, func.sum(Movement.quantity).label("on_hand")
+            )
+            .filter(Movement.item_id.in_(item_ids))
+            .group_by(Movement.item_id)
+            .all()
+        )
+        on_hand_totals = {row.item_id: row.on_hand for row in quantity_totals}
 
     types_query = (
         db.session.query(Item.type)
@@ -1042,8 +1076,58 @@ def list_items():
         available_types=available_types,
         selected_type=selected_type,
         sort=sort_param,
+        order=order,
         search=search,
         delete_all_prompt=delete_all_prompt,
+        on_hand_totals=on_hand_totals,
+    )
+
+
+@bp.route("/item/<int:item_id>")
+def view_item(item_id):
+    item = Item.query.options(joinedload(Item.attachments)).get_or_404(item_id)
+
+    location_totals = (
+        db.session.query(
+            Movement.location_id, func.sum(Movement.quantity).label("on_hand")
+        )
+        .filter(Movement.item_id == item.id)
+        .group_by(Movement.location_id)
+        .having(func.sum(Movement.quantity) != 0)
+        .all()
+    )
+
+    location_ids = [location_id for location_id, _ in location_totals if location_id is not None]
+    locations = (
+        {
+            loc.id: loc
+            for loc in Location.query.filter(Location.id.in_(location_ids)).all()
+        }
+        if location_ids
+        else {}
+    )
+
+    location_balances = []
+    for location_id, on_hand in location_totals:
+        location = locations.get(location_id)
+        if not location:
+            continue
+        location_balances.append({"location": location, "on_hand": int(on_hand)})
+
+    location_balances.sort(key=lambda entry: entry["location"].code or "")
+    total_on_hand = sum(entry["on_hand"] for entry in location_balances)
+
+    edit_roles = resolve_edit_roles(
+        "inventory", default_roles=("editor", "admin", "inventory")
+    )
+    can_edit = current_user.is_authenticated and current_user.has_any_role(edit_roles)
+
+    return render_template(
+        "inventory/view_item.html",
+        item=item,
+        location_balances=location_balances,
+        total_on_hand=total_on_hand,
+        can_edit=can_edit,
     )
 
 

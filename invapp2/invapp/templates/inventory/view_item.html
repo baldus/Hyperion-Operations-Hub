@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Item {{ item.sku }}</h2>
+
+<div class="action-bar">
+  <a href="{{ url_for('inventory.list_items') }}" class="bubble-btn">Back to Items</a>
+  {% if can_edit %}
+    <a href="{{ url_for('inventory.edit_item', item_id=item.id) }}" class="bubble-btn">Edit Item</a>
+  {% endif %}
+</div>
+
+<section class="item-details">
+  <h3>Details</h3>
+  <dl class="detail-list">
+    <div class="detail-list__row">
+      <dt>SKU</dt>
+      <dd>{{ item.sku }}</dd>
+    </div>
+    <div class="detail-list__row">
+      <dt>Name</dt>
+      <dd>{{ item.name }}</dd>
+    </div>
+    <div class="detail-list__row">
+      <dt>Type</dt>
+      <dd>{{ item.type or '-' }}</dd>
+    </div>
+    <div class="detail-list__row">
+      <dt>Unit</dt>
+      <dd>{{ item.unit }}</dd>
+    </div>
+    <div class="detail-list__row">
+      <dt>Description</dt>
+      <dd>{{ item.description or '-' }}</dd>
+    </div>
+    <div class="detail-list__row">
+      <dt>Min Stock</dt>
+      <dd>{{ item.min_stock or 0 }}</dd>
+    </div>
+    <div class="detail-list__row">
+      <dt>List Price</dt>
+      <dd>{% if item.list_price is not none %}{{ "{:.2f}".format(item.list_price) }}{% else %}-{% endif %}</dd>
+    </div>
+    <div class="detail-list__row">
+      <dt>Last Unit Cost</dt>
+      <dd>{% if item.last_unit_cost is not none %}{{ "{:.2f}".format(item.last_unit_cost) }}{% else %}-{% endif %}</dd>
+    </div>
+    <div class="detail-list__row">
+      <dt>Item Class</dt>
+      <dd>{{ item.item_class or '-' }}</dd>
+    </div>
+    <div class="detail-list__row">
+      <dt>Notes</dt>
+      <dd>{% if item.notes %}{{ item.notes }}{% else %}<span class="text-muted">No notes yet.</span>{% endif %}</dd>
+    </div>
+  </dl>
+</section>
+
+<section class="item-locations">
+  <h3>Locations</h3>
+  {% if location_balances %}
+    <table class="inventory-table">
+      <thead>
+        <tr>
+          <th>Location</th>
+          <th>Description</th>
+          <th>On Hand</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in location_balances %}
+          <tr>
+            <td>{{ entry.location.code }}</td>
+            <td>{{ entry.location.description or '-' }}</td>
+            <td>{{ entry.on_hand }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <th colspan="2">Total On Hand</th>
+          <th>{{ total_on_hand }}</th>
+        </tr>
+      </tfoot>
+    </table>
+  {% else %}
+    <p class="text-muted">This SKU is not currently assigned to any locations.</p>
+  {% endif %}
+</section>
+
+<section class="item-attachments">
+  <h3>Attachments</h3>
+  {% if item.attachments %}
+    <ul class="attachment-list">
+      {% for attachment in item.attachments %}
+        <li class="attachment-list__item">
+          <a href="{{ url_for('inventory.download_item_attachment', item_id=item.id, attachment_id=attachment.id) }}">
+            {{ attachment.original_name }}
+          </a>
+          <small class="text-muted">
+            Uploaded {{ attachment.uploaded_at.strftime('%Y-%m-%d %H:%M') if attachment.uploaded_at else '' }}
+          </small>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="text-muted">No attachments uploaded for this item.</p>
+  {% endif %}
+</section>
+{% endblock %}
