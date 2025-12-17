@@ -986,6 +986,7 @@ def list_items():
     size = request.args.get("size", 20, type=int)
     selected_type = request.args.get("type", type=str)
     sort_param = request.args.get("sort", "sku")
+    order = request.args.get("order", "asc")
     search = request.args.get("search", "")
 
     on_hand_subquery = (
@@ -1009,17 +1010,25 @@ def list_items():
         )
 
     sort_columns = {
-        "sku": Item.sku.asc(),
-        "name": Item.name.asc(),
-        "type": Item.type.asc(),
-        "unit": Item.unit.asc(),
-        "min_stock": Item.min_stock.asc(),
-        "list_price": Item.list_price.asc(),
-        "last_unit_cost": Item.last_unit_cost.asc(),
-        "item_class": Item.item_class.asc(),
-        "on_hand": on_hand_coalesced.asc(),
+        "sku": Item.sku,
+        "name": Item.name,
+        "type": Item.type,
+        "unit": Item.unit,
+        "min_stock": Item.min_stock,
+        "list_price": Item.list_price,
+        "last_unit_cost": Item.last_unit_cost,
+        "item_class": Item.item_class,
+        "on_hand": on_hand_coalesced,
     }
-    query = query.order_by(sort_columns.get(sort_param, Item.sku.asc()))
+
+    sort_expression = sort_columns.get(sort_param, Item.sku)
+    if order == "desc":
+        sort_expression = sort_expression.desc()
+    else:
+        order = "asc"
+        sort_expression = sort_expression.asc()
+
+    query = query.order_by(sort_expression)
 
     pagination = query.paginate(page=page, per_page=size, error_out=False)
 
@@ -1054,6 +1063,7 @@ def list_items():
         available_types=available_types,
         selected_type=selected_type,
         sort=sort_param,
+        order=order,
         search=search,
         delete_all_prompt=delete_all_prompt,
         on_hand_totals=on_hand_totals,
