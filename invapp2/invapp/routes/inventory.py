@@ -1034,6 +1034,54 @@ def list_items():
     )
 
 
+@bp.route("/item/<int:item_id>")
+def view_item(item_id):
+    item = Item.query.options(joinedload(Item.attachments)).get_or_404(item_id)
+
+    location_totals = (
+        db.session.query(
+            Movement.location_id, func.sum(Movement.quantity).label("on_hand")
+        )
+        .filter(Movement.item_id == item.id)
+        .group_by(Movement.location_id)
+        .having(func.sum(Movement.quantity) != 0)
+        .all()
+    )
+
+    location_ids = [location_id for location_id, _ in location_totals if location_id is not None]
+    locations = (
+        {
+            loc.id: loc
+            for loc in Location.query.filter(Location.id.in_(location_ids)).all()
+        }
+        if location_ids
+        else {}
+    )
+
+    location_balances = []
+    for location_id, on_hand in location_totals:
+        location = locations.get(location_id)
+        if not location:
+            continue
+        location_balances.append({"location": location, "on_hand": int(on_hand)})
+
+    location_balances.sort(key=lambda entry: entry["location"].code or "")
+    total_on_hand = sum(entry["on_hand"] for entry in location_balances)
+
+    edit_roles = resolve_edit_roles(
+        "inventory", default_roles=("editor", "admin", "inventory")
+    )
+    can_edit = current_user.is_authenticated and current_user.has_any_role(edit_roles)
+
+    return render_template(
+        "inventory/view_item.html",
+        item=item,
+        location_balances=location_balances,
+        total_on_hand=total_on_hand,
+        can_edit=can_edit,
+    )
+
+
 @bp.route("/item/add", methods=["GET", "POST"])
 def add_item():
     if request.method == "POST":
