@@ -141,5 +141,19 @@ else
     echo "✅ Using GUNICORN_TIMEOUT=${TIMEOUT}s"
 fi
 
+echo "🔹 Running startup health check"
+HEALTHCHECK_FLAGS=()
+if [ "${HEALTHCHECK_FATAL:-0}" -eq 1 ]; then
+    HEALTHCHECK_FLAGS+=("--fatal")
+fi
+if [ "${HEALTHCHECK_DRY_RUN:-0}" -eq 1 ]; then
+    HEALTHCHECK_FLAGS+=("--dry-run")
+fi
+
+if ! python -m invapp.healthcheck "${HEALTHCHECK_FLAGS[@]}"; then
+    echo "❌ Health check failed; aborting startup" >&2
+    exit 1
+fi
+
 echo "🔹 Starting Hyperion Operations Console via Gunicorn ($HOST:$PORT)"
 exec gunicorn --bind "$HOST:$PORT" --workers "$WORKERS" --timeout "$TIMEOUT" "$APP_MODULE"

@@ -1,0 +1,95 @@
+import argparse
+import json
+import logging
+from dataclasses import asdict
+from typing import Any
+
+from sqlalchemy import create_engine
+
+from config import Config
+from invapp.db_maintenance import analyze_primary_key_sequences, repair_primary_key_sequences
+from invapp.extensions import db
+
+# Ensure models are registered with the declarative base
+import invapp.models  # noqa: F401
+
+
+LOGGER_NAME = "invapp.db_sanity_check"
+
+
+def _build_engine(config: Config):
+    return create_engine(
+        config.SQLALCHEMY_DATABASE_URI,
+        pool_pre_ping=True,
+    )
+
+
+def _format_issue(issue) -> str:
+    current = issue.current_next_value
+    desired = issue.desired_next_value
+    prefix = f"{issue.table} ({issue.pk_column})"
+    if issue.sequence_name:
+        prefix += f" -> {issue.sequence_name}"
+    if issue.error:
+        return f"{prefix}: ERROR {issue.error}"
+    if issue.status == "mismatch":
+        return f"{prefix}: sequence at {current} but needs to be at least {desired}"
+    if issue.status == "skipped":
+        return f"{prefix}: skipped (no sequence)"
+    return f"{prefix}: status={issue.status}"
+
+
+def run_check(apply_fixes: bool, as_json_output: bool) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    logger = logging.getLogger(LOGGER_NAME)
+
+    config = Config()
+    engine = _build_engine(config)
+
+    checks = analyze_primary_key_sequences(engine, db.Model, logger=logger)
+    issues = [c for c in checks if c.status != "ok"]
+
+    repair_summary: dict[str, Any] | None = None
+    exit_code = 0
+
+    if issues and not apply_fixes:
+        exit_code = 1
+
+    if apply_fixes:
+        repair_summary = repair_primary_key_sequences(engine, db.Model, logger=logger)
+        if repair_summary.get("failed"):
+            exit_code = 2
+
+    if as_json_output:
+        payload = {
+            "issues": [asdict(c) for c in issues],
+            "repair_summary": repair_summary,
+        }
+        print(json.dumps(payload, indent=2))
+    else:
+        if not issues:
+            print("✅ All primary key sequences appear healthy")
+        else:
+            print("⚠️ Sequence issues detected:")
+            for issue in issues:
+                print(f" - {_format_issue(issue)}")
+        if repair_summary:
+            print(
+                f"Repair summary: repaired={repair_summary.get('repaired', 0)} "
+                f"skipped={repair_summary.get('skipped', 0)} failed={repair_summary.get('failed', 0)}"
+            )
+
+    return exit_code
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Check database primary key sequences")
+    parser.add_argument("--fix", action="store_true", help="Apply repairs instead of reporting only")
+    parser.add_argument("--json", action="store_true", dest="json_output", help="Emit JSON output")
+    args = parser.parse_args()
+
+    raise SystemExit(run_check(apply_fixes=args.fix, as_json_output=args.json_output))
+
+
+if __name__ == "__main__":
+    main()
