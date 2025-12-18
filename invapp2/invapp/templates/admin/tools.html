@@ -47,5 +47,29 @@
         </a>
         {% endfor %}
     </div>
+    <div class="error-report-log">
+        <div class="log-header">
+            <h4>Recent Error Reports</h4>
+            <p>Submitted from the error screen when something goes wrong.</p>
+        </div>
+        {% if not database_online %}
+        <p class="empty-text">Error reports are unavailable while the database is offline.</p>
+        {% elif error_reports %}
+        <ul class="log-list" aria-label="Recent error reports">
+            {% for report in error_reports %}
+            <li class="log-item">
+                <p class="log-primary">{{ report.summary() }}</p>
+                <p class="log-meta">
+                    Reported {{ report.occurred_at.strftime('%b %d, %Y %H:%M UTC') }}
+                    {% if report.username %} by {{ report.username }}{% endif %}
+                    {% if report.path %} on {{ report.path }}{% endif %}
+                </p>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="empty-text">No error reports have been submitted yet.</p>
+        {% endif %}
+    </div>
 </section>
 {% endblock %}

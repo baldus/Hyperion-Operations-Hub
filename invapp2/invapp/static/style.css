@@ -4081,3 +4081,162 @@ body.light .email-modal-hint {
 .empty-state p {
     margin-bottom: 1rem;
 }
+
+.error-card {
+    max-width: 1100px;
+}
+
+.error-panel {
+    display: grid;
+    gap: 1.5rem;
+    grid-template-columns: 1fr;
+}
+
+.error-summary {
+    padding: 1.25rem;
+    border-radius: 16px;
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.08), rgba(248, 113, 113, 0.12));
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.error-summary h3 {
+    margin-top: 0;
+    margin-bottom: 0.5rem;
+}
+
+.error-message {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin: 0 0 0.35rem;
+}
+
+.error-context {
+    margin: 0 0 0.75rem;
+    color: #1f2937;
+}
+
+.error-note {
+    margin: 0 0 0.75rem;
+    color: #334155;
+}
+
+.error-report-form {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0.5rem 0 0;
+}
+
+.primary-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.65rem 1.2rem;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    color: #fff;
+    border: none;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.primary-btn:hover {
+    background: linear-gradient(135deg, #1d4ed8, #1e40af);
+}
+
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.status-pill--success {
+    background: rgba(16, 185, 129, 0.15);
+    color: #065f46;
+}
+
+.status-pill--error {
+    background: rgba(239, 68, 68, 0.12);
+    color: #991b1b;
+}
+
+.stacktrace-block {
+    padding: 1.25rem;
+    border-radius: 12px;
+    background: #0f172a;
+    color: #e2e8f0;
+    border: 1px solid rgba(226, 232, 240, 0.08);
+    overflow: auto;
+}
+
+.stacktrace-header {
+    margin-bottom: 0.5rem;
+}
+
+.stacktrace {
+    white-space: pre-wrap;
+    margin: 0;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+    font-size: 0.95rem;
+}
+
+.success-text {
+    margin: 0.5rem 0 0;
+    color: #047857;
+}
+
+.error-text {
+    margin: 0.5rem 0 0;
+    color: #b91c1c;
+}
+
+.error-report-log {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(226, 232, 240, 0.7);
+}
+
+.log-header h4 {
+    margin: 0 0 0.2rem;
+}
+
+.log-header p {
+    margin: 0 0 0.75rem;
+    color: #334155;
+}
+
+.log-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.log-item {
+    padding: 0.85rem 1rem;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.04);
+    border: 1px solid rgba(226, 232, 240, 0.9);
+}
+
+.log-primary {
+    margin: 0 0 0.25rem;
+    font-weight: 700;
+}
+
+.log-meta {
+    margin: 0;
+    color: #475569;
+    font-size: 0.95rem;
+}
+
+.empty-text {
+    margin: 0.25rem 0;
+    color: #475569;
+}

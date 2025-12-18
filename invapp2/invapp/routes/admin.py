@@ -580,11 +580,20 @@ def tools():
         },
     ]
 
+    error_reports: list[models.ErrorReport] = []
+    if database_online:
+        error_reports = (
+            models.ErrorReport.query.order_by(models.ErrorReport.occurred_at.desc())
+            .limit(10)
+            .all()
+        )
+
     return render_template(
         "admin/tools.html",
         system_health=system_health,
         quick_links=quick_links,
         database_online=database_online,
+        error_reports=error_reports,
     )
 
 

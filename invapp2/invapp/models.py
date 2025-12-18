@@ -155,6 +155,33 @@ class AccessLog(db.Model):
 
 
 
+class ErrorReport(db.Model):
+    __tablename__ = "error_report"
+
+    id = db.Column(db.Integer, primary_key=True)
+    occurred_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    path = db.Column(db.String(512), nullable=True)
+    endpoint = db.Column(db.String(255), nullable=True)
+    message = db.Column(db.Text, nullable=False)
+    stacktrace = db.Column(db.Text, nullable=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="SET NULL"))
+    username = db.Column(db.String(255), nullable=True)
+    user_agent = db.Column(db.String(512), nullable=True)
+    ip_address = db.Column(db.String(64), nullable=True)
+
+    user = db.relationship("User", backref=db.backref("error_reports", lazy="dynamic"))
+
+    __table_args__ = (db.Index("ix_error_report_occurred_at", "occurred_at"),)
+
+    def summary(self) -> str:
+        """Return the first non-empty line of the message for display."""
+
+        for line in (self.message or "").splitlines():
+            cleaned = line.strip()
+            if cleaned:
+                return cleaned
+        return self.message or "Internal error"
+
 class UsefulLink(db.Model):
     __tablename__ = "useful_link"
 
