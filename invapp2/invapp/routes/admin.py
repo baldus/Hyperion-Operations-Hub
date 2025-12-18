@@ -42,111 +42,153 @@ _AUTOMATED_RECOVERY_ACTION_ID = "automated-recovery"
 _CONSOLE_RESTART_ACTION_ID = "console-restart"
 
 
-_RECOVERY_SEQUENCE = (
-    {
-        "label": "Refresh apt package index",
-        "command": ("sudo", "apt-get", "update"),
-        "note": "Fetch the latest package metadata before installing or upgrading components.",
-    },
-    {
-        "label": "Install PostgreSQL server",
-        "command": (
-            "sudo",
-            "apt-get",
-            "install",
-            "-y",
-            "postgresql",
-            "postgresql-contrib",
-        ),
-        "note": "Ensure the database server and extensions are present on the host.",
-    },
-    {
-        "label": "Start PostgreSQL service",
-        "command": ("sudo", "systemctl", "start", "postgresql"),
-        "note": "Bring PostgreSQL online if it is currently stopped.",
-    },
-    {
-        "label": "Restart PostgreSQL service",
-        "command": ("sudo", "systemctl", "restart", "postgresql"),
-        "note": "Reload the database service to pick up configuration or package updates.",
-    },
-    {
-        "label": "Ensure application database exists",
-        "command": (
-            "sudo",
-            "-u",
-            "postgres",
-            "bash",
-            "-c",
-            "psql -tc \"SELECT 1 FROM pg_database WHERE datname = 'invdb'\" | grep -q 1 || createdb invdb",
-        ),
-        "note": "Create the expected invdb database when provisioning a new environment.",
-    },
-    {
-        "label": "Ensure application user exists",
-        "command": (
-            "sudo",
-            "-u",
-            "postgres",
-            "psql",
-            "-c",
-            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'inv') THEN CREATE USER inv WITH PASSWORD 'change_me'; END IF; END $$;",
-        ),
-        "note": "Provision the documented inv role when it is missing.",
-    },
-    {
-        "label": "Ensure database owner",
-        "command": (
-            "sudo",
-            "-u",
-            "postgres",
-            "psql",
-            "-c",
-            "ALTER DATABASE invdb OWNER TO inv;",
-        ),
-        "note": "Guarantee the application role owns the database.",
-    },
-    {
-        "label": "Grant database privileges",
-        "command": (
-            "sudo",
-            "-u",
-            "postgres",
-            "psql",
-            "-c",
-            "GRANT ALL PRIVILEGES ON DATABASE invdb TO inv;",
-        ),
-        "note": "Allow the application role to connect once PostgreSQL is online.",
-    },
-    {
-        "label": "Upgrade console dependencies",
-        "command": ("pip", "install", "--upgrade", "-r", "requirements.txt"),
-        "note": "Reinstall Python packages inside the active virtual environment.",
-    },
-    {
-        "label": "Capture diagnostics snapshot",
-        "command": ("bash", "support/run_diagnostics.sh"),
-        "note": "Collect system status information for troubleshooting.",
-    },
-)
+def _quote_sql(value: str) -> str:
+    return value.replace("'", "''")
 
 
-_EMERGENCY_ACTIONS = (
-    {
-        "id": _AUTOMATED_RECOVERY_ACTION_ID,
-        "title": "Automated recovery",
-        "button_label": "Diagnose and repair",
-        "description": "Run every recovery helper in sequence and surface the results in one place.",
-        "note": "Includes package refresh, PostgreSQL maintenance, and a diagnostics snapshot.",
-    },
-    {
-        "id": _CONSOLE_RESTART_ACTION_ID,
-        "title": "Restart console services",
-        "button_label": "Restart console",
-        "description": "Launch the helper script to reload Gunicorn and re-apply configuration.",
-        "note": "Invokes start_operations_console.sh on the application host.",
-    },
-)
+def _database_settings() -> dict[str, str]:
+    """Return connection details from the configured SQLAlchemy URI."""
+
+    default = {
+        "database": "invdb",
+        "username": "inv",
+        "password": "change_me",
+        "host": "localhost",
+    }
+
+    uri = current_app.config.get("SQLALCHEMY_DATABASE_URI")
+    if not uri:
+        return default
+
+    try:
+        url = make_url(uri)
+    except Exception:
+        return default
+
+    return {
+        "database": url.database or default["database"],
+        "username": url.username or default["username"],
+        "password": url.password or default["password"],
+        "host": url.host or default["host"],
+    }
+
+
+def _build_recovery_sequence() -> tuple[dict[str, object], ...]:
+    settings = _database_settings()
+    db_name = settings["database"]
+    db_user = settings["username"]
+    db_password = settings["password"]
+    db_host = settings["host"]
+
+    sql_db_name = _quote_sql(db_name)
+    sql_db_user = _quote_sql(db_user)
+    sql_db_password = _quote_sql(db_password)
+
+    host_args: tuple[str, ...] = ("-h", db_host) if db_host else tuple()
+    psql_prefix = ("sudo", "-u", "postgres", "psql", *host_args)
+
+    return (
+        {
+            "label": "Refresh apt package index",
+            "command": ("sudo", "apt-get", "update"),
+            "note": "Fetch the latest package metadata before installing or upgrading components.",
+        },
+        {
+            "label": "Install PostgreSQL server",
+            "command": (
+                "sudo",
+                "apt-get",
+                "install",
+                "-y",
+                "postgresql",
+                "postgresql-contrib",
+            ),
+            "note": "Ensure the database server and extensions are present on the host.",
+        },
+        {
+            "label": "Start PostgreSQL service",
+            "command": ("sudo", "systemctl", "start", "postgresql"),
+            "note": "Bring PostgreSQL online if it is currently stopped.",
+        },
+        {
+            "label": "Restart PostgreSQL service",
+            "command": ("sudo", "systemctl", "restart", "postgresql"),
+            "note": "Reload the database service to pick up configuration or package updates.",
+        },
+        {
+            "label": "Ensure application database exists",
+            "command": (
+                "sudo",
+                "-u",
+                "postgres",
+                "bash",
+                "-c",
+                f"psql {' '.join(host_args)} -tc \"SELECT 1 FROM pg_database WHERE datname = '{sql_db_name}'\" | "
+                f"grep -q 1 || createdb {shlex.quote(db_name)}",
+            ),
+            "note": f"Create the configured {db_name} database when provisioning a new environment.",
+        },
+        {
+            "label": "Ensure application user exists",
+            "command": (*psql_prefix, "-c", f"DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{sql_db_user}') "
+            f"THEN CREATE USER \"{db_user}\" WITH PASSWORD '{sql_db_password}'; END IF; END $$;"),
+            "note": f"Provision the application role ({db_user}) when it is missing.",
+        },
+        {
+            "label": "Ensure database owner",
+            "command": (*psql_prefix, "-c", f"ALTER DATABASE \"{db_name}\" OWNER TO \"{db_user}\";"),
+            "note": f"Guarantee the {db_name} database is owned by {db_user}.",
+        },
+        {
+            "label": "Grant database privileges",
+            "command": (*psql_prefix, "-c", f"GRANT ALL PRIVILEGES ON DATABASE \"{db_name}\" TO \"{db_user}\";"),
+            "note": f"Allow the application role to connect once PostgreSQL is online.",
+        },
+        {
+            "label": "Re-run application bootstrap",
+            "command": (
+                "bash",
+                "-c",
+                "python - <<'PY'\n"
+                "from invapp import create_app\n"
+                "app = create_app()\n"
+                "print('Application bootstrap completed successfully')\n"
+                "PY",
+            ),
+            "note": "Rebuild database schema and defaults using the configured DB settings.",
+        },
+        {
+            "label": "Upgrade console dependencies",
+            "command": ("pip", "install", "--upgrade", "-r", "requirements.txt"),
+            "note": "Reinstall Python packages inside the active virtual environment.",
+        },
+        {
+            "label": "Capture diagnostics snapshot",
+            "command": ("bash", "support/run_diagnostics.sh"),
+            "note": "Collect system status information for troubleshooting.",
+        },
+    )
+
+
+def _emergency_actions() -> tuple[dict[str, str], ...]:
+    db_name = _database_settings()["database"]
+
+    return (
+        {
+            "id": _AUTOMATED_RECOVERY_ACTION_ID,
+            "title": "Automated recovery",
+            "button_label": "Diagnose and repair",
+            "description": "Run every recovery helper in sequence and surface the results in one place.",
+            "note": f"Includes package refresh, {db_name} database maintenance, an application bootstrap, and a diagnostics snapshot.",
+        },
+        {
+            "id": _CONSOLE_RESTART_ACTION_ID,
+            "title": "Restart console services",
+            "button_label": "Restart console",
+            "description": "Launch the helper script to reload Gunicorn and re-apply configuration.",
+            "note": "Invokes start_operations_console.sh on the application host.",
+        },
+    )
 
 
 _APPROVED_HELPER_SCRIPTS = {
@@ -283,7 +325,7 @@ def _run_recovery_sequence() -> dict[str, object]:
     steps: list[dict[str, object]] = []
     failures = 0
 
-    for step in _RECOVERY_SEQUENCE:
+    for step in _build_recovery_sequence():
         result = _run_emergency_command(step["command"])
         result["label"] = step["label"]
         result["note"] = step.get("note")
@@ -601,7 +643,7 @@ def tools():
 @login_required
 @require_roles("admin")
 def emergency_console():
-    actions = _EMERGENCY_ACTIONS
+    actions = _emergency_actions()
     action_lookup = {action["id"]: action for action in actions}
     command_result: dict[str, object] | None = None
     error_message: str | None = None
