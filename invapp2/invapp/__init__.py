@@ -40,6 +40,7 @@ from .mdi import models as mdi_models
 from config import Config
 from . import models  # ensure models are registered with SQLAlchemy
 from .audit import record_access_event, resolve_client_ip
+from .db_maintenance import repair_primary_key_sequences
 from .superuser import is_superuser
 
 
@@ -576,6 +577,7 @@ def create_app(config_override=None):
 
     database_available = True
     database_error_message: str | None = None
+    sequence_repair_summary: dict | None = None
 
     # create tables if they do not exist and ensure legacy schema
     with app.app_context():
@@ -620,9 +622,23 @@ def create_app(config_override=None):
                 )
                 _ensure_core_roles()
                 _repair_rma_status_event_sequence(db.engine)
-                # Repair movement primary key sequences that may have been
-                # desynchronized by manual imports or restores.
-                models.Movement._repair_primary_key_sequence()
+                try:
+                    sequence_repair_summary = repair_primary_key_sequences(
+                        db.engine, db.Model, logger=current_app.logger
+                    )
+                except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
+                    sequence_repair_summary = {
+                        "repaired": 0,
+                        "skipped": 0,
+                        "failed": 1,
+                        "details": [],
+                        "error": str(exc),
+                    }
+                    current_app.logger.warning(
+                        "Primary key sequence repair failed during startup: %s",
+                        exc,
+                        exc_info=current_app.debug,
+                    )
             except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
                 database_available = False
                 database_error_message = (
@@ -634,6 +650,7 @@ def create_app(config_override=None):
 
     app.config["DATABASE_AVAILABLE"] = database_available
     app.config["DATABASE_ERROR"] = database_error_message
+    app.config["SEQUENCE_REPAIR_SUMMARY"] = sequence_repair_summary
 
     @app.context_processor
     def inject_permission_helpers():

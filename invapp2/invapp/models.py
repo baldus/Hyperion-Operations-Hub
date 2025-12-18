@@ -1,10 +1,12 @@
+import logging
 import secrets
 from decimal import Decimal
 from datetime import date, datetime
 from typing import ClassVar
 
+from flask import current_app
 from sqlalchemy import func, inspect, select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.orm import synonym
 from sqlalchemy.orm.exc import DetachedInstanceError
@@ -12,6 +14,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from invapp.extensions import db
 from invapp.login import UserMixin
+from invapp.db_maintenance import repair_primary_key_sequences
 
 
 class PrimaryKeySequenceMixin:
@@ -54,46 +57,25 @@ class PrimaryKeySequenceMixin:
         if not bind:
             return
 
-        table = getattr(cls, "__table__", None)
-        if table is None:
-            return
+        try:
+            logger = current_app.logger  # type: ignore[attr-defined]
+        except Exception:
+            logger = logging.getLogger(__name__)
 
-        pk_column_name = getattr(cls, "pk_column_name", "id")
-        pk_column = getattr(table.c, pk_column_name, None)
-        if pk_column is None:
-            return
-
-        dialect = bind.dialect.name
-        if dialect == "postgresql":
-            with bind.begin() as connection:
-                sequence_name = connection.execute(
-                    text("SELECT pg_get_serial_sequence(:table_name, :pk_column)"),
-                    {"table_name": table.fullname, "pk_column": pk_column_name},
-                ).scalar_one_or_none()
-                if not sequence_name:
-                    return
-
-                max_identifier = connection.execute(
-                    select(func.coalesce(func.max(pk_column), 0))
-                ).scalar_one()
-
-                connection.execute(
-                    text("SELECT setval(:sequence_name, :new_value, true)"),
-                    {"sequence_name": sequence_name, "new_value": max_identifier},
-                )
-        elif dialect == "sqlite":
-            with bind.begin() as connection:
-                max_identifier = connection.execute(
-                    select(func.coalesce(func.max(pk_column), 0))
-                ).scalar_one()
-                connection.execute(
-                    text(
-                        "UPDATE sqlite_sequence "
-                        "SET seq = :max_identifier "
-                        "WHERE name = :table_name"
-                    ),
-                    {"max_identifier": max_identifier, "table_name": table.name},
-                )
+        try:
+            repair_primary_key_sequences(
+                bind,
+                db.Model,
+                logger=logger,
+                models=[cls],
+            )
+        except SQLAlchemyError as exc:
+            logger.warning(
+                "Failed to repair primary key sequence for %s: %s",
+                getattr(cls, "__tablename__", cls.__name__),
+                exc,
+                exc_info=logger.isEnabledFor(logging.DEBUG),
+            )
 
     @classmethod
     def commit_with_sequence_retry(cls, instance) -> None:
