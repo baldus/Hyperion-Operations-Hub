@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block content_card_class %}error-card{% endblock %}
+
+{% block content %}
+<h2>Something went wrong</h2>
+<p class="page-intro">An unexpected error occurred. Please contact Josh for assistance.</p>
+
+<div class="error-panel">
+    <div class="error-summary">
+        <h3>What happened?</h3>
+        <p class="error-message">{{ error_message }}</p>
+        {% if path %}
+        <p class="error-context"><strong>Path:</strong> {{ path }}</p>
+        {% endif %}
+        <p class="error-note">Include the details below when contacting Josh so we can fix the issue quickly.</p>
+        <form method="post" action="{{ url_for('errors.report_error') }}" class="error-report-form">
+            <input type="hidden" name="message" value="{{ error_message }}">
+            <input type="hidden" name="stacktrace" value="{{ stacktrace }}">
+            <input type="hidden" name="path" value="{{ path }}">
+            <input type="hidden" name="endpoint" value="{{ endpoint }}">
+            <button type="submit" class="primary-btn">Report this error</button>
+            {% if report_submitted %}
+            <span class="status-pill status-pill--success" role="status">Reported</span>
+            {% elif report_failed %}
+            <span class="status-pill status-pill--error" role="status">Report failed</span>
+            {% endif %}
+        </form>
+        {% if report_submitted %}
+        <p class="success-text">Thanks! The report has been logged for the administrators.</p>
+        {% elif report_failed %}
+        <p class="error-text">We could not save the report. Please share these details with Josh.</p>
+        {% endif %}
+    </div>
+    {% if stacktrace %}
+    <div class="stacktrace-block">
+        <div class="stacktrace-header">
+            <h3>Error details</h3>
+            <p>Share this with Josh when reporting the issue.</p>
+        </div>
+        <pre class="stacktrace" aria-label="Error details">{{ stacktrace }}</pre>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -20,6 +20,7 @@ from .permissions import (
 from .routes import (
     admin,
     auth,
+    errors,
     inventory,
     orders,
     purchasing,
@@ -599,6 +600,7 @@ def create_app(config_override=None):
 
     # register blueprints
     app.register_blueprint(auth.bp)
+    app.register_blueprint(errors.bp)
     app.register_blueprint(inventory.bp)
     app.register_blueprint(reports.bp)
     app.register_blueprint(orders.bp)
