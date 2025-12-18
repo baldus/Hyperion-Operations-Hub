@@ -3,10 +3,12 @@ import sys
 from datetime import date
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
-from invapp import create_app
+from invapp import _repair_rma_status_event_sequence, create_app
 from invapp.extensions import db
 from invapp.models import RMARequest, RMAStatusEvent, Role, User
 
@@ -163,3 +165,75 @@ def test_update_rma_request_logs_event(app, client):
         assert latest.to_status == RMARequest.STATUS_IN_REVIEW
         assert "Escalated to engineering" in (latest.note or "")
         assert latest.changed_by == "superuser"
+
+
+def test_rma_status_event_sequence_repair(app):
+    with app.app_context():
+        request = RMARequest(
+            customer_name="Gamma Works",
+            issue_description="Paint blemish",
+            opened_by="superuser",
+        )
+        db.session.add(request)
+        db.session.flush()
+
+        events = [
+            RMAStatusEvent(
+                request_id=request.id,
+                from_status=None,
+                to_status=RMARequest.STATUS_OPEN,
+                changed_by="superuser",
+                note="Seed event",
+            )
+            for _ in range(3)
+        ]
+        db.session.add_all(events)
+        db.session.commit()
+
+        max_identifier = max(event.id for event in events)
+
+        if db.engine.dialect.name == "sqlite":
+            # Push the AUTOINCREMENT counter behind the stored rows to mimic
+            # sequence drift caused by manual inserts.
+            db.session.execute(
+                text(
+                    "INSERT OR REPLACE INTO sqlite_sequence (name, seq) "
+                    "VALUES ('rma_status_event', 1)"
+                )
+            )
+            db.session.commit()
+
+        _repair_rma_status_event_sequence(db.engine)
+
+        repaired_event = RMAStatusEvent(
+            request_id=request.id,
+            from_status=RMARequest.STATUS_OPEN,
+            to_status=RMARequest.STATUS_IN_REVIEW,
+            changed_by="auditor",
+        )
+        db.session.add(repaired_event)
+        db.session.commit()
+
+        assert repaired_event.id > max_identifier
+
+
+def test_new_request_handles_integrity_error(app, client, monkeypatch):
+    def fail_commit():
+        raise IntegrityError("stmt", {}, Exception("fail"))
+
+    monkeypatch.setattr(db.session, "commit", fail_commit)
+
+    response = client.post(
+        "/quality/requests/new",
+        data={
+            "customer_name": "Omega",
+            "issue_description": "Bad latch",
+        },
+    )
+
+    assert response.status_code == 400
+    assert b"Unable to log the RMA request" in response.data
+
+    with app.app_context():
+        assert RMARequest.query.count() == 0
+        assert db.session.is_active

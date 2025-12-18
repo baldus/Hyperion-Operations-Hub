@@ -1,5 +1,7 @@
 from datetime import date, timedelta
 
+import click
+
 from flask import Flask, current_app, render_template, request, session, url_for
 from sqlalchemy import func, inspect, text
 from sqlalchemy.exc import IntegrityError, NoSuchTableError, OperationalError, SQLAlchemyError
@@ -419,6 +421,88 @@ def _ensure_production_schema(engine):
                     )
 
 
+def _repair_rma_status_event_sequence(engine=None) -> None:
+    """Realign the ``rma_status_event`` primary key sequence with stored rows.
+
+    Backups and manual inserts can desynchronize PostgreSQL sequences, causing
+    INSERT statements to reuse an existing identifier. This helper resets the
+    next value to ``MAX(id)`` so new rows continue incrementing correctly.
+    """
+
+    engine = engine or db.engine
+    if engine is None:
+        return
+
+    dialect = engine.dialect.name
+
+    if dialect == "postgresql":
+        with engine.begin() as conn:
+            sequence_name = conn.execute(
+                text("SELECT pg_get_serial_sequence('rma_status_event', 'id')")
+            ).scalar()
+
+            if not sequence_name:
+                return
+
+            max_identifier = conn.execute(
+                text("SELECT COALESCE(MAX(id), 0) FROM rma_status_event")
+            ).scalar()
+            max_identifier = max_identifier or 0
+
+            next_value = max_identifier if max_identifier > 0 else 1
+            conn.execute(
+                text("SELECT setval(:sequence_name, :value, :is_called)"),
+                {
+                    "sequence_name": sequence_name,
+                    "value": next_value,
+                    "is_called": bool(max_identifier),
+                },
+            )
+
+    elif dialect == "sqlite":
+        # SQLite only exposes ``sqlite_sequence`` when AUTOINCREMENT is enabled.
+        with engine.begin() as conn:
+            has_sequence_table = conn.execute(
+                text(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type='table' AND name='sqlite_sequence'"
+                )
+            ).scalar()
+
+            if not has_sequence_table:
+                return
+
+            max_identifier = conn.execute(
+                text("SELECT COALESCE(MAX(id), 0) FROM rma_status_event")
+            ).scalar()
+            max_identifier = max_identifier or 0
+            next_value = max_identifier if max_identifier > 0 else 1
+
+            existing_row = conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM sqlite_sequence "
+                    "WHERE name='rma_status_event'"
+                )
+            ).scalar()
+
+            if existing_row:
+                conn.execute(
+                    text(
+                        "UPDATE sqlite_sequence SET seq=:value "
+                        "WHERE name='rma_status_event'"
+                    ),
+                    {"value": next_value},
+                )
+            else:
+                conn.execute(
+                    text(
+                        "INSERT INTO sqlite_sequence (name, seq) "
+                        "VALUES ('rma_status_event', :value)"
+                    ),
+                    {"value": next_value},
+                )
+
+
 def _ping_database() -> None:
     """Raise :class:`OperationalError` when the configured database is unreachable."""
 
@@ -534,6 +618,7 @@ def create_app(config_override=None):
                     app.config.get("ADMIN_PASSWORD", "joshbaldus"),
                 )
                 _ensure_core_roles()
+                _repair_rma_status_event_sequence(db.engine)
                 # Repair movement primary key sequences that may have been
                 # desynchronized by manual imports or restores.
                 models.Movement._repair_primary_key_sequence()
@@ -638,13 +723,29 @@ def create_app(config_override=None):
         except (TypeError, ValueError):
             user_id = None
 
+        if not db.session.is_active:
+            # Avoid cascading errors when the session requires rollback.
+            try:  # pragma: no cover - defensive best effort
+                db.session.rollback()
+            except Exception:
+                pass
+            return None, None
+
         try:
             username = getattr(current_user, "username", None)
         except DetachedInstanceError:
             username = None
+        except SQLAlchemyError:
+            db.session.rollback()
+            return user_id, None
 
         if username is None and user_id is not None:
-            refreshed = models.User.query.get(user_id)
+            try:
+                refreshed = models.User.query.get(user_id)
+            except SQLAlchemyError:
+                db.session.rollback()
+                refreshed = None
+
             if refreshed is not None:
                 username = refreshed.username
 
@@ -811,6 +912,14 @@ def create_app(config_override=None):
             inventory_summary=inventory_summary,
             useful_links=useful_links,
         )
+
+    @app.cli.command("db-repair-sequences")
+    def repair_sequences_command() -> None:
+        """Reset primary key sequences that may have fallen behind table data."""
+
+        click.echo("Repairing RMA status event primary key sequence...")
+        _repair_rma_status_event_sequence(db.engine)
+        click.echo("Sequence repair completed.")
 
     return app
 

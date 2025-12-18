@@ -18,6 +18,7 @@ from flask import (
     url_for,
 )
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import DetachedInstanceError
 from werkzeug.utils import secure_filename
 
@@ -245,7 +246,26 @@ def new_request():
                 )
             )
             db.session.add(rma_request)
-            db.session.commit()
+            try:
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+                current_app.logger.exception(
+                    "RMA request creation failed due to a database integrity error."
+                )
+                flash(
+                    "Unable to log the RMA request right now. Please try again.",
+                    "error",
+                )
+                return (
+                    render_template(
+                        "quality/new_request.html",
+                        form_data=form_data,
+                        priority_choices=RMARequest.PRIORITY_CHOICES,
+                    ),
+                    400,
+                )
+
             flash("RMA request logged for quality review.", "success")
             return redirect(url_for("quality.view_request", request_id=rma_request.id))
 
