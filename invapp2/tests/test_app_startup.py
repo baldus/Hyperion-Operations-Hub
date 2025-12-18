@@ -97,6 +97,9 @@ def test_emergency_console_runs_recovery_sequence(monkeypatch):
     app = create_app({"TESTING": True})
     client = app.test_client()
 
+    with app.app_context():
+        recovery_sequence = admin_routes._build_recovery_sequence()
+
     response = client.post(
         "/admin/emergency-console",
         data={"action_id": admin_routes._AUTOMATED_RECOVERY_ACTION_ID},
@@ -104,10 +107,34 @@ def test_emergency_console_runs_recovery_sequence(monkeypatch):
     assert response.status_code == 200
     assert b"Automated recovery sequence" in response.data
     assert b"steps succeeded" in response.data
-    assert len(executed) == len(admin_routes._RECOVERY_SEQUENCE)
+    assert len(executed) == len(recovery_sequence)
     assert executed[0][:3] == ("sudo", "apt-get", "update")
     assert executed[-1][0] == "bash"
     assert executed[-1][1].endswith("support/run_diagnostics.sh")
+
+
+def test_recovery_sequence_uses_configured_database(monkeypatch):
+    def fake_ping() -> None:
+        raise OperationalError("SELECT 1", {}, Exception("database offline"))
+
+    monkeypatch.setattr(invapp_module, "_ping_database", fake_ping)
+
+    app = create_app(
+        {
+            "TESTING": True,
+            "SQLALCHEMY_DATABASE_URI": "postgresql+psycopg2://example:sekret@db.example.com/exampledb",
+        }
+    )
+
+    with app.app_context():
+        recovery_sequence = admin_routes._build_recovery_sequence()
+
+    commands = [" ".join(step["command"]) for step in recovery_sequence]
+
+    assert any("exampledb" in command for command in commands)
+    assert any("example" in command and "sekret" in command for command in commands)
+    assert any("-h db.example.com" in command for command in commands)
+    assert any("Application bootstrap completed successfully" in command for command in commands)
 
 
 def test_emergency_console_resolves_restart_script(monkeypatch):
