@@ -560,8 +560,11 @@ class RMAAttachment(db.Model):
 
 class RMAStatusEvent(db.Model):
     __tablename__ = "rma_status_event"
+    # Ensure SQLite allocates monotonically increasing rowids so sequence repair
+    # utilities can reset the backing counter without reusing identifiers.
+    __table_args__ = {"sqlite_autoincrement": True}
 
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     request_id = db.Column(db.Integer, db.ForeignKey("rma_request.id"), nullable=False)
     from_status = db.Column(db.String(32), nullable=True)
     to_status = db.Column(db.String(32), nullable=False)
