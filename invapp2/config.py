@@ -21,6 +21,13 @@ class Config:
     # automatically when the draft is opened. Configure via env var if desired.
     MDI_DEFAULT_SENDER = os.getenv("MDI_DEFAULT_SENDER", "")
 
+    MDI_SMTP_HOST = os.getenv("MDI_SMTP_HOST", "")
+    MDI_SMTP_PORT = int(os.getenv("MDI_SMTP_PORT", 587))
+    MDI_SMTP_USERNAME = os.getenv("MDI_SMTP_USERNAME", "")
+    MDI_SMTP_PASSWORD = os.getenv("MDI_SMTP_PASSWORD", "")
+    MDI_SMTP_USE_TLS = os.getenv("MDI_SMTP_USE_TLS", "true")
+    MDI_SMTP_USE_SSL = os.getenv("MDI_SMTP_USE_SSL", "false")
+
     FRAMING_PANEL_OFFSET = os.getenv("FRAMING_PANEL_OFFSET", 0)
 
     ITEM_ATTACHMENT_UPLOAD_FOLDER = os.path.join(

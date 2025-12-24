@@ -27,8 +27,13 @@
         <a class="btn btn-outline-success" href="{{ url_for('mdi.report_export_csv') }}">
           <i class="bi bi-download"></i> Export CSV
         </a>
-        <button class="btn btn-outline-primary" id="email-active-btn" type="button">
-          <i class="bi bi-envelope"></i> Email Active Items
+        <button
+          class="btn btn-outline-primary"
+          id="email-active-btn"
+          type="button"
+          data-email-endpoint="{{ url_for('mdi.send_mdi_email') }}"
+        >
+          <i class="bi bi-send"></i> Send Active Items Email
         </button>
         <form class="btn-group" action="{{ url_for('mdi.report_import_csv') }}" method="post" enctype="multipart/form-data">
           <label class="btn btn-outline-secondary mb-0">
@@ -121,6 +126,7 @@
         </section>
       {% endfor %}
     </div>
+    <div class="toast-container position-fixed top-0 end-0 p-3" id="mdi-toast-container" aria-live="polite" aria-atomic="true"></div>
   </div>
 {% endblock %}
 

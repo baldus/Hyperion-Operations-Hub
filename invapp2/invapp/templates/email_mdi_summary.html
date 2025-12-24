@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MDI Active Item Summary</title>
+    <style>
+      :root {
+        --slate-900: #0f172a;
+        --slate-600: #475569;
+        --slate-200: #e2e8f0;
+        --primary: #0d6efd;
+        --primary-soft: #eaf2ff;
+        --success: #198754;
+        --warning: #f59f00;
+        --danger: #d63384;
+        --info: #0ea5e9;
+      }
+
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #f5f7fb;
+        color: var(--slate-900);
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      }
+
+      .email-shell {
+        max-width: 960px;
+        margin: 0 auto;
+        background: #ffffff;
+        border-radius: 16px;
+        overflow: hidden;
+        border: 1px solid var(--slate-200);
+        box-shadow: 0 16px 42px rgba(15, 23, 42, 0.12);
+      }
+
+      .hero {
+        padding: 24px 28px;
+        background: linear-gradient(120deg, #0d6efd, #0ea5e9);
+        color: #ffffff;
+      }
+
+      .hero h1 {
+        margin: 0 0 6px;
+        font-size: 26px;
+      }
+
+      .hero p {
+        margin: 4px 0 0;
+        opacity: 0.9;
+      }
+
+      .content {
+        padding: 24px 28px;
+      }
+
+      .cta {
+        display: inline-block;
+        margin: 12px 0 18px;
+        padding: 12px 18px;
+        background: #0d6efd;
+        color: #ffffff;
+        border-radius: 10px;
+        text-decoration: none;
+        font-weight: 600;
+        box-shadow: 0 10px 18px rgba(13, 110, 253, 0.25);
+      }
+
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 12px;
+        margin: 10px 0 20px;
+      }
+
+      .summary-card {
+        padding: 14px 16px;
+        border-radius: 12px;
+        background: #f8fbff;
+        border: 1px solid var(--slate-200);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .summary-card h3 {
+        margin: 0;
+        font-size: 22px;
+      }
+
+      .summary-card p {
+        margin: 4px 0 0;
+        color: var(--slate-600);
+        font-size: 13px;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+      }
+
+      .lane {
+        border: 1px solid var(--slate-200);
+        border-radius: 14px;
+        overflow: hidden;
+        margin-top: 20px;
+      }
+
+      .lane header {
+        padding: 14px 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: #ffffff;
+      }
+
+      .lane h2 {
+        margin: 0;
+        font-size: 16px;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+      }
+
+      .lane small {
+        opacity: 0.9;
+      }
+
+      .lane-body {
+        padding: 16px;
+        background: #f7faff;
+      }
+
+      .card {
+        background: #ffffff;
+        border: 1px solid #e5e9f2;
+        border-radius: 12px;
+        padding: 14px 14px 12px;
+        margin-bottom: 12px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+      }
+
+      .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .chip {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        border: 1px solid transparent;
+      }
+
+      .chip-muted {
+        background: #f1f3f5;
+        color: var(--slate-600);
+        border-color: var(--slate-200);
+      }
+
+      .chip-priority { background: var(--primary-soft); color: #0d6efd; }
+      .chip-status { background: #ecf5ff; color: #0d6efd; border-color: #d7e6ff; }
+      .chip-success { background: #e8f8ed; color: var(--success); }
+      .chip-warning { background: #fff4e0; color: var(--warning); }
+      .chip-danger { background: #ffe6f1; color: var(--danger); }
+      .chip-info { background: #e7f6fd; color: var(--info); }
+
+      .card-title {
+        margin: 8px 0 6px;
+        font-size: 16px;
+        font-weight: 700;
+      }
+
+      .card-title a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .card-title a:hover {
+        text-decoration: underline;
+      }
+
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        color: var(--slate-600);
+        font-size: 13px;
+      }
+
+      .body-text {
+        color: #1f2937;
+        line-height: 1.45;
+        margin: 8px 0;
+      }
+
+      .footer {
+        display: flex;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 8px;
+        color: var(--slate-600);
+        font-size: 12px;
+        margin-top: 10px;
+      }
+
+      .empty {
+        padding: 14px 16px;
+        color: var(--slate-600);
+        font-style: italic;
+        margin: 0;
+      }
+
+      .lane-primary { background: linear-gradient(90deg, #0d6efd, #0b5ed7); }
+      .lane-danger { background: linear-gradient(90deg, #d63384, #b02a61); }
+      .lane-warning { background: linear-gradient(90deg, #f59f00, #c97b00); }
+      .lane-success { background: linear-gradient(90deg, #198754, #157347); }
+      .lane-info { background: linear-gradient(90deg, #0ea5e9, #0a89c2); }
+
+      .divider {
+        border: 0;
+        border-top: 1px dashed var(--slate-200);
+        margin: 10px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="email-shell">
+      <div class="hero">
+        <p style="letter-spacing: 0.6px; opacity: 0.9; margin: 0 0 6px;">Management for Daily Improvement</p>
+        <h1>Active MDI Item Summary</h1>
+        <p>Generated {{ generated_at.strftime('%Y-%m-%d %H:%M UTC') }}</p>
+      </div>
+
+      <div class="content">
+        <p style="margin-top: 0;">Hi team,</p>
+        <p style="margin: 0 0 6px;">Here are the currently active tiles from the dashboard, grouped by pillar. Each item links directly back to the live MDI view.</p>
+        <a class="cta" href="{{ dashboard_url }}">Open Dashboard</a>
+
+        <div class="summary-grid">
+          {% for section in category_sections %}
+            <div class="summary-card">
+              <div>
+                <h3>{{ section.entries|length }}</h3>
+                <p>{{ section.name }}</p>
+              </div>
+              {% set color = section.meta.get('color', 'primary') %}
+              <span style="width: 12px; height: 12px; border-radius: 50%; display: inline-block; background: var(--{{ color if color != 'danger' else 'danger' }});"></span>
+            </div>
+          {% endfor %}
+        </div>
+
+        {% for section in category_sections %}
+          {% set color = section.meta.get('color', 'primary') %}
+          <div class="lane">
+            <header class="lane-{{ color }}">
+              <h2>{{ section.name }}</h2>
+              {% set count = section.entries|length %}
+              <small>{% if count %}{{ count }} active{% else %}No active items{% endif %}</small>
+            </header>
+
+            {% if section.entries %}
+              <div class="lane-body">
+                {% for entry in section.entries %}
+                  <div class="card">
+                    <div class="card-header">
+                      <div class="meta" style="gap: 6px;">
+                        <span class="chip chip-muted">#{{ '%04d'|format(entry.id) }}</span>
+                        {% if entry.priority %}
+                          <span class="chip chip-priority">{{ entry.priority }}</span>
+                        {% endif %}
+                      </div>
+                      <span class="chip chip-status">{{ entry.status }}</span>
+                    </div>
+
+                    <p class="card-title"><a href="{{ entry.url }}">{{ entry.title }}</a></p>
+                    <div class="meta">
+                      <span><strong>Owner:</strong> {{ entry.owner }}</span>
+                      {% if entry.area %}
+                        <span>&middot; <strong>Area:</strong> {{ entry.area }}</span>
+                      {% endif %}
+                      {% if entry.due_date %}
+                        <span>&middot; <strong>Due:</strong> {{ entry.due_date.strftime('%b %d, %Y') }}</span>
+                      {% endif %}
+                    </div>
+
+                    <hr class="divider" />
+
+                    {% if entry.category == 'Safety' %}
+                      <p class="body-text">{{ entry.description }}</p>
+                      {% if entry.related_reference %}
+                        <div class="footer"><span>Reference: {{ entry.related_reference }}</span></div>
+                      {% endif %}
+                    {% elif entry.category == 'Quality' %}
+                      <p class="body-text">{{ entry.description }}</p>
+                      <div class="footer">
+                        <span>{% if entry.related_reference %}Ref {{ entry.related_reference }}{% endif %}</span>
+                        <span>Logged {{ entry.date_logged.strftime('%b %d, %Y') if entry.date_logged else 'N/A' }}</span>
+                      </div>
+                    {% elif entry.category == 'Delivery' %}
+                      <p class="body-text">{{ entry.description }}</p>
+                      <div class="footer">
+                        <span>Order: {{ entry.order_number or 'N/A' }}</span>
+                        <span>Customer: {{ entry.customer or 'N/A' }}</span>
+                        <span>Due: {{ entry.due_date.strftime('%b %d, %Y') if entry.due_date else 'N/A' }}</span>
+                      </div>
+                    {% elif entry.category == 'People' %}
+                      <p class="body-text">People Update</p>
+                      <div class="footer">
+                        <span>Absentees: {{ entry.number_absentees if entry.number_absentees is not none else 'N/A' }}</span>
+                        <span>Open Roles: {{ entry.open_positions if entry.open_positions is not none else 'N/A' }}</span>
+                      </div>
+                    {% elif entry.category == 'Materials' %}
+                      <p class="body-text">{{ entry.description }}</p>
+                      <div class="footer">
+                        {% if entry.item_part_number %}<span>Part {{ entry.item_part_number }}</span>{% endif %}
+                        {% if entry.vendor %}<span>Vendor {{ entry.vendor }}</span>{% endif %}
+                        {% if entry.eta %}<span>ETA {{ entry.eta }}</span>{% endif %}
+                        {% if entry.po_number %}<span>PO {{ entry.po_number }}</span>{% endif %}
+                      </div>
+                    {% else %}
+                      <p class="body-text">{{ entry.description }}</p>
+                    {% endif %}
+
+                    <div class="footer">
+                      <span>Logged {{ entry.date_logged.strftime('%b %d, %Y') if entry.date_logged else 'N/A' }}</span>
+                      <span><a href="{{ entry.url }}" style="color: #0d6efd; text-decoration: none;">View on dashboard →</a></span>
+                    </div>
+                  </div>
+                {% endfor %}
+              </div>
+            {% else %}
+              <p class="empty">No active items for {{ section.name }}.</p>
+            {% endif %}
+          </div>
+        {% endfor %}
+
+        <p style="margin-top: 18px; color: var(--slate-600); font-size: 13px;">This message was sent automatically from the MDI dashboard so the team has the latest active items.</p>
+      </div>
+    </div>
+  </body>
+</html>
