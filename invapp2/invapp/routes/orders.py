@@ -1,10 +1,13 @@
+import base64
 import csv
 import io
 import json
 import re
+import zipfile
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from xml.etree import ElementTree
 
 from flask import (
     Blueprint,
@@ -27,6 +30,7 @@ from invapp.models import (
     BillOfMaterialComponent,
     Batch,
     GateOrderDetail,
+    ImportBatch,
     Item,
     Location,
     Movement,
@@ -49,6 +53,24 @@ bp.before_request(blueprint_page_guard("orders"))
 
 ORDER_TYPE_CHOICES = ("Gates", "COP's", "Operators", "Controllers")
 GATE_ROUTING_STEPS = ("Framing", "Assembly", "Inspection", "Packaging")
+IMPORT_REQUIRED_COLUMNS = {
+    "so/proposal no.": "order_number",
+    "ship by": "ship_by",
+    "customer": "customer",
+    "item id": "item_number",
+    "item description": "item_description",
+    "qty on order": "quantity",
+    "item type": "order_type",
+}
+IMPORT_DISPLAY_COLUMNS = (
+    ("SO/Proposal No.", "order_number"),
+    ("Ship By", "ship_by"),
+    ("Customer", "customer"),
+    ("Item ID", "item_number"),
+    ("Item Description", "item_description"),
+    ("Qty on Order", "quantity"),
+    ("Item Type", "order_type"),
+)
 
 
 def _ensure_order_management_access():
@@ -110,6 +132,318 @@ def _rebalance_priorities():
     for new_priority, order in enumerate(reorderable_orders, start=1):
         if order.priority != new_priority:
             order.priority = new_priority
+
+
+def _normalize_text(value: str | None) -> str:
+    if value is None:
+        return ""
+    return " ".join(str(value).split())
+
+
+def _parse_ship_date(raw_value):
+    if raw_value is None or raw_value == "":
+        return None, None
+
+    if isinstance(raw_value, (int, float)):
+        try:
+            excel_start = datetime(1899, 12, 30)
+            converted = excel_start + timedelta(days=int(raw_value))
+            return converted.date(), None
+        except Exception:
+            return None, "Unable to convert Excel serial date"
+
+    value = _normalize_text(str(raw_value))
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y"):
+        try:
+            return datetime.strptime(value, fmt).date(), None
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(value).date(), None
+    except Exception:
+        return None, "Unable to parse Ship By date"
+
+
+def _parse_quantity_value(raw_value):
+    if raw_value is None or str(raw_value).strip() == "":
+        return None
+    try:
+        cleaned = str(raw_value).replace(",", "")
+        qty = Decimal(cleaned)
+        if qty <= 0:
+            return None
+        return int(qty.to_integral_value())
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _append_description_note(order: Order, description: str):
+    normalized = _normalize_text(description)
+    if not normalized:
+        return
+    line = f"Imported Description: {normalized}"
+    notes = order.general_notes or ""
+    if line.strip() and line not in notes:
+        if notes and not notes.endswith("\n"):
+            notes += "\n"
+        notes += line
+        order.general_notes = notes
+
+
+def _normalize_headers(headers):
+    return {(header or "").strip().lower(): header for header in headers or ()}
+
+
+def _extract_import_rows_from_csv(upload, errors):
+    upload.stream.seek(0)
+    try:
+        wrapper = io.TextIOWrapper(upload.stream, encoding="utf-8-sig")
+    except Exception:
+        errors.append("Unable to read CSV file contents.")
+        return []
+
+    reader = csv.DictReader(wrapper)
+    if not reader.fieldnames:
+        errors.append("CSV file is empty.")
+        return []
+
+    normalized_headers = _normalize_headers(reader.fieldnames)
+    rows = []
+    for row_number, row in enumerate(reader, start=2):
+        rows.append({"row_number": row_number, "data": row, "headers": normalized_headers})
+    return rows
+
+
+def _extract_import_rows_from_xlsx(upload, errors):
+    def column_index(cell_ref: str) -> int:
+        letters = "".join(ch for ch in cell_ref if ch.isalpha())
+        result = 0
+        for char in letters:
+            result = result * 26 + (ord(char.upper()) - ord("A") + 1)
+        return result - 1
+
+    upload.stream.seek(0)
+    try:
+        with zipfile.ZipFile(upload.stream) as archive:
+            sheet_name = "xl/worksheets/sheet1.xml"
+            if sheet_name not in archive.namelist():
+                errors.append("Could not locate the first worksheet in the Excel file.")
+                return []
+
+            shared_strings = []
+            if "xl/sharedStrings.xml" in archive.namelist():
+                shared_root = ElementTree.fromstring(archive.read("xl/sharedStrings.xml"))
+                ns = {"a": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+                for si in shared_root.findall("a:si", ns):
+                    texts = [node.text or "" for node in si.findall(".//a:t", ns)]
+                    shared_strings.append("".join(texts))
+
+            sheet_root = ElementTree.fromstring(archive.read(sheet_name))
+    except Exception:
+        errors.append("Unable to read Excel file. Ensure it is a valid .xlsx workbook.")
+        return []
+
+    ns = {"a": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    headers: list[str] = []
+    rows = []
+
+    for row_idx, row in enumerate(sheet_root.findall("a:sheetData/a:row", ns), start=1):
+        values: dict[int, str] = {}
+        for cell in row.findall("a:c", ns):
+            ref = cell.get("r", "")
+            idx = column_index(ref)
+            value_element = cell.find("a:v", ns)
+            if value_element is None:
+                continue
+            raw_value = value_element.text
+            cell_type = cell.get("t")
+            if cell_type == "s":
+                try:
+                    raw_value = shared_strings[int(raw_value)]
+                except Exception:
+                    raw_value = raw_value or ""
+            values[idx] = raw_value
+
+        if not values:
+            continue
+
+        if row_idx == 1:
+            headers = [values.get(i, "") for i in range(max(values.keys()) + 1)]
+            continue
+
+        row_data = {headers[i]: values.get(i, "") for i in range(len(headers))}
+        if not any(row_data.values()):
+            continue
+        rows.append({"row_number": row_idx, "data": row_data, "headers": _normalize_headers(headers)})
+
+    if not headers:
+        errors.append("Excel file is missing a header row.")
+    return rows
+
+
+def _extract_order_import_rows(upload):
+    filename = (upload.filename or "").lower()
+    errors: list[str] = []
+    if filename.endswith(".csv"):
+        rows = _extract_import_rows_from_csv(upload, errors)
+    elif filename.endswith(".xlsx"):
+        rows = _extract_import_rows_from_xlsx(upload, errors)
+    else:
+        errors.append("Only .csv and .xlsx files are supported.")
+        rows = []
+
+    return rows, errors
+
+
+def _map_row_data(row_entry):
+    normalized_headers = row_entry["headers"]
+    raw_row = row_entry["data"]
+    mapped = {value: "" for value in IMPORT_REQUIRED_COLUMNS.values()}
+    for required_name, mapped_key in IMPORT_REQUIRED_COLUMNS.items():
+        source_header = normalized_headers.get(required_name)
+        if source_header is None:
+            continue
+        mapped[mapped_key] = raw_row.get(source_header, "")
+    return mapped
+
+
+def _validate_required_columns(normalized_headers):
+    missing = [
+        display
+        for key, value in IMPORT_REQUIRED_COLUMNS.items()
+        if key not in normalized_headers
+        for display, mapped in IMPORT_DISPLAY_COLUMNS
+        if mapped == value
+    ]
+    return sorted(set(missing))
+
+
+def _generate_error_report(errors):
+    if not errors:
+        return None
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["row", "message"])
+    for entry in errors:
+        writer.writerow([entry["row"], entry["message"]])
+    csv_bytes = output.getvalue().encode("utf-8")
+    b64 = base64.b64encode(csv_bytes).decode("ascii")
+    return f"data:text/csv;base64,{b64}"
+
+
+def _load_mapped_import_rows(upload):
+    raw_rows, file_errors = _extract_order_import_rows(upload)
+    if file_errors:
+        return [], file_errors, []
+    if not raw_rows:
+        return [], [], []
+
+    normalized_headers = raw_rows[0]["headers"]
+    missing = _validate_required_columns(normalized_headers)
+    if missing:
+        return [], [], missing
+
+    mapped_rows = []
+    for entry in raw_rows:
+        mapped = _map_row_data(entry)
+        if all(not (value or "").strip() for value in mapped.values()):
+            continue
+        mapped_rows.append({"row_number": entry["row_number"], **mapped})
+    return mapped_rows, [], []
+
+
+def _perform_order_import(mapped_rows, filename):
+    errors: list[dict[str, str]] = []
+    warnings: list[dict[str, str]] = []
+    created = 0
+    updated = 0
+    skipped = 0
+    imported_numbers: set[str] = set()
+    flagged_for_review = 0
+
+    with db.session.begin_nested():
+        batch = ImportBatch(
+            filename=filename,
+            uploaded_by=getattr(current_user, "username", None),
+            row_count=len(mapped_rows),
+        )
+        db.session.add(batch)
+        db.session.flush()
+
+        for entry in mapped_rows:
+            row_number = entry["row_number"]
+            order_number = _normalize_text(entry.get("order_number"))
+            if not order_number:
+                errors.append({"row": row_number, "message": "Missing SO/Proposal No."})
+                skipped += 1
+                continue
+
+            quantity = _parse_quantity_value(entry.get("quantity"))
+            if quantity is None:
+                errors.append(
+                    {"row": row_number, "message": "Qty on Order must be a positive number."}
+                )
+                skipped += 1
+                continue
+
+            ship_date, ship_warning = _parse_ship_date(entry.get("ship_by"))
+            if ship_warning:
+                warnings.append({"row": row_number, "message": ship_warning})
+
+            customer = _normalize_text(entry.get("customer")) or None
+            item_number = _normalize_text(entry.get("item_number")) or "Unknown"
+            order_type = _normalize_text(entry.get("order_type")) or ORDER_TYPE_CHOICES[0]
+            description = _normalize_text(entry.get("item_description"))
+
+            order = Order.query.filter_by(order_number=order_number).first()
+            if order is None:
+                order = Order(order_number=order_number, status=OrderStatus.SCHEDULED)
+                db.session.add(order)
+                created += 1
+            else:
+                updated += 1
+
+            order.customer_name = customer
+            order.order_type = order_type
+            order.scheduled_ship_date = ship_date
+            order.last_import_batch_id = batch.id
+            order.needs_review = False
+            order.review_reason = None
+            order.review_batch_id = None
+
+            details = order.gate_details
+            if details is None:
+                details = GateOrderDetail(order=order, item_number=item_number, production_quantity=quantity)
+                db.session.add(details)
+            else:
+                details.item_number = item_number
+                details.production_quantity = quantity
+
+            _append_description_note(order, description)
+            imported_numbers.add(order.order_number)
+
+        active_orders = Order.query.filter(Order.status.in_(OrderStatus.ACTIVE_STATES)).all()
+        for order in active_orders:
+            if order.order_number not in imported_numbers:
+                order.needs_review = True
+                order.review_reason = "Missing from latest import"
+                order.review_batch_id = batch.id
+                flagged_for_review += 1
+
+        batch.created_count = created
+        batch.updated_count = updated
+        batch.skipped_count = skipped
+        batch.error_count = len(errors)
+
+    return {
+        "batch": batch,
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors,
+        "warnings": warnings,
+        "flagged": flagged_for_review,
+    }
 
 
 def _available_quantity(item_id: int) -> Decimal:
@@ -662,6 +996,60 @@ def orders_home():
         search_term=search_term,
         customer_filter=customer_filter,
         today=date.today(),
+    )
+
+
+@bp.route("/import", methods=["GET", "POST"])
+@require_roles("admin")
+def import_orders():
+    preview_rows = []
+    results = None
+    errors: list[str] = []
+    missing_columns: list[str] = []
+    warnings: list[dict[str, str]] = []
+    error_report = None
+
+    if request.method == "POST":
+        action = (request.form.get("action") or "preview").lower()
+        upload = request.files.get("orders_file")
+        if upload is None or not upload.filename:
+            errors.append("Please select a CSV or Excel file to import.")
+        else:
+            mapped_rows, file_errors, missing_columns = _load_mapped_import_rows(upload)
+            errors.extend(file_errors)
+
+            if missing_columns:
+                errors.append(
+                    "Missing required columns: " + ", ".join(sorted(set(missing_columns)))
+                )
+
+            if not errors and mapped_rows:
+                preview_rows = mapped_rows[:25]
+                if action == "import":
+                    results = _perform_order_import(mapped_rows, upload.filename)
+                    error_report = _generate_error_report(results["errors"])
+                    warnings = results.get("warnings", [])
+                    flash(
+                        "Import complete: "
+                        f"{results['created']} created, "
+                        f"{results['updated']} updated, "
+                        f"{results['skipped']} skipped.",
+                        "success",
+                    )
+            elif not errors:
+                errors.append("The uploaded file did not contain any data rows.")
+
+        for message in errors:
+            flash(message, "danger")
+        for entry in warnings:
+            flash(f"Row {entry['row']}: {entry['message']}", "warning")
+
+    return render_template(
+        "orders/import_orders.html",
+        preview_rows=preview_rows,
+        results=results,
+        display_columns=IMPORT_DISPLAY_COLUMNS,
+        error_report=error_report,
     )
 
 

@@ -9,6 +9,7 @@
         {% if can_edit_page('orders') %}
             <a href="{{ url_for('orders.new_order') }}" class="action-btn primary-action">Create New Order</a>
             <a href="{{ url_for('orders.prioritize_orders') }}" class="action-btn subtle-action">Prioritize</a>
+            <a href="{{ url_for('orders.import_orders') }}" class="action-btn subtle-action">Import Orders</a>
         {% endif %}
         <a href="{{ url_for('orders.schedule_view') }}" class="action-btn subtle-action">Schedule</a>
         <a href="{{ url_for('work.station_overview') }}" class="action-btn subtle-action">Workstations</a>

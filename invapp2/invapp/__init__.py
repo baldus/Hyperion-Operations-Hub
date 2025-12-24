@@ -217,6 +217,7 @@ def _ensure_order_schema(engine):
         "item_bom",
         "item_bom_component",
         "gate_order_detail",
+        "import_batch",
     }
     missing_tables = required_tables - existing_tables
     if missing_tables:
@@ -234,6 +235,14 @@ def _ensure_order_schema(engine):
         columns_to_add.append(("customer_name", "VARCHAR"))
     if "created_by" not in order_columns:
         columns_to_add.append(("created_by", "VARCHAR"))
+    if "needs_review" not in order_columns:
+        columns_to_add.append(("needs_review", "BOOLEAN NOT NULL DEFAULT FALSE"))
+    if "review_reason" not in order_columns:
+        columns_to_add.append(("review_reason", "VARCHAR"))
+    if "last_import_batch_id" not in order_columns:
+        columns_to_add.append(("last_import_batch_id", "INTEGER"))
+    if "review_batch_id" not in order_columns:
+        columns_to_add.append(("review_batch_id", "INTEGER"))
     if "general_notes" not in order_columns:
         columns_to_add.append(("general_notes", "TEXT"))
     if "order_type" not in order_columns:
@@ -260,6 +269,7 @@ def _ensure_order_schema(engine):
         gate_columns = set()
 
     gate_columns_to_add = []
+    gate_column_metadata = {col["name"]: col for col in inspector.get_columns("gate_order_detail")}
     required_gate_columns = {
         "inspection_panel_count": "INTEGER",
         "inspection_gate_height": "NUMERIC(10, 3)",
@@ -282,6 +292,36 @@ def _ensure_order_schema(engine):
                 conn.execute(
                     text(
                         f"ALTER TABLE gate_order_detail ADD COLUMN {column_name} {column_type}"
+                    )
+                )
+
+    nullable_gate_columns = {
+        "panel_count",
+        "total_gate_height",
+        "al_color",
+        "insert_color",
+        "lead_post_direction",
+        "visi_panels",
+        "half_panel_color",
+        "hardware_option",
+        "adders",
+        "inspection_panel_count",
+        "inspection_gate_height",
+        "inspection_al_color",
+        "inspection_insert_color",
+        "inspection_lead_post_direction",
+        "inspection_visi_panels",
+        "inspection_recorded_at",
+    }
+
+    for column_name in nullable_gate_columns:
+        column_metadata = gate_column_metadata.get(column_name)
+        if column_metadata and not column_metadata.get("nullable", True):
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE gate_order_detail "
+                        f"ALTER COLUMN {column_name} DROP NOT NULL"
                     )
                 )
 
