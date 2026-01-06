@@ -10,25 +10,20 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from invapp import create_app
-
-try:
-    from ops_monitor.launcher import launch_monitor_process
-except Exception:  # pragma: no cover - best-effort import for monitor bootstrap
-    launch_monitor_process = None
+from ops_monitor.launcher import launch_monitor_process
 
 app = create_app()
 
 if __name__ == "__main__":
     # Development fallback: the production entry point now uses Gunicorn.
-    if launch_monitor_process:
-        port = int(os.getenv("PORT", 5000))
-        log_file = PROJECT_ROOT / "support" / "operations.log"
-        restart_cmd = f"{sys.executable} {Path(__file__).name}"
-        launch_monitor_process(
-            target_pid=os.getpid(),
-            app_port=port,
-            log_file=log_file,
-            restart_cmd=restart_cmd,
-            service_name="Hyperion Operations Hub",
-        )
+    port = int(os.getenv("PORT", 5000))
+    log_file = PROJECT_ROOT / "support" / "operations.log"
+    restart_cmd = f"{sys.executable} {Path(__file__).name}"
+    launch_monitor_process(
+        target_pid=os.getpid(),
+        app_port=port,
+        log_file=log_file,
+        restart_cmd=restart_cmd,
+        service_name="Hyperion Operations Hub",
+    )
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
