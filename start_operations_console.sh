@@ -75,6 +75,7 @@ APP_DIR="${APP_DIR:-$SCRIPT_DIR/invapp2}"
 VENV_DIR="${VENV_DIR:-$APP_DIR/.venv}"
 REQUIREMENTS_FILE="${REQUIREMENTS_FILE:-$APP_DIR/requirements.txt}"
 APP_MODULE="${APP_MODULE:-app:app}"
+MONITOR_LOG_FILE="${MONITOR_LOG_FILE:-$SCRIPT_DIR/support/operations.log}"
 
 if [ ! -d "$APP_DIR" ]; then
     echo "❌ Unable to locate application directory: $APP_DIR" >&2
@@ -134,6 +135,17 @@ HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 WORKERS="${GUNICORN_WORKERS:-2}"
 TIMEOUT="${GUNICORN_TIMEOUT:-600}"
+
+if [ "${ENABLE_OPS_MONITOR:-1}" != "0" ]; then
+    echo "🔹 Launching Operations Console against PID $$"
+    PYTHONPATH="${PYTHONPATH:-$SCRIPT_DIR}" \
+        python -m ops_monitor.launcher \
+        --target-pid "$$" \
+        --app-port "$PORT" \
+        --log-file "$MONITOR_LOG_FILE" \
+        --restart-cmd "${RESTART_CMD_OVERRIDE:-$SCRIPT_DIR/start_operations_console.sh}" \
+        --service-name "Hyperion Operations Hub"
+fi
 
 if [ -z "${GUNICORN_TIMEOUT:-}" ]; then
     echo "⚠️ GUNICORN_TIMEOUT not provided; defaulting to ${TIMEOUT}s to accommodate large data backups"

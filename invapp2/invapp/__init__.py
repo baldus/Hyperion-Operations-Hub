@@ -1,4 +1,7 @@
 from datetime import date, timedelta
+import logging
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 import click
 
@@ -518,6 +521,20 @@ def create_app(config_override=None):
     app.config.from_object(Config)
     if config_override:
         app.config.update(config_override)
+
+    log_path = Path(app.config.get("OPS_LOG_PATH", Path(__file__).resolve().parent.parent / "support" / "operations.log"))
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    if not any(
+        isinstance(handler, RotatingFileHandler) and getattr(handler, "baseFilename", "") == str(log_path)
+        for handler in app.logger.handlers
+    ):
+        handler = RotatingFileHandler(log_path, maxBytes=2 * 1024 * 1024, backupCount=3)
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+        )
+        app.logger.addHandler(handler)
+    app.logger.setLevel(logging.INFO)
 
     # Track database health so the UI can surface meaningful guidance when the
     # backing service is offline.
