@@ -204,6 +204,12 @@ def purchasing_home():
 
     if status_filter == "open":
         query = query.filter(~PurchaseRequest.status.in_(CLOSED_STATUSES))
+    elif "," in status_filter:
+        requested_statuses = [value.strip() for value in status_filter.split(",") if value.strip()]
+        if requested_statuses and all(status in valid_statuses for status in requested_statuses):
+            query = query.filter(PurchaseRequest.status.in_(requested_statuses))
+        elif status_filter:
+            flash("Unknown status filter applied. Showing all requests.", "warning")
     elif status_filter in valid_statuses:
         query = query.filter(PurchaseRequest.status == status_filter)
     elif status_filter:

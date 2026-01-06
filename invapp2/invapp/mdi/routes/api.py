@@ -4,6 +4,7 @@ from datetime import datetime, date
 from flask import jsonify, request
 
 from invapp.extensions import db
+from invapp.mdi.materials_summary import build_materials_summary
 from invapp.mdi.models import MDIEntry
 
 from .constants import ACTIVE_STATUS_FILTER, COMPLETED_STATUSES
@@ -129,6 +130,11 @@ def delete_entry(entry_id):
     return "", 204
 
 
+def materials_summary():
+    """Return aggregated Item Shortage data for the MDI materials dashboard."""
+    return jsonify(build_materials_summary())
+
+
 def _parse_date(date_str):
     if not date_str:
         return None
@@ -180,4 +186,10 @@ def register(bp):
         view_func=delete_entry,
         methods=["DELETE"],
         endpoint="api_delete_entry",
+    )
+    bp.add_url_rule(
+        "/api/mdi/materials/summary",
+        view_func=materials_summary,
+        methods=["GET"],
+        endpoint="api_materials_summary",
     )

@@ -318,6 +318,47 @@ def seed_data():
 
         created_records = True
 
+    from decimal import Decimal
+
+    from invapp.models import PurchaseRequest
+
+    shortages_seeded = PurchaseRequest.query.first() is not None
+    if not shortages_seeded:
+        demo_shortages = [
+            PurchaseRequest(
+                title="Valve-482 – Stockout",
+                requested_by="Stores",
+                status=PurchaseRequest.STATUS_NEW,
+                quantity=Decimal("12"),
+                unit="ea",
+            ),
+            PurchaseRequest(
+                title="Sensor-713 – Supplier hold",
+                requested_by="Receiving",
+                status=PurchaseRequest.STATUS_WAITING,
+                quantity=Decimal("5"),
+                unit="ea",
+                supplier_name="Northwind",
+            ),
+            PurchaseRequest(
+                title="Bracket-221 – PO placed",
+                requested_by="Purchasing",
+                status=PurchaseRequest.STATUS_ORDERED,
+                quantity=Decimal("30"),
+                unit="ea",
+                purchase_order_number="PO-7684",
+            ),
+            PurchaseRequest(
+                title="Seal-909 – Delivered",
+                requested_by="Maintenance",
+                status=PurchaseRequest.STATUS_RECEIVED,
+                quantity=Decimal("8"),
+                unit="ea",
+            ),
+        ]
+        db.session.add_all(demo_shortages)
+        created_records = True
+
     if created_records:
         db.session.commit()
 
@@ -407,4 +448,3 @@ def ensure_schema():
         for column_name, ddl in columns_to_add.items():
             if column_name not in existing_columns:
                 connection.execute(text(ddl))
-

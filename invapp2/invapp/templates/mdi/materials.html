@@ -15,11 +15,35 @@
   {{ super() }}
   {{ mdi_assets.script_assets() }}
   <script src="{{ url_for('mdi.static', filename='js/charts.js') }}"></script>
+  <script src="{{ url_for('mdi.static', filename='js/materials_summary.js') }}"></script>
 {% endblock %}
 
 {% block content %}
   <div class="container py-3">
     {% include 'components/category_header.html' %}
+
+    <section
+      class="card shadow-sm border-0 mb-4 mdi-materials-summary"
+      data-materials-summary
+      data-summary-url="{{ materials_summary_url }}"
+      data-shortages-url="{{ materials_shortages_url }}"
+    >
+      <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+          <div>
+            <h2 class="h5 mb-1">Item Shortages Summary</h2>
+            <p class="text-muted mb-0">Live counts and quantities from Item Shortages.</p>
+          </div>
+          <small class="text-muted" data-materials-last-updated></small>
+        </div>
+        <div class="mdi-materials-summary__body" data-materials-summary-body>
+          <div class="mdi-materials-summary__loading">
+            <div class="spinner-border spinner-border-sm text-secondary" role="status" aria-hidden="true"></div>
+            <span>Loading item shortages…</span>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <div class="row g-4 mb-4">
       {% for chart in charts %}
