@@ -50,7 +50,7 @@ from .superuser import is_superuser
 NAVIGATION_PAGES: tuple[tuple[str, str, str], ...] = (
     ("inventory", "inventory.inventory_home", "Inventory"),
     ("orders", "orders.orders_home", "Orders"),
-    ("purchasing", "purchasing.purchasing_home", "Purchase Requests"),
+    ("purchasing", "purchasing.purchasing_home", "Item Shortages"),
     ("quality", "quality.quality_home", "Quality"),
     ("work", "work.station_overview", "Workstations"),
     ("production", "production.history", "Production History"),
@@ -958,4 +958,3 @@ def create_app(config_override=None):
         click.echo("Sequence repair completed.")
 
     return app
-

@@ -1,19 +1,19 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2>Purchase Requests</h2>
+<h2>Item Shortages</h2>
 
 <div class="purchasing-toolbar">
     <div class="toolbar-actions">
         {% if can_edit_page('purchasing') %}
-            <a class="action-btn primary-action" href="{{ url_for('purchasing.new_request') }}">Log Purchase Need</a>
+            <a class="action-btn primary-action" href="{{ url_for('purchasing.new_request') }}">Log Item Shortage</a>
         {% endif %}
     </div>
     <form method="get" class="status-filter-form">
         <label for="status" class="sr-only">Filter by status</label>
         <select name="status" id="status">
             <option value="" {% if not status_filter %}selected{% endif %}>All statuses</option>
-            <option value="open" {% if status_filter == 'open' %}selected{% endif %}>Open requests</option>
+            <option value="open" {% if status_filter == 'open' %}selected{% endif %}>Open shortages</option>
             {% for value, label in status_choices %}
                 <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
@@ -112,9 +112,9 @@
     </div>
 {% else %}
     <div class="empty-state">
-        <p>No purchase requests logged yet.</p>
+        <p>No item shortages logged yet.</p>
         {% if can_edit_page('purchasing') %}
-            <a class="action-btn primary-action" href="{{ url_for('purchasing.new_request') }}">Create the first request</a>
+            <a class="action-btn primary-action" href="{{ url_for('purchasing.new_request') }}">Create the first shortage</a>
         {% endif %}
     </div>
 {% endif %}

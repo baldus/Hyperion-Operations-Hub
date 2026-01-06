@@ -57,7 +57,7 @@ def test_create_purchase_request_flow(app, client):
 
     assert response.status_code == 200
     assert b"Aluminum Plate" in response.data
-    assert b"Purchase request logged" in response.data
+    assert b"Item shortage logged" in response.data
 
     with app.app_context():
         stored = PurchaseRequest.query.one()
@@ -127,7 +127,7 @@ def test_update_requires_edit_role(app):
 
     detail_response = client.get(admin_response.headers["Location"], follow_redirects=True)
     assert detail_response.status_code == 200
-    assert b"Purchase request updated" in detail_response.data
+    assert b"Item shortage updated" in detail_response.data
 
     with app.app_context():
         refreshed = db.session.get(PurchaseRequest, request_id)

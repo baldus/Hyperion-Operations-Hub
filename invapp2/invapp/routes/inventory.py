@@ -610,7 +610,7 @@ def _create_purchase_request_for_item(
     )
     if existing_request:
         flash(
-            "An open purchase request already exists for this item. Redirecting to the existing request.",
+            "An open item shortage already exists for this item. Redirecting to the existing record.",
             "info",
         )
         return redirect(url_for("purchasing.view_request", request_id=existing_request.id))
@@ -665,7 +665,7 @@ def create_purchase_request_from_low_stock(item_id: int):
         return _create_purchase_request_for_item(
             item,
             description,
-            "Purchase request created from low stock alert.",
+            "Item shortage created from low stock alert.",
             recommended_quantity,
         )
 
@@ -758,7 +758,7 @@ def create_purchase_request_from_waiting(item_id: int):
         return _create_purchase_request_for_item(
             item,
             description,
-            "Purchase request created for waiting material shortage.",
+            "Item shortage created for waiting material shortage.",
             shortage,
         )
 
