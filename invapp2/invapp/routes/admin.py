@@ -1005,6 +1005,10 @@ def _gather_storage_directories() -> list[dict[str, object]]:
             "Quality Attachments",
             current_app.config.get("QUALITY_ATTACHMENT_UPLOAD_FOLDER"),
         ),
+        (
+            "Item Shortage Attachments",
+            current_app.config.get("PURCHASING_ATTACHMENT_UPLOAD_FOLDER"),
+        ),
     ]
 
     directories: list[dict[str, object]] = []

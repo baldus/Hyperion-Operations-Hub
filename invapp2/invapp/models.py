@@ -404,6 +404,13 @@ class PurchaseRequest(PrimaryKeySequenceMixin, db.Model):
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
 
+    attachments = db.relationship(
+        "PurchaseRequestAttachment",
+        back_populates="request",
+        cascade="all, delete-orphan",
+        order_by="PurchaseRequestAttachment.uploaded_at.desc()",
+    )
+
     @classmethod
     def status_values(cls) -> tuple[str, ...]:
         return tuple(choice for choice, _ in cls.STATUS_CHOICES)
@@ -421,6 +428,22 @@ class PurchaseRequest(PrimaryKeySequenceMixin, db.Model):
     @property
     def is_closed(self) -> bool:
         return self.status in {self.STATUS_RECEIVED, self.STATUS_CANCELLED}
+
+
+class PurchaseRequestAttachment(db.Model):
+    __tablename__ = "purchase_request_attachment"
+
+    id = db.Column(db.Integer, primary_key=True)
+    request_id = db.Column(
+        db.Integer, db.ForeignKey("purchase_request.id"), nullable=False
+    )
+    filename = db.Column(db.String, nullable=False)
+    original_name = db.Column(db.String, nullable=False)
+    file_size = db.Column(db.Integer, nullable=False, default=0)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    uploaded_by = db.Column(db.String(128), nullable=True)
+
+    request = db.relationship("PurchaseRequest", back_populates="attachments")
 
 
 class RMARequest(db.Model):

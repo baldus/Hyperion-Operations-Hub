@@ -3,17 +3,30 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+import os
+import uuid
 from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Iterable
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    abort,
+    current_app,
+    flash,
+    redirect,
+    render_template,
+    request,
+    send_from_directory,
+    url_for,
+)
 from werkzeug.routing import BuildError
+from werkzeug.utils import secure_filename
 from sqlalchemy import func
 
 from invapp.auth import blueprint_page_guard
 from invapp.login import current_user
-from invapp.models import PurchaseRequest, db
+from invapp.models import PurchaseRequest, PurchaseRequestAttachment, db
 from invapp.permissions import resolve_edit_roles
 from invapp.security import require_any_role
 
@@ -96,9 +109,96 @@ def _require_purchasing_edit(view_func):
     return wrapped
 
 
+def _current_actor() -> str:
+    if not current_user.is_authenticated:
+        return "system"
+    return getattr(current_user, "username", None) or "system"
+
+
+def _allowed_purchase_attachment(filename: str) -> bool:
+    if not filename or "." not in filename:
+        return False
+    extension = filename.rsplit(".", 1)[1].lower()
+    allowed = current_app.config.get("PURCHASING_ATTACHMENT_ALLOWED_EXTENSIONS", set())
+    return extension in allowed
+
+
+def _file_storage_size(file_storage) -> int:
+    if not file_storage:
+        return 0
+    size = file_storage.content_length
+    if size is not None:
+        return size
+    stream = file_storage.stream
+    if not stream or not hasattr(stream, "seek"):
+        return 0
+    try:
+        current_pos = stream.tell()
+        stream.seek(0, os.SEEK_END)
+        size = stream.tell()
+        stream.seek(current_pos)
+        return size
+    except OSError:
+        return 0
+
+
+def _save_purchase_attachment(purchase_request: PurchaseRequest, file_storage):
+    if not file_storage or not file_storage.filename:
+        return False, "Select a file to upload.", None
+
+    filename = file_storage.filename
+    if not _allowed_purchase_attachment(filename):
+        allowed = current_app.config.get("PURCHASING_ATTACHMENT_ALLOWED_EXTENSIONS", set())
+        allowed_list = ", ".join(sorted(allowed)) if allowed else "(none)"
+        return (
+            False,
+            f"Attachment not saved. Allowed file types: {allowed_list}",
+            None,
+        )
+
+    max_size_mb = current_app.config.get("PURCHASING_ATTACHMENT_MAX_SIZE_MB", 25)
+    max_size_bytes = max_size_mb * 1024 * 1024
+    file_size = _file_storage_size(file_storage)
+    if file_size and file_size > max_size_bytes:
+        return (
+            False,
+            f"Attachment exceeds the {max_size_mb} MB upload limit.",
+            None,
+        )
+
+    safe_name = secure_filename(filename)
+    if not safe_name:
+        safe_name = f"attachment_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+
+    upload_folder = current_app.config.get("PURCHASING_ATTACHMENT_UPLOAD_FOLDER")
+    if not upload_folder:
+        return False, "Attachment upload folder is not configured.", None
+
+    os.makedirs(upload_folder, exist_ok=True)
+    extension = os.path.splitext(safe_name)[1].lower()
+    unique_name = f"{uuid.uuid4().hex}{extension}"
+    file_path = os.path.join(upload_folder, unique_name)
+    file_storage.stream.seek(0)
+    file_storage.save(file_path)
+
+    attachment = PurchaseRequestAttachment(
+        request=purchase_request,
+        filename=unique_name,
+        original_name=safe_name,
+        file_size=file_size or 0,
+        uploaded_by=_current_actor(),
+    )
+    db.session.add(attachment)
+    return True, None, attachment
+
+
 @bp.route("/")
 def purchasing_home():
-    status_filter = (request.args.get("status") or "").strip().lower()
+    raw_status_filter = request.args.get("status")
+    if raw_status_filter is None:
+        status_filter = "open"
+    else:
+        status_filter = (raw_status_filter or "").strip().lower()
     valid_statuses = set(PurchaseRequest.status_values())
     query = PurchaseRequest.query.order_by(PurchaseRequest.created_at.desc())
 
@@ -192,7 +292,7 @@ def new_request():
                     "Failed to create purchase request from purchasing form"
                 )
                 raise
-            flash("Purchase request logged for purchasing review.", "success")
+            flash("Item shortage logged for purchasing review.", "success")
             return redirect(
                 url_for("purchasing.view_request", request_id=purchase_request.id)
             )
@@ -231,12 +331,16 @@ def view_request(request_id: int):
         )
     except BuildError:
         receive_url = None
+    allowed_extensions = sorted(
+        current_app.config.get("PURCHASING_ATTACHMENT_ALLOWED_EXTENSIONS", set())
+    )
     return render_template(
         "purchasing/detail.html",
         purchase_request=purchase_request,
         status_choices=PurchaseRequest.STATUS_CHOICES,
         status_labels=dict(PurchaseRequest.STATUS_CHOICES),
         receive_url=receive_url,
+        allowed_extensions=allowed_extensions,
     )
 
 
@@ -293,6 +397,78 @@ def update_request(request_id: int):
         db.session.rollback()
     else:
         db.session.commit()
-        flash("Purchase request updated.", "success")
+        flash("Item shortage updated.", "success")
 
+    return redirect(url_for("purchasing.view_request", request_id=request_id))
+
+
+@bp.route("/<int:request_id>/attachments", methods=["POST"])
+@_require_purchasing_edit
+def upload_attachment(request_id: int):
+    purchase_request = PurchaseRequest.query.get_or_404(request_id)
+    file_storage = request.files.get("attachment")
+
+    success, message, _attachment = _save_purchase_attachment(
+        purchase_request, file_storage
+    )
+    if not success:
+        flash(message or "Attachment not uploaded.", "error")
+        return redirect(url_for("purchasing.view_request", request_id=request_id))
+
+    db.session.commit()
+    flash("Attachment uploaded.", "success")
+    return redirect(url_for("purchasing.view_request", request_id=request_id))
+
+
+@bp.route(
+    "/<int:request_id>/attachments/<int:attachment_id>/download",
+    methods=["GET"],
+)
+def download_attachment(request_id: int, attachment_id: int):
+    attachment = PurchaseRequestAttachment.query.filter_by(
+        id=attachment_id, request_id=request_id
+    ).first()
+    if attachment is None:
+        abort(404)
+
+    upload_folder = current_app.config.get("PURCHASING_ATTACHMENT_UPLOAD_FOLDER")
+    if not upload_folder:
+        abort(404)
+
+    return send_from_directory(
+        upload_folder,
+        attachment.filename,
+        as_attachment=True,
+        download_name=attachment.original_name,
+    )
+
+
+@bp.route(
+    "/<int:request_id>/attachments/<int:attachment_id>/delete",
+    methods=["POST"],
+)
+@_require_purchasing_edit
+def delete_attachment(request_id: int, attachment_id: int):
+    attachment = PurchaseRequestAttachment.query.filter_by(
+        id=attachment_id, request_id=request_id
+    ).first()
+    if attachment is None:
+        abort(404)
+
+    upload_folder = current_app.config.get("PURCHASING_ATTACHMENT_UPLOAD_FOLDER")
+    if upload_folder:
+        file_path = os.path.join(upload_folder, attachment.filename)
+        try:
+            os.remove(file_path)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            flash(
+                "Attachment removed from record, but the file could not be deleted.",
+                "warning",
+            )
+
+    db.session.delete(attachment)
+    db.session.commit()
+    flash("Attachment removed.", "success")
     return redirect(url_for("purchasing.view_request", request_id=request_id))

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2>Purchase Request PR-{{ "%04d" | format(purchase_request.id) }}</h2>
+<h2>Item Shortage PR-{{ "%04d" | format(purchase_request.id) }}</h2>
 
 <div class="purchasing-detail-header">
     <span class="status-pill status-{{ purchase_request.status }}">{{ status_labels.get(purchase_request.status, purchase_request.status) }}</span>
@@ -22,7 +22,7 @@
 
 <div class="purchasing-detail-grid">
     <section>
-        <h3>Request Overview</h3>
+        <h3>Shortage Overview</h3>
         <dl>
             <dt>Item or part</dt>
             <dd>{{ purchase_request.title }}</dd>
@@ -92,9 +92,41 @@
     </section>
 </div>
 
+<section class="purchasing-attachments">
+    <h3>Attachments</h3>
+    {% if purchase_request.attachments %}
+        <ul class="attachment-list">
+            {% for attachment in purchase_request.attachments %}
+                <li>
+                    <a href="{{ url_for('purchasing.download_attachment', request_id=purchase_request.id, attachment_id=attachment.id) }}">{{ attachment.original_name }}</a>
+                    <span class="secondary-text">
+                        Uploaded {{ attachment.uploaded_at.strftime('%Y-%m-%d %H:%M') }}
+                        {% if attachment.uploaded_by %} by {{ attachment.uploaded_by }}{% endif %}
+                    </span>
+                    {% if can_edit_page('purchasing') %}
+                        <form method="post" action="{{ url_for('purchasing.delete_attachment', request_id=purchase_request.id, attachment_id=attachment.id) }}" class="inline-form" onsubmit="return confirm('Remove this attachment?');">
+                            <button type="submit" class="link-btn">Remove</button>
+                        </form>
+                    {% endif %}
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p class="muted">No attachments have been added yet.</p>
+    {% endif %}
+
+    {% if can_edit_page('purchasing') %}
+        <form method="post" action="{{ url_for('purchasing.upload_attachment', request_id=purchase_request.id) }}" enctype="multipart/form-data" class="attachment-upload">
+            <label for="attachment">Attach file {% if allowed_extensions %}<span class="secondary-text">({{ allowed_extensions | join(', ') }})</span>{% endif %}</label>
+            <input type="file" id="attachment" name="attachment" required>
+            <button type="submit" class="action-btn">Upload</button>
+        </form>
+    {% endif %}
+</section>
+
 {% if can_edit_page('purchasing') %}
 <hr>
-<h3>Update Request</h3>
+<h3>Update Shortage</h3>
 <form method="post" action="{{ url_for('purchasing.update_request', request_id=purchase_request.id) }}" class="form-grid purchasing-form">
     <div class="form-row two-col">
         <div>

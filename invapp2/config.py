@@ -44,6 +44,24 @@ class Config:
         "csv",
         "txt",
     }
+    PURCHASING_ATTACHMENT_UPLOAD_FOLDER = os.getenv(
+        "PURCHASING_ATTACHMENT_UPLOAD_FOLDER",
+        os.path.join(BASE_DIR, "invapp", "static", "purchase_request_attachments"),
+    )
+    PURCHASING_ATTACHMENT_ALLOWED_EXTENSIONS = {
+        "pdf",
+        "png",
+        "jpg",
+        "jpeg",
+        "xlsx",
+        "csv",
+        "txt",
+        "doc",
+        "docx",
+    }
+    PURCHASING_ATTACHMENT_MAX_SIZE_MB = int(
+        os.getenv("PURCHASING_ATTACHMENT_MAX_SIZE_MB", 25)
+    )
 
     ZEBRA_PRINTER_HOST = os.getenv("ZEBRA_PRINTER_HOST", "localhost")
     ZEBRA_PRINTER_PORT = int(os.getenv("ZEBRA_PRINTER_PORT", 9100))

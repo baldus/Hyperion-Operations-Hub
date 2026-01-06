@@ -63,7 +63,7 @@ DEFAULT_PAGE_ACCESS: Mapping[str, Mapping[str, Sequence[str] | str]] = {
         "edit_roles": ("editor", "admin", "orders"),
     },
     "purchasing": {
-        "label": "Purchase Requests",
+        "label": "Item Shortages",
         "view_roles": ("viewer", "editor", "admin", "purchasing", "orders", "inventory"),
         "edit_roles": ("editor", "admin", "purchasing"),
     },

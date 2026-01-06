@@ -88,7 +88,7 @@
             {% if entry.item %}
               {% if can_edit_page('purchasing') %}
               <form method="post" class="inline-form" action="{{ url_for('inventory.create_purchase_request_from_waiting', item_id=entry.item.id) }}">
-                <button type="submit" class="bubble-btn">Create Purchase Request</button>
+                <button type="submit" class="bubble-btn">Create Item Shortage</button>
               </form>
               {% else %}
               <span class="field-note">Requires purchasing access</span>
@@ -135,7 +135,7 @@
             {% if entry.item %}
               {% if can_edit_page('purchasing') %}
               <form method="post" class="inline-form" action="{{ url_for('inventory.create_purchase_request_from_low_stock', item_id=entry.item.id) }}">
-                <button type="submit" class="bubble-btn">Create Purchase Request</button>
+                <button type="submit" class="bubble-btn">Create Item Shortage</button>
               </form>
               {% else %}
               <span class="field-note">Requires purchasing access</span>

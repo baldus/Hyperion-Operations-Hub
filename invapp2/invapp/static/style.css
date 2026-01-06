@@ -3218,6 +3218,7 @@ body.light .link-btn.danger:focus {
 
 .quality-detail-grid section,
 .quality-attachments,
+.purchasing-attachments,
 .quality-timeline {
     background-color: rgba(255, 255, 255, 0.04);
     border-radius: 16px;
@@ -3226,6 +3227,7 @@ body.light .link-btn.danger:focus {
 
 body.light .quality-detail-grid section,
 body.light .quality-attachments,
+body.light .purchasing-attachments,
 body.light .quality-timeline {
     background-color: #f4f6fb;
 }
@@ -3246,6 +3248,7 @@ body.light .quality-timeline {
 }
 
 .quality-attachments .attachment-list,
+.purchasing-attachments .attachment-list,
 .quality-timeline ul {
     list-style: none;
     margin: 0;
@@ -3263,6 +3266,14 @@ body.light .quality-timeline {
     flex-wrap: wrap;
 }
 
+.purchasing-attachments .attachment-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
 .quality-attachments .attachment-upload {
     margin-top: 16px;
     display: flex;
@@ -3271,7 +3282,16 @@ body.light .quality-timeline {
     align-items: flex-start;
 }
 
-.quality-attachments .attachment-upload input[type="file"] {
+.purchasing-attachments .attachment-upload {
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start;
+}
+
+.quality-attachments .attachment-upload input[type="file"],
+.purchasing-attachments .attachment-upload input[type="file"] {
     max-width: 320px;
 }
 
@@ -3312,6 +3332,11 @@ body.light .quality-timeline pre {
 
 @media (max-width: 720px) {
     .quality-attachments .attachment-list li {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .purchasing-attachments .attachment-list li {
         flex-direction: column;
         align-items: flex-start;
     }
