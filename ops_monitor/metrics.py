@@ -3,10 +3,12 @@ from __future__ import annotations
 import socket
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable, Optional
 
 import psutil
+from sqlalchemy import create_engine, text
 
 
 @dataclass
@@ -30,6 +32,13 @@ class PortStatus:
 class LogSnapshot:
     lines: list[str]
     path: Path
+
+
+@dataclass
+class AccessSnapshot:
+    users: list[str]
+    pages: list[str]
+    status: str
 
 
 def read_process_metrics(pid: int) -> Optional[ProcessMetrics]:
@@ -91,6 +100,59 @@ def tail_log(path: Path, max_lines: int = 18, state: dict[str, int] | None = Non
         lines = [f"Unable to read log: {exc}"]
 
     return LogSnapshot(lines=lines, path=path)
+
+
+def read_recent_access(
+    db_url: str | None,
+    *,
+    limit: int = 8,
+    window_seconds: int = 300,
+) -> AccessSnapshot:
+    if not db_url:
+        return AccessSnapshot(users=[], pages=[], status="DB_URL not set")
+
+    since = datetime.utcnow() - timedelta(seconds=window_seconds)
+    users: list[str] = []
+    pages: list[str] = []
+
+    try:
+        engine = create_engine(db_url, pool_pre_ping=True)
+        with engine.connect() as conn:
+            user_rows = conn.execute(
+                text(
+                    """
+                    SELECT DISTINCT COALESCE(username, ip_address, 'anonymous') AS identity
+                    FROM access_log
+                    WHERE occurred_at >= :since
+                    ORDER BY identity
+                    LIMIT :limit
+                    """
+                ),
+                {"since": since, "limit": limit},
+            )
+            users = [row.identity for row in user_rows if row.identity]
+
+            page_rows = conn.execute(
+                text(
+                    """
+                    SELECT occurred_at, COALESCE(username, ip_address, 'anonymous') AS identity, path
+                    FROM access_log
+                    WHERE occurred_at >= :since AND event_type = :event_type
+                    ORDER BY occurred_at DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"since": since, "event_type": "request", "limit": limit},
+            )
+            for row in page_rows:
+                timestamp = row.occurred_at.strftime("%H:%M:%S") if row.occurred_at else "--:--:--"
+                pages.append(f"{timestamp} {row.identity}: {row.path or '-'}")
+        engine.dispose()
+    except Exception as exc:
+        return AccessSnapshot(users=[], pages=[], status=f"DB error: {exc.__class__.__name__}")
+
+    status = "Recent access (last 5m)"
+    return AccessSnapshot(users=users, pages=pages, status=status)
 
 
 def format_uptime(seconds: float) -> str:

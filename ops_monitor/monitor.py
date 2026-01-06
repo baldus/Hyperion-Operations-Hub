@@ -21,9 +21,11 @@ from rich.text import Text
 
 from . import controls
 from .metrics import (
+    AccessSnapshot,
     check_port,
     format_uptime,
     read_process_metrics,
+    read_recent_access,
     summarize_connections,
     tail_log,
 )
@@ -70,6 +72,21 @@ def build_log_panel(log_lines: list[str], path: Path) -> Panel:
     return Panel(rendered, title=f"Log tail — {path}", box=box.ROUNDED, padding=(1, 1))
 
 
+def build_access_panel(access_snapshot: AccessSnapshot) -> Panel:
+    users = access_snapshot.users or ["(no recent users)"]
+    pages = access_snapshot.pages or ["(no recent page activity)"]
+    rendered = "\n".join(
+        [
+            "[b]Connected users (last 5m)[/b]",
+            *[f"- {user}" for user in users],
+            "",
+            "[b]Recent pages[/b]",
+            *[f"- {page}" for page in pages],
+        ]
+    )
+    return Panel(rendered, title=access_snapshot.status, box=box.ROUNDED, padding=(1, 1))
+
+
 def build_controls_panel(verbose: bool) -> Panel:
     lines = [
         "[b]r[/b] Restart application",
@@ -92,13 +109,12 @@ def render_layout(state: dict) -> Layout:
         Layout(name="body"),
         Layout(name="footer", size=7),
     )
-    layout["body"].split_row(
-        Layout(name="metrics", ratio=1),
-        Layout(name="logs", ratio=2),
-    )
+    layout["body"].split_row(Layout(name="left", ratio=1), Layout(name="logs", ratio=2))
+    layout["left"].split_column(Layout(name="metrics"), Layout(name="access", size=12))
 
     layout["header"].update(build_header(state.get("service_name", "Operations"), state.get("status", "Unknown")))
     layout["metrics"].update(build_metrics_table(state))
+    layout["access"].update(build_access_panel(state.get("access_snapshot", AccessSnapshot([], [], "Access"))))
     layout["logs"].update(build_log_panel(state.get("log_lines", []), state.get("log_path", Path("log"))))
     layout["footer"].update(build_controls_panel(state.get("verbose", False)))
     return layout
@@ -121,6 +137,7 @@ def monitor_loop(
     status_message = "System Online"
     verbose = False
     tracked_pid = target_pid
+    db_url = os.getenv("OPS_MONITOR_DB_URL") or os.getenv("DB_URL")
 
     live_state = {
         "service_name": service_name,
@@ -134,6 +151,7 @@ def monitor_loop(
         "log_lines": [],
         "log_path": log_file,
         "verbose": verbose,
+        "access_snapshot": AccessSnapshot([], [], "Access"),
     }
 
     with Live(render_layout(live_state), console=console, screen=True, refresh_per_second=4) as live:
@@ -141,6 +159,7 @@ def monitor_loop(
             metrics = read_process_metrics(tracked_pid)
             port_status = check_port(app_port)
             log_snapshot = tail_log(log_file, state=log_cursor)
+            access_snapshot = read_recent_access(db_url)
 
             if metrics is None:
                 status = "Stopped"
@@ -173,6 +192,7 @@ def monitor_loop(
                 "log_lines": log_snapshot.lines,
                 "log_path": log_snapshot.path,
                 "verbose": verbose,
+                "access_snapshot": access_snapshot,
             }
 
             live.update(render_layout(live_state))
