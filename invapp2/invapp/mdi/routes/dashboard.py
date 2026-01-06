@@ -265,36 +265,10 @@ def people_dashboard():  # pragma: no cover - registered via blueprint
 
 def materials_dashboard():  # pragma: no cover - registered via blueprint
     category = "Materials"
-    entries = _entries_for_category(category)
-    date_range, labels = _chart_date_range()
-
-    open_counts = _build_daily_counts(entries, date_range, lambda entry: (entry.status or "").lower() == "open")
-
-    charts = [
-        {
-            "id": "materials-open-items-chart",
-            "title": "Open Items by Day",
-            "subtitle": "Material-related issues awaiting closure",
-            "column_class": "col-12 col-xl-8",
-            "config": _line_chart(
-                labels,
-                [
-                    _dataset(
-                        label="Open Items",
-                        data=open_counts,
-                        color=CATEGORY_COLORS[category],
-                        background_alpha=0.2,
-                    )
-                ],
-            ),
-        }
-    ]
-
     context = _base_context(category, "Track material shortages and follow-up actions.")
     context.update({
-        "charts": charts,
-        "entries": entries,
-        **_metric_context(category),
+        "materials_summary_url": url_for("mdi.api_materials_summary"),
+        "item_shortages_url": url_for("purchasing.purchasing_home"),
     })
     return render_template("materials.html", **context)
 
@@ -680,4 +654,3 @@ def register(bp):
     bp.add_url_rule("/mdi/delivery", view_func=delivery_dashboard, methods=["GET", "POST"])
     bp.add_url_rule("/mdi/people", view_func=people_dashboard, methods=["GET", "POST"])
     bp.add_url_rule("/mdi/materials", view_func=materials_dashboard)
-

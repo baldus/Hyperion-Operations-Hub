@@ -1,10 +1,13 @@
 """REST API endpoints for the MDI module."""
+from collections import defaultdict
 from datetime import datetime, date
 
 from flask import jsonify, request
+from sqlalchemy import func
 
 from invapp.extensions import db
 from invapp.mdi.models import MDIEntry
+from invapp.models import PurchaseRequest
 
 from .constants import ACTIVE_STATUS_FILTER, COMPLETED_STATUSES
 
@@ -129,6 +132,82 @@ def delete_entry(entry_id):
     return "", 204
 
 
+def get_materials_summary():
+    """Return the Item Shortages summary used by the MDI Materials dashboard."""
+    status_label_map = _materials_status_labels()
+    rows = (
+        db.session.query(
+            PurchaseRequest.status,
+            func.count(PurchaseRequest.id),
+            func.coalesce(func.sum(PurchaseRequest.quantity), 0),
+        )
+        .group_by(PurchaseRequest.status)
+        .all()
+    )
+
+    buckets: dict[str, dict[str, object]] = defaultdict(
+        lambda: {"count": 0, "qty_total": 0.0, "status_values": set()}
+    )
+    for status, count, qty_total in rows:
+        display_label = status_label_map.get(status, PurchaseRequest.status_label(status))
+        bucket = buckets[display_label]
+        bucket["count"] += int(count or 0)
+        bucket["qty_total"] += float(qty_total or 0)
+        bucket["status_values"].add(status)
+
+    ordered_labels = _ordered_material_status_labels(status_label_map, buckets.keys())
+    by_status = []
+    for label in ordered_labels:
+        bucket = buckets.get(label)
+        if not bucket:
+            continue
+        by_status.append(
+            {
+                "status": label,
+                "count": bucket["count"],
+                "qty_total": round(bucket["qty_total"], 2),
+                "status_values": sorted(bucket["status_values"]),
+            }
+        )
+
+    total_count = sum(bucket["count"] for bucket in buckets.values())
+    total_qty = round(sum(bucket["qty_total"] for bucket in buckets.values()), 2)
+    last_updated = db.session.query(func.max(PurchaseRequest.updated_at)).scalar()
+
+    return jsonify(
+        {
+            "by_status": by_status,
+            "total_count": total_count,
+            "total_qty": total_qty,
+            "last_updated": last_updated.isoformat() if last_updated else None,
+        }
+    )
+
+
+def _materials_status_labels() -> dict[str, str]:
+    return {
+        PurchaseRequest.STATUS_NEW: "New",
+        PurchaseRequest.STATUS_REVIEW: "Reviewing",
+        PurchaseRequest.STATUS_WAITING: "Waiting on Supplier",
+        PurchaseRequest.STATUS_ORDERED: "Ordered",
+        PurchaseRequest.STATUS_RECEIVED: "Received",
+        PurchaseRequest.STATUS_CANCELLED: "Cancelled",
+    }
+
+
+def _ordered_material_status_labels(
+    status_label_map: dict[str, str],
+    seen_labels,
+) -> list[str]:
+    preferred_labels = []
+    for status in PurchaseRequest.status_values():
+        label = status_label_map.get(status, PurchaseRequest.status_label(status))
+        if label not in preferred_labels:
+            preferred_labels.append(label)
+    remaining = sorted(label for label in seen_labels if label not in preferred_labels)
+    return preferred_labels + remaining
+
+
 def _parse_date(date_str):
     if not date_str:
         return None
@@ -180,4 +259,10 @@ def register(bp):
         view_func=delete_entry,
         methods=["DELETE"],
         endpoint="api_delete_entry",
+    )
+    bp.add_url_rule(
+        "/api/mdi/materials/summary",
+        view_func=get_materials_summary,
+        methods=["GET"],
+        endpoint="api_materials_summary",
     )

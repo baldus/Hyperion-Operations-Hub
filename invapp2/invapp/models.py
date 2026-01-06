@@ -446,6 +446,60 @@ class PurchaseRequestAttachment(db.Model):
     request = db.relationship("PurchaseRequest", back_populates="attachments")
 
 
+def seed_purchase_requests() -> None:
+    """Seed a handful of item shortages for local development/testing."""
+    try:
+        if not current_app.config.get("SEED_PURCHASE_REQUESTS", True):
+            return
+    except RuntimeError:
+        return
+
+    if PurchaseRequest.query.first() is not None:
+        return
+
+    sample_requests = [
+        PurchaseRequest(
+            title="Copper bus bar",
+            description="Critical for upcoming transformer build.",
+            quantity=Decimal("24.00"),
+            unit="ea",
+            requested_by="Production",
+            status=PurchaseRequest.STATUS_NEW,
+            supplier_name="Metro Metals",
+        ),
+        PurchaseRequest(
+            title="Bearing kit 6205",
+            description="Waiting on supplier confirmation.",
+            quantity=Decimal("48.00"),
+            unit="kit",
+            requested_by="Maintenance",
+            status=PurchaseRequest.STATUS_WAITING,
+            supplier_name="Motion Supply",
+        ),
+        PurchaseRequest(
+            title="Control panel enclosure",
+            description="PO issued for expedited delivery.",
+            quantity=Decimal("6.00"),
+            unit="ea",
+            requested_by="Scheduling",
+            status=PurchaseRequest.STATUS_ORDERED,
+            supplier_name="Northwind Components",
+            purchase_order_number="PO-4821",
+        ),
+        PurchaseRequest(
+            title="Sealant cartridge",
+            description="Awaiting review from purchasing.",
+            quantity=Decimal("18.00"),
+            unit="tube",
+            requested_by="Assembly",
+            status=PurchaseRequest.STATUS_REVIEW,
+        ),
+    ]
+
+    db.session.add_all(sample_requests)
+    db.session.commit()
+
+
 class RMARequest(db.Model):
     __tablename__ = "rma_request"
 

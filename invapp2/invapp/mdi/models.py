@@ -163,18 +163,6 @@ def seed_data():
                 "absentees": range(0, 6),
                 "open_positions": range(0, 4),
             },
-            "Materials": {
-                "owners": ["Taylor Brooks", "Dakota Ruiz", "Morgan Ellis"],
-                "areas": ["Stores", "Fabrication", "Receiving"],
-                "descriptions": [
-                    "Follow up on supplier shortage in {area}",
-                    "Reconcile inventory variance for {area}",
-                    "Escalate critical part issue for {area}",
-                    "Audit Kanban cards within {area}",
-                ],
-                "items": ["Valve-482", "Sensor-713", "Bracket-221", "Seal-909"],
-                "vendors": ["Delta Supply", "Northwind", "Precision Co", "Allied Parts"],
-            },
         }
 
         for category, config in category_configs.items():
@@ -407,4 +395,3 @@ def ensure_schema():
         for column_name, ddl in columns_to_add.items():
             if column_name not in existing_columns:
                 connection.execute(text(ddl))
-

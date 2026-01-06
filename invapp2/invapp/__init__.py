@@ -630,6 +630,7 @@ def create_app(config_override=None):
                 _ensure_production_schema(db.engine)
                 mdi_models.ensure_schema()
                 mdi_models.seed_data()
+                models.seed_purchase_requests()
                 # ✅ ensure default production customers at startup
                 production._ensure_default_customers()
                 production._ensure_output_formula()

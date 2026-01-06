@@ -202,7 +202,15 @@ def purchasing_home():
     valid_statuses = set(PurchaseRequest.status_values())
     query = PurchaseRequest.query.order_by(PurchaseRequest.created_at.desc())
 
-    if status_filter == "open":
+    if "," in status_filter:
+        requested_statuses = [
+            value.strip()
+            for value in status_filter.split(",")
+            if value.strip() in valid_statuses
+        ]
+        if requested_statuses:
+            query = query.filter(PurchaseRequest.status.in_(requested_statuses))
+    elif status_filter == "open":
         query = query.filter(~PurchaseRequest.status.in_(CLOSED_STATUSES))
     elif status_filter in valid_statuses:
         query = query.filter(PurchaseRequest.status == status_filter)

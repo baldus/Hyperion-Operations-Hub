@@ -8,31 +8,46 @@
 {% block extra_head %}
   {{ super() }}
   {{ mdi_assets.head_assets() }}
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
 {% endblock %}
 
 {% block extra_scripts %}
   {{ super() }}
   {{ mdi_assets.script_assets() }}
-  <script src="{{ url_for('mdi.static', filename='js/charts.js') }}"></script>
+  <script src="{{ url_for('mdi.static', filename='js/materials.js') }}" defer></script>
 {% endblock %}
 
 {% block content %}
   <div class="container py-3">
     {% include 'components/category_header.html' %}
 
-    <div class="row g-4 mb-4">
-      {% for chart in charts %}
-        <div class="{{ chart.column_class or 'col-12' }}">
-          {% include 'components/chart_block.html' %}
+    <div
+      class="card shadow-sm border-0 mb-4"
+      id="materials-summary"
+      data-summary-url="{{ materials_summary_url }}"
+      data-item-shortages-url="{{ item_shortages_url }}"
+    >
+      <div class="card-body">
+        <div class="d-flex flex-column flex-md-row justify-content-between gap-3">
+          <div>
+            <h2 class="h5 mb-1">Item Shortages Summary</h2>
+            <p class="text-muted mb-0">
+              Live counts and quantities sourced from the Item Shortages module.
+            </p>
+          </div>
+          <div class="d-flex align-items-start">
+            <a class="btn btn-sm btn-outline-primary" href="{{ item_shortages_url }}">
+              View Item Shortages
+            </a>
+          </div>
         </div>
-      {% endfor %}
+        <div class="mt-4" data-summary-content>
+          <div class="text-muted">Loading material shortages…</div>
+        </div>
+      </div>
     </div>
 
-    <div class="alert alert-secondary shadow-sm border-0 mb-4">
-      The open items trend updates automatically based on active material logs.
+    <div class="alert alert-secondary shadow-sm border-0 mb-0">
+      Status counts update automatically as Item Shortages change.
     </div>
-
-    {% include 'components/category_cards.html' %}
   </div>
 {% endblock %}
