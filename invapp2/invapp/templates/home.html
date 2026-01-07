@@ -40,8 +40,9 @@
 
 {% set show_orders = order_summary is not none %}
 {% set show_inventory = inventory_summary is not none %}
+{% set show_incoming = incoming_items is not none %}
 
-{% if show_orders or show_inventory %}
+{% if show_orders or show_inventory or show_incoming %}
 <div class="home-summary-grid">
   {% if show_orders %}
   <section class="home-summary-card">
@@ -141,6 +142,71 @@
 
     <div class="home-summary-footer">
       <a class="home-summary-link" href="{{ url_for('inventory.inventory_home') }}">Go to Inventory →</a>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if show_incoming %}
+  <section class="home-summary-card">
+    <div class="home-summary-heading">
+      <h3>Incoming Items (Next 3 Days &amp; Overdue)</h3>
+      <span class="home-summary-badge">Purchasing</span>
+    </div>
+
+    <h4 class="home-summary-subheading">Overdue ({{ overdue_items|length }})</h4>
+    <ul class="home-summary-list">
+      {% for item in overdue_items %}
+      <li class="home-summary-critical">
+        <div class="home-summary-line">
+          <a href="{{ url_for('purchasing.view_request', request_id=item.id) }}" class="home-summary-primary">
+            {{ item.item_number or ('Request #' ~ item.id) }}
+          </a>
+          <span class="home-summary-meta">ETA {{ item.eta_date.strftime('%b %d, %Y') }}</span>
+        </div>
+        <div class="home-summary-line">
+          <span class="home-summary-secondary">{{ item.description or item.title }}</span>
+          {% if item.supplier %}
+          <span class="home-summary-secondary">{{ item.supplier }}</span>
+          {% endif %}
+        </div>
+        <div class="home-summary-line">
+          <span class="home-summary-meta">Ordered {{ item.ordered_display }} / Received {{ item.received_display }}</span>
+          <span class="home-summary-status">Overdue</span>
+        </div>
+      </li>
+      {% else %}
+      <li class="home-summary-empty">No overdue items 🎉</li>
+      {% endfor %}
+    </ul>
+
+    <h4 class="home-summary-subheading">Next 3 Days ({{ incoming_items|length }})</h4>
+    <ul class="home-summary-list">
+      {% for item in incoming_items %}
+      <li>
+        <div class="home-summary-line">
+          <a href="{{ url_for('purchasing.view_request', request_id=item.id) }}" class="home-summary-primary">
+            {{ item.item_number or ('Request #' ~ item.id) }}
+          </a>
+          <span class="home-summary-meta">ETA {{ item.eta_date.strftime('%b %d, %Y') }}</span>
+        </div>
+        <div class="home-summary-line">
+          <span class="home-summary-secondary">{{ item.description or item.title }}</span>
+          {% if item.supplier %}
+          <span class="home-summary-secondary">{{ item.supplier }}</span>
+          {% endif %}
+        </div>
+        <div class="home-summary-line">
+          <span class="home-summary-meta">Ordered {{ item.ordered_display }} / Received {{ item.received_display }}</span>
+          <span class="home-summary-status">Due Soon</span>
+        </div>
+      </li>
+      {% else %}
+      <li class="home-summary-empty">Nothing due in the next 3 days</li>
+      {% endfor %}
+    </ul>
+
+    <div class="home-summary-footer">
+      <a class="home-summary-link" href="{{ url_for('purchasing.purchasing_home') }}">Go to Item Shortages →</a>
     </div>
   </section>
   {% endif %}

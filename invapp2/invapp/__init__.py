@@ -44,6 +44,7 @@ from config import Config
 from . import models  # ensure models are registered with SQLAlchemy
 from .audit import record_access_event, resolve_client_ip
 from .db_maintenance import repair_primary_key_sequences
+from .home_overview import get_incoming_and_overdue_items
 from .superuser import is_superuser
 
 
@@ -822,11 +823,15 @@ def create_app(config_override=None):
                 "home.html",
                 order_summary=None,
                 inventory_summary=None,
+                overdue_items=None,
+                incoming_items=None,
                 useful_links=useful_links,
             )
 
         order_summary = None
         inventory_summary = None
+        overdue_items = None
+        incoming_items = None
 
         can_view_orders = principal_has_any_role(resolve_view_roles("orders"))
         can_view_inventory = principal_has_any_role(resolve_view_roles("inventory"))
@@ -940,12 +945,18 @@ def create_app(config_override=None):
                 "total_alerts": len(out_items) + len(low_items),
             }
 
+        can_view_purchasing = principal_has_any_role(resolve_view_roles("purchasing"))
+        if can_view_purchasing:
+            overdue_items, incoming_items = get_incoming_and_overdue_items()
+
         useful_links = models.UsefulLink.ordered()
 
         return render_template(
             "home.html",
             order_summary=order_summary,
             inventory_summary=inventory_summary,
+            overdue_items=overdue_items,
+            incoming_items=incoming_items,
             useful_links=useful_links,
         )
 
