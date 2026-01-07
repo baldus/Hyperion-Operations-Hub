@@ -2,10 +2,16 @@ import csv
 from datetime import datetime, date
 from io import BytesIO, StringIO
 
-from flask import flash, redirect, render_template, request, send_file, url_for
+from flask import current_app, flash, redirect, render_template, request, send_file, url_for
 
 from invapp.extensions import db
+from invapp.login import current_user
 from invapp.mdi.models import CATEGORY_DISPLAY, CategoryMetric, MDIEntry, STATUS_BADGES
+from invapp.models import PurchaseRequest
+from invapp.routes.purchasing import (
+    build_purchase_request_from_form,
+    purchase_request_form_defaults,
+)
 
 
 DEFAULT_STATUS_OPTIONS = ["Open", "In Progress", "Closed"]
@@ -50,6 +56,7 @@ def report_entry():
     entry = MDIEntry.query.get(entry_id) if entry_id else None
     categories = list(CATEGORY_DISPLAY.keys())
     initial_category = entry.category if entry else (categories[0] if categories else "")
+    default_requestor = current_user.username if current_user.is_authenticated else ""
     previous_open_positions = None
     if entry and entry.category == "People" and entry.open_positions is not None:
         previous_open_positions = entry.open_positions
@@ -66,6 +73,8 @@ def report_entry():
         default_open_positions=previous_open_positions,
         initial_category=initial_category,
         default_date=date.today(),
+        materials_form_data=purchase_request_form_defaults(default_requestor),
+        errors=[],
     )
 
 
@@ -73,7 +82,57 @@ def mdi_item_redirect(entry_id):
     """Direct link target used by email summaries to open a specific item."""
 
     return redirect(url_for("mdi.report_entry", id=entry_id))
+
+
+# MDI Materials item shortages share the purchasing form builder to keep a single source of truth.
+# Manual verification checklist:
+# 1) MDI Meeting View -> Add Item -> Materials: submit required fields and confirm save.
+# 2) Confirm the new record appears on Item Shortages and the MDI Materials lane.
+# 3) Confirm the status defaults to "New" and matches Item Shortages.
 def add_entry():
+    if request.form.get("category") == "Materials":
+        default_requestor = current_user.username if current_user.is_authenticated else ""
+        current_app.logger.info("MDI materials Add Item submission received.")
+        purchase_request, errors, materials_form_data = build_purchase_request_from_form(
+            request.form, default_requestor=default_requestor
+        )
+        if errors:
+            current_app.logger.warning(
+                "MDI materials Add Item validation errors: %s", errors
+            )
+            return render_template(
+                "report_entry.html",
+                entry=None,
+                category_meta=CATEGORY_DISPLAY,
+                status_badges=STATUS_BADGES,
+                category_status_options=CATEGORY_STATUS_OPTIONS,
+                default_open_positions=None,
+                initial_category="Materials",
+                default_date=date.today(),
+                materials_form_data=materials_form_data,
+                errors=errors,
+            )
+        try:
+            PurchaseRequest.commit_with_sequence_retry(purchase_request)
+        except Exception:
+            current_app.logger.exception(
+                "Failed to create purchase request from MDI materials form"
+            )
+            return render_template(
+                "report_entry.html",
+                entry=None,
+                category_meta=CATEGORY_DISPLAY,
+                status_badges=STATUS_BADGES,
+                category_status_options=CATEGORY_STATUS_OPTIONS,
+                default_open_positions=None,
+                initial_category="Materials",
+                default_date=date.today(),
+                materials_form_data=materials_form_data,
+                errors=["Unable to save the item shortage right now. Please try again."],
+            )
+        flash("Item shortage logged for purchasing review.", "success")
+        return redirect(url_for("mdi.meeting_view"))
+
     entry = MDIEntry()
     _populate_entry_from_form(entry, request.form)
     if entry.date_logged is None:
@@ -438,4 +497,3 @@ def _map_row(header, row):
     for index, column in enumerate(header):
         mapping[column] = row[index].strip() if index < len(row) else ""
     return mapping
-

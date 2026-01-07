@@ -68,6 +68,75 @@ def _clean_text(value: str) -> str | None:
     return text or None
 
 
+def purchase_request_form_defaults(default_requestor: str) -> dict[str, str]:
+    return {
+        "title": "",
+        "description": "",
+        "quantity": "",
+        "unit": "",
+        "needed_by": "",
+        "requested_by": default_requestor,
+        "supplier_name": "",
+        "supplier_contact": "",
+        "eta_date": "",
+        "purchase_order_number": "",
+        "notes": "",
+    }
+
+
+def build_purchase_request_from_form(
+    form: dict[str, str],
+    *,
+    default_requestor: str,
+) -> tuple[PurchaseRequest | None, list[str], dict[str, str]]:
+    """Shared builder for purchase requests (purchasing + MDI materials)."""
+
+    form_data = purchase_request_form_defaults(default_requestor)
+    for field in form_data:
+        form_data[field] = (form.get(field, "") or "").strip()
+
+    errors: list[str] = []
+    if not form_data["title"]:
+        errors.append("An item, part, or material description is required.")
+
+    quantity_value, quantity_error = _parse_decimal(form_data["quantity"])
+    if quantity_error:
+        errors.append(quantity_error)
+
+    needed_by_value, needed_by_error = _parse_date(
+        form_data["needed_by"], field_label="the needed-by date"
+    )
+    if needed_by_error:
+        errors.append(needed_by_error)
+
+    eta_value, eta_error = _parse_date(form_data["eta_date"], field_label="the ETA")
+    if eta_error:
+        errors.append(eta_error)
+
+    requestor = form_data["requested_by"] or default_requestor
+    form_data["requested_by"] = requestor
+    if not requestor:
+        errors.append("Identify who is requesting the purchase.")
+
+    if errors:
+        return None, errors, form_data
+
+    purchase_request = PurchaseRequest(
+        title=form_data["title"],
+        description=_clean_text(form_data["description"]),
+        quantity=quantity_value,
+        unit=_clean_text(form_data["unit"]),
+        requested_by=requestor,
+        needed_by=needed_by_value,
+        supplier_name=_clean_text(form_data["supplier_name"]),
+        supplier_contact=_clean_text(form_data["supplier_contact"]),
+        eta_date=eta_value,
+        purchase_order_number=_clean_text(form_data["purchase_order_number"]),
+        notes=_clean_text(form_data["notes"]),
+    )
+    return purchase_request, [], form_data
+
+
 def _format_decimal_for_number_field(value: Decimal) -> str:
     """Return a clean string for Decimal quantities used in number inputs."""
 
@@ -242,55 +311,16 @@ def purchasing_home():
 @_require_purchasing_edit
 def new_request():
     default_requestor = current_user.username if current_user.is_authenticated else ""
-    form_data = {
-        "title": "",
-        "description": "",
-        "quantity": "",
-        "unit": "",
-        "needed_by": "",
-        "supplier_name": "",
-        "supplier_contact": "",
-        "notes": "",
-        "requested_by": default_requestor,
-    }
+    form_data = purchase_request_form_defaults(default_requestor)
 
     if request.method == "POST":
-        for field in form_data:
-            form_data[field] = request.form.get(field, "").strip()
-
-        errors: list[str] = []
-        if not form_data["title"]:
-            errors.append("An item, part, or material description is required.")
-
-        quantity_value, quantity_error = _parse_decimal(form_data["quantity"])
-        if quantity_error:
-            errors.append(quantity_error)
-
-        needed_by_value, needed_by_error = _parse_date(
-            form_data["needed_by"], field_label="the needed-by date"
+        purchase_request, errors, form_data = build_purchase_request_from_form(
+            request.form, default_requestor=default_requestor
         )
-        if needed_by_error:
-            errors.append(needed_by_error)
-
-        requestor = form_data["requested_by"] or default_requestor
-        if not requestor:
-            errors.append("Identify who is requesting the purchase.")
-
         if errors:
             for message in errors:
                 flash(message, "error")
         else:
-            purchase_request = PurchaseRequest(
-                title=form_data["title"],
-                description=_clean_text(form_data["description"]),
-                quantity=quantity_value,
-                unit=_clean_text(form_data["unit"]),
-                requested_by=requestor,
-                needed_by=needed_by_value,
-                supplier_name=_clean_text(form_data["supplier_name"]),
-                supplier_contact=_clean_text(form_data["supplier_contact"]),
-                notes=_clean_text(form_data["notes"]),
-            )
             try:
                 PurchaseRequest.commit_with_sequence_retry(purchase_request)
             except Exception:
