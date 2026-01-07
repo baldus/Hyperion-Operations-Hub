@@ -73,6 +73,7 @@ function renderCategoryDetails(entry) {
       return `
         <div class="text-muted small mb-0 d-flex flex-wrap gap-2">
           ${entry.item_part_number ? `<span>Part ${escapeHtml(entry.item_part_number)}</span>` : ''}
+          ${entry.quantity != null ? `<span>Qty ${escapeHtml(entry.quantity)}${entry.unit ? ` ${escapeHtml(entry.unit)}` : ''}</span>` : ''}
           ${entry.vendor ? `<span>Vendor ${escapeHtml(entry.vendor)}</span>` : ''}
           ${entry.eta ? `<span>ETA ${escapeHtml(entry.eta)}</span>` : ''}
           ${entry.po_number ? `<span>PO ${escapeHtml(entry.po_number)}</span>` : ''}
@@ -99,7 +100,7 @@ function countMetricEntries(entries) {
 function renderEntryCard(entry, categoryMeta, statusBadges, entryUrl) {
   const meta = categoryMeta[entry.category] || {};
   const color = meta.color || 'primary';
-  const statusClass = statusToBadge(entry.status, statusBadges);
+  const statusClass = entry.status_badge || statusToBadge(entry.status, statusBadges);
   const entryNumber = String(entry.id).padStart(4, '0');
   const entryTitle = (() => {
     if (entry.category === 'Delivery') {
@@ -110,7 +111,7 @@ function renderEntryCard(entry, categoryMeta, statusBadges, entryUrl) {
     }
     return entry.description || 'No description provided';
   })();
-  const showCompleteButton = entry.status !== 'Closed';
+  const showCompleteButton = entry.status !== 'Closed' && !entry.is_material_shortage;
   const completeButton = showCompleteButton
     ? `
       <div class="mdi-entry-card__actions">
@@ -152,7 +153,7 @@ function renderEntryCard(entry, categoryMeta, statusBadges, entryUrl) {
           <span class="fw-semibold">View details →</span>
         </div>
         <a
-          href="${entryUrl}?id=${entry.id}"
+          href="${entry.detail_url || `${entryUrl}?id=${entry.id}`}"
           class="stretched-link"
           aria-label="View entry #${entryNumber}"
         ></a>

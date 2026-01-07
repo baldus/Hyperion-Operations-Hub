@@ -7,6 +7,7 @@ from typing import Callable, Dict, Iterable, List, Tuple
 from flask import flash, redirect, render_template, request, url_for
 
 from invapp.extensions import db
+from invapp.mdi.materials_summary import build_open_shortage_counts
 from invapp.mdi.models import CATEGORY_DISPLAY, CategoryMetric, MDIEntry, STATUS_BADGES
 
 
@@ -265,10 +266,9 @@ def people_dashboard():  # pragma: no cover - registered via blueprint
 
 def materials_dashboard():  # pragma: no cover - registered via blueprint
     category = "Materials"
-    entries = _entries_for_category(category)
     date_range, labels = _chart_date_range()
 
-    open_counts = _build_daily_counts(entries, date_range, lambda entry: (entry.status or "").lower() == "open")
+    open_counts = build_open_shortage_counts(date_range)
 
     charts = [
         {
@@ -293,8 +293,10 @@ def materials_dashboard():  # pragma: no cover - registered via blueprint
     context = _base_context(category, "Track material shortages and follow-up actions.")
     context.update({
         "charts": charts,
-        "entries": entries,
+        "entries": _entries_for_category(category),
         **_metric_context(category),
+        "materials_summary_url": url_for("mdi.api_materials_summary"),
+        "materials_shortages_url": url_for("purchasing.purchasing_home"),
     })
     return render_template("materials.html", **context)
 
@@ -680,4 +682,3 @@ def register(bp):
     bp.add_url_rule("/mdi/delivery", view_func=delivery_dashboard, methods=["GET", "POST"])
     bp.add_url_rule("/mdi/people", view_func=people_dashboard, methods=["GET", "POST"])
     bp.add_url_rule("/mdi/materials", view_func=materials_dashboard)
-

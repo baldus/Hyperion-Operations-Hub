@@ -8,7 +8,8 @@
         <small class="text-muted">#{{ '%04d'|format(entry.id) }}</small>
       </div>
       {% if entry.status %}
-        <span class="mdi-pill mdi-pill--status bg-{{ status_badges.get(entry.status, 'secondary') }}">
+        {% set badge_class = entry.status_badge if entry.status_badge else status_badges.get(entry.status, 'secondary') %}
+        <span class="mdi-pill mdi-pill--status bg-{{ badge_class }}">
           {{ entry.status }}
         </span>
       {% endif %}
@@ -57,6 +58,9 @@
     {% elif entry.category == 'Materials' %}
       <div class="text-muted small mb-0 d-flex flex-wrap gap-2">
         {% if entry.item_part_number %}<span>Part {{ entry.item_part_number }}</span>{% endif %}
+        {% if entry.quantity is not none %}
+          <span>Qty {{ "{:.2f}".format(entry.quantity) }}{% if entry.unit %} {{ entry.unit }}{% endif %}</span>
+        {% endif %}
         {% if entry.vendor %}<span>Vendor {{ entry.vendor }}</span>{% endif %}
         {% if entry.eta %}<span>ETA {{ entry.eta }}</span>{% endif %}
         {% if entry.po_number %}<span>PO {{ entry.po_number }}</span>{% endif %}
@@ -69,12 +73,12 @@
     </div>
 
     <a
-      href="{{ url_for('mdi.report_entry', id=entry.id) }}"
+      href="{{ entry.detail_url or url_for('mdi.report_entry', id=entry.id) }}"
       class="stretched-link"
       aria-label="View entry #{{ '%04d'|format(entry.id) }}"
     ></a>
   </div>
-  {% if entry.status != 'Closed' %}
+  {% if entry.status != 'Closed' and not entry.is_material_shortage %}
     <div class="mdi-entry-card__actions">
       <button
         type="button"
