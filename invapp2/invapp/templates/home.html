@@ -42,13 +42,32 @@
 {% set show_inventory = inventory_summary is not none %}
 {% set show_incoming = incoming_items is not none %}
 
+{% if current_user.is_authenticated and database_online and home_layout %}
+<div class="home-customize-controls">
+  <button type="button" class="action-btn secondary" id="home-customize-toggle">Customize Home</button>
+  <div class="home-customize-actions">
+    <button type="button" class="action-btn" id="home-customize-save" hidden>Save</button>
+    <button type="button" class="action-btn subtle-action" id="home-customize-cancel" hidden>Cancel</button>
+  </div>
+</div>
+{% endif %}
+
 {% if show_orders or show_inventory or show_incoming %}
-<div class="home-summary-grid">
-  {% if show_orders %}
-  <section class="home-summary-card">
+<div class="home-summary-grid" id="home-summary-grid">
+  {% for cube in home_layout %}
+  {% if cube.key == "orders" and show_orders %}
+  <section class="home-summary-card{% if not cube.visible %} is-hidden{% endif %}" data-cube-key="{{ cube.key }}">
     <div class="home-summary-heading">
-      <h3>Orders</h3>
-      <span class="home-summary-badge">Production</span>
+      <div class="home-summary-title">
+        <h3>Orders</h3>
+        <span class="home-summary-badge">Production</span>
+      </div>
+      {% if current_user.is_authenticated and database_online %}
+      <div class="home-summary-actions">
+        <button class="home-cube-drag" type="button" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
+        <button class="home-cube-toggle" type="button" data-action="hide-cube">Hide</button>
+      </div>
+      {% endif %}
     </div>
     <div class="home-summary-metrics">
       <p class="home-summary-metric"><strong>{{ order_summary.due_soon_count }}</strong> due within {{ order_summary.due_soon_window_days }} days</p>
@@ -103,13 +122,19 @@
       <a class="home-summary-link" href="{{ url_for('orders.orders_home') }}">Go to Orders →</a>
     </div>
   </section>
-  {% endif %}
-
-  {% if show_inventory %}
-  <section class="home-summary-card">
+  {% elif cube.key == "inventory" and show_inventory %}
+  <section class="home-summary-card{% if not cube.visible %} is-hidden{% endif %}" data-cube-key="{{ cube.key }}">
     <div class="home-summary-heading">
-      <h3>Inventory</h3>
-      <span class="home-summary-badge">Stock Control</span>
+      <div class="home-summary-title">
+        <h3>Inventory</h3>
+        <span class="home-summary-badge">Stock Control</span>
+      </div>
+      {% if current_user.is_authenticated and database_online %}
+      <div class="home-summary-actions">
+        <button class="home-cube-drag" type="button" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
+        <button class="home-cube-toggle" type="button" data-action="hide-cube">Hide</button>
+      </div>
+      {% endif %}
     </div>
     <div class="home-summary-metrics">
       <p class="home-summary-metric"><strong>{{ inventory_summary.out_count }}</strong> out of stock</p>
@@ -144,13 +169,19 @@
       <a class="home-summary-link" href="{{ url_for('inventory.inventory_home') }}">Go to Inventory →</a>
     </div>
   </section>
-  {% endif %}
-
-  {% if show_incoming %}
-  <section class="home-summary-card">
+  {% elif cube.key == "incoming_items" and show_incoming %}
+  <section class="home-summary-card{% if not cube.visible %} is-hidden{% endif %}" data-cube-key="{{ cube.key }}">
     <div class="home-summary-heading">
-      <h3>Incoming Items (Next 3 Days &amp; Overdue)</h3>
-      <span class="home-summary-badge">Purchasing</span>
+      <div class="home-summary-title">
+        <h3>Incoming Items (Next 3 Days &amp; Overdue)</h3>
+        <span class="home-summary-badge">Purchasing</span>
+      </div>
+      {% if current_user.is_authenticated and database_online %}
+      <div class="home-summary-actions">
+        <button class="home-cube-drag" type="button" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
+        <button class="home-cube-toggle" type="button" data-action="hide-cube">Hide</button>
+      </div>
+      {% endif %}
     </div>
 
     <h4 class="home-summary-subheading">Overdue ({{ overdue_items|length }})</h4>
@@ -210,6 +241,7 @@
     </div>
   </section>
   {% endif %}
+  {% endfor %}
 </div>
 {% else %}
 <p class="home-summary-empty">No operational summaries are available for your role yet. Use the navigation menu to explore the areas available to you.</p>
@@ -246,5 +278,31 @@
   </div>
   <p class="home-summary-note">Add links so your team can quickly reach external resources.</p>
 </section>
+{% endif %}
+
+{% if current_user.is_authenticated and database_online and home_layout %}
+<section class="home-cube-panel" id="home-cube-panel" hidden>
+  <div class="home-cube-panel__header">
+    <h3>Available cubes</h3>
+    <p class="home-summary-note">Drag tiles to reorder. Hide tiles to move them here.</p>
+  </div>
+  <ul class="home-cube-list" id="home-cube-available-list">
+    {% for cube in home_layout_available %}
+    <li class="home-cube-item" data-cube-key="{{ cube.key }}">
+      <div class="home-cube-info">
+        <strong>{{ cube.display_name }}</strong>
+        {% if cube.description %}
+        <span>{{ cube.description }}</span>
+        {% endif %}
+      </div>
+      <button type="button" class="action-btn secondary" data-action="add-cube">Add</button>
+    </li>
+    {% endfor %}
+    <li class="home-cube-empty{% if home_layout_available %} is-hidden{% endif %}">All cubes are on your dashboard.</li>
+  </ul>
+</section>
+
+<script id="home-layout-data" type="application/json">{{ home_layout_data | tojson }}</script>
+<script src="{{ url_for('static', filename='js/home-customize.js') }}"></script>
 {% endif %}
 {% endblock %}

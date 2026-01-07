@@ -924,6 +924,22 @@ class User(UserMixin, PrimaryKeySequenceMixin, db.Model):
         return f"<User {self.username}>"
 
 
+class UserHomeLayout(db.Model):
+    __tablename__ = "user_home_layout"
+
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    layout_json = db.Column(db.JSON, nullable=False, default=list)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    user = db.relationship("User", backref=db.backref("home_layout", uselist=False))
+
+
 
 class OrderStatus:
     SCHEDULED = "SCHEDULED"
