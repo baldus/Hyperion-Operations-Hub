@@ -5,7 +5,7 @@ from pathlib import Path
 
 import click
 
-from flask import Flask, current_app, render_template, request, session, url_for
+from flask import Flask, current_app, jsonify, render_template, request, session, url_for
 from sqlalchemy import func, inspect, text
 from sqlalchemy.exc import IntegrityError, NoSuchTableError, OperationalError, SQLAlchemyError
 from sqlalchemy.pool import StaticPool
@@ -13,7 +13,7 @@ from sqlalchemy.orm.exc import DetachedInstanceError
 
 from .extensions import db, login_manager
 from .offline import OfflineAdminUser
-from .login import current_user
+from .login import current_user, login_required
 from .permissions import (
     current_principal_roles,
     ensure_page_access,
@@ -45,6 +45,12 @@ from . import models  # ensure models are registered with SQLAlchemy
 from .audit import record_access_event, resolve_client_ip
 from .db_maintenance import repair_primary_key_sequences
 from .home_overview import get_incoming_and_overdue_items
+from .home_layout import (
+    allowed_home_cube_keys,
+    build_home_layout_response,
+    normalize_layout_payload,
+    save_home_layout,
+)
 from .superuser import is_superuser
 
 
@@ -288,6 +294,21 @@ def _ensure_order_schema(engine):
                         f"ALTER TABLE gate_order_detail ADD COLUMN {column_name} {column_type}"
                     )
                 )
+
+
+def _ensure_home_layout_schema(engine) -> None:
+    inspector = inspect(engine)
+    try:
+        existing_tables = {table.lower() for table in inspector.get_table_names()}
+    except Exception:  # pragma: no cover - defensive guard
+        return
+
+    if "user_home_layout" in existing_tables:
+        return
+
+    table = db.Model.metadata.tables.get("user_home_layout")
+    if table is not None:
+        table.create(bind=engine)
 
 
 def _ensure_production_schema(engine):
@@ -628,6 +649,7 @@ def create_app(config_override=None):
                 db.create_all()
                 _ensure_inventory_schema(db.engine)
                 _ensure_order_schema(db.engine)
+                _ensure_home_layout_schema(db.engine)
                 _ensure_production_schema(db.engine)
                 mdi_models.ensure_schema()
                 mdi_models.seed_data()
@@ -826,6 +848,9 @@ def create_app(config_override=None):
                 overdue_items=None,
                 incoming_items=None,
                 useful_links=useful_links,
+                home_layout=[],
+                home_layout_data=None,
+                home_layout_available=[],
             )
 
         order_summary = None
@@ -950,6 +975,7 @@ def create_app(config_override=None):
             overdue_items, incoming_items = get_incoming_and_overdue_items()
 
         useful_links = models.UsefulLink.ordered()
+        home_layout_data = build_home_layout_response(current_user)
 
         return render_template(
             "home.html",
@@ -958,7 +984,44 @@ def create_app(config_override=None):
             overdue_items=overdue_items,
             incoming_items=incoming_items,
             useful_links=useful_links,
+            home_layout=home_layout_data["layout"],
+            home_layout_data=home_layout_data,
+            home_layout_available=home_layout_data["available_cubes"],
         )
+
+    @app.get("/api/home_layout")
+    @login_required
+    def get_home_layout_api():
+        if not current_app.config.get("DATABASE_AVAILABLE", True):
+            return jsonify({"error": "Database is unavailable."}), 503
+
+        layout = build_home_layout_response(current_user)
+        return jsonify(layout)
+
+    @app.post("/api/home_layout")
+    @login_required
+    def save_home_layout_api():
+        if not current_app.config.get("DATABASE_AVAILABLE", True):
+            return jsonify({"error": "Database is unavailable."}), 503
+
+        payload = request.get_json(silent=True)
+        if payload is None:
+            return jsonify({"error": "Invalid JSON payload."}), 400
+
+        layout_payload = payload
+        if isinstance(payload, dict):
+            layout_payload = payload.get("layout")
+
+        layout, errors = normalize_layout_payload(
+            layout_payload,
+            allowed_keys=allowed_home_cube_keys(),
+        )
+        if errors or layout is None:
+            return jsonify({"error": "Invalid layout payload.", "details": errors}), 400
+
+        save_home_layout(current_user.id, layout)
+        updated_layout = build_home_layout_response(current_user)
+        return jsonify(updated_layout)
 
     @app.cli.command("db-repair-sequences")
     def repair_sequences_command() -> None:

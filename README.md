@@ -26,6 +26,7 @@ logging stack.
 10. [MDI Meeting Dashboard Experience](#mdi-meeting-dashboard-experience)
 11. [Extending the MDI Module](#extending-the-mdi-module)
 12. [Operational Tips](#operational-tips)
+13. [Home Screen Cubes](#home-screen-cubes)
 
 ---
 
@@ -302,6 +303,25 @@ retaining easy access to historical entries through the status filter.
   database is offline; the UI exposes next-step commands to restart services.
 * **Testing** – `pytest` tests live under `invapp2/tests`. Activate the virtual
   environment and run `pytest` before opening pull requests.
+
+---
+
+## Home Screen Cubes
+
+Home tiles are registered in `invapp2/invapp/home_cubes.py`. To add a new cube:
+
+1. Add a new `CubeDefinition` entry to `HOME_CUBES` with a stable `key`, label,
+   description, and `endpoint` route.
+2. Decide whether the cube should be enabled by default. Add its key to
+   `DEFAULT_HOME_CUBE_KEYS` if it should appear immediately for users without a
+   saved layout.
+3. Update the `home` route in `invapp2/invapp/__init__.py` to compute any data
+   needed by the cube.
+4. Add the cube markup to `invapp2/invapp/templates/home.html` in the cube loop
+   so it can render when visible.
+
+Once registered, the cube automatically appears in the “Available cubes” list
+for users who have access to the associated page.
 
 ---
 
