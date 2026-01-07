@@ -1,11 +1,12 @@
 """REST API endpoints for the MDI module."""
 from datetime import datetime, date
 
-from flask import jsonify, request
+from flask import jsonify, request, url_for
 
 from invapp.extensions import db
-from invapp.mdi.materials_summary import build_materials_summary
+from invapp.mdi.materials_summary import build_materials_card, build_materials_summary
 from invapp.mdi.models import MDIEntry
+from invapp.models import PurchaseRequest
 
 from .constants import ACTIVE_STATUS_FILTER, COMPLETED_STATUSES
 
@@ -16,9 +17,15 @@ def get_entries():
     status = request.args.get("status")
     date = request.args.get("date")
 
+    if category == "Materials":
+        materials_entries = _materials_entries(status, date)
+        return jsonify(materials_entries)
+
     query = MDIEntry.query
     if category:
         query = query.filter(MDIEntry.category == category)
+    else:
+        query = query.filter(MDIEntry.category != "Materials")
     if status == ACTIVE_STATUS_FILTER:
         query = query.filter(MDIEntry.status.notin_(COMPLETED_STATUSES))
     elif status:
@@ -29,8 +36,9 @@ def get_entries():
         except ValueError:
             pass
 
-    entries = query.order_by(MDIEntry.created_at.desc()).all()
-    return jsonify([entry.to_dict() for entry in entries])
+    entries = [entry.to_dict() for entry in query.order_by(MDIEntry.created_at.desc()).all()]
+    entries.extend(_materials_entries(status, date))
+    return jsonify(entries)
 
 
 def create_entry():
@@ -133,6 +141,37 @@ def delete_entry(entry_id):
 def materials_summary():
     """Return aggregated Item Shortage data for the MDI materials dashboard."""
     return jsonify(build_materials_summary())
+
+
+def _materials_entries(status_filter: str | None, date_filter: str | None) -> list[dict[str, object]]:
+    materials_query = PurchaseRequest.query
+    if status_filter == ACTIVE_STATUS_FILTER:
+        materials_query = materials_query.filter(
+            ~PurchaseRequest.status.in_(
+                {PurchaseRequest.STATUS_RECEIVED, PurchaseRequest.STATUS_CANCELLED}
+            )
+        )
+    elif status_filter in PurchaseRequest.status_values():
+        materials_query = materials_query.filter(PurchaseRequest.status == status_filter)
+
+    if date_filter:
+        try:
+            filter_date = datetime.strptime(date_filter, "%Y-%m-%d").date()
+        except ValueError:
+            filter_date = None
+        if filter_date:
+            start_dt = datetime.combine(filter_date, datetime.min.time())
+            end_dt = datetime.combine(filter_date, datetime.max.time())
+            materials_query = materials_query.filter(PurchaseRequest.created_at >= start_dt)
+            materials_query = materials_query.filter(PurchaseRequest.created_at <= end_dt)
+
+    return [
+        {
+            **build_materials_card(request_record, for_api=True),
+            "detail_url": url_for("purchasing.view_request", request_id=request_record.id),
+        }
+        for request_record in materials_query.order_by(PurchaseRequest.created_at.desc()).all()
+    ]
 
 
 def _parse_date(date_str):

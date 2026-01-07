@@ -14,11 +14,12 @@
     </div>
 </div>
 
-{% if receive_url %}
 <div class="purchasing-detail-actions">
-    <a href="{{ receive_url }}" class="action-btn">Receive Items</a>
+    {% if receive_url %}
+        <a href="{{ receive_url }}" class="action-btn">Receive Items</a>
+    {% endif %}
+    <a href="{{ url_for('mdi.meeting_view', category='Materials') }}" class="action-btn">View on MDI</a>
 </div>
-{% endif %}
 
 <div class="purchasing-detail-grid">
     <section>

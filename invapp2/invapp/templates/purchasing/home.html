@@ -8,6 +8,7 @@
         {% if can_edit_page('purchasing') %}
             <a class="action-btn primary-action" href="{{ url_for('purchasing.new_request') }}">Log Item Shortage</a>
         {% endif %}
+        <a class="action-btn" href="{{ url_for('mdi.meeting_view', category='Materials') }}">View on MDI</a>
     </div>
     <form method="get" class="status-filter-form">
         <label for="status" class="sr-only">Filter by status</label>

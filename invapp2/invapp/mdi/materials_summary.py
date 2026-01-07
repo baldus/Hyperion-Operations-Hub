@@ -17,6 +17,16 @@ STATUS_PRIORITY = [
 ]
 
 
+STATUS_BADGES = {
+    PurchaseRequest.STATUS_NEW: "secondary",
+    PurchaseRequest.STATUS_REVIEW: "warning",
+    PurchaseRequest.STATUS_WAITING: "warning",
+    PurchaseRequest.STATUS_ORDERED: "info",
+    PurchaseRequest.STATUS_RECEIVED: "success",
+    PurchaseRequest.STATUS_CANCELLED: "secondary",
+}
+
+
 def status_display_label(status: str | None) -> str:
     if not status:
         return "Other"
@@ -29,6 +39,27 @@ def status_display_label(status: str | None) -> str:
         PurchaseRequest.STATUS_CANCELLED: "Cancelled",
     }
     return mapping.get(status, PurchaseRequest.status_label(status))
+
+
+def status_badge(status: str | None) -> str:
+    return STATUS_BADGES.get(status or "", "secondary")
+
+
+def extract_sku_from_title(title: str | None) -> str | None:
+    if not title:
+        return None
+
+    separators = [" – ", " — ", " - ", "–", "—", "-"]
+    for separator in separators:
+        if separator in title:
+            candidate = title.split(separator, 1)[0].strip()
+            if candidate:
+                return candidate
+
+    cleaned = title.strip()
+    if cleaned and " " not in cleaned:
+        return cleaned
+    return None
 
 
 def _status_sort_key(label: str) -> tuple[int, str]:
@@ -88,6 +119,29 @@ def build_materials_summary() -> dict[str, object]:
         "total_count": total_count,
         "total_qty": total_qty,
         "last_updated": datetime.utcnow().isoformat(),
+    }
+
+
+def build_materials_card(request: PurchaseRequest, *, for_api: bool) -> dict[str, object]:
+    sku = extract_sku_from_title(request.title)
+    date_logged = request.created_at.date() if request.created_at else None
+    quantity = None if request.quantity is None else float(request.quantity)
+    return {
+        "id": request.id,
+        "category": "Materials",
+        "description": request.title,
+        "owner": request.requested_by,
+        "status": status_display_label(request.status),
+        "status_badge": status_badge(request.status),
+        "item_part_number": sku,
+        "vendor": request.supplier_name,
+        "eta": request.eta_date.isoformat() if request.eta_date else None,
+        "po_number": request.purchase_order_number,
+        "quantity": quantity,
+        "unit": request.unit,
+        "date_logged": date_logged.isoformat() if for_api and date_logged else date_logged,
+        "created_at": request.created_at.isoformat() if for_api and request.created_at else None,
+        "is_material_shortage": True,
     }
 
 
