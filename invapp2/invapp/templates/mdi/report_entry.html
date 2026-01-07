@@ -25,6 +25,16 @@
           {% endif %}
         </div>
         <div class="card-body">
+          {% if errors %}
+            <div class="alert alert-danger" role="alert">
+              <p class="mb-2 fw-semibold">Please resolve the following issues:</p>
+              <ul class="mb-0">
+                {% for message in errors %}
+                  <li>{{ message }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
           {% set priority_options = ['High', 'Medium', 'Low'] %}
           {% set active_category = entry.category if entry else initial_category %}
           <form method="post" action="{% if entry %}{{ url_for('mdi.report_update_entry', entry_id=entry.id) }}{% else %}{{ url_for('mdi.report_add_entry') }}{% endif %}">
@@ -220,69 +230,57 @@
               </div>
 
               <div class="category-section{% if active_category != 'Materials' %} d-none{% endif %}" data-category-section="Materials">
-                <h5 class="mb-3">Materials Details</h5>
+                <h5 class="mb-3">Item Shortage Details</h5>
                 <div class="row g-3">
-                  <div class="col-md-6">
-                    <label for="materials-status" class="form-label">Status</label>
-                    <select class="form-select" id="materials-status" name="status" data-required="true" {% if active_category != 'Materials' %}disabled{% else %}required{% endif %}>
-                      {% for status in category_status_options['Materials'] %}
-                        {% set selected = entry and entry.category == 'Materials' and entry.status == status %}
-                        {% if not entry and initial_category == 'Materials' and status == 'Open' %}
-                          {% set selected = true %}
-                        {% endif %}
-                        <option value="{{ status }}" {% if selected %}selected{% endif %}>{{ status }}</option>
-                      {% endfor %}
-                    </select>
-                  </div>
-                  <div class="col-md-6">
-                    <label for="materials-priority" class="form-label">Priority</label>
-                    <select class="form-select" id="materials-priority" name="priority" {% if active_category != 'Materials' %}disabled{% endif %}>
-                      {% for priority in priority_options %}
-                        {% set selected = entry and entry.category == 'Materials' and entry.priority == priority %}
-                        {% if not entry and initial_category == 'Materials' and priority == 'Medium' %}
-                          {% set selected = true %}
-                        {% endif %}
-                        <option value="{{ priority }}" {% if selected %}selected{% endif %}>{{ priority }}</option>
-                      {% endfor %}
-                    </select>
-                  </div>
-                  <div class="col-md-6">
-                    <label for="materials-owner" class="form-label">Owner</label>
-                    <input type="text" class="form-control" id="materials-owner" name="owner" value="{% if entry and entry.category == 'Materials' %}{{ entry.owner }}{% endif %}" {% if active_category != 'Materials' %}disabled{% endif %} />
+                  <div class="col-12">
+                    <label for="materials-title" class="form-label">Item or part <span aria-hidden="true">*</span></label>
+                    <input type="text" class="form-control" id="materials-title" name="title" data-required="true" value="{{ materials_form_data.title }}" {% if active_category != 'Materials' %}disabled{% else %}required{% endif %} />
                   </div>
                   <div class="col-12">
-                    <label for="materials-description" class="form-label">Description</label>
-                    <textarea class="form-control" id="materials-description" name="description" rows="3" data-required="true" {% if active_category != 'Materials' %}disabled{% else %}required{% endif %}>{% if entry and entry.category == 'Materials' %}{{ entry.description }}{% endif %}</textarea>
+                    <label for="materials-description" class="form-label">Reason or description</label>
+                    <textarea class="form-control" id="materials-description" name="description" rows="3" {% if active_category != 'Materials' %}disabled{% endif %}>{{ materials_form_data.description }}</textarea>
+                  </div>
+                  <div class="col-md-6">
+                    <label for="materials-quantity" class="form-label">Quantity needed</label>
+                    <input type="text" class="form-control" id="materials-quantity" name="quantity" value="{{ materials_form_data.quantity }}" {% if active_category != 'Materials' %}disabled{% endif %} />
+                  </div>
+                  <div class="col-md-6">
+                    <label for="materials-unit" class="form-label">Unit</label>
+                    <input type="text" class="form-control" id="materials-unit" name="unit" value="{{ materials_form_data.unit }}" {% if active_category != 'Materials' %}disabled{% endif %} />
+                  </div>
+                  <div class="col-md-6">
+                    <label for="materials-needed-by" class="form-label">Needed by</label>
+                    <input type="date" class="form-control" id="materials-needed-by" name="needed_by" value="{{ materials_form_data.needed_by }}" {% if active_category != 'Materials' %}disabled{% endif %} />
+                  </div>
+                  <div class="col-md-6">
+                    <label for="materials-requested-by" class="form-label">Requested by <span aria-hidden="true">*</span></label>
+                    <input type="text" class="form-control" id="materials-requested-by" name="requested_by" data-required="true" value="{{ materials_form_data.requested_by }}" {% if active_category != 'Materials' %}disabled{% else %}required{% endif %} />
+                  </div>
+                  <div class="col-md-6">
+                    <label for="materials-supplier-name" class="form-label">Preferred supplier</label>
+                    <input type="text" class="form-control" id="materials-supplier-name" name="supplier_name" value="{{ materials_form_data.supplier_name }}" {% if active_category != 'Materials' %}disabled{% endif %} />
+                  </div>
+                  <div class="col-md-6">
+                    <label for="materials-supplier-contact" class="form-label">Supplier contact</label>
+                    <input type="text" class="form-control" id="materials-supplier-contact" name="supplier_contact" value="{{ materials_form_data.supplier_contact }}" {% if active_category != 'Materials' %}disabled{% endif %} />
+                  </div>
+                  <div class="col-md-6">
+                    <label for="materials-eta-date" class="form-label">ETA</label>
+                    <input type="date" class="form-control" id="materials-eta-date" name="eta_date" value="{{ materials_form_data.eta_date }}" {% if active_category != 'Materials' %}disabled{% endif %} />
+                  </div>
+                  <div class="col-md-6">
+                    <label for="materials-po-number" class="form-label">PO Number</label>
+                    <input type="text" class="form-control" id="materials-po-number" name="purchase_order_number" value="{{ materials_form_data.purchase_order_number }}" {% if active_category != 'Materials' %}disabled{% endif %} />
                   </div>
                   <div class="col-12">
-                    <label for="materials-notes" class="form-label">Notes</label>
-                    <textarea class="form-control" id="materials-notes" name="notes" rows="3" {% if active_category != 'Materials' %}disabled{% endif %}>{% if entry and entry.category == 'Materials' %}{{ entry.notes }}{% endif %}</textarea>
-                  </div>
-                  <div class="col-md-6">
-                    <label for="materials-item" class="form-label">Item or Part Number</label>
-                    <input type="text" class="form-control" id="materials-item" name="item_part_number" value="{% if entry and entry.category == 'Materials' %}{{ entry.item_part_number }}{% endif %}" {% if active_category != 'Materials' %}disabled{% endif %} />
-                  </div>
-                  <div class="col-md-6">
-                    <label for="materials-area" class="form-label">Area / Department</label>
-                    <input type="text" class="form-control" id="materials-area" name="area" value="{% if entry and entry.category == 'Materials' %}{{ entry.area }}{% endif %}" {% if active_category != 'Materials' %}disabled{% endif %} />
-                  </div>
-                  <div class="col-md-6">
-                    <label for="materials-vendor" class="form-label">Vendor</label>
-                    <input type="text" class="form-control" id="materials-vendor" name="vendor" value="{% if entry and entry.category == 'Materials' %}{{ entry.vendor }}{% endif %}" {% if active_category != 'Materials' %}disabled{% endif %} />
-                  </div>
-                  <div class="col-md-6">
-                    <label for="materials-eta" class="form-label">ETA / Project LT</label>
-                    <input type="text" class="form-control" id="materials-eta" name="eta" value="{% if entry and entry.category == 'Materials' %}{{ entry.eta }}{% endif %}" {% if active_category != 'Materials' %}disabled{% endif %} />
-                  </div>
-                  <div class="col-md-6">
-                    <label for="materials-po" class="form-label">PO Number</label>
-                    <input type="text" class="form-control" id="materials-po" name="po_number" value="{% if entry and entry.category == 'Materials' %}{{ entry.po_number }}{% endif %}" {% if active_category != 'Materials' %}disabled{% endif %} />
+                    <label for="materials-notes" class="form-label">Additional notes for purchasing</label>
+                    <textarea class="form-control" id="materials-notes" name="notes" rows="3" {% if active_category != 'Materials' %}disabled{% endif %}>{{ materials_form_data.notes }}</textarea>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div class="row g-3 mt-3">
+            <div class="row g-3 mt-3" id="date-logged-row">
               <div class="col-md-6">
                 <label for="date_logged" class="form-label">Date Logged</label>
                 <input type="date" class="form-control" id="date_logged" name="date_logged" value="{% if entry and entry.date_logged %}{{ entry.date_logged.isoformat() }}{% else %}{{ default_date.isoformat() }}{% endif %}" />
@@ -322,6 +320,15 @@
             }
           });
         });
+
+        const dateRow = document.getElementById('date-logged-row');
+        if (dateRow) {
+          const showDate = selectedCategory !== 'Materials';
+          dateRow.classList.toggle('d-none', !showDate);
+          dateRow.querySelectorAll('input').forEach((field) => {
+            field.disabled = !showDate;
+          });
+        }
 
         if (selectedCategory === 'People') {
           const openPositionsInput = document.getElementById('people-open-positions');
