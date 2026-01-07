@@ -45,56 +45,61 @@ def _desired_next_value(connection, table, pk_column) -> int:
     return int(connection.execute(query).scalar_one())
 
 
-def _pg_sequence_next_value(connection, sequence_name: str) -> Optional[int]:
-    schema, name = _split_schema_and_name(sequence_name)
-    params = {"seqname": name}
-    query = (
-        "SELECT last_value, is_called, increment_by "
-        "FROM pg_sequences WHERE sequencename = :seqname"
-    )
-    if schema:
-        query += " AND schemaname = :schemaname"
-        params["schemaname"] = schema
+def _max_pk_value(connection, table, pk_column) -> int:
+    query = select(func.coalesce(func.max(pk_column), 0)).select_from(table)
+    return int(connection.execute(query).scalar_one())
 
-    row = connection.execute(text(query), params).fetchone()
+
+def _quote_qualified_name(dialect, qualified_name: str) -> str:
+    schema, name = _split_schema_and_name(qualified_name)
+    preparer = dialect.identifier_preparer
+    if schema:
+        return f"{preparer.quote(schema)}.{preparer.quote(name)}"
+    return preparer.quote(name)
+
+
+def _pg_sequence_next_value(connection, sequence_name: str) -> Optional[int]:
+    quoted_sequence = _quote_qualified_name(connection.dialect, sequence_name)
+    row = connection.execute(
+        text(f"SELECT last_value, increment_by FROM {quoted_sequence}")
+    ).fetchone()
     if row is None:
         return None
 
-    last_value, is_called, increment_by = row
-    if is_called:
-        return int(last_value + increment_by)
-    return int(last_value)
+    last_value, increment_by = row
+    return int(last_value + increment_by)
 
 
 def _repair_postgres_sequence(connection, table, pk_column, logger, dry_run: bool):
     pk_column_name = pk_column.name
+    schema_name = table.schema or "public"
+    qualified_table = f"{schema_name}.{table.name}"
     sequence_name = connection.execute(
         text("SELECT pg_get_serial_sequence(:table_name, :pk_column)"),
-        {"table_name": table.fullname, "pk_column": pk_column_name},
+        {"table_name": qualified_table, "pk_column": pk_column_name},
     ).scalar_one_or_none()
     if not sequence_name:
-        logger.debug(
-            "Skipping sequence repair for %s: no backing sequence discovered", table.fullname
+        logger.info(
+            "Skipping sequence repair for %s: no sequence found, skipping", table.fullname
         )
         return False, None, None
 
-    desired_next = _desired_next_value(connection, table, pk_column)
-    current_next = _pg_sequence_next_value(connection, sequence_name)
+    max_identifier = _max_pk_value(connection, table, pk_column)
+    next_value = max(max_identifier, 1)
 
     if not dry_run:
         connection.execute(
-            text("SELECT setval(:sequence_name, GREATEST(:next_value, 1), false)"),
-            {"sequence_name": sequence_name, "next_value": desired_next},
+            text("SELECT setval(:sequence_name, :next_value, true)"),
+            {"sequence_name": sequence_name, "next_value": next_value},
         )
 
     logger.info(
-        "Repaired primary key sequence for %s using %s (was %s, set to %s)",
+        "Repaired primary key sequence for %s using %s (set to %s)",
         table.fullname,
         sequence_name,
-        current_next,
-        desired_next,
+        next_value,
     )
-    return True, sequence_name, desired_next
+    return True, sequence_name, next_value
 
 
 def _ensure_sqlite_sequence(connection, table, pk_column, logger, dry_run: bool):
@@ -152,7 +157,7 @@ def repair_primary_key_sequences(
     inspector = inspect(engine)
     target_models = list(models or _iter_models(base_model))
 
-    with engine.begin() as connection:
+    with engine.connect() as connection:
         for model in target_models:
             table = getattr(model, "__table__", None)
             if table is None:
@@ -175,6 +180,7 @@ def repair_primary_key_sequences(
                 skipped += 1
                 continue
 
+            transaction = connection.begin()
             try:
                 if engine.dialect.name == "postgresql":
                     fixed, sequence_name, desired_next = _repair_postgres_sequence(
@@ -186,8 +192,12 @@ def repair_primary_key_sequences(
                     )
                 else:
                     skipped += 1
+                    transaction.rollback()
                     continue
-            except SQLAlchemyError as exc:
+                transaction.commit()
+            except Exception as exc:
+                if transaction.is_active:
+                    transaction.rollback()
                 failed += 1
                 summaries.append(
                     SequenceCheck(
@@ -264,9 +274,11 @@ def analyze_primary_key_sequences(
 
             if engine.dialect.name == "postgresql":
                 try:
+                    schema_name = table.schema or "public"
+                    qualified_table = f"{schema_name}.{table.name}"
                     sequence_name = connection.execute(
                         text("SELECT pg_get_serial_sequence(:table_name, :pk_column)"),
-                        {"table_name": table.fullname, "pk_column": pk_column.name},
+                        {"table_name": qualified_table, "pk_column": pk_column.name},
                     ).scalar_one_or_none()
                     if not sequence_name:
                         results.append(
