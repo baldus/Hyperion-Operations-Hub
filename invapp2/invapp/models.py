@@ -517,6 +517,21 @@ class PurchaseRequestAttachment(db.Model):
     request = db.relationship("PurchaseRequest", back_populates="attachments")
 
 
+class PurchaseRequestDeleteAudit(db.Model):
+    __tablename__ = "purchase_request_delete_audit"
+
+    id = db.Column(db.Integer, primary_key=True)
+    purchase_request_id = db.Column(db.Integer, nullable=False)
+    title = db.Column(db.String(255), nullable=False)
+    item_number = db.Column(db.String(255), nullable=True)
+    requested_by = db.Column(db.String(128), nullable=True)
+    attachment_count = db.Column(db.Integer, nullable=False, default=0)
+    deleted_by_user_id = db.Column(db.Integer, nullable=True)
+    deleted_by_username = db.Column(db.String(255), nullable=True)
+    deleted_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    delete_reason = db.Column(db.Text, nullable=True)
+
+
 class RMARequest(db.Model):
     __tablename__ = "rma_request"
 

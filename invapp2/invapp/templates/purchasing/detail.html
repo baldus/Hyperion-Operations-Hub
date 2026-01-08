@@ -19,6 +19,9 @@
         <a href="{{ receive_url }}" class="action-btn">Receive Items</a>
     {% endif %}
     <a href="{{ url_for('mdi.meeting_view', category='Materials') }}" class="action-btn">View on MDI</a>
+    {% if is_superuser() %}
+        <a href="{{ url_for('purchasing.confirm_delete_request', request_id=purchase_request.id) }}" class="action-btn danger">Delete</a>
+    {% endif %}
 </div>
 
 <div class="purchasing-detail-grid">

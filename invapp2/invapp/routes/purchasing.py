@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 import os
+import secrets
 import uuid
 from decimal import Decimal, InvalidOperation
 from functools import wraps
@@ -18,17 +19,27 @@ from flask import (
     render_template,
     request,
     send_from_directory,
+    session,
     url_for,
 )
 from werkzeug.routing import BuildError
 from werkzeug.utils import secure_filename
 from sqlalchemy import func
+from sqlalchemy.exc import SQLAlchemyError
 
 from invapp.auth import blueprint_page_guard
+from invapp.extensions import login_manager
 from invapp.login import current_user
-from invapp.models import Item, PurchaseRequest, PurchaseRequestAttachment, db
+from invapp.models import (
+    Item,
+    PurchaseRequest,
+    PurchaseRequestAttachment,
+    PurchaseRequestDeleteAudit,
+    db,
+)
 from invapp.permissions import resolve_edit_roles
 from invapp.security import require_any_role
+from invapp.superuser import is_superuser
 
 
 bp = Blueprint("purchasing", __name__, url_prefix="/purchasing")
@@ -237,6 +248,35 @@ def _file_storage_size(file_storage) -> int:
         return 0
 
 
+def _delete_request_csrf_token() -> str:
+    token = session.get("purchase_request_delete_csrf")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["purchase_request_delete_csrf"] = token
+    return token
+
+
+def _delete_request_csrf_valid(token: str | None) -> bool:
+    return bool(token) and token == session.get("purchase_request_delete_csrf")
+
+
+def _require_superuser_delete():
+    if not current_user.is_authenticated:
+        return login_manager.unauthorized()
+
+    if not is_superuser():
+        flash("Delete is restricted to the system superuser.", "danger")
+        return (
+            render_template(
+                "errors/forbidden.html",
+                message="Item shortage deletes are restricted to the system superuser.",
+            ),
+            403,
+        )
+
+    return None
+
+
 def _save_purchase_attachment(purchase_request: PurchaseRequest, file_storage):
     if not file_storage or not file_storage.filename:
         return False, "Select a file to upload.", None
@@ -404,6 +444,79 @@ def view_request(request_id: int):
         receive_url=receive_url,
         allowed_extensions=allowed_extensions,
     )
+
+
+@bp.route("/<int:request_id>/delete/confirm")
+def confirm_delete_request(request_id: int):
+    guard = _require_superuser_delete()
+    if guard is not None:
+        return guard
+
+    purchase_request = PurchaseRequest.query.get_or_404(request_id)
+    return render_template(
+        "purchasing/delete_confirm.html",
+        purchase_request=purchase_request,
+        csrf_token=_delete_request_csrf_token(),
+    )
+
+
+@bp.route("/<int:request_id>/delete", methods=["POST"])
+def delete_request(request_id: int):
+    guard = _require_superuser_delete()
+    if guard is not None:
+        return guard
+
+    purchase_request = PurchaseRequest.query.get_or_404(request_id)
+    token = request.form.get("csrf_token")
+    if not _delete_request_csrf_valid(token):
+        flash("Invalid delete request. Please try again.", "danger")
+        return redirect(
+            url_for("purchasing.confirm_delete_request", request_id=request_id)
+        )
+
+    delete_reason = (request.form.get("delete_reason") or "").strip() or None
+    audit_entry = PurchaseRequestDeleteAudit(
+        purchase_request_id=purchase_request.id,
+        title=purchase_request.title,
+        item_number=purchase_request.item_number,
+        requested_by=purchase_request.requested_by,
+        attachment_count=len(purchase_request.attachments),
+        deleted_by_user_id=getattr(current_user, "id", None),
+        deleted_by_username=getattr(current_user, "username", None),
+        delete_reason=delete_reason,
+    )
+    upload_folder = current_app.config.get("PURCHASING_ATTACHMENT_UPLOAD_FOLDER")
+    failed_files: list[str] = []
+    if upload_folder:
+        for attachment in purchase_request.attachments:
+            file_path = os.path.join(upload_folder, attachment.filename)
+            try:
+                os.remove(file_path)
+            except FileNotFoundError:
+                continue
+            except OSError:
+                failed_files.append(attachment.original_name or attachment.filename)
+
+    db.session.add(audit_entry)
+    db.session.delete(purchase_request)
+    try:
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Failed to delete purchase request %s", purchase_request.id
+        )
+        flash("Unable to delete the item shortage. Please try again.", "danger")
+        return redirect(url_for("purchasing.view_request", request_id=request_id))
+
+    if failed_files:
+        flash(
+            "Item shortage deleted, but some attachment files could not be removed.",
+            "warning",
+        )
+
+    flash("Item shortage permanently deleted.", "success")
+    return redirect(url_for("purchasing.purchasing_home", status="open"))
 
 
 @bp.route("/<int:request_id>/update", methods=["POST"])

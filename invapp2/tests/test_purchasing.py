@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 from decimal import Decimal
 
@@ -8,7 +9,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from invapp import create_app
 from invapp.extensions import db
-from invapp.models import PurchaseRequest, Role, User
+from invapp.models import PurchaseRequest, PurchaseRequestDeleteAudit, Role, User
 
 
 @pytest.fixture
@@ -160,3 +161,71 @@ def test_purchase_request_receive_link_prefills_receiving(app, client):
     assert b"qty=5" in response.data
     assert b"person=Receiver" in response.data
     assert b"po_number=PO-1234" in response.data
+
+
+def test_delete_purchase_request_as_superuser(app, client):
+    with app.app_context():
+        request_record = PurchaseRequest(
+            title="Delete Me",
+            item_number="DEL-100",
+            requested_by="Ops",
+        )
+        db.session.add(request_record)
+        db.session.commit()
+        request_id = request_record.id
+
+    confirm_response = client.get(f"/purchasing/{request_id}/delete/confirm")
+    assert confirm_response.status_code == 200
+    match = re.search(
+        r'name="csrf_token" value="([^"]+)"', confirm_response.data.decode("utf-8")
+    )
+    assert match is not None
+    csrf_token = match.group(1)
+
+    delete_response = client.post(
+        f"/purchasing/{request_id}/delete",
+        data={"csrf_token": csrf_token, "delete_reason": "Duplicate request"},
+        follow_redirects=False,
+    )
+    assert delete_response.status_code == 302
+
+    with app.app_context():
+        assert PurchaseRequest.query.count() == 0
+        audit = PurchaseRequestDeleteAudit.query.one()
+        assert audit.purchase_request_id == request_id
+        assert audit.item_number == "DEL-100"
+        assert audit.title == "Delete Me"
+        assert audit.delete_reason == "Duplicate request"
+        assert audit.deleted_by_username == "superuser"
+
+
+def test_delete_requires_superuser(app):
+    client = app.test_client()
+    with app.app_context():
+        admin_role = Role.query.filter_by(name="admin").first()
+        if admin_role is None:
+            admin_role = Role(name="admin", description="Administrator")
+            db.session.add(admin_role)
+            db.session.flush()
+        admin_user = User(username="admin-user")
+        admin_user.set_password("secret")
+        admin_user.roles = [admin_role]
+        db.session.add(admin_user)
+        request_record = PurchaseRequest(title="Nope", requested_by="Ops")
+        db.session.add(request_record)
+        db.session.commit()
+        request_id = request_record.id
+
+    client.post(
+        "/auth/login",
+        data={"username": "admin-user", "password": "secret"},
+        follow_redirects=True,
+    )
+
+    response = client.post(f"/purchasing/{request_id}/delete")
+    assert response.status_code == 403
+
+
+def test_delete_missing_request_returns_404(app, client):
+    response = client.post("/purchasing/999/delete")
+    assert response.status_code == 404
