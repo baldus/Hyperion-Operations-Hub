@@ -184,6 +184,74 @@ class UsefulLink(db.Model):
         return cls.query.order_by(cls.display_order.asc(), cls.title.asc()).all()
 
 
+class AppSetting(db.Model):
+    __tablename__ = "app_setting"
+
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(128), nullable=False, unique=True)
+    value = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    @classmethod
+    def get_or_create(cls, key: str, default_value: str | None = None):
+        setting = cls.query.filter_by(key=key).first()
+        if setting is None:
+            setting = cls(key=key, value=default_value)
+            db.session.add(setting)
+            db.session.commit()
+        return setting
+
+
+class BackupRestoreEvent(db.Model):
+    __tablename__ = "backup_restore_event"
+
+    id = db.Column(db.Integer, primary_key=True)
+    occurred_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="SET NULL"))
+    username = db.Column(db.String(255), nullable=True)
+    backup_filename = db.Column(db.String(255), nullable=False)
+    action = db.Column(db.String(64), nullable=False)
+    status = db.Column(db.String(32), nullable=False)
+    message = db.Column(db.Text, nullable=True)
+
+    user = db.relationship("User", backref=db.backref("backup_restore_events", lazy="dynamic"))
+
+    __table_args__ = (
+        db.Index("ix_backup_restore_event_occurred_at", "occurred_at"),
+    )
+
+
+class BackupRun(db.Model):
+    __tablename__ = "backup_run"
+
+    id = db.Column(db.Integer, primary_key=True)
+    started_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    finished_at = db.Column(db.DateTime, nullable=True)
+    status = db.Column(db.String(32), nullable=False)
+    filename = db.Column(db.String(255), nullable=True)
+    filepath = db.Column(db.String(512), nullable=True)
+    bytes = db.Column(db.BigInteger, nullable=True)
+    message = db.Column(db.Text, nullable=True)
+
+    __table_args__ = (db.Index("ix_backup_run_started_at", "started_at"),)
+
+
+class OpsEventLog(db.Model):
+    __tablename__ = "ops_event_log"
+
+    id = db.Column(db.Integer, primary_key=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    level = db.Column(db.String(32), nullable=False)
+    source = db.Column(db.String(128), nullable=True)
+    message = db.Column(db.Text, nullable=False)
+    context_json = db.Column(db.JSON, nullable=True)
+
+    __table_args__ = (db.Index("ix_ops_event_log_created_at", "created_at"),)
+
+
 class ProductionChartSettings(db.Model):
     __tablename__ = "production_chart_settings"
 

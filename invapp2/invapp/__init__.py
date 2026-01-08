@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+import os
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -53,6 +54,8 @@ from .home_layout import (
     save_home_layout,
 )
 from .superuser import is_superuser
+from .services import backup_service, status_bus
+from .services.db_schema import ensure_app_setting_schema
 
 
 NAVIGATION_PAGES: tuple[tuple[str, str, str], ...] = (
@@ -619,6 +622,8 @@ def create_app(config_override=None):
         )
         app.logger.addHandler(handler)
     app.logger.setLevel(logging.INFO)
+    if not any(isinstance(handler, status_bus.StatusBusHandler) for handler in app.logger.handlers):
+        app.logger.addHandler(status_bus.StatusBusHandler(level=logging.WARNING))
 
     # Track database health so the UI can surface meaningful guidance when the
     # backing service is offline.
@@ -708,6 +713,7 @@ def create_app(config_override=None):
         else:
             try:
                 db.create_all()
+                ensure_app_setting_schema(db.engine, current_app.logger)
                 _ensure_inventory_schema(db.engine)
                 _ensure_purchasing_schema(db.engine)
                 _ensure_order_schema(db.engine)
@@ -753,6 +759,21 @@ def create_app(config_override=None):
     app.config["DATABASE_AVAILABLE"] = database_available
     app.config["DATABASE_ERROR"] = database_error_message
     app.config["SEQUENCE_REPAIR_SUMMARY"] = sequence_repair_summary
+    with app.app_context():
+        if sequence_repair_summary:
+            status_bus.log_event(
+                "info",
+                "Sequence repair summary recorded.",
+                context=sequence_repair_summary,
+                source="sequence_repair",
+                dedupe_key="sequence_repair_summary",
+            )
+        status_bus.log_event(
+            "info",
+            "Application boot completed.",
+            source="startup",
+            dedupe_key="app_boot",
+        )
 
     @app.context_processor
     def inject_permission_helpers():
@@ -1093,5 +1114,16 @@ def create_app(config_override=None):
         click.echo("Repairing RMA status event primary key sequence...")
         _repair_rma_status_event_sequence(db.engine)
         click.echo("Sequence repair completed.")
+
+    if not app.config.get("TESTING", False) and app.config.get("BACKUP_SCHEDULER_ENABLED", True):
+        if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+            try:
+                backup_service.initialize_backup_scheduler(app)
+            except Exception as exc:  # pragma: no cover - defensive guard
+                app.config["BACKUPS_ENABLED"] = False
+                app.logger.exception("Backups disabled due to error: %s", exc)
+                app.logger.warning(
+                    "Backups disabled due to error; app will continue. Set BACKUP_DIR to a writable path."
+                )
 
     return app
