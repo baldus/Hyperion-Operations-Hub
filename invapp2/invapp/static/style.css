@@ -1910,6 +1910,45 @@ body.light .item-search-summary {
     opacity: 0.7;
 }
 
+.item-stock-summary {
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    display: grid;
+    gap: 6px;
+}
+
+body.light .item-stock-summary {
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(0, 0, 0, 0.08);
+}
+
+.item-stock-summary-title {
+    font-weight: 600;
+}
+
+.item-stock-summary-total {
+    font-size: 1.1rem;
+}
+
+.item-stock-summary-locations {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 4px;
+    font-size: 0.85rem;
+}
+
+.item-stock-location.muted {
+    opacity: 0.7;
+}
+
+.item-stock-summary-updated {
+    font-size: 0.8rem;
+}
+
 @media (max-width: 720px) {
     .purchasing-toolbar {
         flex-direction: column;

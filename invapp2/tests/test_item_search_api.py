@@ -77,3 +77,27 @@ def test_item_search_limits_results(client, app):
     assert response.status_code == 200
     data = response.get_json()
     assert len(data) == 10
+
+
+def test_item_stock_endpoint(client, app):
+    with app.app_context():
+        location = Location(code="LINE", description="Line side")
+        item = Item(sku="STOCK-1", name="Stocked Item")
+        db.session.add_all([location, item])
+        db.session.commit()
+        item_id = item.id
+        db.session.add(
+            Movement(
+                item_id=item_id,
+                location_id=location.id,
+                quantity=12,
+                movement_type="ADJUST",
+            )
+        )
+        db.session.commit()
+
+    response = client.get(f"/api/items/{item_id}/stock")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["on_hand_total"] == 12.0
+    assert payload["locations"][0]["code"] == "LINE"

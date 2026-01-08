@@ -120,3 +120,43 @@ def search_items():
         )
 
     return jsonify(results)
+
+
+@bp.get("/items/<int:item_id>/stock")
+def item_stock(item_id: int):
+    """Return on-hand totals for a single item for live purchasing updates."""
+
+    item = db.session.get(Item, item_id)
+    if item is None:
+        return jsonify({"error": "Item not found."}), 404
+
+    total = (
+        db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+        .filter(Movement.item_id == item_id)
+        .scalar()
+    )
+    total_value = float(total or 0)
+
+    location_rows = (
+        db.session.query(
+            Location.code,
+            Location.description,
+            func.coalesce(func.sum(Movement.quantity), 0),
+        )
+        .join(Location, Location.id == Movement.location_id)
+        .filter(Movement.item_id == item_id)
+        .group_by(Location.code, Location.description)
+        .order_by(Location.code)
+        .all()
+    )
+
+    locations = [
+        {
+            "code": code,
+            "description": description or "",
+            "quantity": float(quantity or 0),
+        }
+        for code, description, quantity in location_rows
+    ]
+
+    return jsonify({"item_id": item_id, "on_hand_total": total_value, "locations": locations})
