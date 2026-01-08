@@ -16,6 +16,19 @@ body.light {
     color: #222;
 }
 
+body.dark a {
+    color: #8ab4ff;
+}
+
+body.dark a:visited {
+    color: #c4a7ff;
+}
+
+body.dark a:hover,
+body.dark a:focus {
+    color: #b7d3ff;
+}
+
 /* --- Header --- */
 header {
     display: flex;
