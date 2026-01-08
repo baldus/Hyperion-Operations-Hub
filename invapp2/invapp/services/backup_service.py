@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tarfile
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
@@ -27,12 +29,54 @@ DEFAULT_BACKUP_FREQUENCY_HOURS = 4
 BACKUP_JOB_ID = "automated-backup"
 BACKUP_REFRESH_JOB_ID = "automated-backup-refresh"
 BACKUP_REFRESH_MINUTES = 5
+BACKUP_SUBDIRS = ("db", "files", "tmp")
+RESTORE_TIMEOUT_SECONDS = 900
 
 
-def _backup_directory(app) -> Path:
-    backup_dir = Path(app.config.get("BACKUP_DIR", "/backups"))
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    return backup_dir
+def _ensure_directory(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def _verify_writable(path: Path) -> None:
+    with tempfile.NamedTemporaryFile(dir=path, prefix=".write_test_", delete=True):
+        pass
+
+
+def get_backup_dir(app, logger: logging.Logger | None = None) -> Path:
+    logger = logger or logging.getLogger("invapp.backup")
+    env_dir = os.environ.get("BACKUP_DIR")
+    config_dir = app.config.get("BACKUP_DIR")
+
+    candidates = []
+    if env_dir:
+        candidates.append(("BACKUP_DIR env", Path(env_dir)))
+    if config_dir:
+        candidates.append(("BACKUP_DIR config", Path(config_dir)))
+
+    instance_dir = Path(app.instance_path) / "backups"
+    candidates.append(("instance path", instance_dir))
+    candidates.append(("cwd fallback", Path.cwd() / "backups"))
+
+    last_error: Exception | None = None
+    for source, candidate in candidates:
+        try:
+            _ensure_directory(candidate)
+            _verify_writable(candidate)
+            for subdir in BACKUP_SUBDIRS:
+                _ensure_directory(candidate / subdir)
+            return candidate
+        except Exception as exc:
+            last_error = exc
+            _log_warning(
+                logger,
+                f"Backup directory '{candidate}' from {source} is not writable; "
+                "falling back to the next option. Set BACKUP_DIR to a writable path.",
+            )
+            continue
+
+    raise RuntimeError(
+        f"Unable to create a writable backup directory. Last error: {last_error}"
+    )
 
 
 def _backup_logger(backup_dir: Path) -> logging.Logger:
@@ -80,17 +124,18 @@ def _timestamp_label() -> str:
     return datetime.utcnow().strftime("%Y-%m-%d_%H%M")
 
 
-def _next_copy_number(backup_dir: Path, timestamp: str) -> int:
+def _next_copy_number(backup_dirs: Iterable[Path], timestamp: str) -> int:
     pattern = re.compile(rf"^backup_{re.escape(timestamp)}_copy(\d+)")
     max_copy = 0
-    for item in backup_dir.iterdir():
-        match = pattern.match(item.name)
-        if not match:
-            continue
-        try:
-            max_copy = max(max_copy, int(match.group(1)))
-        except ValueError:
-            continue
+    for backup_dir in backup_dirs:
+        for item in backup_dir.iterdir():
+            match = pattern.match(item.name)
+            if not match:
+                continue
+            try:
+                max_copy = max(max_copy, int(match.group(1)))
+            except ValueError:
+                continue
     return max_copy + 1
 
 
@@ -211,12 +256,18 @@ def update_backup_frequency_hours(value: int) -> None:
 
 def run_backup_job(app) -> None:
     with app.app_context():
-        backup_dir = _backup_directory(app)
+        backup_dir = get_backup_dir(app)
         logger = _backup_logger(backup_dir)
+        if not app.config.get("BACKUPS_ENABLED", True):
+            _log_warning(logger, "Backups are disabled; skipping automated backup run.")
+            return
+
+        db_dir = backup_dir / "db"
+        files_dir = backup_dir / "files"
         timestamp = _timestamp_label()
-        copy_number = _next_copy_number(backup_dir, timestamp)
-        db_dump_path = backup_dir / f"backup_{timestamp}_copy{copy_number}.sql"
-        data_archive_path = backup_dir / f"backup_{timestamp}_copy{copy_number}.tar.gz"
+        copy_number = _next_copy_number((db_dir, files_dir), timestamp)
+        db_dump_path = db_dir / f"backup_{timestamp}_copy{copy_number}.sql"
+        data_archive_path = files_dir / f"backup_{timestamp}_copy{copy_number}.tar.gz"
 
         _log_info(logger, f"Starting automated backup (copy {copy_number})")
 
@@ -241,7 +292,15 @@ def refresh_backup_schedule(app, *, force: bool = False) -> None:
         return
 
     with app.app_context():
-        backup_dir = _backup_directory(app)
+        try:
+            backup_dir = get_backup_dir(app)
+        except Exception as exc:
+            app.config["BACKUPS_ENABLED"] = False
+            current_app.logger.exception("Backups disabled due to error: %s", exc)
+            current_app.logger.warning(
+                "Backups disabled due to error; app will continue. Set BACKUP_DIR to a writable path."
+            )
+            return
         logger = _backup_logger(backup_dir)
         frequency_hours = get_backup_frequency_hours(app, logger=logger)
         cached_frequency = app.config.get("BACKUP_FREQUENCY_HOURS")
@@ -276,6 +335,18 @@ def initialize_backup_scheduler(app) -> None:
     scheduler = BackgroundScheduler(timezone="UTC")
     app.extensions["backup_scheduler"] = scheduler
 
+    try:
+        backup_dir = get_backup_dir(app)
+    except Exception as exc:
+        app.config["BACKUPS_ENABLED"] = False
+        app.logger.exception("Backups disabled due to error: %s", exc)
+        app.logger.warning(
+            "Backups disabled due to error; app will continue. Set BACKUP_DIR to a writable path."
+        )
+        return
+
+    app.config["BACKUPS_ENABLED"] = True
+    _backup_logger(backup_dir)
     refresh_backup_schedule(app, force=True)
     scheduler.add_job(
         refresh_backup_schedule,
@@ -288,3 +359,80 @@ def initialize_backup_scheduler(app) -> None:
     )
 
     scheduler.start()
+
+
+def list_backup_files(backup_dir: Path) -> list[dict[str, object]]:
+    results: list[dict[str, object]] = []
+    for kind in ("db", "files"):
+        folder = backup_dir / kind
+        if not folder.exists():
+            continue
+        for item in folder.iterdir():
+            if not item.is_file():
+                continue
+            try:
+                stat = item.stat()
+            except OSError:
+                continue
+            results.append(
+                {
+                    "filename": item.name,
+                    "path": item,
+                    "kind": kind,
+                    "size": stat.st_size,
+                    "created_at": datetime.utcfromtimestamp(stat.st_mtime),
+                }
+            )
+    results.sort(key=lambda entry: entry["created_at"], reverse=True)
+    return results
+
+
+def is_valid_backup_filename(filename: str) -> bool:
+    if not filename:
+        return False
+    if Path(filename).name != filename:
+        return False
+    if ".." in filename or "/" in filename or "\\" in filename:
+        return False
+    return filename.endswith((".sql", ".dump"))
+
+
+def restore_database_backup(app, filename: str, logger: logging.Logger) -> str:
+    if not is_valid_backup_filename(filename):
+        raise ValueError("Invalid backup filename.")
+
+    backup_dir = get_backup_dir(app, logger=logger)
+    db_dir = backup_dir / "db"
+    backup_path = db_dir / filename
+
+    if not backup_path.exists():
+        raise FileNotFoundError("Backup file not found.")
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    staging_dir = backup_dir / "tmp" / f"restore_{timestamp}"
+    _ensure_directory(staging_dir)
+    staged_backup = staging_dir / backup_path.name
+    shutil.copy2(backup_path, staged_backup)
+
+    env = _build_pg_dump_env(app, logger)
+    if env is None:
+        raise RuntimeError("Database connection info not available for restore.")
+
+    timeout = app.config.get("BACKUP_RESTORE_TIMEOUT", RESTORE_TIMEOUT_SECONDS)
+
+    if staged_backup.suffix == ".sql":
+        command = ["psql", "-f", str(staged_backup)]
+    else:
+        command = [
+            "pg_restore",
+            "--clean",
+            "--if-exists",
+            "--no-owner",
+            "--no-privileges",
+            "-d",
+            env.get("PGDATABASE", ""),
+            str(staged_backup),
+        ]
+
+    subprocess.run(command, check=True, env=env, timeout=timeout)
+    return f"Restore completed from {filename}."

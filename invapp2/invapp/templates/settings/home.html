@@ -32,6 +32,7 @@
             <li><a href="{{ url_for('admin.data_backup') }}" class="link-item">Data Backup</a></li>
             {% if is_superuser() %}
             <li><a href="{{ url_for('useful_links.manage_links') }}" class="link-item">Manage Useful Links</a></li>
+            <li><a href="{{ url_for('admin.backups_home') }}" class="link-item">Restore Backups</a></li>
             {% endif %}
         </ul>
     </section>
@@ -39,7 +40,7 @@
     {% if current_user.has_role('admin') or is_superuser() %}
     <section class="card-section settings-card">
         <h3>Backups</h3>
-        <p>Manage the automated backup schedule and retention settings.</p>
+        <p>Manage the automated backup schedule.</p>
         <a href="{{ url_for('admin.backup_settings') }}" class="action-btn">Manage Backups</a>
     </section>
     {% endif %}

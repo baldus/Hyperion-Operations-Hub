@@ -153,6 +153,25 @@ export ADMIN_PASSWORD="change_me"
 Optional knobs (see `invapp2/config.py`) include printer hosts, attachment
 extension allow-lists, and admin session timeouts.
 
+### Backup Configuration
+Automated backups write into a resolved backup directory. The application will
+attempt the following, in order:
+
+1. `BACKUP_DIR` environment variable
+2. `BACKUP_DIR` app config value
+3. `<instance_path>/backups` (default)
+4. `./backups` (fallback)
+
+If a configured path is not writable, the app logs a warning and falls back to
+the next option without blocking startup.
+
+To enable database restores, set:
+```bash
+export ALLOW_RESTORE=1
+```
+Restore is limited to the configured superuser and remains disabled unless this
+environment variable is present.
+
 ---
 
 ## Database Initialization

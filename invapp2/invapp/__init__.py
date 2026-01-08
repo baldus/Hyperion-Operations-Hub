@@ -1098,6 +1098,13 @@ def create_app(config_override=None):
 
     if not app.config.get("TESTING", False) and app.config.get("BACKUP_SCHEDULER_ENABLED", True):
         if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
-            backup_service.initialize_backup_scheduler(app)
+            try:
+                backup_service.initialize_backup_scheduler(app)
+            except Exception as exc:  # pragma: no cover - defensive guard
+                app.config["BACKUPS_ENABLED"] = False
+                app.logger.exception("Backups disabled due to error: %s", exc)
+                app.logger.warning(
+                    "Backups disabled due to error; app will continue. Set BACKUP_DIR to a writable path."
+                )
 
     return app

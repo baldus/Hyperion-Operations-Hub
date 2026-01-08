@@ -4,6 +4,7 @@ import json
 import os
 import shlex
 import shutil
+import secrets
 import subprocess
 from pathlib import Path
 from datetime import date, datetime, time as time_type, timedelta
@@ -30,9 +31,11 @@ from sqlalchemy.sql.sqltypes import Numeric
 
 from invapp import models
 from invapp.extensions import db
+
 from invapp.login import current_user, login_required, logout_user
 from invapp.offline import is_emergency_mode_active
 from invapp.security import require_roles, require_admin_or_superuser
+from invapp.superuser import superuser_required
 from invapp.services import backup_service
 
 
@@ -771,6 +774,141 @@ def backup_settings():
         backup_frequency_hours=current_frequency,
         default_frequency_hours=default_frequency,
     )
+
+
+def _backup_restore_csrf_token() -> str:
+    token = session.get("backup_restore_csrf")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["backup_restore_csrf"] = token
+    return token
+
+
+def _record_backup_restore_event(
+    *,
+    filename: str,
+    status: str,
+    action: str,
+    message: str | None = None,
+) -> None:
+    try:
+        event = models.BackupRestoreEvent(
+            user_id=getattr(current_user, "id", None),
+            username=getattr(current_user, "username", None),
+            backup_filename=filename,
+            action=action,
+            status=status,
+            message=message,
+        )
+        db.session.add(event)
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        current_app.logger.exception("Failed to record backup restore event.")
+
+
+@bp.route("/backups", methods=["GET"])
+@superuser_required
+def backups_home():
+    backup_dir = None
+    backups = []
+    restore_allowed = os.environ.get("ALLOW_RESTORE") == "1"
+    message = None
+
+    try:
+        backup_dir = backup_service.get_backup_dir(current_app)
+        backups = backup_service.list_backup_files(backup_dir)
+    except Exception as exc:
+        current_app.logger.exception("Failed to list backups: %s", exc)
+        message = "Backup storage is unavailable. Check BACKUP_DIR permissions."
+
+    return render_template(
+        "admin/backups.html",
+        backups=backups,
+        backup_dir=str(backup_dir) if backup_dir else None,
+        restore_allowed=restore_allowed,
+        csrf_token=_backup_restore_csrf_token(),
+        message=message,
+    )
+
+
+@bp.route("/backups/restore", methods=["POST"])
+@superuser_required
+def restore_backup():
+    restore_allowed = os.environ.get("ALLOW_RESTORE") == "1"
+    if not restore_allowed:
+        flash("Restore is disabled. Set ALLOW_RESTORE=1 to enable this action.", "warning")
+        _record_backup_restore_event(
+            filename=request.form.get("backup_filename", "unknown"),
+            status="failed",
+            action="restore",
+            message="Restore disabled by ALLOW_RESTORE.",
+        )
+        return redirect(url_for("admin.backups_home"))
+
+    token = request.form.get("csrf_token")
+    if not token or token != session.get("backup_restore_csrf"):
+        flash("Invalid restore request. Please try again.", "danger")
+        return redirect(url_for("admin.backups_home"))
+
+    filename = (request.form.get("backup_filename") or "").strip()
+    confirmation = (request.form.get("confirm_restore") or "").strip().upper()
+    acknowledged = request.form.get("confirm_ack") == "yes"
+    if not acknowledged:
+        flash("Please confirm the restore acknowledgement checkbox.", "warning")
+        return redirect(url_for("admin.backups_home"))
+    if confirmation != "RESTORE":
+        flash("Type RESTORE to confirm the backup restore.", "warning")
+        return redirect(url_for("admin.backups_home"))
+
+    if not backup_service.is_valid_backup_filename(filename):
+        _record_backup_restore_event(
+            filename=filename or "unknown",
+            status="failed",
+            action="restore",
+            message="Invalid backup filename.",
+        )
+        flash("Invalid backup filename selected.", "danger")
+        return redirect(url_for("admin.backups_home"))
+
+    _record_backup_restore_event(
+        filename=filename,
+        status="started",
+        action="restore",
+        message="Restore initiated.",
+    )
+
+    try:
+        logger = current_app.logger
+        result_message = backup_service.restore_database_backup(current_app, filename, logger)
+    except (ValueError, FileNotFoundError) as exc:
+        _record_backup_restore_event(
+            filename=filename,
+            status="failed",
+            action="restore",
+            message=str(exc),
+        )
+        flash(str(exc), "danger")
+        return redirect(url_for("admin.backups_home"))
+    except Exception as exc:
+        current_app.logger.exception("Restore failed: %s", exc)
+        _record_backup_restore_event(
+            filename=filename,
+            status="failed",
+            action="restore",
+            message=str(exc),
+        )
+        flash("Restore failed. Check logs for details.", "danger")
+        return redirect(url_for("admin.backups_home"))
+
+    _record_backup_restore_event(
+        filename=filename,
+        status="succeeded",
+        action="restore",
+        message=result_message,
+    )
+    flash("Restore completed. Restart the console if needed.", "success")
+    return redirect(url_for("admin.backups_home"))
 
 
 @bp.route("/data-backup/export", methods=["POST"])

@@ -205,6 +205,25 @@ class AppSetting(db.Model):
         return setting
 
 
+class BackupRestoreEvent(db.Model):
+    __tablename__ = "backup_restore_event"
+
+    id = db.Column(db.Integer, primary_key=True)
+    occurred_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="SET NULL"))
+    username = db.Column(db.String(255), nullable=True)
+    backup_filename = db.Column(db.String(255), nullable=False)
+    action = db.Column(db.String(64), nullable=False)
+    status = db.Column(db.String(32), nullable=False)
+    message = db.Column(db.Text, nullable=True)
+
+    user = db.relationship("User", backref=db.backref("backup_restore_events", lazy="dynamic"))
+
+    __table_args__ = (
+        db.Index("ix_backup_restore_event_occurred_at", "occurred_at"),
+    )
+
+
 class ProductionChartSettings(db.Model):
     __tablename__ = "production_chart_settings"
 
