@@ -13,6 +13,7 @@ from urllib.parse import urljoin
 
 from flask import (
     Blueprint,
+    after_this_request,
     current_app,
     flash,
     redirect,
@@ -36,7 +37,7 @@ from invapp.login import current_user, login_required, logout_user
 from invapp.offline import is_emergency_mode_active
 from invapp.security import require_roles, require_admin_or_superuser
 from invapp.superuser import superuser_required
-from invapp.services import backup_service, status_bus
+from invapp.services import backup_exporter, backup_service, status_bus
 
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -726,7 +727,7 @@ def access_log():
 
 @bp.route("/data-backup")
 @login_required
-@require_roles("admin")
+@require_admin_or_superuser
 def data_backup():
     if not _database_available():
         return _render_offline_page(
@@ -735,7 +736,16 @@ def data_backup():
         )
 
     table_names = [table.name for table in db.Model.metadata.sorted_tables]
-    return render_template("admin/data_backup.html", table_names=table_names)
+    last_backup = (
+        models.BackupRun.query.filter_by(status="succeeded")
+        .order_by(models.BackupRun.finished_at.desc())
+        .first()
+    )
+    return render_template(
+        "admin/data_backup.html",
+        table_names=table_names,
+        last_backup=last_backup,
+    )
 
 
 @bp.route("/settings/backups", methods=["GET", "POST"])
@@ -930,28 +940,35 @@ def restore_backup():
 
 @bp.route("/data-backup/export", methods=["POST"])
 @login_required
-@require_roles("admin")
+@require_admin_or_superuser
 def export_data():
     if not _database_available():
         flash("Backups cannot be exported while the database is offline.", "warning")
         return redirect(url_for("admin.data_backup"))
 
-    data = {}
-    for table in db.Model.metadata.sorted_tables:
-        result = db.session.execute(table.select()).mappings()
-        data[table.name] = [
-            {key: _serialize_value(value) for key, value in row.items()}
-            for row in result
-        ]
+    try:
+        archive_path, staging_dir = backup_exporter.create_database_backup_archive(current_app)
+    except Exception as exc:
+        current_app.logger.exception("Failed to export backup: %s", exc)
+        status_bus.log_event(
+            "error",
+            "Backup export failed.",
+            context={"error": str(exc)},
+            source="backup_export",
+        )
+        flash("Backup export failed. Check logs for details.", "danger")
+        return redirect(url_for("admin.data_backup"))
 
-    payload = json.dumps(data, indent=2).encode("utf-8")
-    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    filename = f"hyperion-backup-{timestamp}.json"
+    @after_this_request
+    def _cleanup_backup(response):
+        backup_exporter.cleanup_backup_artifacts(archive_path, staging_dir)
+        return response
+
     return send_file(
-        io.BytesIO(payload),
-        mimetype="application/json",
+        archive_path,
+        mimetype="application/zip",
         as_attachment=True,
-        download_name=filename,
+        download_name=archive_path.name,
     )
 
 
@@ -960,7 +977,7 @@ _IMPORT_BATCH_SIZE = 500
 
 @bp.route("/data-backup/import", methods=["POST"])
 @login_required
-@require_roles("admin")
+@require_admin_or_superuser
 def import_data():
     if not _database_available():
         flash("Backups cannot be imported while the database is offline.", "warning")

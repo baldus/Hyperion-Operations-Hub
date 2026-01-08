@@ -6,7 +6,15 @@
 
 <section aria-labelledby="export-title" class="card-section">
     <h3 id="export-title">Export Data</h3>
-    <p>Download a JSON backup of every table in the system.</p>
+    <p>Download a zipped SQL backup of every table in the system.</p>
+    {% if last_backup %}
+        <p class="page-meta">
+            Last successful backup: {{ last_backup.finished_at.strftime('%Y-%m-%d %H:%M UTC') }}
+            ({{ last_backup.filename }})
+        </p>
+    {% else %}
+        <p class="page-meta">No successful backups recorded yet.</p>
+    {% endif %}
     <form method="post" action="{{ url_for('admin.export_data') }}">
         <button type="submit" class="action-btn">Download Backup</button>
     </form>
@@ -14,7 +22,7 @@
 
 <section aria-labelledby="import-title" class="card-section">
     <h3 id="import-title">Import Data</h3>
-    <p>Upload a JSON backup file created by this tool to restore the system state.</p>
+    <p>Upload a JSON backup file to restore the system state.</p>
     <form id="backup-import-form" method="post" action="{{ url_for('admin.import_data') }}" enctype="multipart/form-data">
         <label for="backup-file" class="sr-only">Backup file</label>
         <input

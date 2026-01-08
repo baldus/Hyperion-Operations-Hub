@@ -2,6 +2,7 @@ import io
 import json
 import os
 import sys
+import zipfile
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -13,6 +14,7 @@ from sqlalchemy.orm import joinedload
 
 from invapp import create_app
 from invapp.extensions import db
+from invapp.routes.admin import _serialize_value
 from invapp.models import (
     Item,
     Location,
@@ -80,11 +82,22 @@ def test_export_and_import_round_trip(client, app):
 
     export_response = client.post("/admin/data-backup/export")
     assert export_response.status_code == 200
-    assert export_response.mimetype == "application/json"
+    assert export_response.mimetype == "application/zip"
 
-    exported = json.loads(export_response.data)
-    assert "item" in exported
-    assert any(row["sku"] == "SKU-1" for row in exported["item"])
+    with zipfile.ZipFile(io.BytesIO(export_response.data)) as archive:
+        names = archive.namelist()
+    assert "item.sql" in names
+    assert "location.sql" in names
+    assert "movement.sql" in names
+
+    with app.app_context():
+        data = {}
+        for table in db.Model.metadata.sorted_tables:
+            result = db.session.execute(table.select()).mappings()
+            data[table.name] = [
+                {key: _serialize_value(value) for key, value in row.items()}
+                for row in result
+            ]
 
     with app.app_context():
         Movement.query.delete()
@@ -92,7 +105,7 @@ def test_export_and_import_round_trip(client, app):
         Location.query.delete()
         db.session.commit()
 
-    upload = io.BytesIO(export_response.data)
+    upload = io.BytesIO(json.dumps(data).encode("utf-8"))
     upload.name = "backup.json"
     import_response = client.post(
         "/admin/data-backup/import",
@@ -188,13 +201,24 @@ def test_export_includes_production_history(client, app):
     export_response = client.post("/admin/data-backup/export")
     assert export_response.status_code == 200
 
-    exported = json.loads(export_response.data)
-    assert exported["production_customer"]
-    assert exported["production_daily_record"]
-    assert exported["production_daily_customer_total"]
-    assert exported["production_daily_gate_completion"]
-    assert exported["production_chart_settings"]
-    assert exported["production_output_formula"]
+    with zipfile.ZipFile(io.BytesIO(export_response.data)) as archive:
+        names = archive.namelist()
+
+    assert "production_customer.sql" in names
+    assert "production_daily_record.sql" in names
+    assert "production_daily_customer_total.sql" in names
+    assert "production_daily_gate_completion.sql" in names
+    assert "production_chart_settings.sql" in names
+    assert "production_output_formula.sql" in names
+
+    with app.app_context():
+        data = {}
+        for table in db.Model.metadata.sorted_tables:
+            result = db.session.execute(table.select()).mappings()
+            data[table.name] = [
+                {key: _serialize_value(value) for key, value in row.items()}
+                for row in result
+            ]
 
     with app.app_context():
         ProductionDailyGateCompletion.query.delete()
@@ -205,7 +229,7 @@ def test_export_includes_production_history(client, app):
         ProductionOutputFormula.query.delete()
         db.session.commit()
 
-    upload = io.BytesIO(export_response.data)
+    upload = io.BytesIO(json.dumps(data).encode("utf-8"))
     upload.name = "backup.json"
     import_response = client.post(
         "/admin/data-backup/import",
