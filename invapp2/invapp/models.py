@@ -387,6 +387,8 @@ class PurchaseRequest(PrimaryKeySequenceMixin, db.Model):
     )
 
     id = db.Column(db.Integer, primary_key=True)
+    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=True)
+    item_number = db.Column(db.String(255), nullable=True)
     title = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text, nullable=True)
     quantity = db.Column(db.Numeric(10, 2), nullable=True)
@@ -410,6 +412,7 @@ class PurchaseRequest(PrimaryKeySequenceMixin, db.Model):
         cascade="all, delete-orphan",
         order_by="PurchaseRequestAttachment.uploaded_at.desc()",
     )
+    item = db.relationship("Item")
 
     @classmethod
     def status_values(cls) -> tuple[str, ...]:

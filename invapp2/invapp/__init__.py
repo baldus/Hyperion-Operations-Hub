@@ -27,6 +27,7 @@ from .routes import (
     auth,
     errors,
     inventory,
+    item_search,
     orders,
     purchasing,
     quality,
@@ -211,6 +212,66 @@ def _ensure_inventory_schema(engine):
                 text(
                     "ALTER TABLE item ADD CONSTRAINT fk_item_default_location "
                     "FOREIGN KEY (default_location_id) REFERENCES location(id)"
+                )
+            )
+
+
+def _ensure_purchasing_schema(engine):
+    """Backfill purchase request records with the current columns."""
+
+    inspector = inspect(engine)
+
+    try:
+        purchase_request_columns = {
+            col["name"] for col in inspector.get_columns("purchase_request")
+        }
+    except (NoSuchTableError, OperationalError):
+        return
+
+    columns_to_add = []
+    if "item_id" not in purchase_request_columns:
+        columns_to_add.append(("item_id", "INTEGER"))
+    if "item_number" not in purchase_request_columns:
+        columns_to_add.append(("item_number", "VARCHAR(255)"))
+
+    if columns_to_add:
+        with engine.begin() as conn:
+            for column_name, column_type in columns_to_add:
+                conn.execute(
+                    text(
+                        "ALTER TABLE purchase_request "
+                        f"ADD COLUMN {column_name} {column_type}"
+                    )
+                )
+
+    if engine.dialect.name == "sqlite":
+        return
+
+    try:
+        purchase_request_foreign_keys = inspector.get_foreign_keys("purchase_request")
+    except (NoSuchTableError, OperationalError):
+        purchase_request_foreign_keys = []
+
+    has_item_fk = any(
+        set(fk.get("constrained_columns", []) or []) == {"item_id"}
+        and fk.get("referred_table") == "item"
+        for fk in purchase_request_foreign_keys
+    )
+    item_column_exists = "item_id" in purchase_request_columns or any(
+        column_name == "item_id" for column_name, _ in columns_to_add
+    )
+
+    if (
+        item_column_exists
+        and not has_item_fk
+        and "item" in inspector.get_table_names()
+    ):
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE purchase_request "
+                    "ADD CONSTRAINT fk_purchase_request_item "
+                    "FOREIGN KEY (item_id) REFERENCES item(id)"
                 )
             )
 
@@ -648,6 +709,7 @@ def create_app(config_override=None):
             try:
                 db.create_all()
                 _ensure_inventory_schema(db.engine)
+                _ensure_purchasing_schema(db.engine)
                 _ensure_order_schema(db.engine)
                 _ensure_home_layout_schema(db.engine)
                 _ensure_production_schema(db.engine)
@@ -744,6 +806,7 @@ def create_app(config_override=None):
     app.register_blueprint(auth.bp)
     app.register_blueprint(errors.bp)
     app.register_blueprint(inventory.bp)
+    app.register_blueprint(item_search.bp)
     app.register_blueprint(reports.bp)
     app.register_blueprint(orders.bp)
     app.register_blueprint(purchasing.bp)
