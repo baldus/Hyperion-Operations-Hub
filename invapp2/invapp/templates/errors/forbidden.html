@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Access Denied</h2>
+<p>{{ message }}</p>
+<p class="muted">You do not have permission to perform this action.</p>
+<a class="action-btn" href="{{ url_for('purchasing.purchasing_home') }}">Back to Item Shortages</a>
+{% endblock %}

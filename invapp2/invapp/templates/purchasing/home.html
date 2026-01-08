@@ -50,6 +50,9 @@
                     <th scope="col">ETA</th>
                     <th scope="col">Requested By</th>
                     <th scope="col">Updated</th>
+                    {% if is_superuser() %}
+                        <th scope="col">Actions</th>
+                    {% endif %}
                 </tr>
             </thead>
             <tbody>
@@ -106,6 +109,11 @@
                         </td>
                         <td data-label="Requested By">{{ req.requested_by }}</td>
                         <td data-label="Updated">{{ req.updated_at.strftime('%Y-%m-%d') }}</td>
+                        {% if is_superuser() %}
+                            <td data-label="Actions">
+                                <a class="link-btn danger" href="{{ url_for('purchasing.confirm_delete_request', request_id=req.id) }}">Delete</a>
+                            </td>
+                        {% endif %}
                     </tr>
                 {% endfor %}
             </tbody>

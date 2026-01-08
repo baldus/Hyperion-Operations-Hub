@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Delete Item Shortage PR-{{ "%04d" | format(purchase_request.id) }}</h2>
+
+<div class="admin-delete-callout">
+    <p><strong>This action is permanent.</strong> The item shortage record and its attachments will be removed and cannot be restored.</p>
+</div>
+
+<div class="purchasing-detail-grid">
+    <section>
+        <h3>Shortage Summary</h3>
+        <dl>
+            <dt>Item or part</dt>
+            <dd>{{ purchase_request.title }}</dd>
+            <dt>Item number</dt>
+            <dd>{{ purchase_request.item_number or 'Not specified' }}</dd>
+            <dt>Requested by</dt>
+            <dd>{{ purchase_request.requested_by }}</dd>
+        </dl>
+    </section>
+</div>
+
+<form method="post" action="{{ url_for('purchasing.delete_request', request_id=purchase_request.id) }}" class="form-grid purchasing-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="form-row">
+        <label for="delete_reason">Reason for deletion (optional)</label>
+        <textarea id="delete_reason" name="delete_reason" rows="3" placeholder="Add a brief reason for audit history."></textarea>
+    </div>
+    <div class="form-actions">
+        <a class="action-btn subtle-action" href="{{ url_for('purchasing.view_request', request_id=purchase_request.id) }}">Cancel</a>
+        <button type="submit" class="action-btn danger">Delete Permanently</button>
+    </div>
+</form>
+{% endblock %}
