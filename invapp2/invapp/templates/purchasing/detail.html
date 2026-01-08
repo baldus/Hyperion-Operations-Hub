@@ -28,6 +28,22 @@
             <dt>Item or part</dt>
             <dd>{{ purchase_request.title }}</dd>
 
+            {% if purchase_request.item_id %}
+                <dt>On-hand snapshot</dt>
+                <dd>
+                    <div
+                        class="item-stock-summary"
+                        data-item-id="{{ purchase_request.item_id }}"
+                        data-stock-url="{{ url_for('item_search.item_stock', item_id=purchase_request.item_id) }}"
+                    >
+                        <div class="item-stock-summary-title">Live inventory</div>
+                        <div class="item-stock-summary-total" data-stock-total>Loading…</div>
+                        <ul class="item-stock-summary-locations" data-stock-locations></ul>
+                        <div class="item-stock-summary-updated muted" data-stock-updated></div>
+                    </div>
+                </dd>
+            {% endif %}
+
             <dt>Quantity</dt>
             <dd>
                 {% if purchase_request.quantity is not none %}
@@ -202,4 +218,10 @@
     </div>
 </form>
 {% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+    {% if purchase_request.item_id %}
+        <script defer src="{{ url_for('static', filename='js/purchasing-item-stock.js') }}"></script>
+    {% endif %}
 {% endblock %}

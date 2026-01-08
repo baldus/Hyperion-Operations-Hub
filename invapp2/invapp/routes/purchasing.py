@@ -26,7 +26,7 @@ from sqlalchemy import func
 
 from invapp.auth import blueprint_page_guard
 from invapp.login import current_user
-from invapp.models import PurchaseRequest, PurchaseRequestAttachment, db
+from invapp.models import Item, PurchaseRequest, PurchaseRequestAttachment, db
 from invapp.permissions import resolve_edit_roles
 from invapp.security import require_any_role
 
@@ -70,6 +70,10 @@ def _clean_text(value: str) -> str | None:
 
 def purchase_request_form_defaults(default_requestor: str) -> dict[str, str]:
     return {
+        "item_id": "",
+        "item_number": "",
+        "item_name": "",
+        "item_description": "",
         "title": "",
         "description": "",
         "quantity": "",
@@ -82,6 +86,19 @@ def purchase_request_form_defaults(default_requestor: str) -> dict[str, str]:
         "purchase_order_number": "",
         "notes": "",
     }
+
+
+def _resolve_item_from_form(form: dict[str, str]) -> Item | None:
+    raw_item_id = (form.get("item_id") or "").strip()
+    if not raw_item_id:
+        return None
+    try:
+        item_id = int(raw_item_id)
+    except ValueError:
+        return None
+    if item_id <= 0:
+        return None
+    return db.session.get(Item, item_id)
 
 
 def build_purchase_request_from_form(
@@ -121,7 +138,16 @@ def build_purchase_request_from_form(
     if errors:
         return None, errors, form_data
 
+    selected_item = _resolve_item_from_form(form)
+    item_number = _clean_text(form_data["item_number"])
+    if selected_item is not None:
+        item_number = selected_item.sku
+    elif not item_number:
+        item_number = _extract_sku_from_title(form_data["title"]) or form_data["title"]
+
     purchase_request = PurchaseRequest(
+        item_id=selected_item.id if selected_item else None,
+        item_number=_clean_text(item_number),
         title=form_data["title"],
         description=_clean_text(form_data["description"]),
         quantity=quantity_value,
@@ -344,7 +370,7 @@ def view_request(request_id: int):
     purchase_request = PurchaseRequest.query.get_or_404(request_id)
     receiving_params: dict[str, str] = {}
 
-    sku = _extract_sku_from_title(purchase_request.title)
+    sku = purchase_request.item_number or _extract_sku_from_title(purchase_request.title)
     if sku:
         receiving_params["sku"] = sku
 

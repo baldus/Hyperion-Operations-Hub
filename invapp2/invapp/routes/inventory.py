@@ -616,6 +616,8 @@ def _create_purchase_request_for_item(
         return redirect(url_for("purchasing.view_request", request_id=existing_request.id))
 
     purchase_request = PurchaseRequest(
+        item_id=item.id,
+        item_number=item.sku,
         title=title,
         description=description,
         quantity=quantity_value,
