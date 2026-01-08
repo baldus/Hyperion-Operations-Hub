@@ -32,7 +32,8 @@ from invapp import models
 from invapp.extensions import db
 from invapp.login import current_user, login_required, logout_user
 from invapp.offline import is_emergency_mode_active
-from invapp.security import require_roles
+from invapp.security import require_roles, require_admin_or_superuser
+from invapp.services import backup_service
 
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -732,6 +733,44 @@ def data_backup():
 
     table_names = [table.name for table in db.Model.metadata.sorted_tables]
     return render_template("admin/data_backup.html", table_names=table_names)
+
+
+@bp.route("/settings/backups", methods=["GET", "POST"])
+@login_required
+@require_admin_or_superuser
+def backup_settings():
+    current_frequency = backup_service.get_backup_frequency_hours(current_app)
+    default_frequency = backup_service.DEFAULT_BACKUP_FREQUENCY_HOURS
+
+    if request.method == "POST":
+        raw_value = (request.form.get("backup_frequency_hours") or "").strip()
+        try:
+            frequency = int(raw_value)
+        except (TypeError, ValueError):
+            flash("Backup frequency must be a whole number of hours.", "warning")
+            return redirect(url_for("admin.backup_settings"))
+
+        if frequency <= 0:
+            flash("Backup frequency must be greater than zero hours.", "warning")
+            return redirect(url_for("admin.backup_settings"))
+
+        try:
+            backup_service.update_backup_frequency_hours(frequency)
+        except SQLAlchemyError as exc:
+            db.session.rollback()
+            current_app.logger.exception("Failed to update backup frequency: %s", exc)
+            flash("Unable to save backup settings. Please try again.", "danger")
+            return redirect(url_for("admin.backup_settings"))
+
+        backup_service.refresh_backup_schedule(current_app, force=True)
+        flash("Backup schedule updated.", "success")
+        return redirect(url_for("admin.backup_settings"))
+
+    return render_template(
+        "admin/backup_settings.html",
+        backup_frequency_hours=current_frequency,
+        default_frequency_hours=default_frequency,
+    )
 
 
 @bp.route("/data-backup/export", methods=["POST"])

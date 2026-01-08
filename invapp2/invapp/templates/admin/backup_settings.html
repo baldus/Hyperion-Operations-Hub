@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Backup Settings</h2>
+<p class="lead">Configure the automated backup schedule for the operations console.</p>
+
+<section class="card-section">
+    <h3>Automated Backup Schedule</h3>
+    <p>Backups will run on a repeating schedule and include the database and critical data folders.</p>
+    <form method="post" action="{{ url_for('admin.backup_settings') }}" class="stacked-form">
+        <label for="backup-frequency">Backup frequency (hours)</label>
+        <input
+            id="backup-frequency"
+            type="number"
+            name="backup_frequency_hours"
+            min="1"
+            step="1"
+            value="{{ backup_frequency_hours }}"
+            required
+        >
+        <p class="field-help">Default: {{ default_frequency_hours }} hours.</p>
+        <button type="submit" class="action-btn">Save Backup Schedule</button>
+    </form>
+</section>
+{% endblock %}

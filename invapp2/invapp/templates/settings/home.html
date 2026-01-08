@@ -35,5 +35,13 @@
             {% endif %}
         </ul>
     </section>
+
+    {% if current_user.has_role('admin') or is_superuser() %}
+    <section class="card-section settings-card">
+        <h3>Backups</h3>
+        <p>Manage the automated backup schedule and retention settings.</p>
+        <a href="{{ url_for('admin.backup_settings') }}" class="action-btn">Manage Backups</a>
+    </section>
+    {% endif %}
 </div>
 {% endblock %}

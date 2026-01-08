@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+import os
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -53,6 +54,7 @@ from .home_layout import (
     save_home_layout,
 )
 from .superuser import is_superuser
+from .services import backup_service
 
 
 NAVIGATION_PAGES: tuple[tuple[str, str, str], ...] = (
@@ -1093,5 +1095,9 @@ def create_app(config_override=None):
         click.echo("Repairing RMA status event primary key sequence...")
         _repair_rma_status_event_sequence(db.engine)
         click.echo("Sequence repair completed.")
+
+    if not app.config.get("TESTING", False) and app.config.get("BACKUP_SCHEDULER_ENABLED", True):
+        if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+            backup_service.initialize_backup_scheduler(app)
 
     return app

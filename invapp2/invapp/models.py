@@ -184,6 +184,27 @@ class UsefulLink(db.Model):
         return cls.query.order_by(cls.display_order.asc(), cls.title.asc()).all()
 
 
+class AppSetting(db.Model):
+    __tablename__ = "app_setting"
+
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(128), nullable=False, unique=True)
+    value = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    @classmethod
+    def get_or_create(cls, key: str, default_value: str | None = None):
+        setting = cls.query.filter_by(key=key).first()
+        if setting is None:
+            setting = cls(key=key, value=default_value)
+            db.session.add(setting)
+            db.session.commit()
+        return setting
+
+
 class ProductionChartSettings(db.Model):
     __tablename__ = "production_chart_settings"
 
