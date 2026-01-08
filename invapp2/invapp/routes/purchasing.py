@@ -72,6 +72,8 @@ def purchase_request_form_defaults(default_requestor: str) -> dict[str, str]:
     return {
         "item_id": "",
         "item_number": "",
+        "item_name": "",
+        "item_description": "",
         "title": "",
         "description": "",
         "quantity": "",

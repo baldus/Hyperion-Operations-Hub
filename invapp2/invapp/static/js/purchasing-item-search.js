@@ -8,12 +8,17 @@
   const statusPanel = document.getElementById('item-search-status');
   const itemIdField = document.getElementById('item_id');
   const itemNumberField = document.getElementById('item_number');
+  const itemNameField = document.getElementById('item_name');
+  const itemDescriptionField = document.getElementById('item_description');
   const titleField = document.getElementById('title');
   const descriptionField = document.getElementById('description');
   const unitField = document.getElementById('unit');
   const quantityField = document.getElementById('quantity');
   const supplierField = document.getElementById('supplier_name');
   const notesField = document.getElementById('notes');
+  const summaryPanel = document.getElementById('item-search-summary');
+  const summaryTotal = document.getElementById('item-search-total');
+  const summaryLocations = document.getElementById('item-search-locations');
 
   let results = [];
   let selectedIndex = -1;
@@ -35,6 +40,18 @@
     }
     clearStatus();
     searchInput.setAttribute('aria-expanded', 'false');
+  };
+
+  const clearSummary = () => {
+    if (summaryPanel) {
+      summaryPanel.classList.remove('is-visible');
+    }
+    if (summaryTotal) {
+      summaryTotal.textContent = '—';
+    }
+    if (summaryLocations) {
+      summaryLocations.innerHTML = '';
+    }
   };
 
   const setStatus = (message) => {
@@ -141,8 +158,16 @@
       itemNumberField.value = item.item_number;
     }
 
-    if (titleField && item.item_number) {
-      titleField.value = item.item_number;
+    if (itemNameField) {
+      itemNameField.value = item.name || '';
+    }
+    if (itemDescriptionField) {
+      itemDescriptionField.value = item.description || item.name || '';
+    }
+
+    if (titleField) {
+      const titleParts = [item.item_number, item.name].filter(Boolean);
+      titleField.value = titleParts.join(' – ');
     }
     if (descriptionField) {
       descriptionField.value = item.description || item.name || '';
@@ -157,6 +182,31 @@
     if (notesField && notesField.value.trim() === '') {
       const details = [item.item_number, item.description || item.name].filter(Boolean).join(' - ');
       notesField.value = details ? `Item details: ${details}` : '';
+    }
+
+    if (summaryPanel) {
+      summaryPanel.classList.add('is-visible');
+    }
+    if (summaryTotal) {
+      summaryTotal.textContent = `${item.on_hand_total ?? 0}`;
+    }
+    if (summaryLocations) {
+      summaryLocations.innerHTML = '';
+      const locations = Array.isArray(item.locations) ? item.locations : [];
+      if (!locations.length) {
+        const empty = document.createElement('li');
+        empty.className = 'item-search-location muted';
+        empty.textContent = 'No locations found';
+        summaryLocations.appendChild(empty);
+      } else {
+        locations.forEach((location) => {
+          const entry = document.createElement('li');
+          entry.className = 'item-search-location';
+          const description = location.description ? ` (${location.description})` : '';
+          entry.textContent = `${location.code}${description}: ${location.quantity}`;
+          summaryLocations.appendChild(entry);
+        });
+      }
     }
 
     closeResults();
@@ -204,6 +254,7 @@
     if (itemNumberField) {
       itemNumberField.value = '';
     }
+    clearSummary();
 
     const query = searchInput.value.trim();
     if (query.length < 2) {

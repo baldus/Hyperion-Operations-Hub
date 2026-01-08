@@ -25,6 +25,22 @@
             <div class="item-search-results" id="item-search-results" role="listbox" aria-label="Item search results"></div>
             <div class="item-search-status" id="item-search-status" role="status" aria-live="polite"></div>
         </div>
+        <div class="item-search-summary" id="item-search-summary" aria-live="polite">
+            <div class="item-search-summary-title">Current on-hand</div>
+            <div class="item-search-summary-total" id="item-search-total">—</div>
+            <ul class="item-search-summary-locations" id="item-search-locations"></ul>
+        </div>
+    </div>
+
+    <div class="form-row two-col">
+        <div>
+            <label for="item_name">Item name</label>
+            <input type="text" id="item_name" name="item_name" value="{{ form_data.item_name }}" placeholder="Auto-filled from item search">
+        </div>
+        <div>
+            <label for="item_description">Item description</label>
+            <input type="text" id="item_description" name="item_description" value="{{ form_data.item_description }}" placeholder="Auto-filled from item search">
+        </div>
     </div>
 
     <div class="form-row">

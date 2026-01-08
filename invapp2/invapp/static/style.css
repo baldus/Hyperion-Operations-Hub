@@ -1868,6 +1868,48 @@ body.light .item-search-status {
     color: rgba(0, 0, 0, 0.6);
 }
 
+.item-search-summary {
+    display: none;
+    margin-top: 12px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    width: 100%;
+}
+
+body.light .item-search-summary {
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(0, 0, 0, 0.08);
+}
+
+.item-search-summary.is-visible {
+    display: block;
+}
+
+.item-search-summary-title {
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.item-search-summary-total {
+    font-size: 1.1rem;
+    margin-bottom: 8px;
+}
+
+.item-search-summary-locations {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 4px;
+    font-size: 0.85rem;
+}
+
+.item-search-location.muted {
+    opacity: 0.7;
+}
+
 @media (max-width: 720px) {
     .purchasing-toolbar {
         flex-direction: column;

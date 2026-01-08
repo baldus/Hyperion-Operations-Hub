@@ -5,7 +5,7 @@ from sqlalchemy import case, func, or_
 from sqlalchemy.orm import load_only
 
 from invapp.auth import blueprint_page_guard
-from invapp.models import Item
+from invapp.models import Item, Location, Movement, db
 
 
 bp = Blueprint("item_search", __name__, url_prefix="/api")
@@ -63,6 +63,44 @@ def search_items():
         .all()
     )
 
+    item_ids = [item.id for item in matches]
+    totals_map: dict[int, float] = {}
+    locations_map: dict[int, list[dict[str, str | float]]] = {}
+    if item_ids:
+        totals = (
+            db.session.query(
+                Movement.item_id,
+                func.coalesce(func.sum(Movement.quantity), 0),
+            )
+            .filter(Movement.item_id.in_(item_ids))
+            .group_by(Movement.item_id)
+            .all()
+        )
+        totals_map = {item_id: float(total or 0) for item_id, total in totals}
+
+        location_rows = (
+            db.session.query(
+                Movement.item_id,
+                Location.code,
+                Location.description,
+                func.coalesce(func.sum(Movement.quantity), 0),
+            )
+            .join(Location, Location.id == Movement.location_id)
+            .filter(Movement.item_id.in_(item_ids))
+            .group_by(Movement.item_id, Location.code, Location.description)
+            .order_by(Location.code)
+            .all()
+        )
+
+        for item_id, code, description, total in location_rows:
+            locations_map.setdefault(item_id, []).append(
+                {
+                    "code": code,
+                    "description": description or "",
+                    "quantity": float(total or 0),
+                }
+            )
+
     results = []
     for item in matches:
         results.append(
@@ -76,6 +114,8 @@ def search_items():
                 "preferred_supplier_id": None,
                 "preferred_supplier_name": None,
                 "category": item.item_class or item.type,
+                "on_hand_total": totals_map.get(item.id, 0),
+                "locations": locations_map.get(item.id, []),
             }
         )
 
