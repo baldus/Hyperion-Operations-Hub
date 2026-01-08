@@ -9,6 +9,7 @@ from flask import abort
 
 from invapp.extensions import login_manager
 from invapp.login import current_user
+from invapp.superuser import is_superuser
 
 
 def _normalize_roles(role_names: Iterable[str]) -> Tuple[str, ...]:
@@ -61,3 +62,18 @@ def require_admin(view_func):
 
     return require_roles("admin")(view_func)
 
+
+def require_admin_or_superuser(view_func):
+    """Decorator allowing access to administrators or the configured superuser."""
+
+    @wraps(view_func)
+    def wrapped(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return login_manager.unauthorized()
+
+        if not (current_user.has_any_role(("admin",)) or is_superuser()):
+            abort(403)
+
+        return view_func(*args, **kwargs)
+
+    return wrapped

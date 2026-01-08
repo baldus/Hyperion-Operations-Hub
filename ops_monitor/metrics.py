@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 import psutil
+import json
+
 from sqlalchemy import create_engine, text
 
 
@@ -38,6 +40,34 @@ class LogSnapshot:
 class AccessSnapshot:
     users: list[str]
     pages: list[str]
+    status: str
+
+
+@dataclass
+class OpsEventEntry:
+    created_at: datetime
+    level: str
+    message: str
+    source: str | None
+    context: dict | None
+
+
+@dataclass
+class BackupStatus:
+    frequency_hours: int
+    frequency_source: str
+    last_run_at: datetime | None
+    last_run_status: str | None
+    last_run_message: str | None
+    last_run_filename: str | None
+    last_run_filepath: str | None
+    last_success_at: datetime | None
+    next_run_at: datetime | None
+
+
+@dataclass
+class ErrorSnapshot:
+    entries: list[str]
     status: str
 
 
@@ -153,6 +183,241 @@ def read_recent_access(
 
     status = "Recent access (last 5m)"
     return AccessSnapshot(users=users, pages=pages, status=status)
+
+
+def read_ops_events(db_url: str | None, *, limit: int = 12) -> list[OpsEventEntry]:
+    if not db_url:
+        return []
+    try:
+        engine = create_engine(db_url, pool_pre_ping=True)
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT created_at, level, message, source, context_json
+                    FROM ops_event_log
+                    ORDER BY created_at DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": limit},
+            )
+            results = []
+            for row in rows:
+                context = row.context_json
+                if isinstance(context, str):
+                    try:
+                        context = json.loads(context)
+                    except json.JSONDecodeError:
+                        context = None
+                results.append(
+                    OpsEventEntry(
+                        created_at=row.created_at,
+                        level=row.level,
+                        message=row.message,
+                        source=row.source,
+                        context=context if isinstance(context, dict) else None,
+                    )
+                )
+        engine.dispose()
+        return results
+    except Exception:
+        return []
+
+
+def read_backup_status(db_url: str | None, *, default_frequency: int = 4) -> BackupStatus:
+    if not db_url:
+        return BackupStatus(
+            frequency_hours=default_frequency,
+            frequency_source="default",
+            last_run_at=None,
+            last_run_status=None,
+            last_run_message=None,
+            last_run_filename=None,
+            last_run_filepath=None,
+            last_success_at=None,
+            next_run_at=None,
+        )
+    frequency = default_frequency
+    frequency_source = "default"
+    last_run_at = None
+    last_run_status = None
+    last_run_message = None
+    last_run_filename = None
+    last_run_filepath = None
+    last_success_at = None
+    try:
+        engine = create_engine(db_url, pool_pre_ping=True)
+        with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT value
+                    FROM app_setting
+                    WHERE key = :key
+                    LIMIT 1
+                    """
+                ),
+                {"key": "backup_frequency_hours"},
+            ).first()
+            if row and row.value is not None:
+                try:
+                    parsed = int(row.value)
+                    if parsed > 0:
+                        frequency = parsed
+                        frequency_source = "setting"
+                except (TypeError, ValueError):
+                    pass
+
+            last_run = conn.execute(
+                text(
+                    """
+                    SELECT started_at, status, message, filename, filepath
+                    FROM backup_run
+                    ORDER BY started_at DESC
+                    LIMIT 1
+                    """
+                )
+            ).first()
+            if last_run:
+                last_run_at = last_run.started_at
+                last_run_status = last_run.status
+                last_run_message = last_run.message
+                last_run_filename = last_run.filename
+                last_run_filepath = last_run.filepath
+
+            last_success = conn.execute(
+                text(
+                    """
+                    SELECT started_at
+                    FROM backup_run
+                    WHERE status = 'succeeded'
+                    ORDER BY started_at DESC
+                    LIMIT 1
+                    """
+                )
+            ).first()
+            if last_success:
+                last_success_at = last_success.started_at
+        engine.dispose()
+    except Exception:
+        pass
+
+    next_run_at = None
+    if last_run_at:
+        next_run_at = last_run_at + timedelta(hours=frequency)
+
+    return BackupStatus(
+        frequency_hours=frequency,
+        frequency_source=frequency_source,
+        last_run_at=last_run_at,
+        last_run_status=last_run_status,
+        last_run_message=last_run_message,
+        last_run_filename=last_run_filename,
+        last_run_filepath=last_run_filepath,
+        last_success_at=last_success_at,
+        next_run_at=next_run_at,
+    )
+
+
+def read_recent_errors(db_url: str | None, *, limit: int = 5) -> ErrorSnapshot:
+    if not db_url:
+        return ErrorSnapshot(entries=[], status="DB_URL not set")
+    entries: list[str] = []
+    try:
+        engine = create_engine(db_url, pool_pre_ping=True)
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT occurred_at, message
+                    FROM error_report
+                    ORDER BY occurred_at DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": limit},
+            )
+            for row in rows:
+                timestamp = row.occurred_at.strftime("%H:%M:%S") if row.occurred_at else "--:--:--"
+                message = (row.message or "").splitlines()[0]
+                entries.append(f"{timestamp} {message}")
+        engine.dispose()
+        return ErrorSnapshot(entries=entries, status="Recent exceptions")
+    except Exception as exc:
+        return ErrorSnapshot(entries=[], status=f"Error log unavailable: {exc.__class__.__name__}")
+
+
+def read_sequence_repair_summary(db_url: str | None) -> dict | None:
+    if not db_url:
+        return None
+    try:
+        engine = create_engine(db_url, pool_pre_ping=True)
+        with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT context_json
+                    FROM ops_event_log
+                    WHERE source = 'sequence_repair'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """
+                )
+            ).first()
+        engine.dispose()
+        if row:
+            context = row.context_json
+            if isinstance(context, str):
+                try:
+                    context = json.loads(context)
+                except json.JSONDecodeError:
+                    context = None
+            if isinstance(context, dict):
+                return context
+    except Exception:
+        return None
+    return None
+
+
+def read_boot_status(db_url: str | None) -> str | None:
+    if not db_url:
+        return None
+    try:
+        engine = create_engine(db_url, pool_pre_ping=True)
+        with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT created_at, message
+                    FROM ops_event_log
+                    WHERE source = 'startup'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """
+                )
+            ).first()
+        engine.dispose()
+        if row and row.created_at:
+            timestamp = row.created_at.strftime("%Y-%m-%d %H:%M UTC")
+            return f"{row.message} ({timestamp})"
+    except Exception:
+        return None
+    return None
+
+
+def mask_db_url(db_url: str | None) -> str:
+    if not db_url:
+        return "not set"
+    if "@" not in db_url:
+        return db_url
+    prefix, rest = db_url.split("@", 1)
+    if "://" in prefix:
+        scheme, creds = prefix.split("://", 1)
+        if ":" in creds:
+            user, _ = creds.split(":", 1)
+            return f"{scheme}://{user}:****@{rest}"
+    return f"****@{rest}"
 
 
 def format_uptime(seconds: float) -> str:

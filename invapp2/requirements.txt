@@ -4,6 +4,7 @@ Werkzeug==2.2.3
 gunicorn==21.2.0
 rich==13.7.1
 psutil==5.9.8
+APScheduler==3.10.4
 
 # Database integration
 Flask-SQLAlchemy==2.5.1

@@ -22,10 +22,17 @@ from rich.text import Text
 from . import controls
 from .metrics import (
     AccessSnapshot,
+    BackupStatus,
     check_port,
     format_uptime,
+    mask_db_url,
+    read_backup_status,
+    read_ops_events,
     read_process_metrics,
     read_recent_access,
+    read_recent_errors,
+    read_boot_status,
+    read_sequence_repair_summary,
     summarize_connections,
     tail_log,
 )
@@ -102,6 +109,57 @@ def build_controls_panel(verbose: bool) -> Panel:
     return Panel("\n".join(lines), title="Controls", box=box.ROUNDED, padding=(1, 1))
 
 
+def build_backup_panel(status: BackupStatus) -> Panel:
+    lines = [
+        f"[b]Frequency[/b]: {status.frequency_hours}h ({status.frequency_source})",
+        f"[b]Last run[/b]: {status.last_run_at.strftime('%Y-%m-%d %H:%M UTC') if status.last_run_at else 'n/a'}",
+        f"[b]Last status[/b]: {status.last_run_status or 'n/a'}",
+        f"[b]Last message[/b]: {status.last_run_message or 'n/a'}",
+        f"[b]Last file[/b]: {status.last_run_filename or 'n/a'}",
+        f"[b]Last path[/b]: {status.last_run_filepath or 'n/a'}",
+        f"[b]Last success[/b]: {status.last_success_at.strftime('%Y-%m-%d %H:%M UTC') if status.last_success_at else 'n/a'}",
+        f"[b]Next run[/b]: {status.next_run_at.strftime('%Y-%m-%d %H:%M UTC') if status.next_run_at else 'n/a'}",
+    ]
+    return Panel("\n".join(lines), title="Backup Status", box=box.ROUNDED, padding=(1, 1))
+
+
+def build_events_panel(events: list) -> Panel:
+    if not events:
+        return Panel("(no recent warnings/errors)", title="Events", box=box.ROUNDED, padding=(1, 1))
+    lines = []
+    for event in events:
+        timestamp = event.created_at.strftime("%H:%M:%S") if event.created_at else "--:--:--"
+        level = event.level
+        message = event.message
+        lines.append(f"[{level}] {timestamp} {message}")
+    return Panel("\n".join(lines), title="Recent Events", box=box.ROUNDED, padding=(1, 1))
+
+
+def build_health_panel(state: dict) -> Panel:
+    lines = [
+        f"[b]DB_URL[/b]: {state.get('db_url_masked', 'n/a')}",
+        f"[b]Gunicorn bind[/b]: {state.get('gunicorn_bind', 'n/a')}",
+        f"[b]Workers[/b]: {state.get('gunicorn_workers', 'n/a')}",
+        f"[b]Timeout[/b]: {state.get('gunicorn_timeout', 'n/a')}",
+        f"[b]Boot[/b]: {state.get('boot_status', 'n/a')}",
+    ]
+
+    summary = state.get("sequence_summary")
+    if summary:
+        lines.append(
+            "[b]Sequence repair[/b]: "
+            f"{summary.get('repaired', 0)} repaired, "
+            f"{summary.get('skipped', 0)} skipped, "
+            f"{summary.get('failed', 0)} failed"
+        )
+    return Panel("\n".join(lines), title="Health", box=box.ROUNDED, padding=(1, 1))
+
+
+def build_errors_panel(error_snapshot) -> Panel:
+    lines = error_snapshot.entries or ["(no recent exceptions)"]
+    return Panel("\n".join(lines), title=error_snapshot.status, box=box.ROUNDED, padding=(1, 1))
+
+
 def render_layout(state: dict) -> Layout:
     layout = Layout()
     layout.split_column(
@@ -109,13 +167,23 @@ def render_layout(state: dict) -> Layout:
         Layout(name="body"),
         Layout(name="footer", size=7),
     )
-    layout["body"].split_row(Layout(name="left", ratio=1), Layout(name="logs", ratio=2))
-    layout["left"].split_column(Layout(name="metrics"), Layout(name="access", size=12))
+    layout["body"].split_row(Layout(name="left", ratio=1), Layout(name="right", ratio=2))
+    layout["left"].split_column(
+        Layout(name="metrics"),
+        Layout(name="backup"),
+        Layout(name="health"),
+        Layout(name="access", size=12),
+    )
+    layout["right"].split_column(Layout(name="logs"), Layout(name="events"), Layout(name="errors", size=8))
 
     layout["header"].update(build_header(state.get("service_name", "Operations"), state.get("status", "Unknown")))
     layout["metrics"].update(build_metrics_table(state))
+    layout["backup"].update(build_backup_panel(state.get("backup_status")))
+    layout["health"].update(build_health_panel(state))
     layout["access"].update(build_access_panel(state.get("access_snapshot", AccessSnapshot([], [], "Access"))))
     layout["logs"].update(build_log_panel(state.get("log_lines", []), state.get("log_path", Path("log"))))
+    layout["events"].update(build_events_panel(state.get("events", [])))
+    layout["errors"].update(build_errors_panel(state.get("error_snapshot")))
     layout["footer"].update(build_controls_panel(state.get("verbose", False)))
     return layout
 
@@ -138,6 +206,10 @@ def monitor_loop(
     verbose = False
     tracked_pid = target_pid
     db_url = os.getenv("OPS_MONITOR_DB_URL") or os.getenv("DB_URL")
+    db_url_masked = mask_db_url(db_url)
+    gunicorn_bind = f"{os.getenv('HOST', '0.0.0.0')}:{os.getenv('PORT', '8000')}"
+    gunicorn_workers = os.getenv("GUNICORN_WORKERS", "2")
+    gunicorn_timeout = os.getenv("GUNICORN_TIMEOUT", "600")
 
     live_state = {
         "service_name": service_name,
@@ -152,6 +224,25 @@ def monitor_loop(
         "log_path": log_file,
         "verbose": verbose,
         "access_snapshot": AccessSnapshot([], [], "Access"),
+        "backup_status": BackupStatus(
+            frequency_hours=4,
+            frequency_source="default",
+            last_run_at=None,
+            last_run_status=None,
+            last_run_message=None,
+            last_run_filename=None,
+            last_run_filepath=None,
+            last_success_at=None,
+            next_run_at=None,
+        ),
+        "events": [],
+        "error_snapshot": read_recent_errors(db_url),
+        "db_url_masked": db_url_masked,
+        "gunicorn_bind": gunicorn_bind,
+        "gunicorn_workers": gunicorn_workers,
+        "gunicorn_timeout": gunicorn_timeout,
+        "boot_status": "Unknown",
+        "sequence_summary": None,
     }
 
     with Live(render_layout(live_state), console=console, screen=True, refresh_per_second=4) as live:
@@ -160,6 +251,11 @@ def monitor_loop(
             port_status = check_port(app_port)
             log_snapshot = tail_log(log_file, state=log_cursor)
             access_snapshot = read_recent_access(db_url)
+            backup_status = read_backup_status(db_url)
+            events = read_ops_events(db_url)
+            error_snapshot = read_recent_errors(db_url)
+            sequence_summary = read_sequence_repair_summary(db_url)
+            boot_status = read_boot_status(db_url)
 
             if metrics is None:
                 status = "Stopped"
@@ -193,6 +289,15 @@ def monitor_loop(
                 "log_path": log_snapshot.path,
                 "verbose": verbose,
                 "access_snapshot": access_snapshot,
+                "backup_status": backup_status,
+                "events": events,
+                "error_snapshot": error_snapshot,
+                "db_url_masked": db_url_masked,
+                "gunicorn_bind": gunicorn_bind,
+                "gunicorn_workers": gunicorn_workers,
+                "gunicorn_timeout": gunicorn_timeout,
+                "boot_status": boot_status or status_message,
+                "sequence_summary": sequence_summary,
             }
 
             live.update(render_layout(live_state))
