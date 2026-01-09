@@ -165,12 +165,8 @@ attempt the following, in order:
 If a configured path is not writable, the app logs a warning and falls back to
 the next option without blocking startup.
 
-To enable database restores, set:
-```bash
-export ALLOW_RESTORE=1
-```
-Restore is limited to the configured superuser and remains disabled unless this
-environment variable is present.
+Database restores are restricted to the configured superuser account and
+require explicit UI confirmations before execution.
 
 ---
 

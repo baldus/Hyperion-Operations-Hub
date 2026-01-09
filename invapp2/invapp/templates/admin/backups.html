@@ -44,32 +44,32 @@
 
 <section class="card-section">
     <h3>Restore Database</h3>
-    <p>Restores will overwrite the current database. Use only when necessary.</p>
-    {% if not restore_allowed %}
-        <div class="alert alert-warning">
-            Restore is disabled. Set <code>ALLOW_RESTORE=1</code> to enable restores.
-        </div>
+    <div class="alert alert-warning">
+        WARNING: Restoring will overwrite the current database. Use only when necessary.
+    </div>
+    {% if is_superuser() %}
+        <form method="post" action="{{ url_for('admin.restore_backup') }}" class="stacked-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label for="backup-filename">Select a database backup (.sql or .dump)</label>
+            <select id="backup-filename" name="backup_filename" required>
+                <option value="">Select a backup</option>
+                {% for backup in backups if backup.kind == 'db' %}
+                    <option value="{{ backup.filename }}">{{ backup.filename }}</option>
+                {% endfor %}
+            </select>
+
+            <label class="checkbox">
+                <input type="checkbox" name="confirm_ack" value="yes" required>
+                I understand this will overwrite the current database.
+            </label>
+
+            <label for="confirm-restore">Type RESTORE to confirm</label>
+            <input id="confirm-restore" type="text" name="confirm_restore" placeholder="RESTORE" required>
+
+            <button type="submit" class="action-btn">Restore Backup</button>
+        </form>
+    {% else %}
+        <p class="text-muted">Restore actions are available to superusers only.</p>
     {% endif %}
-
-    <form method="post" action="{{ url_for('admin.restore_backup') }}" class="stacked-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label for="backup-filename">Select a database backup (.sql or .dump)</label>
-        <select id="backup-filename" name="backup_filename" required {% if not restore_allowed %}disabled{% endif %}>
-            <option value="">Select a backup</option>
-            {% for backup in backups if backup.kind == 'db' %}
-                <option value="{{ backup.filename }}">{{ backup.filename }}</option>
-            {% endfor %}
-        </select>
-
-        <label class="checkbox">
-            <input type="checkbox" name="confirm_ack" value="yes" required {% if not restore_allowed %}disabled{% endif %}>
-            I understand this will overwrite the current database.
-        </label>
-
-        <label for="confirm-restore">Type RESTORE to confirm</label>
-        <input id="confirm-restore" type="text" name="confirm_restore" placeholder="RESTORE" required {% if not restore_allowed %}disabled{% endif %}>
-
-        <button type="submit" class="action-btn" {% if not restore_allowed %}disabled{% endif %}>Restore Backup</button>
-    </form>
 </section>
 {% endblock %}
