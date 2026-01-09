@@ -104,7 +104,6 @@ def test_restore_permissions(client, app):
 
 
 def test_restore_rejects_path_traversal(client, app, monkeypatch):
-    monkeypatch.setenv("ALLOW_RESTORE", "1")
     monkeypatch.setattr("os.geteuid", lambda: 0)
     login_superuser(client)
 

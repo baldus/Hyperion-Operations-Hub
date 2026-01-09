@@ -171,6 +171,14 @@ terminate HTTPS and provide request buffering.
 - **System Updates** – Apply OS patches monthly and reboot after kernel updates.
 - **Printer Checks** – Confirm Zebra printers have labels/ribbons and clear error
   states as part of daily shift handoff.
+- **Backup Restore Sanity Test Plan** – After updates to restore flows:
+  - Superuser: restore button enabled on Backup Restore page.
+  - Superuser: cannot restore without checkbox acknowledgement.
+  - Superuser: cannot restore without typing `RESTORE`.
+  - Superuser: cannot restore with wrong file type.
+  - Superuser: can restore with valid `.sql`/`.dump` + confirmations.
+  - Non-superuser: restore UI hidden/disabled.
+  - Non-superuser: direct POST returns 403 and does not restore.
 
 ---
 

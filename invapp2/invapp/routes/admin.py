@@ -14,6 +14,7 @@ from urllib.parse import urljoin
 from flask import (
     Blueprint,
     after_this_request,
+    abort,
     current_app,
     flash,
     redirect,
@@ -36,7 +37,7 @@ from invapp.extensions import db
 from invapp.login import current_user, login_required, logout_user
 from invapp.offline import is_emergency_mode_active
 from invapp.security import require_roles, require_admin_or_superuser
-from invapp.superuser import superuser_required
+from invapp.superuser import is_superuser, superuser_required
 from invapp.services import backup_exporter, backup_service, status_bus
 
 
@@ -824,12 +825,31 @@ def _record_backup_restore_event(
         current_app.logger.exception("Failed to record backup restore event.")
 
 
+def _log_backup_restore_attempt(
+    *,
+    filename: str,
+    outcome: str,
+    reason: str | None = None,
+) -> None:
+    timestamp = datetime.utcnow().isoformat() + "Z"
+    username = getattr(current_user, "username", "unknown")
+    detail = reason or "n/a"
+    log = current_app.logger.info if outcome == "success" else current_app.logger.warning
+    log(
+        "Backup restore attempt timestamp=%s username=%s filename=%s outcome=%s reason=%s",
+        timestamp,
+        username,
+        filename,
+        outcome,
+        detail,
+    )
+
+
 @bp.route("/backups", methods=["GET"])
 @superuser_required
 def backups_home():
     backup_dir = None
     backups = []
-    restore_allowed = os.environ.get("ALLOW_RESTORE") == "1"
     message = None
 
     try:
@@ -843,49 +863,105 @@ def backups_home():
         "admin/backups.html",
         backups=backups,
         backup_dir=str(backup_dir) if backup_dir else None,
-        restore_allowed=restore_allowed,
         csrf_token=_backup_restore_csrf_token(),
         message=message,
     )
 
 
 @bp.route("/backups/restore", methods=["POST"])
-@superuser_required
+@login_required
 def restore_backup():
-    restore_allowed = os.environ.get("ALLOW_RESTORE") == "1"
-    if not restore_allowed:
-        flash("Restore is disabled. Set ALLOW_RESTORE=1 to enable this action.", "warning")
+    # Restore is superuser-only; no env var required; confirmations required.
+    filename = (request.form.get("backup_filename") or "").strip()
+    if not is_superuser():
         _record_backup_restore_event(
-            filename=request.form.get("backup_filename", "unknown"),
+            filename=filename or "unknown",
             status="failed",
             action="restore",
-            message="Restore disabled by ALLOW_RESTORE.",
+            message="Restore blocked: superuser required.",
         )
-        return redirect(url_for("admin.backups_home"))
+        _log_backup_restore_attempt(
+            filename=filename or "unknown",
+            outcome="failure",
+            reason="auth denied",
+        )
+        abort(403)
 
     if hasattr(os, "geteuid") and os.geteuid() != 0:
         flash("Restore is restricted to the system superuser.", "danger")
         _record_backup_restore_event(
-            filename=request.form.get("backup_filename", "unknown"),
+            filename=filename or "unknown",
             status="failed",
             action="restore",
             message="Restore blocked: OS user is not root.",
+        )
+        _log_backup_restore_attempt(
+            filename=filename or "unknown",
+            outcome="failure",
+            reason="os user not root",
         )
         return redirect(url_for("admin.backups_home"))
 
     token = request.form.get("csrf_token")
     if not token or token != session.get("backup_restore_csrf"):
         flash("Invalid restore request. Please try again.", "danger")
+        _record_backup_restore_event(
+            filename=filename or "unknown",
+            status="failed",
+            action="restore",
+            message="Restore blocked: invalid CSRF token.",
+        )
+        _log_backup_restore_attempt(
+            filename=filename or "unknown",
+            outcome="failure",
+            reason="invalid csrf token",
+        )
         return redirect(url_for("admin.backups_home"))
 
-    filename = (request.form.get("backup_filename") or "").strip()
-    confirmation = (request.form.get("confirm_restore") or "").strip().upper()
+    if not filename:
+        flash("Select a backup file to restore.", "warning")
+        _record_backup_restore_event(
+            filename="unknown",
+            status="failed",
+            action="restore",
+            message="Restore blocked: missing backup filename.",
+        )
+        _log_backup_restore_attempt(
+            filename="unknown",
+            outcome="failure",
+            reason="missing backup filename",
+        )
+        return redirect(url_for("admin.backups_home"))
+
+    confirmation = (request.form.get("confirm_restore") or "").strip()
     acknowledged = request.form.get("confirm_ack") == "yes"
     if not acknowledged:
         flash("Please confirm the restore acknowledgement checkbox.", "warning")
+        _record_backup_restore_event(
+            filename=filename,
+            status="failed",
+            action="restore",
+            message="Restore blocked: acknowledgement missing.",
+        )
+        _log_backup_restore_attempt(
+            filename=filename,
+            outcome="failure",
+            reason="missing acknowledgement",
+        )
         return redirect(url_for("admin.backups_home"))
     if confirmation != "RESTORE":
         flash("Type RESTORE to confirm the backup restore.", "warning")
+        _record_backup_restore_event(
+            filename=filename,
+            status="failed",
+            action="restore",
+            message="Restore blocked: confirmation text mismatch.",
+        )
+        _log_backup_restore_attempt(
+            filename=filename,
+            outcome="failure",
+            reason="confirmation text mismatch",
+        )
         return redirect(url_for("admin.backups_home"))
 
     if not backup_service.is_valid_backup_filename(filename):
@@ -894,6 +970,11 @@ def restore_backup():
             status="failed",
             action="restore",
             message="Invalid backup filename.",
+        )
+        _log_backup_restore_attempt(
+            filename=filename or "unknown",
+            outcome="failure",
+            reason="invalid backup filename",
         )
         flash("Invalid backup filename selected.", "danger")
         return redirect(url_for("admin.backups_home"))
@@ -915,6 +996,11 @@ def restore_backup():
             action="restore",
             message=str(exc),
         )
+        _log_backup_restore_attempt(
+            filename=filename,
+            outcome="failure",
+            reason=str(exc),
+        )
         flash(str(exc), "danger")
         return redirect(url_for("admin.backups_home"))
     except Exception as exc:
@@ -925,6 +1011,11 @@ def restore_backup():
             action="restore",
             message=str(exc),
         )
+        _log_backup_restore_attempt(
+            filename=filename,
+            outcome="failure",
+            reason="exception during restore",
+        )
         flash("Restore failed. Check logs for details.", "danger")
         return redirect(url_for("admin.backups_home"))
 
@@ -933,6 +1024,11 @@ def restore_backup():
         status="succeeded",
         action="restore",
         message=result_message,
+    )
+    _log_backup_restore_attempt(
+        filename=filename,
+        outcome="success",
+        reason="restore completed",
     )
     flash("Restore completed. Restart the console if needed.", "success")
     return redirect(url_for("admin.backups_home"))
