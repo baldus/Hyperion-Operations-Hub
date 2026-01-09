@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Item Stock Detail</h2>
+
+<div class="stock-detail-header">
+  <div>
+    <h3>{{ item.sku }} - {{ item.name }}</h3>
+    <p class="muted">{{ item.description or "" }}</p>
+    <p>
+      <strong>Unit:</strong> {{ item.unit or "" }}
+      <span class="stock-detail-metric"><strong>Total on hand:</strong> {{ total_on_hand }}</span>
+    </p>
+  </div>
+</div>
+
+{% if not can_edit %}
+  <p class="muted">You have view-only access to stock balances.</p>
+{% endif %}
+
+<div class="table-container">
+  <table class="inventory-table">
+    <thead>
+      <tr>
+        <th>Location</th>
+        <th>Quantity</th>
+        <th>Last Updated</th>
+        <th>Updated By</th>
+        {% if can_edit %}
+          <th>Adjust</th>
+          <th>Remove</th>
+        {% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% if locations %}
+        {% for row in locations %}
+          <tr>
+            <td>{{ row.location.code if row.location else "Unknown" }}</td>
+            <td>{{ row.quantity }}</td>
+            <td>
+              {% if row.updated_at %}
+                {{ row.updated_at.strftime('%Y-%m-%d %H:%M') }}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td>{{ row.updated_by or "-" }}</td>
+            {% if can_edit %}
+              <td>
+                <form method="post" action="{{ url_for('inventory.set_stock_quantity', item_id=item.id) }}" class="inline-form">
+                  <input type="hidden" name="location_id" value="{{ row.location.id }}">
+                  <input type="number" name="quantity" step="0.001" min="0" value="{{ row.quantity }}" class="short-input">
+                  <button type="submit" class="bubble-btn">Save</button>
+                </form>
+              </td>
+              <td>
+                <form method="post" action="{{ url_for('inventory.remove_stock_location', item_id=item.id) }}" class="inline-form">
+                  <input type="hidden" name="location_id" value="{{ row.location.id }}">
+                  <button type="submit" class="bubble-btn danger" onclick="return confirm('Set this location to zero?');">Zero Out</button>
+                </form>
+              </td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="6">No stock movements recorded for this item yet.</td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{% if can_edit %}
+  <div class="stock-detail-actions">
+    <div class="stock-action-card">
+      <h4>Transfer Stock</h4>
+      <form method="post" action="{{ url_for('inventory.transfer_stock', item_id=item.id) }}" class="stock-action-form">
+        <label for="from_location_id">From</label>
+        <select id="from_location_id" name="from_location_id" required>
+          <option value="">Select location</option>
+          {% for row in transfer_from_locations %}
+            <option value="{{ row.location.id }}">{{ row.location.code }} ({{ row.quantity }})</option>
+          {% endfor %}
+        </select>
+        <label for="to_location_id">To</label>
+        <select id="to_location_id" name="to_location_id" required>
+          <option value="">Select location</option>
+          {% for location in all_locations %}
+            <option value="{{ location.id }}">{{ location.code }}</option>
+          {% endfor %}
+        </select>
+        <label for="transfer_quantity">Quantity</label>
+        <input type="number" id="transfer_quantity" name="quantity" step="0.001" min="0" required>
+        <label for="transfer_reference">Reference</label>
+        <input type="text" id="transfer_reference" name="reference" placeholder="Optional note">
+        <button type="submit" class="bubble-btn">Transfer</button>
+      </form>
+    </div>
+
+    <div class="stock-action-card">
+      <h4>Add Location</h4>
+      <form method="post" action="{{ url_for('inventory.add_stock_location', item_id=item.id) }}" class="stock-action-form">
+        <label for="add_location_id">Location</label>
+        <select id="add_location_id" name="location_id" required>
+          <option value="">Select location</option>
+          {% for location in available_locations %}
+            <option value="{{ location.id }}">{{ location.code }}</option>
+          {% endfor %}
+        </select>
+        <label for="add_quantity">Initial Quantity</label>
+        <input type="number" id="add_quantity" name="quantity" step="0.001" min="0" value="0">
+        <label for="add_reference">Reference</label>
+        <input type="text" id="add_reference" name="reference" placeholder="Optional note">
+        <button type="submit" class="bubble-btn">Add Location</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
+
+<p><a href="{{ url_for('inventory.list_stock') }}">&larr; Back to Stock Overview</a></p>
+{% endblock %}
