@@ -2602,6 +2602,17 @@ body.dark .modal-content {
     margin-top: 10px;
 }
 
+.checkbox-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    text-align: left;
+}
+
+.checkbox-row input[type="checkbox"] {
+    margin-top: 3px;
+}
+
 /* --- Orders Home --- */
 .orders-toolbar {
     display: flex;

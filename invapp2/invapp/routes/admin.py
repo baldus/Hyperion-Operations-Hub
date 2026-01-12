@@ -24,14 +24,14 @@ from flask import (
     session,
     url_for,
 )
-from sqlalchemy import create_engine, func, text
+from sqlalchemy import create_engine, func, inspect, text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql.sqltypes import Date as SQLDate
 from sqlalchemy.sql.sqltypes import DateTime as SQLDateTime
 from sqlalchemy.sql.sqltypes import Numeric
 
-from invapp import models
+from invapp import audit, models
 from invapp.extensions import db
 
 from invapp.login import current_user, login_required, logout_user
@@ -46,6 +46,16 @@ bp = Blueprint("admin", __name__, url_prefix="/admin")
 
 _AUTOMATED_RECOVERY_ACTION_ID = "automated-recovery"
 _CONSOLE_RESTART_ACTION_ID = "console-restart"
+_CLEAR_INVENTORY_CONFIRMATION = "CLEAR INVENTORY"
+_CLEAR_INVENTORY_CSRF_KEY = "clear_inventory_csrf"
+_INVENTORY_TABLES = (
+    "routing_step_consumption",
+    "movement",
+    "batch",
+    "reservation",
+    "receiving",
+    "stock",
+)
 
 
 _RECOVERY_SEQUENCE = (
@@ -792,6 +802,138 @@ def backup_settings():
         backup_frequency_hours=current_frequency,
         default_frequency_hours=default_frequency,
     )
+
+
+def _clear_inventory_csrf_token() -> str:
+    token = session.get(_CLEAR_INVENTORY_CSRF_KEY)
+    if not token:
+        token = secrets.token_urlsafe(16)
+        session[_CLEAR_INVENTORY_CSRF_KEY] = token
+    return token
+
+
+def _clear_inventory_csrf_valid(token: str | None) -> bool:
+    return bool(token) and token == session.get(_CLEAR_INVENTORY_CSRF_KEY)
+
+
+def _inventory_tables_to_clear() -> list[str]:
+    inspector = inspect(db.engine)
+    existing = set(inspector.get_table_names())
+    return [table for table in _INVENTORY_TABLES if table in existing]
+
+
+def _clear_inventory_tables(tables: list[str]) -> list[str]:
+    if not tables:
+        return []
+
+    bind = db.engine
+    dialect = bind.dialect.name
+    preparer = bind.dialect.identifier_preparer
+    quoted_tables = [preparer.quote(table) for table in tables]
+
+    if dialect == "postgresql":
+        db.session.execute(
+            text(
+                "TRUNCATE TABLE "
+                + ", ".join(quoted_tables)
+                + " RESTART IDENTITY CASCADE"
+            )
+        )
+        return tables
+
+    for table in quoted_tables:
+        db.session.execute(text(f"DELETE FROM {table}"))
+
+    if dialect == "sqlite":
+        for table in tables:
+            db.session.execute(
+                text("DELETE FROM sqlite_sequence WHERE name = :name"),
+                {"name": table},
+            )
+
+    return tables
+
+
+def _create_inventory_backup() -> tuple[bool, str | None]:
+    try:
+        backup_exporter.create_database_backup_archive(current_app)
+    except Exception as exc:
+        current_app.logger.exception("Failed to create inventory backup: %s", exc)
+        status_bus.log_event(
+            "error",
+            "Pre-clear inventory backup failed.",
+            context={"error": str(exc)},
+            source="clear_inventory",
+        )
+        return False, "Backup failed. Inventory was not cleared."
+    return True, None
+
+
+@bp.route("/settings/clear-inventory", methods=["POST"])
+@login_required
+@require_admin_or_superuser
+def clear_inventory():
+    if not _database_available():
+        flash("Inventory cannot be cleared while the database is offline.", "warning")
+        return redirect(url_for("settings.settings_home"))
+
+    token = request.form.get("csrf_token")
+    if not _clear_inventory_csrf_valid(token):
+        flash("Clear inventory request rejected. Please refresh and try again.", "danger")
+        return redirect(url_for("settings.settings_home"))
+
+    acknowledge = request.form.get("acknowledge")
+    confirmation = (request.form.get("confirm_phrase") or "").strip()
+    password = (request.form.get("password") or "").strip()
+
+    if acknowledge != "1":
+        flash("Confirm the acknowledgement checkbox to continue.", "danger")
+        return redirect(url_for("settings.settings_home"))
+
+    if confirmation != _CLEAR_INVENTORY_CONFIRMATION:
+        flash(
+            f"Type '{_CLEAR_INVENTORY_CONFIRMATION}' to confirm the inventory reset.",
+            "danger",
+        )
+        return redirect(url_for("settings.settings_home"))
+
+    if not password or not current_user.check_password(password):
+        flash("Password confirmation failed. Inventory was not cleared.", "danger")
+        return redirect(url_for("settings.settings_home"))
+
+    backup_ok, backup_error = _create_inventory_backup()
+    if not backup_ok:
+        flash(backup_error or "Backup failed. Inventory was not cleared.", "danger")
+        return redirect(url_for("settings.settings_home"))
+
+    tables_cleared = []
+    try:
+        with db.session.begin_nested():
+            tables_cleared = _clear_inventory_tables(_inventory_tables_to_clear())
+            db.session.add(
+                models.AdminAuditLog(
+                    user_id=current_user.id,
+                    action="CLEAR_INVENTORY",
+                    note=(
+                        f"Cleared inventory tables: {', '.join(tables_cleared)}"
+                        if tables_cleared
+                        else "No inventory tables cleared."
+                    ),
+                    ip_address=audit.resolve_client_ip(),
+                )
+            )
+        db.session.commit()
+    except SQLAlchemyError as exc:
+        db.session.rollback()
+        current_app.logger.exception("Failed to clear inventory: %s", exc)
+        flash("Inventory clear failed. No data was removed.", "danger")
+        return redirect(url_for("settings.settings_home"))
+
+    if tables_cleared:
+        flash("Inventory cleared and reset to zero.", "success")
+    else:
+        flash("Inventory was already empty. No records were removed.", "info")
+    return redirect(url_for("settings.settings_home"))
 
 
 def _backup_restore_csrf_token() -> str:
