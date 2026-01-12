@@ -6,6 +6,7 @@ import shlex
 import shutil
 import secrets
 import subprocess
+from collections import deque
 from pathlib import Path
 from datetime import date, datetime, time as time_type, timedelta
 from decimal import Decimal
@@ -19,6 +20,7 @@ from flask import (
     flash,
     redirect,
     render_template,
+    render_template_string,
     request,
     send_file,
     session,
@@ -1240,6 +1242,35 @@ def _display_database_url(raw_url: str) -> str:
     if url.password:
         url = url.set(password="••••••")
     return str(url)
+
+
+@bp.route("/logs")
+@superuser_required
+def view_logs():
+    log_path_value = current_app.config.get("APP_LOG_PATH", "")
+    log_path = Path(log_path_value) if log_path_value else None
+    lines = deque(maxlen=200)
+
+    if log_path and log_path.exists():
+        with log_path.open("r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                lines.append(line.rstrip("\n"))
+    else:
+        lines.append("Log file not found.")
+
+    content = "\n".join(lines)
+    return render_template_string(
+        """
+        {% extends "base.html" %}
+        {% block content %}
+        <h2>Application Logs (last 200 lines)</h2>
+        <p class="page-intro">Source: {{ log_path or "Unavailable" }}</p>
+        <pre style="white-space: pre-wrap;">{{ content }}</pre>
+        {% endblock %}
+        """,
+        content=content,
+        log_path=str(log_path) if log_path else None,
+    )
 
 
 def _test_database_connection(target_url: str) -> bool:

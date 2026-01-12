@@ -13,6 +13,9 @@
         {% if path %}
         <p class="error-context"><strong>Path:</strong> {{ path }}</p>
         {% endif %}
+        {% if request_id %}
+        <p class="error-context"><strong>Request ID:</strong> {{ request_id }}</p>
+        {% endif %}
         <p class="error-note">Include the details below when contacting Josh so we can fix the issue quickly.</p>
         <form method="post" action="{{ url_for('errors.report_error') }}" class="error-report-form">
             <input type="hidden" name="message" value="{{ error_message }}">
@@ -32,7 +35,7 @@
         <p class="error-text">We could not save the report. Please share these details with Josh.</p>
         {% endif %}
     </div>
-    {% if stacktrace %}
+    {% if show_debug and stacktrace %}
     <div class="stacktrace-block">
         <div class="stacktrace-header">
             <h3>Error details</h3>

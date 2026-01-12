@@ -1,12 +1,12 @@
 from datetime import date, timedelta
+from uuid import uuid4
 import os
 import logging
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import click
 
-from flask import Flask, current_app, jsonify, render_template, request, session, url_for
+from flask import Flask, current_app, g, jsonify, render_template, request, session, url_for
 from sqlalchemy import func, inspect, text
 from sqlalchemy.exc import IntegrityError, NoSuchTableError, OperationalError, SQLAlchemyError
 from sqlalchemy.pool import StaticPool
@@ -57,6 +57,7 @@ from .superuser import is_superuser
 from .services import backup_service, status_bus
 from .services.db_schema import ensure_app_setting_schema
 from .utils.db_schema import db_has_column
+from .utils.logging import configure_logging
 
 
 NAVIGATION_PAGES: tuple[tuple[str, str, str], ...] = (
@@ -627,19 +628,8 @@ def create_app(config_override=None):
     if config_override:
         app.config.update(config_override)
 
-    log_path = Path(app.config.get("OPS_LOG_PATH", Path(__file__).resolve().parent.parent / "support" / "operations.log"))
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    if not any(
-        isinstance(handler, RotatingFileHandler) and getattr(handler, "baseFilename", "") == str(log_path)
-        for handler in app.logger.handlers
-    ):
-        handler = RotatingFileHandler(log_path, maxBytes=2 * 1024 * 1024, backupCount=3)
-        handler.setLevel(logging.INFO)
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-        )
-        app.logger.addHandler(handler)
-    app.logger.setLevel(logging.INFO)
+    app_log_path = configure_logging(app)
+    app.config["APP_LOG_PATH"] = str(app_log_path)
     if not any(isinstance(handler, status_bus.StatusBusHandler) for handler in app.logger.handlers):
         app.logger.addHandler(status_bus.StatusBusHandler(level=logging.WARNING))
 
@@ -683,6 +673,17 @@ def create_app(config_override=None):
     login_manager.init_app(app)
     login_manager.anonymous_user = OfflineAdminUser
     login_manager.login_view = "auth.login"
+
+    @app.before_request
+    def _assign_request_id():
+        g.request_id = uuid4().hex[:10]
+
+    @app.after_request
+    def _attach_request_id(response):
+        request_id = getattr(g, "request_id", None)
+        if request_id:
+            response.headers.setdefault("X-Request-ID", request_id)
+        return response
 
     @login_manager.user_loader
     def load_user(user_id: str):
