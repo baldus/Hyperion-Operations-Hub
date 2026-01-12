@@ -9,6 +9,7 @@ import tempfile
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
@@ -184,6 +185,95 @@ def test_list_stock_all_filter(client, stock_items):
     assert stock_items["low"] in page
     assert stock_items["near"] in page
     assert stock_items["ok"] in page
+
+
+def test_set_stock_quantity_updates_location(client, app):
+    with app.app_context():
+        item = Item(sku="SET-1", name="Set Item")
+        location = Location(code="SET-LOC")
+        db.session.add_all([item, location])
+        db.session.commit()
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                location_id=location.id,
+                quantity=5,
+                movement_type="ADJUST",
+            )
+        )
+        db.session.commit()
+        item_id = item.id
+        location_id = location.id
+
+    response = client.post(
+        f"/inventory/stock/{item_id}/set_quantity",
+        data={"location_id": str(location_id), "quantity": "8"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        total = (
+            db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+            .filter(
+                Movement.item_id == item_id,
+                Movement.location_id == location_id,
+            )
+            .scalar()
+        )
+        assert Decimal(total or 0) == Decimal("8")
+
+
+def test_transfer_stock_blocks_negative(client, app):
+    with app.app_context():
+        item = Item(sku="MOVE-1", name="Move Item")
+        from_location = Location(code="FROM-LOC")
+        to_location = Location(code="TO-LOC")
+        db.session.add_all([item, from_location, to_location])
+        db.session.commit()
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                location_id=from_location.id,
+                quantity=5,
+                movement_type="ADJUST",
+            )
+        )
+        db.session.commit()
+        item_id = item.id
+        from_location_id = from_location.id
+        to_location_id = to_location.id
+
+    response = client.post(
+        f"/inventory/stock/{item_id}/transfer",
+        data={
+            "from_location_id": str(from_location_id),
+            "to_location_id": str(to_location_id),
+            "quantity": "10",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        from_total = (
+            db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+            .filter(
+                Movement.item_id == item_id,
+                Movement.location_id == from_location_id,
+            )
+            .scalar()
+        )
+        to_total = (
+            db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+            .filter(
+                Movement.item_id == item_id,
+                Movement.location_id == to_location_id,
+            )
+            .scalar()
+        )
+        assert Decimal(from_total or 0) == Decimal("5")
+        assert Decimal(to_total or 0) == Decimal("0")
 
 
 def test_receiving_prints_batch_label(client, app, monkeypatch):

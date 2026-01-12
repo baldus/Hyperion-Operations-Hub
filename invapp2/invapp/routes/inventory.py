@@ -25,14 +25,16 @@ from flask import (
     session,
     url_for,
 )
-from sqlalchemy import func, or_
+from sqlalchemy import asc, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import joinedload, load_only
+from sqlalchemy.orm import joinedload, lazyload, load_only
+from sqlalchemy.orm.exc import DetachedInstanceError
 
 from invapp.auth import blueprint_page_guard
 from invapp.login import current_user
 from invapp.permissions import resolve_edit_roles
-from invapp.security import require_any_role, require_roles
+from invapp.security import require_admin_or_superuser, require_any_role, require_roles
+from invapp.superuser import is_superuser
 from invapp.models import (
     Batch,
     BillOfMaterial,
@@ -48,6 +50,7 @@ from invapp.models import (
     PurchaseRequest,
     Reservation,
     RoutingStepConsumption,
+    User,
     db,
 )
 from werkzeug.utils import secure_filename
@@ -2163,109 +2166,417 @@ def export_locations():
 ############################
 # STOCK ROUTES
 ############################
+def _parse_stock_quantity(value: str | None) -> Decimal | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float, Decimal)):
+        value = str(value)
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        return Decimal(value).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _get_location_on_hand(item_id: int, location_id: int) -> Decimal:
+    total = (
+        db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+        .filter(Movement.item_id == item_id, Movement.location_id == location_id)
+        .scalar()
+    )
+    return Decimal(total or 0)
+
+
+def _movement_person() -> str | None:
+    if not current_user.is_authenticated:
+        return None
+    try:
+        return current_user.username
+    except DetachedInstanceError:
+        try:
+            user_id = int(session.get("_user_id"))
+        except (TypeError, ValueError):
+            return None
+        user = User.query.get(user_id)
+        return user.username if user else None
+
+
 @bp.route("/stock")
 def list_stock():
     page = request.args.get("page", 1, type=int)
     size = request.args.get("size", 20, type=int)
     status = request.args.get("status", "all")
-    search = request.args.get("search", "")
-    like_pattern = f"%{search}%" if search else None
+    search = (request.args.get("q") or request.args.get("search") or "").strip()
+    location_id = request.args.get("location_id", type=int)
+    in_stock = request.args.get("in_stock") in {"1", "true", "on", "yes"}
+    sort = request.args.get("sort", "sku")
+    direction = request.args.get("dir", "asc")
     if status not in {"all", "low", "near"}:
         status = "all"
-    rows_query = (
-        db.session.query(
-            Movement.item_id,
-            Movement.batch_id,
-            Movement.location_id,
-            func.sum(Movement.quantity).label("on_hand")
-        )
-        .join(Item, Item.id == Movement.item_id)
-        .outerjoin(Batch, Batch.id == Movement.batch_id)
-        .outerjoin(Location, Location.id == Movement.location_id)
-        .group_by(Movement.item_id, Movement.batch_id, Movement.location_id)
-        .having(func.sum(Movement.quantity) != 0)
+
+    total_qty = func.coalesce(func.sum(Movement.quantity), 0).label("total_qty")
+    location_count = func.count(func.distinct(Movement.location_id)).label(
+        "location_count"
     )
-    if like_pattern:
-        rows_query = rows_query.filter(
+    last_updated = func.max(Movement.date).label("last_updated")
+
+    overview_query = (
+        db.session.query(Item, total_qty, location_count, last_updated)
+        .options(lazyload(Item.default_location))
+        .outerjoin(Movement, Movement.item_id == Item.id)
+        .group_by(Item.id)
+    )
+
+    if search:
+        like_pattern = f"%{search}%"
+        overview_query = overview_query.filter(
             or_(
                 Item.sku.ilike(like_pattern),
                 Item.name.ilike(like_pattern),
-                Batch.lot_number.ilike(like_pattern),
-                Location.code.ilike(like_pattern),
+                Item.description.ilike(like_pattern),
             )
         )
-    pagination = rows_query.paginate(page=page, per_page=size, error_out=False)
-    rows = pagination.items
 
-    totals_query = (
-        db.session.query(
-            Movement.item_id,
-            func.sum(Movement.quantity).label("total_on_hand")
+    if location_id:
+        location_items = (
+            db.session.query(Movement.item_id)
+            .filter(Movement.location_id == location_id)
+            .distinct()
+            .subquery()
         )
-        .join(Item, Item.id == Movement.item_id)
-        .outerjoin(Batch, Batch.id == Movement.batch_id)
-        .outerjoin(Location, Location.id == Movement.location_id)
-    )
-    if like_pattern:
-        totals_query = totals_query.filter(
-            or_(
-                Item.sku.ilike(like_pattern),
-                Item.name.ilike(like_pattern),
-                Batch.lot_number.ilike(like_pattern),
-                Location.code.ilike(like_pattern),
-            )
+        overview_query = overview_query.filter(
+            Item.id.in_(select(location_items.c.item_id))
         )
-    totals_query = (
-        totals_query
-        .group_by(Movement.item_id)
-        .all()
-    )
-    totals_map = {item_id: int(total or 0) for item_id, total in totals_query}
 
-    items = {i.id: i for i in Item.query.all()}
-    locations = {l.id: l for l in Location.query.all()}
-    batches = {b.id: b for b in Batch.query.all()}
-
-    def matches_status(item_obj, total_qty):
-        if status == "all":
-            return True
-        if not item_obj:
-            return False
-        min_stock = item_obj.min_stock or 0
+    if status in {"low", "near"}:
         multiplier = 1.05 if status == "low" else 1.25
-        return total_qty < (min_stock * multiplier)
+        overview_query = overview_query.having(
+            total_qty < (func.coalesce(Item.min_stock, 0) * multiplier)
+        )
 
-    totals = {
-        item_id: total
-        for item_id, total in totals_map.items()
-        if matches_status(items.get(item_id), total)
+    if in_stock:
+        overview_query = overview_query.having(total_qty > 0)
+
+    sort_map = {
+        "sku": Item.sku,
+        "name": Item.name,
+        "qty": total_qty,
+        "locations": location_count,
+        "updated": last_updated,
+        "min_stock": Item.min_stock,
     }
+    sort_column = sort_map.get(sort, Item.sku)
+    if direction not in {"asc", "desc"}:
+        direction = "asc"
+    order_func = desc if direction == "desc" else asc
 
-    balances = []
-    for item_id, batch_id, location_id, on_hand in rows:
-        item = items.get(item_id)
-        total_on_hand = totals_map.get(item_id, 0)
-        if not matches_status(item, total_on_hand):
-            continue
-        balances.append({
+    overview_query = overview_query.order_by(order_func(sort_column), Item.sku.asc())
+
+    pagination = overview_query.paginate(page=page, per_page=size, error_out=False)
+
+    entries = [
+        {
             "item": item,
-            "batch": batches.get(batch_id) if batch_id else None,
-            "location": locations.get(location_id),
-            "on_hand": int(on_hand),
-            "total_on_hand": total_on_hand,
-        })
+            "total_qty": float(total or 0),
+            "location_count": location_count or 0,
+            "last_updated": last_updated,
+        }
+        for item, total, location_count, last_updated in pagination.items
+    ]
+
+    locations = Location.query.order_by(Location.code).all()
+
+    def build_stock_url(**overrides):
+        args = request.args.to_dict()
+        args.update({key: value for key, value in overrides.items() if value is not None})
+        cleaned = {
+            key: value
+            for key, value in args.items()
+            if value not in ("", None)
+        }
+        return url_for("inventory.list_stock", **cleaned)
 
     return render_template(
         "inventory/list_stock.html",
-        balances=balances,
-        totals=totals,
-        items=items,
+        entries=entries,
         status=status,
         page=page,
         size=size,
         pages=pagination.pages,
         search=search,
+        location_id=location_id,
+        in_stock=in_stock,
+        sort=sort,
+        direction=direction,
+        locations=locations,
+        build_stock_url=build_stock_url,
     )
+
+
+@bp.route("/stock/<int:item_id>")
+def stock_detail(item_id: int):
+    item = Item.query.get_or_404(item_id)
+    all_locations = Location.query.order_by(Location.code).all()
+
+    stock_rows = (
+        db.session.query(
+            Movement.location_id,
+            func.coalesce(func.sum(Movement.quantity), 0).label("quantity"),
+            func.max(Movement.date).label("updated_at"),
+        )
+        .filter(Movement.item_id == item_id)
+        .group_by(Movement.location_id)
+        .all()
+    )
+
+    latest_movements = (
+        db.session.query(Movement.location_id, Movement.person, Movement.date)
+        .filter(Movement.item_id == item_id)
+        .order_by(Movement.location_id, Movement.date.desc(), Movement.id.desc())
+        .all()
+    )
+    latest_by_location: dict[int, dict[str, object]] = {}
+    for location_id, person, date in latest_movements:
+        if location_id not in latest_by_location:
+            latest_by_location[location_id] = {"person": person, "date": date}
+
+    locations_map = {loc.id: loc for loc in all_locations}
+    locations = []
+    total_on_hand = Decimal("0")
+    for location_id, quantity, updated_at in stock_rows:
+        location = locations_map.get(location_id)
+        latest = latest_by_location.get(location_id, {})
+        total_on_hand += Decimal(quantity or 0)
+        locations.append(
+            {
+                "location": location,
+                "quantity": quantity or Decimal("0"),
+                "updated_at": updated_at or latest.get("date"),
+                "updated_by": latest.get("person"),
+            }
+        )
+
+    existing_location_ids = {row["location"].id for row in locations if row["location"]}
+    available_locations = [
+        loc for loc in all_locations if loc.id not in existing_location_ids
+    ]
+    transfer_from_locations = [
+        row for row in locations if row["location"] and (row["quantity"] or 0) > 0
+    ]
+    can_edit = current_user.is_authenticated and (
+        current_user.has_any_role(("admin",)) or is_superuser()
+    )
+
+    return render_template(
+        "inventory/stock_detail.html",
+        item=item,
+        total_on_hand=total_on_hand,
+        locations=locations,
+        available_locations=available_locations,
+        all_locations=all_locations,
+        transfer_from_locations=transfer_from_locations,
+        can_edit=can_edit,
+    )
+
+
+@bp.post("/stock/<int:item_id>/set_quantity")
+@require_admin_or_superuser
+def set_stock_quantity(item_id: int):
+    item = Item.query.get_or_404(item_id)
+    location_id = request.form.get("location_id", type=int)
+    desired_qty = _parse_stock_quantity(request.form.get("quantity"))
+    reference = request.form.get("reference", "Stock Adjustment").strip() or "Stock Adjustment"
+
+    if location_id is None:
+        flash("Select a valid location.", "danger")
+        return redirect(url_for("inventory.stock_detail", item_id=item_id))
+
+    location = Location.query.get(location_id)
+    if location is None:
+        flash("Location not found.", "danger")
+        return redirect(url_for("inventory.stock_detail", item_id=item_id))
+
+    if desired_qty is None:
+        flash("Enter a valid quantity.", "danger")
+        return redirect(url_for("inventory.stock_detail", item_id=item_id))
+    if desired_qty < 0:
+        flash("Quantity cannot be negative.", "danger")
+        return redirect(url_for("inventory.stock_detail", item_id=item_id))
+
+    current_qty = _get_location_on_hand(item_id, location_id)
+    delta = desired_qty - current_qty
+    if delta == 0:
+        flash("No quantity change detected.", "info")
+        return redirect(url_for("inventory.stock_detail", item_id=item_id))
+
+    with db.session.begin_nested():
+        movement = Movement(
+            item_id=item.id,
+            location_id=location_id,
+            quantity=delta,
+            movement_type="ADJUST",
+            person=_movement_person(),
+            reference=reference,
+        )
+        db.session.add(movement)
+    db.session.commit()
+
+    flash(
+        f"Updated {item.sku} at {location.code} to {desired_qty}.",
+        "success",
+    )
+    return redirect(url_for("inventory.stock_detail", item_id=item_id))
+
+
+@bp.post("/stock/<int:item_id>/transfer")
+@require_admin_or_superuser
+def transfer_stock(item_id: int):
+    item = Item.query.get_or_404(item_id)
+    from_location_id = request.form.get("from_location_id", type=int)
+    to_location_id = request.form.get("to_location_id", type=int)
+    qty = _parse_stock_quantity(request.form.get("quantity"))
+    reference = request.form.get("reference", "Stock Transfer").strip() or "Stock Transfer"
+
+    if not from_location_id or not to_location_id:
+        flash("Select both source and destination locations.", "danger")
+        return redirect(url_for("inventory.stock_detail", item_id=item_id))
+    if from_location_id == to_location_id:
+        flash("Transfer locations must be different.", "danger")
+        return redirect(url_for("inventory.stock_detail", item_id=item_id))
+    if qty is None or qty <= 0:
+        flash("Enter a transfer quantity greater than zero.", "danger")
+        return redirect(url_for("inventory.stock_detail", item_id=item_id))
+
+    from_location = Location.query.get(from_location_id)
+    to_location = Location.query.get(to_location_id)
+    if not from_location or not to_location:
+        flash("Invalid transfer location selection.", "danger")
+        return redirect(url_for("inventory.stock_detail", item_id=item_id))
+
+    from_balance = _get_location_on_hand(item_id, from_location_id)
+    if qty > from_balance:
+        flash("Not enough stock in the selected location.", "danger")
+        return redirect(url_for("inventory.stock_detail", item_id=item_id))
+
+    with db.session.begin_nested():
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                location_id=from_location_id,
+                quantity=-qty,
+                movement_type="MOVE_OUT",
+                person=_movement_person(),
+                reference=reference,
+            )
+        )
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                location_id=to_location_id,
+                quantity=qty,
+                movement_type="MOVE_IN",
+                person=_movement_person(),
+                reference=reference,
+            )
+        )
+    db.session.commit()
+
+    flash(
+        f"Transferred {qty} of {item.sku} from {from_location.code} to {to_location.code}.",
+        "success",
+    )
+    return redirect(url_for("inventory.stock_detail", item_id=item_id))
+
+
+@bp.post("/stock/<int:item_id>/add_location")
+@require_admin_or_superuser
+def add_stock_location(item_id: int):
+    item = Item.query.get_or_404(item_id)
+    location_id = request.form.get("location_id", type=int)
+    qty = _parse_stock_quantity(request.form.get("quantity")) or Decimal("0")
+    reference = request.form.get("reference", "Add Location").strip() or "Add Location"
+
+    if location_id is None:
+        flash("Select a location to add.", "danger")
+        return redirect(url_for("inventory.stock_detail", item_id=item_id))
+
+    location = Location.query.get(location_id)
+    if location is None:
+        flash("Location not found.", "danger")
+        return redirect(url_for("inventory.stock_detail", item_id=item_id))
+
+    if qty < 0:
+        flash("Quantity cannot be negative.", "danger")
+        return redirect(url_for("inventory.stock_detail", item_id=item_id))
+
+    existing = Movement.query.filter_by(
+        item_id=item_id, location_id=location_id
+    ).first()
+    if existing:
+        flash("This item already has activity at that location.", "warning")
+        return redirect(url_for("inventory.stock_detail", item_id=item_id))
+
+    with db.session.begin_nested():
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                location_id=location_id,
+                quantity=qty,
+                movement_type="ADJUST",
+                person=_movement_person(),
+                reference=reference,
+            )
+        )
+    db.session.commit()
+
+    flash(
+        f"Added {location.code} for {item.sku} with {qty} on hand.",
+        "success",
+    )
+    return redirect(url_for("inventory.stock_detail", item_id=item_id))
+
+
+@bp.post("/stock/<int:item_id>/remove_location")
+@require_admin_or_superuser
+def remove_stock_location(item_id: int):
+    item = Item.query.get_or_404(item_id)
+    location_id = request.form.get("location_id", type=int)
+    reference = request.form.get("reference", "Remove Location").strip() or "Remove Location"
+
+    if location_id is None:
+        flash("Select a location to remove.", "danger")
+        return redirect(url_for("inventory.stock_detail", item_id=item_id))
+
+    location = Location.query.get(location_id)
+    if location is None:
+        flash("Location not found.", "danger")
+        return redirect(url_for("inventory.stock_detail", item_id=item_id))
+
+    current_qty = _get_location_on_hand(item_id, location_id)
+    if current_qty == 0:
+        flash("Location already has zero stock.", "info")
+        return redirect(url_for("inventory.stock_detail", item_id=item_id))
+
+    with db.session.begin_nested():
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                location_id=location_id,
+                quantity=-current_qty,
+                movement_type="ADJUST",
+                person=_movement_person(),
+                reference=reference,
+            )
+        )
+    db.session.commit()
+
+    flash(
+        f"Cleared stock for {item.sku} at {location.code}.",
+        "success",
+    )
+    return redirect(url_for("inventory.stock_detail", item_id=item_id))
 
 
 @bp.route("/stock/delete-all", methods=["POST"])
