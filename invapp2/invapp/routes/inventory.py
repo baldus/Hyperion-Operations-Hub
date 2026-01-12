@@ -2897,7 +2897,10 @@ def receiving():
 
     if request.method == "POST":
         sku = request.form["sku"].strip()
-        defer_qty = current_user.is_authenticated and request.form.get("defer_qty") == "1"
+        defer_qty = (
+            current_user.is_authenticated
+            and request.form.get("defer_qty") == "1"
+        )
         qty_raw = request.form.get("qty", "").strip()
         person = request.form["person"].strip()
         po_number = request.form.get("po_number", "").strip() or None

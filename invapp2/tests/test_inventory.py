@@ -76,39 +76,32 @@ def anon_client(app):
     return app.test_client()
 
 
-def create_user(app, username="operator", password="pw", role_names=("user",)):
+def create_user(app, username="operator", password="password", role_names=("inventory",)):
     with app.app_context():
         user = User(username=username)
         user.set_password(password)
 
-        roles = []
-        for role_name in role_names:
-            role = Role.query.filter_by(name=role_name).first()
-            if role is None:
-                role = Role(name=role_name)
-                db.session.add(role)
-            roles.append(role)
+        assigned_roles = []
+        if role_names:
+            for role_name in role_names:
+                role = Role.query.filter_by(name=role_name).first()
+                if role is None:
+                    role = Role(name=role_name)
+                    db.session.add(role)
+                assigned_roles.append(role)
 
-        user.roles = roles
+        user.roles = assigned_roles
         db.session.add(user)
         db.session.commit()
         return user
 
 
-def login(client, username="operator", password="pw"):
+def login(client, username="operator", password="password"):
     return client.post(
         "/auth/login",
         data={"username": username, "password": password},
         follow_redirects=True,
     )
-
-
-@pytest.fixture
-def operator_client(app):
-    client = app.test_client()
-    create_user(app)
-    login(client)
-    return client
 
 
 @pytest.fixture
@@ -352,6 +345,56 @@ def test_receiving_prints_batch_label(client, app, monkeypatch):
     assert context["Batch"]["Quantity"] == 5
     assert context["Batch"]["LotNumber"].startswith("WIDGET-1-")
     assert context["Batch"]["PurchaseOrder"] == "PO-777"
+
+
+def test_receiving_page_shows_defer_option_for_inventory_user(anon_client, app):
+    create_user(app, role_names=("inventory",))
+    login(anon_client)
+
+    response = anon_client.get("/inventory/receiving", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert b"Receive without quantity (add it later)" in response.data
+
+
+def test_receiving_without_quantity_allows_inventory_user(anon_client, app):
+    with app.app_context():
+        item = Item(sku="DEFER-1", name="Deferred Widget", unit="ea")
+        location = Location(code="RCV-03", description="Deferred Dock")
+        db.session.add_all([item, location])
+        db.session.commit()
+        location_id = location.id
+
+    create_user(app, role_names=("inventory",))
+    login(anon_client)
+
+    response = anon_client.post(
+        "/inventory/receiving",
+        data={
+            "sku": "DEFER-1",
+            "qty": "",
+            "location_id": str(location_id),
+            "person": "Alex",
+            "po_number": "",
+            "defer_qty": "1",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+
+    with app.app_context():
+        receipt = Movement.query.filter_by(movement_type="RECEIPT").first()
+        assert receipt is not None
+        assert receipt.quantity == 0
+        assert "quantity pending" in (receipt.reference or "").lower()
+
+
+def test_receiving_requires_login(anon_client):
+    response = anon_client.get("/inventory/receiving", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert "/auth/login" in response.headers["Location"]
 
 
 def test_reprint_receiving_label_uses_batch_label(client, app, monkeypatch):
