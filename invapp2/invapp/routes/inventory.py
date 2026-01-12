@@ -1,6 +1,7 @@
 import base64
 import csv
 import io
+import json
 import os
 import secrets
 import tempfile
@@ -25,7 +26,7 @@ from flask import (
     session,
     url_for,
 )
-from sqlalchemy import asc, desc, func, or_, select
+from sqlalchemy import asc, desc, func, or_, select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, lazyload, load_only
 from sqlalchemy.orm.exc import DetachedInstanceError
@@ -3084,63 +3085,257 @@ def _print_batch_receipt_label(
 ############################
 # MOVE / TRANSFER ROUTES
 ############################
-@bp.route("/move", methods=["GET", "POST"])
-def move_home():
-    items = Item.query.all()
-    locations = Location.query.all()
-    batches = Batch.query.all()
-    prefill_sku = request.values.get("sku", "").strip()
+def _load_move_location_lines(location_id: int) -> list[dict[str, object]]:
+    rows = (
+        db.session.query(
+            Movement.item_id,
+            Movement.batch_id,
+            func.sum(Movement.quantity).label("on_hand"),
+            Item.sku,
+            Item.name,
+            Item.unit,
+            Batch.lot_number,
+        )
+        .join(Item, Item.id == Movement.item_id)
+        .outerjoin(Batch, Batch.id == Movement.batch_id)
+        .filter(Movement.location_id == location_id)
+        .group_by(
+            Movement.item_id,
+            Movement.batch_id,
+            Item.sku,
+            Item.name,
+            Item.unit,
+            Batch.lot_number,
+        )
+        .having(func.sum(Movement.quantity) > 0)
+        .order_by(asc(Item.sku), asc(Batch.lot_number))
+        .all()
+    )
 
-    if request.method == "POST":
-        sku = request.form["sku"].strip()
-        batch_id = int(request.form["batch_id"])
-        from_loc_id = int(request.form["from_location_id"])
-        to_loc_id = int(request.form["to_location_id"])
-        qty = int(request.form["qty"])
-        person = request.form["person"].strip()
-        reference = request.form.get("reference", "Stock Transfer")
+    lines: list[dict[str, object]] = []
+    for row in rows:
+        on_hand = Decimal(row.on_hand or 0).quantize(
+            Decimal("0.001"), rounding=ROUND_HALF_UP
+        )
+        lines.append(
+            {
+                "item_id": row.item_id,
+                "batch_id": row.batch_id,
+                "sku": row.sku,
+                "name": row.name,
+                "unit": row.unit,
+                "lot_number": row.lot_number or "-",
+                "on_hand": str(on_hand),
+            }
+        )
+    return lines
 
-        item = Item.query.filter_by(sku=sku).first()
-        batch = Batch.query.get(batch_id)
-        if not item or not batch:
-            flash("Invalid SKU or Batch selected.", "danger")
-            return redirect(url_for("inventory.move_home"))
 
-        # Ensure valid stock in from location
-        from_balance = (
-            db.session.query(func.sum(Movement.quantity))
-            .filter_by(item_id=item.id, batch_id=batch_id, location_id=from_loc_id)
-            .scalar()
-        ) or 0
+def _load_move_balances(
+    location_id: int, line_keys: list[tuple[int, int | None]]
+) -> dict[tuple[int, int | None], Decimal]:
+    balances: dict[tuple[int, int | None], Decimal] = {}
+    if not line_keys:
+        return balances
 
-        if qty > from_balance:
-            flash("Not enough stock in the selected batch/location.", "danger")
-            return redirect(url_for("inventory.move_home"))
+    none_batch_item_ids = {
+        item_id for item_id, batch_id in line_keys if batch_id is None
+    }
+    if none_batch_item_ids:
+        rows = (
+            db.session.query(
+                Movement.item_id,
+                func.coalesce(func.sum(Movement.quantity), 0).label("on_hand"),
+            )
+            .filter(
+                Movement.location_id == location_id,
+                Movement.batch_id.is_(None),
+                Movement.item_id.in_(none_batch_item_ids),
+            )
+            .group_by(Movement.item_id)
+            .all()
+        )
+        for item_id, on_hand in rows:
+            balances[(item_id, None)] = Decimal(on_hand or 0)
 
-        # Create MOVE_OUT (negative) and MOVE_IN (positive)
-        mv_out = Movement(
-            item_id=item.id,
-            batch_id=batch_id,
-            location_id=from_loc_id,
+    batch_pairs = [
+        (item_id, batch_id)
+        for item_id, batch_id in line_keys
+        if batch_id is not None
+    ]
+    if batch_pairs:
+        rows = (
+            db.session.query(
+                Movement.item_id,
+                Movement.batch_id,
+                func.coalesce(func.sum(Movement.quantity), 0).label("on_hand"),
+            )
+            .filter(
+                Movement.location_id == location_id,
+                tuple_(Movement.item_id, Movement.batch_id).in_(batch_pairs),
+            )
+            .group_by(Movement.item_id, Movement.batch_id)
+            .all()
+        )
+        for item_id, batch_id, on_hand in rows:
+            balances[(item_id, batch_id)] = Decimal(on_hand or 0)
+
+    return balances
+
+
+def _apply_move_lines(
+    lines: list[dict[str, object]],
+    from_location_id: int,
+    to_location_id: int,
+    person: str | None,
+    reference: str,
+) -> None:
+    for line in lines:
+        qty = line["move_qty"]
+        movement_out = Movement(
+            item_id=line["item_id"],
+            batch_id=line["batch_id"],
+            location_id=from_location_id,
             quantity=-qty,
             movement_type="MOVE_OUT",
             person=person,
             reference=reference,
         )
-        mv_in = Movement(
-            item_id=item.id,
-            batch_id=batch_id,
-            location_id=to_loc_id,
+        movement_in = Movement(
+            item_id=line["item_id"],
+            batch_id=line["batch_id"],
+            location_id=to_location_id,
             quantity=qty,
             movement_type="MOVE_IN",
             person=person,
             reference=reference,
         )
-        db.session.add(mv_out)
-        db.session.add(mv_in)
-        db.session.commit()
+        db.session.add(movement_out)
+        db.session.add(movement_in)
 
-        flash(f"Moved {qty} of {sku} (Lot {batch.lot_number}) to new location.", "success")
+
+@bp.get("/move/location/<int:location_id>/lines")
+def move_location_lines(location_id: int):
+    Location.query.get_or_404(location_id)
+    lines = _load_move_location_lines(location_id)
+    return jsonify({"lines": lines})
+
+
+@bp.route("/move", methods=["GET", "POST"])
+def move_home():
+    locations = Location.query.order_by(Location.code).all()
+    default_from_location_id = None
+    session_location_id = session.get("move_from_location_id")
+    if session_location_id is not None:
+        try:
+            session_location_id = int(session_location_id)
+        except (TypeError, ValueError):
+            session_location_id = None
+    if session_location_id:
+        default_from_location_id = next(
+            (loc.id for loc in locations if loc.id == session_location_id), None
+        )
+    if default_from_location_id is None and locations:
+        default_from_location_id = locations[0].id
+    default_to_location_id = next(
+        (
+            loc.id
+            for loc in locations
+            if loc.id != default_from_location_id
+        ),
+        default_from_location_id,
+    )
+
+    if request.method == "POST":
+        try:
+            from_location_id = int(request.form.get("from_location_id", ""))
+            to_location_id = int(request.form.get("to_location_id", ""))
+        except (TypeError, ValueError):
+            flash("Select valid from/to locations.", "danger")
+            return redirect(url_for("inventory.move_home"))
+
+        if from_location_id == to_location_id:
+            flash("From and To locations must be different.", "danger")
+            return redirect(url_for("inventory.move_home"))
+
+        if not Location.query.get(from_location_id) or not Location.query.get(
+            to_location_id
+        ):
+            flash("Invalid location selection.", "danger")
+            return redirect(url_for("inventory.move_home"))
+
+        reference = (
+            request.form.get("reference", "Stock Transfer").strip()
+            or "Stock Transfer"
+        )
+        person = request.form.get("person", "").strip() or _movement_person()
+
+        raw_lines = request.form.get("lines", "")
+        try:
+            lines_payload = json.loads(raw_lines) if raw_lines else []
+        except json.JSONDecodeError:
+            lines_payload = []
+
+        if not isinstance(lines_payload, list) or not lines_payload:
+            flash("Select at least one line to move.", "danger")
+            return redirect(url_for("inventory.move_home"))
+
+        parsed_lines: list[dict[str, object]] = []
+        line_keys: list[tuple[int, int | None]] = []
+        for entry in lines_payload:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                item_id = int(entry.get("item_id"))
+            except (TypeError, ValueError):
+                continue
+            batch_id = entry.get("batch_id")
+            if batch_id in ("", None):
+                batch_id = None
+            else:
+                try:
+                    batch_id = int(batch_id)
+                except (TypeError, ValueError):
+                    continue
+            qty = _parse_stock_quantity(str(entry.get("move_qty", "")))
+            if qty is None or qty <= 0:
+                continue
+            parsed_lines.append(
+                {"item_id": item_id, "batch_id": batch_id, "move_qty": qty}
+            )
+            line_keys.append((item_id, batch_id))
+
+        if not parsed_lines:
+            flash("Enter a valid move quantity for at least one line.", "danger")
+            return redirect(url_for("inventory.move_home"))
+
+        balances = _load_move_balances(from_location_id, line_keys)
+        for line in parsed_lines:
+            key = (line["item_id"], line["batch_id"])
+            available = balances.get(key, Decimal(0))
+            if available <= 0 or line["move_qty"] > available:
+                flash("One or more lines exceed available stock.", "danger")
+                return redirect(url_for("inventory.move_home"))
+
+        try:
+            _apply_move_lines(
+                parsed_lines,
+                from_location_id,
+                to_location_id,
+                person,
+                reference,
+            )
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash("Unable to complete the transfer. Please try again.", "danger")
+            return redirect(url_for("inventory.move_home"))
+
+        session["move_from_location_id"] = from_location_id
+        flash(
+            f"Moved {len(parsed_lines)} line(s) to the new location.",
+            "success",
+        )
         return redirect(url_for("inventory.move_home"))
 
     # Recent moves
@@ -3155,19 +3350,15 @@ def move_home():
     locations_map = {l.id: l for l in Location.query.all()}
     batches_map = {b.id: b for b in Batch.query.all()}
 
-    lookup_template = url_for("inventory.lookup_item_api", sku="__SKU__")
-
     return render_template(
         "inventory/move.html",
-        items=items,
         locations=locations,
-        batches=batches,
         records=records,
         items_map=items_map,
         locations_map=locations_map,
         batches_map=batches_map,
-        prefill_sku=prefill_sku,
-        lookup_template=lookup_template,
+        default_from_location_id=default_from_location_id,
+        default_to_location_id=default_to_location_id,
     )
 
 

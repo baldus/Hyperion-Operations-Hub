@@ -2,44 +2,97 @@
 {% block content %}
 <h2>Stock Transfer (Move)</h2>
 
-<form method="POST">
-  <label for="barcodeOutput">SKU:</label><br>
-  <input type="text" id="barcodeOutput" name="sku" value="{{ prefill_sku }}" required><br><br>
+<form
+  method="POST"
+  class="form-stack move-form"
+  data-move-form
+  data-lines-url="{{ url_for('inventory.move_location_lines', location_id=0) }}"
+>
+  <div class="form-section">
+    <div class="section-header">
+      <h3>From Location</h3>
+      <p class="section-help">Choose a source location to load available lots.</p>
+    </div>
+    <div class="form-grid">
+      <div class="form-field">
+        <label class="field-label" for="from-location">From Location</label>
+        <select id="from-location" name="from_location_id" data-from-location required>
+          {% for loc in locations %}
+            <option value="{{ loc.id }}" {% if loc.id == default_from_location_id %}selected{% endif %}>
+              {{ loc.code }}{% if loc.description %} — {{ loc.description }}{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="field-label" for="move-filter">Filter Items/Lots</label>
+        <input type="text" id="move-filter" data-filter-input placeholder="Search by SKU, item name, or lot">
+        <p class="form-hint">Type to filter the list below.</p>
+      </div>
+    </div>
+  </div>
 
-  {% include "inventory/_barcode_scanner.html" %}
-  <br>
+  <div class="form-section">
+    <div class="section-header">
+      <h3>Available Inventory</h3>
+      <div class="move-toolbar">
+        <button type="button" class="action-btn secondary" data-select-all>Select all</button>
+        <button type="button" class="action-btn secondary" data-clear-selection>Clear selection</button>
+      </div>
+    </div>
+    <div class="move-summary" data-move-summary>
+      <span><strong>Selected:</strong> <span data-selected-count>0</span></span>
+      <span><strong>Total Qty:</strong> <span data-selected-qty>0</span></span>
+    </div>
+    <p class="form-hint" data-form-status>Select rows and enter quantities to move.</p>
+    <div class="table-scroll">
+      <table class="form-table move-lines-table">
+        <thead>
+          <tr>
+            <th>Select</th>
+            <th>SKU</th>
+            <th>Description</th>
+            <th>Lot</th>
+            <th>On Hand</th>
+            <th>Unit</th>
+            <th>Move Qty</th>
+          </tr>
+        </thead>
+        <tbody data-lines-body>
+        </tbody>
+      </table>
+    </div>
+    <div class="move-empty-state" data-empty-state hidden>No inventory found in this location.</div>
+    <div class="move-loading-state" data-loading-state hidden>Loading inventory...</div>
+  </div>
 
-  <label>Batch / Lot:</label><br>
-  <select name="batch_id" required>
-    {% for batch in batches %}
-      <option value="{{ batch.id }}">{{ batch.lot_number }}</option>
-    {% endfor %}
-  </select><br><br>
-
-  <label>From Location:</label><br>
-  <select name="from_location_id" required>
-    {% for loc in locations %}
-      <option value="{{ loc.id }}">{{ loc.code }}</option>
-    {% endfor %}
-  </select><br><br>
-
-  <label>To Location:</label><br>
-  <select name="to_location_id" required>
-    {% for loc in locations %}
-      <option value="{{ loc.id }}">{{ loc.code }}</option>
-    {% endfor %}
-  </select><br><br>
-
-  <label>Quantity:</label><br>
-  <input type="number" name="qty" required><br><br>
-
-  <label>Person:</label><br>
-  <input type="text" name="person" required><br><br>
-
-  <label>Reference:</label><br>
-  <input type="text" name="reference" value="Stock Transfer"><br><br>
-
-  <button type="submit" class="bubble-btn">Submit Transfer</button>
+  <div class="form-section">
+    <div class="section-header">
+      <h3>Destination & Details</h3>
+    </div>
+    <div class="form-grid">
+      <div class="form-field">
+        <label class="field-label" for="to-location">To Location</label>
+        <select id="to-location" name="to_location_id" data-to-location required>
+          {% for loc in locations %}
+            <option value="{{ loc.id }}" {% if loc.id == default_to_location_id %}selected{% endif %}>
+              {{ loc.code }}{% if loc.description %} — {{ loc.description }}{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="field-label" for="move-person">Person</label>
+        <input type="text" id="move-person" name="person" placeholder="Optional">
+      </div>
+      <div class="form-field">
+        <label class="field-label" for="move-reference">Reference</label>
+        <input type="text" id="move-reference" name="reference" value="Stock Transfer">
+      </div>
+    </div>
+    <input type="hidden" name="lines" id="move-lines-input">
+    <button type="submit" class="action-btn" data-submit-btn disabled>Submit Transfer</button>
+  </div>
 </form>
 
 <hr>
@@ -77,4 +130,8 @@
     </tbody>
   </table>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script defer src="{{ url_for('static', filename='js/inventory-move.js') }}"></script>
 {% endblock %}

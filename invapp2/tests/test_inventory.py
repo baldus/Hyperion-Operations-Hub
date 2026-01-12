@@ -1,6 +1,7 @@
 import base64
 import csv
 import io
+import json
 import os
 import re
 import shutil
@@ -274,6 +275,134 @@ def test_transfer_stock_blocks_negative(client, app):
         )
         assert Decimal(from_total or 0) == Decimal("5")
         assert Decimal(to_total or 0) == Decimal("0")
+
+
+def test_move_location_lines_endpoint(client, app):
+    with app.app_context():
+        location = Location(code="MOVE-FROM")
+        item = Item(sku="MOVE-ITEM", name="Move Item", unit="ea")
+        batch = Batch(item=item, lot_number="LOT-1")
+        db.session.add_all([location, item, batch])
+        db.session.commit()
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                batch_id=batch.id,
+                location_id=location.id,
+                quantity=5,
+                movement_type="ADJUST",
+            )
+        )
+        db.session.commit()
+        location_id = location.id
+
+    response = client.get(f"/inventory/move/location/{location_id}/lines")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["lines"]
+    line = payload["lines"][0]
+    assert line["sku"] == "MOVE-ITEM"
+    assert line["lot_number"] == "LOT-1"
+
+
+def test_move_multi_line_transfer_success(client, app):
+    with app.app_context():
+        from_location = Location(code="MOVE-LOC-A")
+        to_location = Location(code="MOVE-LOC-B")
+        item_one = Item(sku="MOVE-1", name="Move One", unit="ea")
+        item_two = Item(sku="MOVE-2", name="Move Two", unit="ea")
+        batch = Batch(item=item_one, lot_number="LOT-2")
+        db.session.add_all([from_location, to_location, item_one, item_two, batch])
+        db.session.commit()
+        db.session.add_all(
+            [
+                Movement(
+                    item_id=item_one.id,
+                    batch_id=batch.id,
+                    location_id=from_location.id,
+                    quantity=5,
+                    movement_type="ADJUST",
+                ),
+                Movement(
+                    item_id=item_two.id,
+                    batch_id=None,
+                    location_id=from_location.id,
+                    quantity=3,
+                    movement_type="ADJUST",
+                ),
+            ]
+        )
+        db.session.commit()
+        from_location_id = from_location.id
+        to_location_id = to_location.id
+        item_one_id = item_one.id
+        item_two_id = item_two.id
+        batch_id = batch.id
+
+    lines = [
+        {"item_id": item_one_id, "batch_id": batch_id, "move_qty": "2"},
+        {"item_id": item_two_id, "batch_id": None, "move_qty": "1.5"},
+    ]
+    response = client.post(
+        "/inventory/move",
+        data={
+            "from_location_id": str(from_location_id),
+            "to_location_id": str(to_location_id),
+            "lines": json.dumps(lines),
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        move_outs = Movement.query.filter_by(movement_type="MOVE_OUT").all()
+        move_ins = Movement.query.filter_by(movement_type="MOVE_IN").all()
+        assert len(move_outs) == 2
+        assert len(move_ins) == 2
+        quantities = sorted([Decimal(mv.quantity) for mv in move_outs])
+        assert quantities == [Decimal("-2"), Decimal("-1.5")]
+
+
+def test_move_rolls_back_on_invalid_qty(client, app):
+    with app.app_context():
+        from_location = Location(code="MOVE-LOC-C")
+        to_location = Location(code="MOVE-LOC-D")
+        item = Item(sku="MOVE-3", name="Move Three", unit="ea")
+        batch = Batch(item=item, lot_number="LOT-3")
+        db.session.add_all([from_location, to_location, item, batch])
+        db.session.commit()
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                batch_id=batch.id,
+                location_id=from_location.id,
+                quantity=2,
+                movement_type="ADJUST",
+            )
+        )
+        db.session.commit()
+        from_location_id = from_location.id
+        to_location_id = to_location.id
+        item_id = item.id
+        batch_id = batch.id
+
+    lines = [{"item_id": item_id, "batch_id": batch_id, "move_qty": "3"}]
+    response = client.post(
+        "/inventory/move",
+        data={
+            "from_location_id": str(from_location_id),
+            "to_location_id": str(to_location_id),
+            "lines": json.dumps(lines),
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        move_outs = Movement.query.filter_by(movement_type="MOVE_OUT").all()
+        move_ins = Movement.query.filter_by(movement_type="MOVE_IN").all()
+        assert move_outs == []
+        assert move_ins == []
 
 
 def test_receiving_prints_batch_label(client, app, monkeypatch):

@@ -2803,6 +2803,58 @@ body.light .scanner-widget {
     background-color: rgba(0, 0, 0, 0.05);
 }
 
+/* --- Move Form --- */
+.move-form .move-toolbar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.move-summary {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background-color: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+body.light .move-summary {
+    background-color: #f4f6fb;
+    border-color: #d8dbe3;
+}
+
+.move-lines-table .move-qty-input {
+    max-width: 120px;
+}
+
+.move-lines-table .move-line-checkbox {
+    transform: scale(1.1);
+}
+
+.move-lines-table input.is-invalid {
+    border-color: #f26c6c;
+    box-shadow: 0 0 0 2px rgba(242, 108, 108, 0.2);
+}
+
+.move-empty-state,
+.move-loading-state {
+    margin-top: 8px;
+    font-style: italic;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+body.light .move-empty-state,
+body.light .move-loading-state {
+    color: #4a4a4a;
+}
+
+.move-form button[disabled] {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
 .scanner-preview {
     position: relative;
     background-color: #000;
