@@ -2923,10 +2923,15 @@ def receiving():
         today_str = datetime.now().strftime("%y%m%d")
         base_lot = f"{item.sku}-{today_str}"
 
-        existing_lots = Batch.query.filter(
-            Batch.item_id == item.id,
-            Batch.lot_number.like(f"{base_lot}-%")
-        ).count()
+        existing_lots = (
+            db.session.query(func.count(Batch.id))
+            .filter(
+                Batch.item_id == item.id,
+                Batch.lot_number.like(f"{base_lot}-%"),
+            )
+            .scalar()
+            or 0
+        )
 
         seq_num = existing_lots + 1
         lot_number = f"{base_lot}-{seq_num:02d}"
