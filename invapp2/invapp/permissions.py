@@ -247,6 +247,11 @@ def ensure_page_access(
     if not current_user.is_authenticated:
         return login_manager.unauthorized()
 
+    if request.endpoint == "inventory.receiving":
+        if principal_has_any_role(permissions.view_roles, require_auth=True):
+            return None
+        abort(403)
+
     if permissions.edit_roles and current_user.has_any_role(permissions.edit_roles):
         return None
 

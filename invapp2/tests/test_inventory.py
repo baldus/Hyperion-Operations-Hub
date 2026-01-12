@@ -76,6 +76,41 @@ def anon_client(app):
     return app.test_client()
 
 
+def create_user(app, username="operator", password="pw", role_names=("user",)):
+    with app.app_context():
+        user = User(username=username)
+        user.set_password(password)
+
+        roles = []
+        for role_name in role_names:
+            role = Role.query.filter_by(name=role_name).first()
+            if role is None:
+                role = Role(name=role_name)
+                db.session.add(role)
+            roles.append(role)
+
+        user.roles = roles
+        db.session.add(user)
+        db.session.commit()
+        return user
+
+
+def login(client, username="operator", password="pw"):
+    return client.post(
+        "/auth/login",
+        data={"username": username, "password": password},
+        follow_redirects=True,
+    )
+
+
+@pytest.fixture
+def operator_client(app):
+    client = app.test_client()
+    create_user(app)
+    login(client)
+    return client
+
+
 @pytest.fixture
 def stock_items(app):
     with app.app_context():
@@ -372,6 +407,57 @@ def test_reprint_receiving_label_uses_batch_label(client, app, monkeypatch):
     assert context["Batch"]["LotNumber"] == lot_number
     assert context["Batch"]["Quantity"] == quantity
     assert context["Location"]["Code"] == location_code
+
+
+def test_receiving_defer_option_available_to_authenticated_user(operator_client, app):
+    with app.app_context():
+        item = Item(sku="DEFER-1", name="Defer Widget", unit="ea")
+        location = Location(code="RCV-03", description="Main Dock")
+        db.session.add_all([item, location])
+        db.session.commit()
+
+    response = operator_client.get("/inventory/receiving")
+
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "Receive without quantity (add it later)" in page
+
+
+def test_receiving_defer_qty_allows_non_superuser(operator_client, app):
+    with app.app_context():
+        item = Item(sku="DEFER-2", name="Defer Batch", unit="ea")
+        location = Location(code="RCV-04", description="Receiving Dock")
+        db.session.add_all([item, location])
+        db.session.commit()
+        location_id = location.id
+
+    response = operator_client.post(
+        "/inventory/receiving",
+        data={
+            "sku": "DEFER-2",
+            "qty": "",
+            "location_id": str(location_id),
+            "person": "Alex",
+            "po_number": "",
+            "defer_qty": "1",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+
+    with app.app_context():
+        receipt = Movement.query.filter_by(movement_type="RECEIPT").first()
+        assert receipt is not None
+        assert receipt.quantity == 0
+        assert "quantity pending" in (receipt.reference or "").lower()
+
+
+def test_receiving_requires_login(anon_client):
+    response = anon_client.get("/inventory/receiving")
+
+    assert response.status_code == 302
+    assert "/auth/login" in response.headers["Location"]
 
 
 def test_print_location_label_uses_location_process(client, app, monkeypatch):
