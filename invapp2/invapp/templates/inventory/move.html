@@ -2,44 +2,84 @@
 {% block content %}
 <h2>Stock Transfer (Move)</h2>
 
-<form method="POST">
-  <label for="barcodeOutput">SKU:</label><br>
-  <input type="text" id="barcodeOutput" name="sku" value="{{ prefill_sku }}" required><br><br>
+<form method="POST" class="form-section move-form" id="move-form" data-lines-url="{{ url_for('inventory.move_location_lines', location_id=0) }}">
+  <div class="form-grid move-form-grid">
+    <div class="form-field">
+      <label class="field-label" for="from-location">From Location</label>
+      <select name="from_location_id" id="from-location" required>
+        <option value="">Select a source location</option>
+        {% for loc in locations %}
+          <option value="{{ loc.id }}" {% if loc.id == default_from_location_id %}selected{% endif %}>
+            {{ loc.code }}{% if loc.description %} — {{ loc.description }}{% endif %}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
 
-  {% include "inventory/_barcode_scanner.html" %}
-  <br>
+    <div class="form-field">
+      <label class="field-label" for="to-location">To Location</label>
+      <select name="to_location_id" id="to-location" required>
+        <option value="">Select a destination location</option>
+        {% for loc in locations %}
+          <option value="{{ loc.id }}">
+            {{ loc.code }}{% if loc.description %} — {{ loc.description }}{% endif %}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
 
-  <label>Batch / Lot:</label><br>
-  <select name="batch_id" required>
-    {% for batch in batches %}
-      <option value="{{ batch.id }}">{{ batch.lot_number }}</option>
-    {% endfor %}
-  </select><br><br>
+    <div class="form-field">
+      <label class="field-label" for="reference">Reference</label>
+      <input type="text" name="reference" id="reference" value="Stock Transfer">
+    </div>
 
-  <label>From Location:</label><br>
-  <select name="from_location_id" required>
-    {% for loc in locations %}
-      <option value="{{ loc.id }}">{{ loc.code }}</option>
-    {% endfor %}
-  </select><br><br>
+    <div class="form-field">
+      <label class="field-label" for="line-filter">Filter items</label>
+      <input type="text" id="line-filter" placeholder="Search SKU, item, or lot">
+    </div>
+  </div>
 
-  <label>To Location:</label><br>
-  <select name="to_location_id" required>
-    {% for loc in locations %}
-      <option value="{{ loc.id }}">{{ loc.code }}</option>
-    {% endfor %}
-  </select><br><br>
+  <div class="move-selection-controls">
+    <div class="selection-actions">
+      <button type="button" class="action-btn secondary" id="select-all">Select all</button>
+      <button type="button" class="action-btn secondary" id="clear-selection">Clear selection</button>
+    </div>
+    <div class="move-summary">
+      <div><strong>Selected:</strong> <span id="selected-count">0</span></div>
+      <div><strong>Total lines:</strong> <span id="total-lines">0</span></div>
+      <div><strong>Total qty:</strong> <span id="total-qty">0</span></div>
+    </div>
+  </div>
 
-  <label>Quantity:</label><br>
-  <input type="number" name="qty" required><br><br>
+  <div class="table-container move-table">
+    <table class="inventory-table">
+      <thead>
+        <tr>
+          <th>
+            <span class="sr-only">Select</span>
+          </th>
+          <th>SKU</th>
+          <th>Item</th>
+          <th>Lot</th>
+          <th>On Hand</th>
+          <th>Unit</th>
+          <th>Move Qty</th>
+        </tr>
+      </thead>
+      <tbody id="move-lines-body">
+        <tr>
+          <td colspan="7">Select a source location to load inventory lines.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
 
-  <label>Person:</label><br>
-  <input type="text" name="person" required><br><br>
+  <input type="hidden" name="lines" id="move-lines-payload">
+  <p class="field-note move-validation" id="move-validation" role="status" aria-live="polite"></p>
 
-  <label>Reference:</label><br>
-  <input type="text" name="reference" value="Stock Transfer"><br><br>
-
-  <button type="submit" class="bubble-btn">Submit Transfer</button>
+  <div class="button-row">
+    <button type="submit" class="action-btn" id="submit-move" disabled>Submit Transfer</button>
+  </div>
 </form>
 
 <hr>
@@ -77,4 +117,8 @@
     </tbody>
   </table>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+  <script defer src="{{ url_for('static', filename='js/stock-move.js') }}"></script>
 {% endblock %}

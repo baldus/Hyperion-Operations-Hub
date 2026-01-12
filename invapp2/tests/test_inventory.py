@@ -1,6 +1,7 @@
 import base64
 import csv
 import io
+import json
 import os
 import re
 import shutil
@@ -1338,3 +1339,175 @@ def test_ensure_placeholder_location_retries_until_visible(app, monkeypatch):
         assert placeholder.description == "Eventually committed"
         assert loc_map[UNASSIGNED_LOCATION_CODE] is placeholder
         assert Location.query.filter_by(code=UNASSIGNED_LOCATION_CODE).count() == 1
+
+
+def test_move_location_lines_endpoint_returns_lines(client, app):
+    with app.app_context():
+        source = Location(code="SRC")
+        dest = Location(code="DEST")
+        item = Item(sku="MOVE-1", name="Move Item", unit="ea")
+        batch = Batch(item=item, lot_number="LOT-1")
+        db.session.add_all([source, dest, item, batch])
+        db.session.commit()
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                batch_id=batch.id,
+                location_id=source.id,
+                quantity=5,
+                movement_type="RECEIPT",
+            )
+        )
+        db.session.commit()
+        location_id = source.id
+
+    response = client.get(f"/inventory/move/location/{location_id}/lines")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["location"]["id"] == location_id
+    assert payload["lines"][0]["sku"] == "MOVE-1"
+    assert payload["lines"][0]["lot_number"] == "LOT-1"
+
+
+def test_move_inventory_lines_success(client, app):
+    with app.app_context():
+        source = Location(code="MOVE-SRC")
+        dest = Location(code="MOVE-DEST")
+        item = Item(sku="MOVE-2", name="Move Item 2", unit="ea")
+        batch = Batch(item=item, lot_number="LOT-2")
+        db.session.add_all([source, dest, item, batch])
+        db.session.commit()
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                batch_id=batch.id,
+                location_id=source.id,
+                quantity=5,
+                movement_type="RECEIPT",
+            )
+        )
+        db.session.commit()
+        source_id = source.id
+        dest_id = dest.id
+        item_id = item.id
+        batch_id = batch.id
+
+    payload = [
+        {"item_id": item_id, "batch_id": batch_id, "move_qty": "2"},
+    ]
+    response = client.post(
+        "/inventory/move",
+        data={
+            "from_location_id": source_id,
+            "to_location_id": dest_id,
+            "reference": "Move Test",
+            "lines": json.dumps(payload),
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        movements = Movement.query.filter_by(item_id=item_id).order_by(Movement.id).all()
+        assert len(movements) == 3
+        assert movements[-2].movement_type == "MOVE_OUT"
+        assert movements[-2].quantity == Decimal("-2.000")
+        assert movements[-1].movement_type == "MOVE_IN"
+        assert movements[-1].quantity == Decimal("2.000")
+
+
+def test_move_inventory_lines_same_location_rejected(client, app):
+    with app.app_context():
+        location = Location(code="MOVE-SAME")
+        item = Item(sku="MOVE-3", name="Move Item 3", unit="ea")
+        batch = Batch(item=item, lot_number="LOT-3")
+        db.session.add_all([location, item, batch])
+        db.session.commit()
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                batch_id=batch.id,
+                location_id=location.id,
+                quantity=5,
+                movement_type="RECEIPT",
+            )
+        )
+        db.session.commit()
+        location_id = location.id
+        item_id = item.id
+        batch_id = batch.id
+
+    payload = [
+        {"item_id": item_id, "batch_id": batch_id, "move_qty": "1"},
+    ]
+    response = client.post(
+        "/inventory/move",
+        data={
+            "from_location_id": location_id,
+            "to_location_id": location_id,
+            "reference": "Invalid Move",
+            "lines": json.dumps(payload),
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        assert Movement.query.filter_by(item_id=item_id).count() == 1
+
+
+def test_move_inventory_lines_rolls_back_on_invalid_line(client, app):
+    with app.app_context():
+        source = Location(code="ROLL-SRC")
+        dest = Location(code="ROLL-DEST")
+        item_a = Item(sku="ROLL-1", name="Roll Item 1", unit="ea")
+        item_b = Item(sku="ROLL-2", name="Roll Item 2", unit="ea")
+        batch_a = Batch(item=item_a, lot_number="LOT-A")
+        batch_b = Batch(item=item_b, lot_number="LOT-B")
+        db.session.add_all([source, dest, item_a, item_b, batch_a, batch_b])
+        db.session.commit()
+        db.session.add_all(
+            [
+                Movement(
+                    item_id=item_a.id,
+                    batch_id=batch_a.id,
+                    location_id=source.id,
+                    quantity=5,
+                    movement_type="RECEIPT",
+                ),
+                Movement(
+                    item_id=item_b.id,
+                    batch_id=batch_b.id,
+                    location_id=source.id,
+                    quantity=3,
+                    movement_type="RECEIPT",
+                ),
+            ]
+        )
+        db.session.commit()
+        source_id = source.id
+        dest_id = dest.id
+        item_a_id = item_a.id
+        item_b_id = item_b.id
+        batch_a_id = batch_a.id
+        batch_b_id = batch_b.id
+
+    payload = [
+        {"item_id": item_a_id, "batch_id": batch_a_id, "move_qty": "2"},
+        {"item_id": item_b_id, "batch_id": batch_b_id, "move_qty": "99"},
+    ]
+    response = client.post(
+        "/inventory/move",
+        data={
+            "from_location_id": source_id,
+            "to_location_id": dest_id,
+            "reference": "Rollback Move",
+            "lines": json.dumps(payload),
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        assert Movement.query.filter_by(item_id=item_a_id).count() == 1
+        assert Movement.query.filter_by(item_id=item_b_id).count() == 1
