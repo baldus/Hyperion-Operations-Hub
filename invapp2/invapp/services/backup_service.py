@@ -32,6 +32,7 @@ BACKUP_JOB_ID = "automated-backup"
 BACKUP_REFRESH_JOB_ID = "automated-backup-refresh"
 BACKUP_REFRESH_MINUTES = 5
 BACKUP_SUBDIRS = ("db", "files", "tmp")
+AUTO_BACKUP_ALLOWED_EXTENSIONS = (".zip", ".tar.gz", ".sql", ".dump")
 RESTORE_TIMEOUT_SECONDS = 900
 _WARNED_KEYS: set[str] = set()
 _APP_SETTING_REPAIR_ATTEMPTED = False
@@ -495,6 +496,82 @@ def is_valid_backup_filename(filename: str) -> bool:
     if ".." in filename or "/" in filename or "\\" in filename:
         return False
     return filename.endswith((".sql", ".dump"))
+
+
+def list_auto_backup_files(app, logger: logging.Logger | None = None) -> list[dict[str, object]]:
+    logger = logger or logging.getLogger("invapp.backup.auto")
+    results: list[dict[str, object]] = []
+    for folder in _auto_backup_dirs(app, logger=logger):
+        if not folder.exists():
+            continue
+        try:
+            entries = list(folder.iterdir())
+        except OSError:
+            logger.exception("Unable to read auto backup directory: %s", folder)
+            continue
+        for item in entries:
+            if not item.is_file():
+                continue
+            if not _is_allowed_auto_backup_filename(item.name):
+                continue
+            try:
+                stat = item.stat()
+            except OSError:
+                continue
+            results.append(
+                {
+                    "filename": item.name,
+                    "path": item,
+                    "size_bytes": stat.st_size,
+                    "size_hr": _format_bytes(float(stat.st_size)),
+                    "created_at": datetime.utcfromtimestamp(stat.st_mtime),
+                }
+            )
+    results.sort(key=lambda entry: entry["created_at"], reverse=True)
+    return results
+
+
+def is_valid_auto_backup_filename(filename: str) -> bool:
+    if not filename:
+        return False
+    if Path(filename).name != filename:
+        return False
+    if ".." in filename or "/" in filename or "\\" in filename:
+        return False
+    return _is_allowed_auto_backup_filename(filename)
+
+
+def resolve_auto_backup_path(app, filename: str, logger: logging.Logger | None = None) -> Path | None:
+    if not is_valid_auto_backup_filename(filename):
+        return None
+    for folder in _auto_backup_dirs(app, logger=logger):
+        candidate = folder / filename
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+def _auto_backup_dirs(app, logger: logging.Logger) -> list[Path]:
+    config_dir = app.config.get("BACKUP_DIR_AUTO")
+    if config_dir:
+        return [Path(config_dir)]
+    backup_root = get_backup_dir(app, logger=logger)
+    return [backup_root / "db", backup_root / "files"]
+
+
+def _is_allowed_auto_backup_filename(filename: str) -> bool:
+    lowered = filename.lower()
+    return any(lowered.endswith(ext) for ext in AUTO_BACKUP_ALLOWED_EXTENSIONS)
+
+
+def _format_bytes(value: float) -> str:
+    step = 1024.0
+    units = ["B", "KB", "MB", "GB", "TB", "PB"]
+    for unit in units:
+        if value < step or unit == units[-1]:
+            return f"{value:.1f} {unit}"
+        value /= step
+    return f"{value:.1f} PB"
 
 
 def restore_database_backup(app, filename: str, logger: logging.Logger) -> str:

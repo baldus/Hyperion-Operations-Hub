@@ -10,6 +10,7 @@ class Config:
     ADMIN_USER = os.getenv("ADMIN_USER", "superuser")
     ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "joshbaldus")
     ADMIN_SESSION_TIMEOUT = int(os.getenv("ADMIN_SESSION_TIMEOUT", 300))
+    BACKUP_DIR_AUTO = os.getenv("BACKUP_DIR_AUTO")
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     WORK_INSTRUCTION_UPLOAD_FOLDER = os.path.join(
         BASE_DIR, "invapp", "static", "work_instructions"

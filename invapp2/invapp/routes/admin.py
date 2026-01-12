@@ -21,6 +21,7 @@ from flask import (
     render_template,
     request,
     send_file,
+    send_from_directory,
     session,
     url_for,
 )
@@ -794,11 +795,111 @@ def backup_settings():
     )
 
 
+@bp.route("/settings/backups/auto", methods=["GET"])
+@login_required
+@require_admin_or_superuser
+def auto_backups():
+    backups: list[dict[str, object]] = []
+    backup_dirs: list[str] = []
+    backup_status = None
+    now = datetime.utcnow()
+
+    try:
+        backups = backup_service.list_auto_backup_files(current_app)
+        for entry in backups:
+            created_at = entry.get("created_at")
+            if isinstance(created_at, datetime):
+                age_seconds = (now - created_at).total_seconds()
+                entry["age_display"] = _format_duration(age_seconds)
+            else:
+                entry["age_display"] = "Unavailable"
+        if backups:
+            backups[0]["is_latest"] = True
+    except Exception as exc:
+        current_app.logger.exception("Failed to list auto backups: %s", exc)
+        flash("Unable to load auto backups. Check backup storage permissions.", "warning")
+
+    try:
+        config_dir = current_app.config.get("BACKUP_DIR_AUTO")
+        if config_dir:
+            backup_dirs = [str(Path(config_dir))]
+        else:
+            backup_root = backup_service.get_backup_dir(current_app)
+            backup_dirs = [str(backup_root / "db"), str(backup_root / "files")]
+    except Exception as exc:
+        current_app.logger.exception("Failed to resolve auto backup directory: %s", exc)
+        backup_dirs = []
+
+    try:
+        backup_status = (
+            models.BackupRun.query.order_by(models.BackupRun.started_at.desc()).first()
+        )
+    except SQLAlchemyError:
+        backup_status = None
+        current_app.logger.exception("Failed to load backup run status.")
+
+    return render_template(
+        "admin/auto_backups.html",
+        backups=backups,
+        backup_dirs=backup_dirs,
+        backup_status=backup_status,
+        csrf_token=_auto_backup_csrf_token(),
+    )
+
+
+@bp.route("/settings/backups/auto/download/<filename>", methods=["GET"])
+@login_required
+@require_admin_or_superuser
+def download_auto_backup(filename: str):
+    backup_path = backup_service.resolve_auto_backup_path(current_app, filename)
+    if backup_path is None:
+        current_app.logger.warning("Auto backup download blocked: %s", filename)
+        abort(404)
+    return send_from_directory(
+        backup_path.parent,
+        backup_path.name,
+        as_attachment=True,
+        download_name=backup_path.name,
+    )
+
+
+@bp.route("/settings/backups/auto/delete/<filename>", methods=["POST"])
+@login_required
+@require_admin_or_superuser
+def delete_auto_backup(filename: str):
+    token = request.form.get("csrf_token")
+    if not token or token != session.get("auto_backup_csrf"):
+        flash("Invalid delete request. Please try again.", "danger")
+        return redirect(url_for("admin.auto_backups"))
+
+    backup_path = backup_service.resolve_auto_backup_path(current_app, filename)
+    if backup_path is None:
+        flash("Backup file not found.", "warning")
+        return redirect(url_for("admin.auto_backups"))
+
+    try:
+        backup_path.unlink()
+        flash(f"Deleted backup {backup_path.name}.", "success")
+    except OSError as exc:
+        current_app.logger.exception("Failed to delete auto backup %s: %s", filename, exc)
+        flash("Unable to delete that backup file. Check permissions.", "danger")
+
+    return redirect(url_for("admin.auto_backups"))
+
+
 def _backup_restore_csrf_token() -> str:
     token = session.get("backup_restore_csrf")
     if not token:
         token = secrets.token_urlsafe(32)
         session["backup_restore_csrf"] = token
+    return token
+
+
+def _auto_backup_csrf_token() -> str:
+    token = session.get("auto_backup_csrf")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["auto_backup_csrf"] = token
     return token
 
 
