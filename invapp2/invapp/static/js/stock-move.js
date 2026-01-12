@@ -116,20 +116,22 @@ if (moveForm) {
     lines.forEach((line) => {
       const row = document.createElement("tr");
       const lineId = `${line.item_id}:${line.batch_id ?? "none"}`;
+      const isNotCounted = line.presence_status === "present_not_counted";
       row.dataset.lineId = lineId;
       row.dataset.itemId = line.item_id;
       row.dataset.batchId = line.batch_id ?? "";
       row.dataset.available = line.on_hand;
+      row.dataset.presence = line.presence_status || "";
       row.dataset.search = `${line.sku} ${line.name} ${line.lot_number}`.toLowerCase();
 
       row.innerHTML = `
         <td>
-          <input type="checkbox" aria-label="Select ${line.sku}">
+          <input type="checkbox" aria-label="Select ${line.sku}" ${isNotCounted ? "disabled" : ""}>
         </td>
         <td>${line.sku}</td>
         <td>${line.name}</td>
         <td>${line.lot_number || "-"}</td>
-        <td>${formatQty(line.on_hand)}</td>
+        <td>${isNotCounted ? '<span class="muted">Present (not counted)</span>' : formatQty(line.on_hand)}</td>
         <td>${line.unit || "-"}</td>
         <td>
           <input
@@ -147,17 +149,24 @@ if (moveForm) {
       const checkbox = row.querySelector("input[type='checkbox']");
       const input = row.querySelector("input.move-qty-input");
 
-      checkbox.addEventListener("change", () => {
-        input.disabled = !checkbox.checked;
-        row.classList.toggle("is-selected", checkbox.checked);
-        if (!checkbox.checked) {
-          input.value = "";
-          input.classList.remove("is-invalid");
-        }
-        updateSummary();
-      });
+      if (isNotCounted) {
+        row.classList.add("is-not-counted");
+        input.disabled = true;
+      } else {
+        checkbox.addEventListener("change", () => {
+          input.disabled = !checkbox.checked;
+          row.classList.toggle("is-selected", checkbox.checked);
+          if (!checkbox.checked) {
+            input.value = "";
+            input.classList.remove("is-invalid");
+          }
+          updateSummary();
+        });
+      }
 
-      input.addEventListener("input", updateSummary);
+      if (!isNotCounted) {
+        input.addEventListener("input", updateSummary);
+      }
 
       fragment.appendChild(row);
     });
@@ -207,6 +216,9 @@ if (moveForm) {
         return;
       }
       const checkbox = row.querySelector("input[type='checkbox']");
+      if (checkbox.disabled) {
+        return;
+      }
       if (!checkbox.checked) {
         checkbox.checked = true;
         row.classList.add("is-selected");

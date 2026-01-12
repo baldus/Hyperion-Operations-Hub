@@ -18,7 +18,9 @@
   <input type="text" name="sku" value="{{ defaults.get('sku', '') }}" required><br><br>
 
   <label>Quantity:</label><br>
-  <input type="number" name="qty" value="{{ defaults.get('qty', '') }}" required><br><br>
+  <input type="number" name="qty" value="{{ defaults.get('qty', '') }}"><br>
+  <p class="form-hint">Optional. Leave blank to mark the lot as present but not counted.</p>
+  <br>
 
   {% if can_defer_without_qty %}
   <div class="form-row">
@@ -117,12 +119,12 @@
     if (qtyInput && deferCheckbox) {
       const syncQtyState = () => {
         if (deferCheckbox.checked) {
-          qtyInput.required = false;
           qtyInput.placeholder = 'Quantity will be entered later';
           qtyInput.value = '';
+          qtyInput.disabled = true;
         } else {
-          qtyInput.required = true;
           qtyInput.placeholder = '';
+          qtyInput.disabled = false;
         }
       };
 
