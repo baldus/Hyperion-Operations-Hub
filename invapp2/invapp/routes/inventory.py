@@ -2899,7 +2899,6 @@ def receiving():
         sku = request.form["sku"].strip()
         defer_qty = (
             current_user.is_authenticated
-            and current_user.has_role("admin")
             and request.form.get("defer_qty") == "1"
         )
         qty_raw = request.form.get("qty", "").strip()
@@ -2999,7 +2998,7 @@ def receiving():
         .all()
     )
 
-    can_defer_without_qty = current_user.is_authenticated and current_user.has_role("admin")
+    can_defer_without_qty = current_user.is_authenticated
 
     return render_template(
         "inventory/receiving.html",
