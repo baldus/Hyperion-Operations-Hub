@@ -8,12 +8,14 @@
   <a href="{{ url_for('inventory.list_items') }}" class="action-btn">Items</a>
   <a href="{{ url_for('inventory.list_locations') }}" class="action-btn">Locations</a>
   <a href="{{ url_for('inventory.list_stock') }}" class="action-btn">Stock</a>
+  {% if is_superuser() %}
   <a href="{{ url_for('inventory.history_home') }}" class="action-btn">History</a>
+  {% endif %}
   {% if can_edit_inventory %}
   <a href="{{ url_for('inventory.receiving') }}" class="action-btn">Receiving</a>
-  <a href="{{ url_for('inventory.adjust_stock') }}" class="action-btn">Issue</a>
   <a href="{{ url_for('inventory.move_home') }}" class="action-btn">Move</a>
-  <a href="{{ url_for('inventory.scan_inventory') }}" class="action-btn">Scan</a>
+  {% endif %}
+  {% if is_superuser() %}
   <a href="{{ url_for('inventory.cycle_count_home') }}" class="action-btn">Cycle Count</a>
   {% endif %}
 </div>
