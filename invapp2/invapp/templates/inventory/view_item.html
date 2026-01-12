@@ -71,7 +71,13 @@
           <tr>
             <td>{{ entry.location.code }}</td>
             <td>{{ entry.location.description or '-' }}</td>
-            <td>{{ entry.on_hand }}</td>
+            <td>
+              {% if entry.on_hand == 0 %}
+                <span class="muted">Present but not counted</span>
+              {% else %}
+                {{ entry.on_hand }}
+              {% endif %}
+            </td>
           </tr>
         {% endfor %}
       </tbody>

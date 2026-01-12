@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from invapp.extensions import db
 from invapp.models import Batch, Item, Location, Movement
@@ -40,11 +40,12 @@ def get_location_inventory_lines(location_id: int) -> list[dict[str, object]]:
             Item.unit,
             Movement.batch_id,
             Batch.lot_number,
-            func.sum(Movement.quantity).label("on_hand"),
+            func.coalesce(func.sum(Movement.quantity), 0).label("on_hand"),
         )
         .join(Item, Item.id == Movement.item_id)
         .outerjoin(Batch, Batch.id == Movement.batch_id)
         .filter(Movement.location_id == location_id)
+        .filter(or_(Movement.batch_id.is_(None), Batch.removed_at.is_(None)))
         .group_by(
             Movement.item_id,
             Item.sku,
@@ -53,7 +54,6 @@ def get_location_inventory_lines(location_id: int) -> list[dict[str, object]]:
             Movement.batch_id,
             Batch.lot_number,
         )
-        .having(func.sum(Movement.quantity) != 0)
         .order_by(Item.sku, Batch.lot_number)
         .all()
     )
@@ -68,6 +68,10 @@ def get_location_inventory_lines(location_id: int) -> list[dict[str, object]]:
         lot_number,
         on_hand,
     ) in rows:
+        on_hand_value = float(on_hand or 0)
+        presence_status = (
+            "present_not_counted" if on_hand_value == 0 else "counted"
+        )
         lines.append(
             {
                 "item_id": item_id,
@@ -75,7 +79,8 @@ def get_location_inventory_lines(location_id: int) -> list[dict[str, object]]:
                 "sku": sku,
                 "name": name,
                 "lot_number": lot_number or "",
-                "on_hand": float(on_hand or 0),
+                "on_hand": on_hand_value,
+                "presence_status": presence_status,
                 "unit": unit or "",
             }
         )

@@ -403,7 +403,8 @@ class Batch(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
     lot_number = db.Column(db.String, nullable=True)  # supplier batch/lot reference
-    quantity = db.Column(db.Numeric(12, 3), default=0)
+    quantity = db.Column(db.Numeric(12, 3), nullable=True)
+    removed_at = db.Column(db.DateTime, nullable=True)
     received_date = db.Column(db.DateTime, default=datetime.utcnow)
     expiration_date = db.Column(db.Date, nullable=True)
     supplier_name = db.Column(db.String, nullable=True)

@@ -54,7 +54,11 @@
               {% for balance in balances %}
                 <li>
                   <strong>{{ balance.item.sku }}</strong>
-                  ({{ balance.quantity }})
+                  {% if balance.quantity == 0 %}
+                    <span class="muted">present (not counted)</span>
+                  {% else %}
+                    ({{ balance.quantity }})
+                  {% endif %}
                   - {{ balance.item.description or balance.item.name }}
                 </li>
               {% endfor %}

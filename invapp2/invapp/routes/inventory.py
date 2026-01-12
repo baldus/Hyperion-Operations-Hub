@@ -874,7 +874,11 @@ def lookup_item_api(sku):
 def cycle_count_home():
     items = Item.query.options(load_only(Item.id, Item.sku, Item.name)).all()
     locations = Location.query.options(load_only(Location.id, Location.code)).all()
-    batches = Batch.query.options(load_only(Batch.id, Batch.lot_number)).all()
+    batches = (
+        Batch.query.options(load_only(Batch.id, Batch.lot_number))
+        .filter(Batch.removed_at.is_(None))
+        .all()
+    )
 
     if request.method == "POST":
         sku = request.form["sku"].strip()
@@ -1104,7 +1108,6 @@ def view_item(item_id):
         )
         .filter(Movement.item_id == item.id)
         .group_by(Movement.location_id)
-        .having(func.sum(Movement.quantity) != 0)
         .all()
     )
 
@@ -1813,7 +1816,6 @@ def list_locations():
             db.session.query(Movement.location_id)
             .join(Item, Item.id == Movement.item_id)
             .group_by(Movement.location_id, Movement.item_id)
-            .having(func.sum(Movement.quantity) != 0)
             .filter(
                 or_(
                     Item.sku.ilike(like_pattern),
@@ -1841,7 +1843,6 @@ def list_locations():
         .join(Item, Item.id == Movement.item_id)
         .join(Location, Location.id == Movement.location_id)
         .group_by(Movement.location_id, Movement.item_id)
-        .having(func.sum(Movement.quantity) != 0)
     )
 
     if like_pattern:
@@ -2838,10 +2839,11 @@ def export_stock():
             Movement.item_id,
             Movement.batch_id,
             Movement.location_id,
-            func.sum(Movement.quantity).label("on_hand")
+            func.coalesce(func.sum(Movement.quantity), 0).label("on_hand")
         )
+        .outerjoin(Batch, Batch.id == Movement.batch_id)
+        .filter(or_(Movement.batch_id.is_(None), Batch.removed_at.is_(None)))
         .group_by(Movement.item_id, Movement.batch_id, Movement.location_id)
-        .having(func.sum(Movement.quantity) != 0)
         .all()
     )
 
@@ -2905,13 +2907,15 @@ def receiving():
         po_number = request.form.get("po_number", "").strip() or None
         location_id = int(request.form["location_id"])
 
-        if defer_qty:
+        qty_missing = not qty_raw
+
+        if defer_qty or qty_missing:
             qty = 0
         else:
             try:
                 qty = int(qty_raw)
             except (TypeError, ValueError):
-                flash("Quantity is required unless deferred for an admin.", "danger")
+                flash("Enter a valid quantity or leave it blank to defer counting.", "danger")
                 return redirect(url_for("inventory.receiving"))
 
         item = Item.query.filter_by(sku=sku).first()
@@ -2942,7 +2946,7 @@ def receiving():
 
         # Record movement
         reference = "PO Receipt" if po_number else "Receipt"
-        if defer_qty:
+        if defer_qty or qty_missing:
             reference += " (quantity pending)"
 
         mv = Movement(
@@ -2958,7 +2962,7 @@ def receiving():
         db.session.add(mv)
         db.session.commit()
 
-        if defer_qty:
+        if defer_qty or qty_missing:
             flash(f"Receiving recorded! Lot: {lot_number}", "success")
             flash(
                 "Receiving recorded without a quantity. Update the batch once the count is known.",
