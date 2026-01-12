@@ -26,7 +26,7 @@ from flask import (
     session,
     url_for,
 )
-from sqlalchemy import asc, desc, func, or_, select
+from sqlalchemy import asc, desc, func, inspect, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, lazyload, load_only
 from sqlalchemy.orm.exc import DetachedInstanceError
@@ -2937,10 +2937,33 @@ def receiving():
         lot_number = f"{base_lot}-{seq_num:02d}"
 
         # Create or update batch
-        batch = Batch(item_id=item.id, lot_number=lot_number, quantity=0)
-        db.session.add(batch)
-        db.session.flush()
-        batch_id = batch.id
+        batch_columns = {col["name"] for col in inspect(db.engine).get_columns("batch")}
+        if "removed_at" in batch_columns:
+            batch = Batch(item_id=item.id, lot_number=lot_number, quantity=0)
+            db.session.add(batch)
+            db.session.flush()
+            batch_id = batch.id
+        else:
+            batch_payload = {
+                "item_id": item.id,
+                "lot_number": lot_number,
+                "quantity": 0,
+                "removed_at": None,
+                "received_date": datetime.utcnow(),
+                "expiration_date": None,
+                "supplier_name": None,
+                "supplier_code": None,
+                "purchase_order": po_number,
+                "notes": None,
+            }
+            filtered_payload = {
+                key: value for key, value in batch_payload.items() if key in batch_columns
+            }
+            result = db.session.execute(
+                Batch.__table__.insert().values(**filtered_payload).returning(Batch.id)
+            )
+            batch_id = result.scalar_one()
+            batch = Batch.query.get(batch_id)
         batch.quantity = (batch.quantity or 0) + qty
         if po_number:
             batch.purchase_order = po_number
