@@ -906,6 +906,30 @@ def test_delete_all_stock_removes_records(client, app):
         assert RoutingStepConsumption.query.count() == 0
 
 
+def test_batch_soft_delete_filters_active(app):
+    with app.app_context():
+        item = Item(sku="SOFT-DEL", name="Soft Delete")
+        db.session.add(item)
+        db.session.commit()
+
+        batch = Batch(item_id=item.id, lot_number="LOT-DEL", quantity=5)
+        db.session.add(batch)
+        db.session.commit()
+
+        assert batch.removed_at is None
+        assert Batch.query.count() == 1
+
+        batch.soft_delete()
+        db.session.commit()
+
+        assert batch.removed_at is not None
+        assert Batch.query.count() == 0
+        assert Batch.active().count() == 0
+        assert Batch.with_removed().count() == 1
+        assert Batch.query.get(batch.id) is None
+        assert Batch.with_removed().get(batch.id) is not None
+
+
 def test_delete_all_locations_requires_admin(anon_client, app):
     with app.app_context():
         db.session.add_all([Location(code="LOC-A"), Location(code="LOC-B")])
