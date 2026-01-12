@@ -1,6 +1,7 @@
 import base64
 import csv
 import io
+import json
 import os
 import secrets
 import tempfile
@@ -52,6 +53,11 @@ from invapp.models import (
     RoutingStepConsumption,
     User,
     db,
+)
+from invapp.services.stock_transfer import (
+    MoveLineRequest,
+    get_location_inventory_lines,
+    move_inventory_lines,
 )
 from werkzeug.utils import secure_filename
 
@@ -3084,63 +3090,78 @@ def _print_batch_receipt_label(
 ############################
 # MOVE / TRANSFER ROUTES
 ############################
+@bp.get("/move/location/<int:location_id>/lines")
+def move_location_lines(location_id: int):
+    location = Location.query.get(location_id)
+    if location is None:
+        abort(404)
+
+    lines = get_location_inventory_lines(location_id)
+    return jsonify({"location": {"id": location.id, "code": location.code}, "lines": lines})
+
+
 @bp.route("/move", methods=["GET", "POST"])
 def move_home():
-    items = Item.query.all()
-    locations = Location.query.all()
-    batches = Batch.query.all()
-    prefill_sku = request.values.get("sku", "").strip()
+    locations = Location.query.order_by(Location.code).all()
+    location_ids = {location.id for location in locations}
+    default_from_location_id = session.get("last_move_from_location_id")
+    if default_from_location_id not in location_ids:
+        default_from_location_id = locations[0].id if locations else None
 
     if request.method == "POST":
-        sku = request.form["sku"].strip()
-        batch_id = int(request.form["batch_id"])
-        from_loc_id = int(request.form["from_location_id"])
-        to_loc_id = int(request.form["to_location_id"])
-        qty = int(request.form["qty"])
-        person = request.form["person"].strip()
-        reference = request.form.get("reference", "Stock Transfer")
+        from_loc_id = request.form.get("from_location_id", type=int)
+        to_loc_id = request.form.get("to_location_id", type=int)
+        reference = request.form.get("reference", "Stock Transfer").strip() or "Stock Transfer"
+        raw_lines = request.form.get("lines", "").strip()
 
-        item = Item.query.filter_by(sku=sku).first()
-        batch = Batch.query.get(batch_id)
-        if not item or not batch:
-            flash("Invalid SKU or Batch selected.", "danger")
+        try:
+            payload = json.loads(raw_lines) if raw_lines else []
+        except json.JSONDecodeError:
+            payload = []
+
+        lines: list[MoveLineRequest] = []
+        for entry in payload if isinstance(payload, list) else []:
+            try:
+                item_id = int(entry.get("item_id"))
+            except (TypeError, ValueError, AttributeError):
+                continue
+            raw_batch_id = entry.get("batch_id")
+            batch_id = None
+            if raw_batch_id not in (None, "", "none"):
+                try:
+                    batch_id = int(raw_batch_id)
+                except (TypeError, ValueError):
+                    batch_id = None
+            qty = _parse_stock_quantity(str(entry.get("move_qty", "")))
+            if qty is None:
+                continue
+            lines.append(
+                MoveLineRequest(item_id=item_id, batch_id=batch_id, quantity=qty)
+            )
+
+        try:
+            result = move_inventory_lines(
+                lines=lines,
+                from_location_id=from_loc_id,
+                to_location_id=to_loc_id,
+                person=_movement_person(),
+                reference=reference,
+            )
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), "danger")
+            return redirect(url_for("inventory.move_home"))
+        except IntegrityError:
+            db.session.rollback()
+            flash("Unable to complete the move. Please try again.", "danger")
             return redirect(url_for("inventory.move_home"))
 
-        # Ensure valid stock in from location
-        from_balance = (
-            db.session.query(func.sum(Movement.quantity))
-            .filter_by(item_id=item.id, batch_id=batch_id, location_id=from_loc_id)
-            .scalar()
-        ) or 0
-
-        if qty > from_balance:
-            flash("Not enough stock in the selected batch/location.", "danger")
-            return redirect(url_for("inventory.move_home"))
-
-        # Create MOVE_OUT (negative) and MOVE_IN (positive)
-        mv_out = Movement(
-            item_id=item.id,
-            batch_id=batch_id,
-            location_id=from_loc_id,
-            quantity=-qty,
-            movement_type="MOVE_OUT",
-            person=person,
-            reference=reference,
-        )
-        mv_in = Movement(
-            item_id=item.id,
-            batch_id=batch_id,
-            location_id=to_loc_id,
-            quantity=qty,
-            movement_type="MOVE_IN",
-            person=person,
-            reference=reference,
-        )
-        db.session.add(mv_out)
-        db.session.add(mv_in)
         db.session.commit()
-
-        flash(f"Moved {qty} of {sku} (Lot {batch.lot_number}) to new location.", "success")
+        session["last_move_from_location_id"] = from_loc_id
+        flash(
+            f"Moved {result['total_qty']} total units across {result['total_lines']} lines.",
+            "success",
+        )
         return redirect(url_for("inventory.move_home"))
 
     # Recent moves
@@ -3155,19 +3176,14 @@ def move_home():
     locations_map = {l.id: l for l in Location.query.all()}
     batches_map = {b.id: b for b in Batch.query.all()}
 
-    lookup_template = url_for("inventory.lookup_item_api", sku="__SKU__")
-
     return render_template(
         "inventory/move.html",
-        items=items,
         locations=locations,
-        batches=batches,
+        default_from_location_id=default_from_location_id,
         records=records,
         items_map=items_map,
         locations_map=locations_map,
         batches_map=batches_map,
-        prefill_sku=prefill_sku,
-        lookup_template=lookup_template,
     )
 
 

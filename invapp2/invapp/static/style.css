@@ -2923,6 +2923,62 @@ body.light .section-help {
     gap: 12px;
 }
 
+.move-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.move-selection-controls {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin: 12px 0;
+}
+
+.selection-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.move-summary {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+    font-size: 0.95rem;
+}
+
+.move-table {
+    margin-top: 8px;
+}
+
+.move-table tr.is-selected .move-qty-input {
+    visibility: visible;
+}
+
+.move-qty-input {
+    width: 100%;
+    visibility: hidden;
+}
+
+.move-qty-input.is-invalid {
+    border-color: #e26d6d;
+    box-shadow: 0 0 0 2px rgba(226, 109, 109, 0.2);
+}
+
+body.light .move-qty-input.is-invalid {
+    border-color: #c74545;
+    box-shadow: 0 0 0 2px rgba(199, 69, 69, 0.2);
+}
+
+.move-validation {
+    min-height: 1.2em;
+}
+
 .form-field {
     display: flex;
     flex-direction: column;
