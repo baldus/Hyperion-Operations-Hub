@@ -41,7 +41,10 @@
     <section class="card-section settings-card">
         <h3>Backups</h3>
         <p>Manage the automated backup schedule.</p>
-        <a href="{{ url_for('admin.backup_settings') }}" class="action-btn">Manage Backups</a>
+        <ul class="link-list">
+            <li><a href="{{ url_for('admin.backup_settings') }}" class="link-item">Backup Schedule</a></li>
+            <li><a href="{{ url_for('admin.auto_backups') }}" class="link-item">Auto Backups</a></li>
+        </ul>
     </section>
     {% endif %}
 </div>
