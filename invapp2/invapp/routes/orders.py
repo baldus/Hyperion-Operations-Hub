@@ -171,6 +171,8 @@ def _inventory_options(item_id: int):
             func.coalesce(func.sum(Movement.quantity), 0).label("on_hand"),
         )
         .filter(Movement.item_id == item_id)
+        .outerjoin(Batch, Batch.id == Movement.batch_id)
+        .filter(or_(Movement.batch_id.is_(None), Batch.removed_at.is_(None)))
         .group_by(Movement.batch_id, Movement.location_id)
         .having(func.coalesce(func.sum(Movement.quantity), 0) > 0)
         .all()
@@ -179,10 +181,14 @@ def _inventory_options(item_id: int):
     batch_ids = {row.batch_id for row in rows if row.batch_id is not None}
     location_ids = {row.location_id for row in rows if row.location_id is not None}
 
-    batches = {
-        batch.id: batch
-        for batch in Batch.query.filter(Batch.id.in_(batch_ids)).all()
-    } if batch_ids else {}
+    batches = (
+        {
+            batch.id: batch
+            for batch in Batch.active().filter(Batch.id.in_(batch_ids)).all()
+        }
+        if batch_ids
+        else {}
+    )
     locations = {
         location.id: location
         for location in Location.query.filter(Location.id.in_(location_ids)).all()

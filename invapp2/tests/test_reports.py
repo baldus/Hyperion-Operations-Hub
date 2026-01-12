@@ -77,7 +77,7 @@ def test_summary_data(client, app):
     aging = data['stock_aging'][0]
     assert aging['sku'] == 'SKU1'
     with app.app_context():
-        batch = Batch.query.first()
+        batch = Batch.active().first()
         expected_days = (datetime.datetime.utcnow().date() - batch.received_date.date()).days
     assert aging['days'] == expected_days
 

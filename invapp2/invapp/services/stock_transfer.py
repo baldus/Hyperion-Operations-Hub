@@ -115,7 +115,7 @@ def move_inventory_lines(
         else {}
     )
     batches = (
-        {batch.id: batch for batch in Batch.query.filter(Batch.id.in_(batch_ids)).all()}
+        {batch.id: batch for batch in Batch.active().filter(Batch.id.in_(batch_ids)).all()}
         if batch_ids
         else {}
     )

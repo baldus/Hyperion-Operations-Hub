@@ -414,6 +414,18 @@ class Batch(db.Model):
 
     item = db.relationship("Item", backref="batches")
 
+    @classmethod
+    def active(cls):
+        return cls.query.filter(cls.removed_at.is_(None))
+
+    @classmethod
+    def with_removed(cls):
+        return cls.query
+
+    def soft_delete(self, removed_at: datetime | None = None) -> "Batch":
+        self.removed_at = removed_at or datetime.utcnow()
+        return self
+
 
 class Movement(PrimaryKeySequenceMixin, db.Model):
     __tablename__ = "movement"

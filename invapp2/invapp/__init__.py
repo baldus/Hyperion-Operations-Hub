@@ -181,6 +181,11 @@ def _ensure_inventory_schema(engine):
     except (NoSuchTableError, OperationalError):
         batch_columns = set()
 
+    try:
+        batch_indexes = inspector.get_indexes("batch")
+    except (NoSuchTableError, OperationalError):
+        batch_indexes = []
+
     batch_required_columns = {
         "expiration_date": "DATE",
         "removed_at": "TIMESTAMP",
@@ -202,6 +207,17 @@ def _ensure_inventory_schema(engine):
                         f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
                     )
                 )
+
+    removed_at_exists = "removed_at" in batch_columns or any(
+        table_name == "batch" and column_name == "removed_at"
+        for table_name, column_name, _ in item_columns_to_add
+    )
+    removed_at_indexed = any(
+        index.get("column_names") == ["removed_at"] for index in batch_indexes
+    )
+    if removed_at_exists and not removed_at_indexed:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_batch_removed_at ON batch (removed_at)"))
 
     # Align legacy ``item`` tables with the new optional default location field
     # so model queries do not reference a missing column or constraint.

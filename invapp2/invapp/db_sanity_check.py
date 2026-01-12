@@ -4,7 +4,7 @@ import logging
 from dataclasses import asdict
 from typing import Any
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 
 from config import Config
 from invapp.db_maintenance import analyze_primary_key_sequences, repair_primary_key_sequences
@@ -39,6 +39,59 @@ def _format_issue(issue) -> str:
     return f"{prefix}: status={issue.status}"
 
 
+def _batch_soft_delete_status(engine) -> dict[str, Any]:
+    inspector = inspect(engine)
+    status: dict[str, Any] = {
+        "table_present": False,
+        "column_present": False,
+        "index_present": False,
+        "active_count": None,
+        "removed_count": None,
+    }
+
+    try:
+        status["table_present"] = "batch" in inspector.get_table_names()
+    except Exception:
+        return status
+
+    if not status["table_present"]:
+        return status
+
+    try:
+        columns = {col["name"] for col in inspector.get_columns("batch")}
+    except Exception:
+        return status
+
+    status["column_present"] = "removed_at" in columns
+
+    try:
+        indexes = inspector.get_indexes("batch")
+    except Exception:
+        indexes = []
+    status["index_present"] = any(
+        index.get("column_names") == ["removed_at"] for index in indexes
+    )
+
+    if not status["column_present"]:
+        return status
+
+    with engine.connect() as connection:
+        result = connection.execute(
+            text(
+                "SELECT "
+                "SUM(CASE WHEN removed_at IS NULL THEN 1 ELSE 0 END) AS active_count, "
+                "SUM(CASE WHEN removed_at IS NOT NULL THEN 1 ELSE 0 END) AS removed_count "
+                "FROM batch"
+            )
+        )
+        row = result.mappings().first()
+        if row:
+            status["active_count"] = int(row["active_count"] or 0)
+            status["removed_count"] = int(row["removed_count"] or 0)
+
+    return status
+
+
 def run_check(apply_fixes: bool, as_json_output: bool) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     logger = logging.getLogger(LOGGER_NAME)
@@ -48,6 +101,7 @@ def run_check(apply_fixes: bool, as_json_output: bool) -> int:
 
     checks = analyze_primary_key_sequences(engine, db.Model, logger=logger)
     issues = [c for c in checks if c.status != "ok"]
+    batch_soft_delete = _batch_soft_delete_status(engine)
 
     repair_summary: dict[str, Any] | None = None
     exit_code = 0
@@ -64,6 +118,7 @@ def run_check(apply_fixes: bool, as_json_output: bool) -> int:
         payload = {
             "issues": [asdict(c) for c in issues],
             "repair_summary": repair_summary,
+            "batch_soft_delete": batch_soft_delete,
         }
         print(json.dumps(payload, indent=2))
     else:
@@ -77,6 +132,17 @@ def run_check(apply_fixes: bool, as_json_output: bool) -> int:
             print(
                 f"Repair summary: repaired={repair_summary.get('repaired', 0)} "
                 f"skipped={repair_summary.get('skipped', 0)} failed={repair_summary.get('failed', 0)}"
+            )
+        if not batch_soft_delete["table_present"]:
+            print("⚠️ Batch table not found; skipped soft-delete column check.")
+        elif not batch_soft_delete["column_present"]:
+            print("⚠️ Batch.removed_at column is missing.")
+        else:
+            print(
+                "Batch soft-delete status: "
+                f"active={batch_soft_delete['active_count']} "
+                f"removed={batch_soft_delete['removed_count']} "
+                f"index={'yes' if batch_soft_delete['index_present'] else 'no'}"
             )
 
     return exit_code

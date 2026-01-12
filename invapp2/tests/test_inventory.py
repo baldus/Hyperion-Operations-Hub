@@ -198,6 +198,27 @@ def test_list_stock_low_filter(client, stock_items):
     assert stock_items["ok"] not in page
 
 
+def test_batch_soft_delete_helpers(app):
+    with app.app_context():
+        item = Item(sku="BATCH-1", name="Batch Item", unit="ea")
+        db.session.add(item)
+        db.session.commit()
+
+        batch = Batch(item_id=item.id, lot_number="LOT-1", quantity=5)
+        db.session.add(batch)
+        db.session.commit()
+
+        assert batch.removed_at is None
+        assert Batch.active().count() == 1
+
+        batch.soft_delete()
+        db.session.commit()
+
+        assert batch.removed_at is not None
+        assert Batch.active().count() == 0
+        assert Batch.with_removed().count() == 1
+
+
 def test_list_stock_near_filter(client, stock_items):
     response = client.get("/inventory/stock?status=near")
     assert response.status_code == 200
@@ -902,7 +923,8 @@ def test_delete_all_stock_removes_records(client, app):
 
     with app.app_context():
         assert Movement.query.count() == 0
-        assert Batch.query.count() == 0
+        assert Batch.active().count() == 0
+        assert Batch.with_removed().count() == 1
         assert RoutingStepConsumption.query.count() == 0
 
 
@@ -993,7 +1015,8 @@ def test_delete_all_history_removes_records(client, app):
 
     with app.app_context():
         assert Movement.query.count() == 0
-        assert Batch.query.count() == 0
+        assert Batch.active().count() == 0
+        assert Batch.with_removed().count() == 1
 
 def test_edit_location_requires_admin(anon_client, app):
     with app.app_context():
@@ -1343,7 +1366,7 @@ def test_import_stock_mapping_flow(client, app):
     assert response.status_code == 302
 
     with app.app_context():
-        batch = Batch.query.filter_by(
+        batch = Batch.active().filter_by(
             item_id=Item.query.filter_by(sku="SKU-1").one().id,
             lot_number="BATCH-1",
         ).one()
