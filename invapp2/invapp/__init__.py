@@ -183,6 +183,7 @@ def _ensure_inventory_schema(engine):
 
     batch_required_columns = {
         "expiration_date": "DATE",
+        "removed_at": "TIMESTAMP",
         "supplier_name": "VARCHAR",
         "supplier_code": "VARCHAR",
         "purchase_order": "VARCHAR",
