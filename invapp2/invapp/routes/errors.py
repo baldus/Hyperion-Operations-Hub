@@ -22,6 +22,11 @@ def _format_stacktrace(error: BaseException | None) -> str:
 
 @bp.app_errorhandler(Exception)
 def handle_exception(error: Exception):
+    try:
+        db.session.rollback()
+    except Exception:
+        pass
+
     # Allow HTTP errors that are not 500 to propagate to their default handlers.
     if isinstance(error, HTTPException) and error.code != 500:
         return error

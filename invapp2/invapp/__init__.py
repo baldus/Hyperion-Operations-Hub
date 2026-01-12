@@ -56,6 +56,7 @@ from .home_layout import (
 from .superuser import is_superuser
 from .services import backup_service, status_bus
 from .services.db_schema import ensure_app_setting_schema
+from .utils.db_schema import db_has_column
 
 
 NAVIGATION_PAGES: tuple[tuple[str, str, str], ...] = (
@@ -181,6 +182,11 @@ def _ensure_inventory_schema(engine):
     except (NoSuchTableError, OperationalError):
         batch_columns = set()
 
+    try:
+        batch_indexes = inspector.get_indexes("batch")
+    except (NoSuchTableError, OperationalError):
+        batch_indexes = []
+
     batch_required_columns = {
         "expiration_date": "DATE",
         "removed_at": "TIMESTAMP",
@@ -202,6 +208,17 @@ def _ensure_inventory_schema(engine):
                         f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
                     )
                 )
+
+    removed_at_exists = "removed_at" in batch_columns or any(
+        table_name == "batch" and column_name == "removed_at"
+        for table_name, column_name, _ in item_columns_to_add
+    )
+    removed_at_indexed = any(
+        index.get("column_names") == ["removed_at"] for index in batch_indexes
+    )
+    if removed_at_exists and not removed_at_indexed:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_batch_removed_at ON batch (removed_at)"))
 
     # Align legacy ``item`` tables with the new optional default location field
     # so model queries do not reference a missing column or constraint.
@@ -716,6 +733,10 @@ def create_app(config_override=None):
                 db.create_all()
                 ensure_app_setting_schema(db.engine, current_app.logger)
                 _ensure_inventory_schema(db.engine)
+                if not db_has_column("batch", "removed_at"):
+                    current_app.logger.warning(
+                        "WARNING: batch.removed_at missing; run `flask db upgrade`."
+                    )
                 _ensure_purchasing_schema(db.engine)
                 _ensure_order_schema(db.engine)
                 _ensure_home_layout_schema(db.engine)
@@ -823,6 +844,14 @@ def create_app(config_override=None):
             ),
             "is_superuser": is_superuser,
         }
+
+    @app.teardown_request
+    def _rollback_on_exception(exc):
+        if exc is not None:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
 
     # register blueprints
     app.register_blueprint(auth.bp)

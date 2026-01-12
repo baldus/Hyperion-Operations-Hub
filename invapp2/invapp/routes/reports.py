@@ -7,7 +7,7 @@ from typing import Iterable, Optional
 
 from flask import Blueprint, Response, jsonify, render_template, request
 from invapp.auth import blueprint_page_guard
-from sqlalchemy import case, func
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import joinedload
 
 from invapp.extensions import db
@@ -71,8 +71,9 @@ def _movement_trends(
     return rows
 
 
-def _stock_aging(sku: Optional[str]):
-    query = db.session.query(Batch).options(joinedload(Batch.item))
+def _stock_aging(sku: Optional[str], include_removed: bool = False):
+    query = Batch.with_removed() if include_removed else Batch.active()
+    query = query.options(joinedload(Batch.item))
     if sku:
         query = query.filter(Batch.item.has(Item.sku == sku))
 
@@ -179,9 +180,10 @@ def summary_data():
     location = request.args.get("location") or None
     start_dt = _parse_date_param(request.args.get("start"))
     end_dt = _parse_date_param(request.args.get("end"))
+    include_removed = request.args.get("include_removed") == "1"
 
     movements = _movement_trends(sku, location, start_dt, end_dt)
-    aging = _stock_aging(sku)
+    aging = _stock_aging(sku, include_removed=include_removed)
 
     return jsonify({"movement_trends": movements, "stock_aging": aging})
 
@@ -192,9 +194,10 @@ def export():
     location = request.args.get("location") or None
     start_dt = _parse_date_param(request.args.get("start"))
     end_dt = _parse_date_param(request.args.get("end"))
+    include_removed = request.args.get("include_removed") == "1"
 
     movements = _movement_trends(sku, location, start_dt, end_dt)
-    aging = _stock_aging(sku)
+    aging = _stock_aging(sku, include_removed=include_removed)
 
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -220,6 +223,8 @@ def export():
 
 @bp.route("/generate")
 def generate_reports():
+    include_removed = request.args.get("include_removed") == "1"
+    batch_query = Batch.with_removed() if include_removed else Batch.active()
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w") as zf:
         output = io.StringIO()
@@ -265,7 +270,7 @@ def generate_reports():
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(["id", "item_sku", "lot_number", "quantity"])
-        for batch in Batch.query.all():
+        for batch in batch_query.all():
             writer.writerow(
                 [
                     batch.id,
@@ -308,6 +313,9 @@ def generate_reports():
             .join(Item, Movement.item_id == Item.id)
             .join(Location, Movement.location_id == Location.id)
             .outerjoin(Batch, Movement.batch_id == Batch.id)
+            .filter(
+                or_(include_removed, Movement.batch_id.is_(None), Batch.removed_at.is_(None))
+            )
             .order_by(Movement.date.desc())
         )
         for (

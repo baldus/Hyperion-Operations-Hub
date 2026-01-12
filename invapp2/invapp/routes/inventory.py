@@ -26,7 +26,7 @@ from flask import (
     session,
     url_for,
 )
-from sqlalchemy import asc, desc, func, inspect, or_, select
+from sqlalchemy import asc, desc, func, inspect, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, lazyload, load_only
 from sqlalchemy.orm.exc import DetachedInstanceError
@@ -36,6 +36,7 @@ from invapp.login import current_user
 from invapp.permissions import resolve_edit_roles
 from invapp.security import require_admin_or_superuser, require_any_role, require_roles
 from invapp.superuser import is_superuser
+from invapp.utils.db_schema import db_has_column
 from invapp.models import (
     Batch,
     BillOfMaterial,
@@ -875,8 +876,7 @@ def cycle_count_home():
     items = Item.query.options(load_only(Item.id, Item.sku, Item.name)).all()
     locations = Location.query.options(load_only(Location.id, Location.code)).all()
     batches = (
-        Batch.query.options(load_only(Batch.id, Batch.lot_number))
-        .filter(Batch.removed_at.is_(None))
+        Batch.active().options(load_only(Batch.id, Batch.lot_number))
         .all()
     )
 
@@ -889,7 +889,7 @@ def cycle_count_home():
         reference = request.form.get("reference", "Cycle Count")
 
         item = Item.query.filter_by(sku=sku).first()
-        batch = Batch.query.get(batch_id)
+        batch = Batch.active().filter_by(id=batch_id).first()
         if not item or not batch:
             flash("Invalid SKU or Batch selected.", "danger")
             return redirect(url_for("inventory.cycle_count_home"))
@@ -1355,7 +1355,7 @@ def delete_item_attachment(item_id, attachment_id):
 def delete_item(item_id):
     item = Item.query.get_or_404(item_id)
 
-    has_batches = Batch.query.filter_by(item_id=item.id).first() is not None
+    has_batches = Batch.active().filter_by(item_id=item.id).first() is not None
     has_movements = Movement.query.filter_by(item_id=item.id).first() is not None
     has_order_lines = OrderLine.query.filter_by(item_id=item.id).first() is not None
     has_components = (
@@ -1410,7 +1410,10 @@ def _deletable_items_query(dependent_item_ids):
 def _delete_stock_records():
     consumptions_deleted = RoutingStepConsumption.query.delete(synchronize_session=False)
     movements_deleted = Movement.query.delete(synchronize_session=False)
-    batches_deleted = Batch.query.delete(synchronize_session=False)
+    batches_deleted = Batch.active().update(
+        {Batch.removed_at: datetime.utcnow()},
+        synchronize_session=False,
+    )
     db.session.commit()
     return consumptions_deleted, movements_deleted, batches_deleted
 
@@ -1424,7 +1427,7 @@ def _flash_stock_deletion_summary(consumptions_deleted, movements_deleted, batch
 
     if batches_deleted:
         label = "batch record" if batches_deleted == 1 else "batch records"
-        parts.append(f"{batches_deleted} {label}")
+        parts.append(f"{batches_deleted} {label} (archived)")
 
     if consumptions_deleted:
         label = "routing consumption record" if consumptions_deleted == 1 else "routing consumption records"
@@ -1433,15 +1436,15 @@ def _flash_stock_deletion_summary(consumptions_deleted, movements_deleted, batch
 
     if parts:
         if len(parts) == 1:
-            message = f"Deleted {parts[0]}."
+            message = f"Removed {parts[0]}."
         elif len(parts) == 2:
-            message = f"Deleted {parts[0]} and {parts[1]}."
+            message = f"Removed {parts[0]} and {parts[1]}."
         else:
-            message = "Deleted " + ", ".join(parts[:-1]) + f", and {parts[-1]}."
+            message = "Removed " + ", ".join(parts[:-1]) + f", and {parts[-1]}."
         flash(message, "success")
     else:
         flash(
-            "There were no stock movement, batch, or routing consumption records to delete.",
+            "There were no stock movement, batch, or routing consumption records to remove.",
             "info",
         )
 
@@ -2614,7 +2617,7 @@ def adjust_stock():
 
         batch_id = None
         if lot_number:
-            batch = Batch.query.filter_by(item_id=item.id, lot_number=lot_number).first()
+            batch = Batch.active().filter_by(item_id=item.id, lot_number=lot_number).first()
             if not batch:
                 batch = Batch(item_id=item.id, lot_number=lot_number, quantity=0)
                 db.session.add(batch)
@@ -2762,7 +2765,7 @@ def import_stock():
 
                 batch = None
                 if lot_number:
-                    batch = Batch.query.filter_by(
+                    batch = Batch.active().filter_by(
                         item_id=item.id, lot_number=lot_number
                     ).first()
                     if not batch:
@@ -2853,7 +2856,7 @@ def export_stock():
 
     items = {i.id: i for i in Item.query.all()}
     locations = {l.id: l for l in Location.query.all()}
-    batches = {b.id: b for b in Batch.query.all()}
+    batches = {b.id: b for b in Batch.active().all()}
 
     for item_id, batch_id, location_id, on_hand in rows:
         sku = items[item_id].sku if item_id in items else "UNKNOWN"
@@ -2940,18 +2943,21 @@ def receiving():
         lot_number = f"{base_lot}-{seq_num:02d}"
 
         # Create or update batch
-        batch_columns = {col["name"] for col in inspect(db.engine).get_columns("batch")}
-        if "removed_at" in batch_columns:
+        has_removed_at = db_has_column("batch", "removed_at")
+        if has_removed_at:
             batch = Batch(item_id=item.id, lot_number=lot_number, quantity=0)
             db.session.add(batch)
             db.session.flush()
             batch_id = batch.id
+            batch.quantity = (batch.quantity or 0) + qty
+            if po_number:
+                batch.purchase_order = po_number
         else:
+            batch_columns = {col["name"] for col in inspect(db.engine).get_columns("batch")}
             batch_payload = {
                 "item_id": item.id,
                 "lot_number": lot_number,
                 "quantity": 0,
-                "removed_at": None,
                 "received_date": datetime.utcnow(),
                 "expiration_date": None,
                 "supplier_name": None,
@@ -2966,10 +2972,26 @@ def receiving():
                 Batch.__table__.insert().values(**filtered_payload).returning(Batch.id)
             )
             batch_id = result.scalar_one()
-            batch = Batch.query.get(batch_id)
-        batch.quantity = (batch.quantity or 0) + qty
-        if po_number:
-            batch.purchase_order = po_number
+            db.session.execute(
+                text(
+                    "UPDATE batch SET "
+                    "quantity = COALESCE(quantity, 0) + :qty, "
+                    "purchase_order = CASE WHEN :po IS NULL THEN purchase_order ELSE :po END "
+                    "WHERE id = :id"
+                ),
+                {"qty": qty, "po": po_number, "id": batch_id},
+            )
+            row = db.session.execute(
+                text(
+                    "SELECT id, item_id, lot_number, quantity, received_date, "
+                    "expiration_date, supplier_name, supplier_code, purchase_order, notes "
+                    "FROM batch WHERE id = :id"
+                ),
+                {"id": batch_id},
+            ).mappings().first()
+            if not row:
+                abort(404)
+            batch = row
 
         # Record movement
         reference = "PO Receipt" if po_number else "Receipt"
@@ -3093,11 +3115,13 @@ def _print_batch_receipt_label(
     from invapp.printing.labels import build_batch_label_context
     from invapp.printing.zebra import print_label_for_process
 
-    lot_number = (
-        getattr(batch, "lot_number", None)
-        if batch is not None
-        else None
-    ) or getattr(item, "sku", "")
+    if batch is None:
+        lot_number = None
+    elif isinstance(batch, Mapping):
+        lot_number = batch.get("lot_number")
+    else:
+        lot_number = getattr(batch, "lot_number", None)
+    lot_number = lot_number or getattr(item, "sku", "")
 
     batch_source: Union[Batch, Mapping[str, object]]
     if batch is None:
@@ -3205,7 +3229,7 @@ def move_home():
     )
     items_map = {i.id: i for i in Item.query.all()}
     locations_map = {l.id: l for l in Location.query.all()}
-    batches_map = {b.id: b for b in Batch.query.all()}
+    batches_map = {b.id: b for b in Batch.active().all()}
 
     return render_template(
         "inventory/move.html",
@@ -3232,7 +3256,7 @@ def history_home():
     )
     items = {i.id: i for i in Item.query.all()}
     locations = {l.id: l for l in Location.query.all()}
-    batches = {b.id: b for b in Batch.query.all()}
+    batches = {b.id: b for b in Batch.active().all()}
 
     return render_template(
         "inventory/history.html",
