@@ -181,6 +181,11 @@ def _ensure_inventory_schema(engine):
     except (NoSuchTableError, OperationalError):
         batch_columns = set()
 
+    try:
+        batch_indexes = {index["name"] for index in inspector.get_indexes("batch")}
+    except (NoSuchTableError, OperationalError):
+        batch_indexes = set()
+
     batch_required_columns = {
         "expiration_date": "DATE",
         "removed_at": "TIMESTAMP",
@@ -200,6 +205,19 @@ def _ensure_inventory_schema(engine):
                 conn.execute(
                     text(
                         f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
+                    )
+                )
+
+    if "removed_at" in batch_columns or any(
+        table_name == "batch" and column_name == "removed_at"
+        for table_name, column_name, _ in item_columns_to_add
+    ):
+        if "ix_batch_removed_at" not in batch_indexes:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_batch_removed_at "
+                        "ON batch (removed_at)"
                     )
                 )
 

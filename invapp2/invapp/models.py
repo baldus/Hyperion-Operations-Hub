@@ -5,6 +5,7 @@ from datetime import date, datetime
 from typing import ClassVar
 
 from flask import current_app
+from flask_sqlalchemy import BaseQuery
 from sqlalchemy import func, inspect, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.associationproxy import association_proxy
@@ -94,6 +95,65 @@ class PrimaryKeySequenceMixin:
             setattr(instance, getattr(cls, "pk_column_name", "id"), None)
             db.session.add(instance)
             db.session.commit()
+
+
+class SoftDeleteQuery(BaseQuery):
+    _with_removed = False
+
+    def with_removed(self):
+        query = self._clone()
+        query._with_removed = True
+        return query
+
+    def _only_not_removed(self):
+        if self._with_removed:
+            return self
+        try:
+            mapper = self._only_full_mapper_zero("soft delete")
+        except Exception:
+            return self
+        model = mapper.class_
+        if hasattr(model, "removed_at"):
+            return self.enable_assertions(False).filter(model.removed_at.is_(None))
+        return self
+
+    def __iter__(self):
+        return super(SoftDeleteQuery, self._only_not_removed()).__iter__()
+
+    def get(self, ident):
+        if self._with_removed:
+            return super().get(ident)
+        obj = super().get(ident)
+        if obj is not None and getattr(obj, "removed_at", None) is not None:
+            return None
+        return obj
+
+    def first(self):
+        return super(SoftDeleteQuery, self._only_not_removed()).first()
+
+    def one(self):
+        return super(SoftDeleteQuery, self._only_not_removed()).one()
+
+    def one_or_none(self):
+        return super(SoftDeleteQuery, self._only_not_removed()).one_or_none()
+
+    def count(self):
+        return super(SoftDeleteQuery, self._only_not_removed()).count()
+
+    def delete(self, synchronize_session="evaluate"):
+        if self._with_removed:
+            return super().delete(synchronize_session=synchronize_session)
+        try:
+            mapper = self._only_full_mapper_zero("soft delete")
+        except Exception:
+            return super().delete(synchronize_session=synchronize_session)
+        model = mapper.class_
+        if hasattr(model, "removed_at"):
+            return super().update(
+                {model.removed_at: datetime.utcnow()},
+                synchronize_session=synchronize_session,
+            )
+        return super().delete(synchronize_session=synchronize_session)
 
 
 class AccessLog(db.Model):
@@ -400,6 +460,7 @@ class Location(db.Model):
 
 class Batch(db.Model):
     __tablename__ = "batch"
+    query_class = SoftDeleteQuery
     id = db.Column(db.Integer, primary_key=True)
     item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
     lot_number = db.Column(db.String, nullable=True)  # supplier batch/lot reference
@@ -413,6 +474,19 @@ class Batch(db.Model):
     notes = db.Column(db.Text, nullable=True)
 
     item = db.relationship("Item", backref="batches")
+
+    __table_args__ = (db.Index("ix_batch_removed_at", "removed_at"),)
+
+    @classmethod
+    def active(cls):
+        return cls.query.filter(cls.removed_at.is_(None))
+
+    @classmethod
+    def with_removed(cls):
+        return cls.query.with_removed()
+
+    def soft_delete(self, removed_at: datetime | None = None) -> None:
+        self.removed_at = removed_at or datetime.utcnow()
 
 
 class Movement(PrimaryKeySequenceMixin, db.Model):

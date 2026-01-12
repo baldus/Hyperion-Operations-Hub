@@ -875,8 +875,7 @@ def cycle_count_home():
     items = Item.query.options(load_only(Item.id, Item.sku, Item.name)).all()
     locations = Location.query.options(load_only(Location.id, Location.code)).all()
     batches = (
-        Batch.query.options(load_only(Batch.id, Batch.lot_number))
-        .filter(Batch.removed_at.is_(None))
+        Batch.active().options(load_only(Batch.id, Batch.lot_number))
         .all()
     )
 
@@ -889,7 +888,7 @@ def cycle_count_home():
         reference = request.form.get("reference", "Cycle Count")
 
         item = Item.query.filter_by(sku=sku).first()
-        batch = Batch.query.get(batch_id)
+        batch = Batch.active().filter_by(id=batch_id).first()
         if not item or not batch:
             flash("Invalid SKU or Batch selected.", "danger")
             return redirect(url_for("inventory.cycle_count_home"))
@@ -2966,7 +2965,11 @@ def receiving():
                 Batch.__table__.insert().values(**filtered_payload).returning(Batch.id)
             )
             batch_id = result.scalar_one()
-            batch = Batch.query.get(batch_id)
+        batch = Batch.active().filter_by(id=batch_id).first()
+        if not batch:
+            flash("The selected batch is no longer available.", "warning")
+            db.session.rollback()
+            return redirect(url_for("inventory.receiving"))
         batch.quantity = (batch.quantity or 0) + qty
         if po_number:
             batch.purchase_order = po_number
