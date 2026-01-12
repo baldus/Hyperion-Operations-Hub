@@ -27,7 +27,7 @@ from flask import (
 )
 from sqlalchemy import asc, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import joinedload, load_only
+from sqlalchemy.orm import joinedload, lazyload, load_only
 from sqlalchemy.orm.exc import DetachedInstanceError
 
 from invapp.auth import blueprint_page_guard
@@ -2224,6 +2224,7 @@ def list_stock():
 
     overview_query = (
         db.session.query(Item, total_qty, location_count, last_updated)
+        .options(lazyload(Item.default_location))
         .outerjoin(Movement, Movement.item_id == Item.id)
         .group_by(Item.id)
     )
