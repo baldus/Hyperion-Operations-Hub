@@ -16,6 +16,14 @@
     <p>
       <strong>Unit:</strong> {{ item.unit or "" if item else "" }}
       <span class="stock-detail-metric"><strong>Total on hand:</strong> {{ total_on_hand }}</span>
+      <span class="stock-detail-metric">
+        <strong>Batches:</strong>
+        {% if batch_count == 1 %}
+          1 Batch
+        {% else %}
+          {{ batch_count }} Batches
+        {% endif %}
+      </span>
     </p>
   </div>
 </div>
@@ -45,7 +53,13 @@
           <tr>
             <td>{{ row.location.code if row.location else "Unknown" }}</td>
             <td>{{ row.batch_label }}</td>
-            <td>{{ row.quantity }}</td>
+            <td>
+              {% if row.pending_qty %}
+                <span class="badge">Qty Pending</span>
+              {% else %}
+                {{ row.quantity }}
+              {% endif %}
+            </td>
             <td>
               {% if row.updated_at %}
                 {{ row.updated_at.strftime('%Y-%m-%d %H:%M') }}

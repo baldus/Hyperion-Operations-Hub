@@ -507,6 +507,54 @@ def test_pending_receipt_move_updates_location(client, app):
         ).one()
         assert move_log.quantity == 0
 
+
+def test_pending_receipt_remove_clears_reference(client, app):
+    pending = _create_pending_receipt(app, sku="PEND-REMOVE", location_code="REMOVE-LOC")
+
+    response = client.post(
+        f"/inventory/pending/{pending['receipt_id']}/remove",
+        data={"reason": "Scrap", "next": "/inventory/locations"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        pending_receipt = Movement.query.get(pending["receipt_id"])
+        assert "voided" in (pending_receipt.reference or "").lower()
+        removal = Movement.query.filter_by(
+            item_id=pending["item_id"],
+            batch_id=pending["batch_id"],
+            location_id=pending["location_id"],
+            movement_type="REMOVE_FROM_LOCATION",
+        ).one()
+        assert removal.quantity == 0
+
+
+def test_stock_overview_shows_zero_batches(client, app):
+    with app.app_context():
+        item = Item(sku="ZERO-BATCH", name="Zero Batch Item")
+        db.session.add(item)
+        db.session.commit()
+
+    response = client.get("/inventory/stock")
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "ZERO-BATCH" in page
+    assert "0 Batches" in page
+
+
+def test_stock_detail_shows_zero_batches(client, app):
+    with app.app_context():
+        item = Item(sku="ZERO-BATCH-DETAIL", name="Zero Batch Detail")
+        db.session.add(item)
+        db.session.commit()
+        item_id = item.id
+
+    response = client.get(f"/inventory/stock/{item_id}")
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "0 Batches" in page
+
 def test_list_stock_primary_location_placeholder(client, app):
     with app.app_context():
         secondary = Location(code="SECONDARY")

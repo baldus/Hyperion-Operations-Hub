@@ -2698,6 +2698,16 @@ def _stock_overview_query():
         .subquery()
     )
 
+    batch_agg = (
+        db.session.query(
+            Batch.item_id.label("item_id"),
+            func.count(Batch.id).label("batch_count"),
+        )
+        .filter(Batch.removed_at.is_(None))
+        .group_by(Batch.item_id)
+        .subquery()
+    )
+
     primary_location = aliased(Location)
     secondary_location = aliased(Location)
     point_of_use_location = aliased(Location)
@@ -2706,6 +2716,7 @@ def _stock_overview_query():
     location_count = func.coalesce(
         movement_agg.c.location_count, 0
     ).label("location_count")
+    batch_count = func.coalesce(batch_agg.c.batch_count, 0).label("batch_count")
     last_updated = movement_agg.c.last_updated.label("last_updated")
 
     overview_query = (
@@ -2713,6 +2724,7 @@ def _stock_overview_query():
             Item,
             total_qty,
             location_count,
+            batch_count,
             last_updated,
             primary_location,
             secondary_location,
@@ -2720,6 +2732,7 @@ def _stock_overview_query():
         )
         .options(lazyload(Item.default_location))
         .outerjoin(movement_agg, movement_agg.c.item_id == Item.id)
+        .outerjoin(batch_agg, batch_agg.c.item_id == Item.id)
         .outerjoin(primary_location, primary_location.id == Item.default_location_id)
         .outerjoin(secondary_location, secondary_location.id == Item.secondary_location_id)
         .outerjoin(
@@ -2730,6 +2743,7 @@ def _stock_overview_query():
         overview_query,
         total_qty,
         location_count,
+        batch_count,
         last_updated,
         primary_location,
         secondary_location,
@@ -2754,6 +2768,7 @@ def list_stock():
         overview_query,
         total_qty,
         location_count,
+        batch_count,
         last_updated,
         primary_location,
         secondary_location,
@@ -2813,6 +2828,7 @@ def list_stock():
             "item": item,
             "total_qty": float(total or 0),
             "location_count": location_count or 0,
+            "batch_count": batch_count or 0,
             "last_updated": last_updated,
             "primary_location": primary_location,
             "secondary_location": secondary_location,
@@ -2822,6 +2838,7 @@ def list_stock():
             item,
             total,
             location_count,
+            batch_count,
             last_updated,
             primary_location,
             secondary_location,
@@ -2868,6 +2885,7 @@ def stock_detail(item_id: int):
             Movement.location_id,
             func.coalesce(func.sum(Movement.quantity), 0).label("quantity"),
             func.max(Movement.date).label("updated_at"),
+            func.max(pending_receipt_case()).label("pending_qty"),
         )
         .filter(Movement.item_id == item_id)
         .group_by(Movement.location_id)
@@ -2893,9 +2911,10 @@ def stock_detail(item_id: int):
     locations_map = {loc.id: loc for loc in all_locations}
     batch_balances = _get_item_location_batch_balances(item_id)
     locations = []
-    for location_id, quantity, updated_at in stock_rows:
+    for location_id, quantity, updated_at, pending_qty in stock_rows:
         quantity = Decimal(quantity or 0)
-        if quantity == 0:
+        is_pending = bool(pending_qty)
+        if quantity == 0 and not is_pending:
             continue
         location = locations_map.get(location_id)
         latest = latest_by_location.get(location_id, {})
@@ -2919,6 +2938,7 @@ def stock_detail(item_id: int):
                 "batch_label": batch_label,
                 "batch_id": batch_id,
                 "batch_count": len(batch_entries),
+                "pending_qty": is_pending,
             }
         )
 
@@ -2933,10 +2953,15 @@ def stock_detail(item_id: int):
         current_user.has_any_role(("admin",)) or is_superuser()
     )
 
+    batch_count = (
+        Batch.query.filter(Batch.item_id == item_id, Batch.removed_at.is_(None)).count()
+    )
+
     return render_template(
         "inventory/stock_detail.html",
         item=item,
         total_on_hand=total_on_hand,
+        batch_count=batch_count,
         locations=locations,
         available_locations=available_locations,
         all_locations=all_locations,

@@ -234,7 +234,9 @@ Receipts recorded without a quantity are stored as `Movement` rows with
 `quantity pending`. Location views include these rows (flagged with a “Qty
 Pending” badge), while aggregate sums continue to ignore them because the
 quantity is zero. Setting a quantity resolves the pending marker and logs a new
-receipt movement for the counted quantity, so totals remain accurate.
+receipt movement for the counted quantity, so totals remain accurate. Batch
+counts include both pending and counted batches, but on-hand totals ignore
+pending quantities.
 
 Relationship map (simplified):
 

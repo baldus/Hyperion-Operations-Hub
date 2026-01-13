@@ -27,7 +27,12 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       const baseAction = form.dataset.actionBase || "";
       form.reset();
-      form.action = baseAction.replace(/0$/, button.dataset.receiptId || "0");
+      const receiptId = button.dataset.receiptId || "0";
+      if (baseAction.includes("/0/")) {
+        form.action = baseAction.replace("/0/", `/${receiptId}/`);
+      } else {
+        form.action = baseAction.replace(/0$/, receiptId);
+      }
       itemLabel.textContent = button.dataset.itemLabel || "-";
       locationLabel.textContent = button.dataset.locationLabel || "-";
       lotLabel.textContent = button.dataset.lotNumber || "-";

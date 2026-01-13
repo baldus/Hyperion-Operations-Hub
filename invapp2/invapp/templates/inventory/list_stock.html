@@ -88,6 +88,7 @@
             {% endif %}
           </a>
         </th>
+        <th>Batches</th>
         <th>
           <a href="{{ build_stock_url(sort='locations', dir='desc' if sort == 'locations' and direction == 'asc' else 'asc', page=1) }}">
             Locations
@@ -139,6 +140,13 @@
             <td>{{ entry.item.sku }}</td>
             <td>{{ entry.item.name }}</td>
             <td>{{ entry.total_qty }}</td>
+            <td>
+              {% if entry.batch_count == 1 %}
+                1 Batch
+              {% else %}
+                {{ entry.batch_count }} Batches
+              {% endif %}
+            </td>
             <td>{{ entry.location_count }}</td>
             <td>
               {% if entry.primary_location %}
@@ -173,7 +181,7 @@
         {% endfor %}
       {% else %}
         <tr>
-          <td colspan="9">No items match the selected filter.</td>
+          <td colspan="10">No items match the selected filter.</td>
         </tr>
       {% endif %}
     </tbody>
