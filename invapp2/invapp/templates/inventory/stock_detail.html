@@ -29,6 +29,7 @@
     <thead>
       <tr>
         <th>Location</th>
+        <th>Lot/Batch</th>
         <th>Quantity</th>
         <th>Last Updated</th>
         <th>Updated By</th>
@@ -43,6 +44,7 @@
         {% for row in locations %}
           <tr>
             <td>{{ row.location.code if row.location else "Unknown" }}</td>
+            <td>{{ row.batch_label }}</td>
             <td>{{ row.quantity }}</td>
             <td>
               {% if row.updated_at %}
@@ -61,17 +63,27 @@
                 </form>
               </td>
               <td>
-                <form method="post" action="{{ url_for('inventory.remove_stock_location', item_id=item.id) }}" class="inline-form">
-                  <input type="hidden" name="location_id" value="{{ row.location.id }}">
-                  <button type="submit" class="bubble-btn danger" onclick="return confirm('Set this location to zero?');">Zero Out</button>
-                </form>
+                <button
+                  type="button"
+                  class="bubble-btn danger remove-from-location-btn"
+                  data-item-id="{{ item.id }}"
+                  data-item-label="{{ item.sku }} - {{ item.name }}"
+                  data-location-id="{{ row.location.id }}"
+                  data-location-label="{{ row.location.code }}"
+                  data-qty="{{ row.quantity }}"
+                  data-batch-id="{{ row.batch_id if row.batch_id is not none else '' }}"
+                  data-lot-number="{{ row.batch_label }}"
+                  data-batch-count="{{ row.batch_count }}"
+                >
+                  Remove from Location
+                </button>
               </td>
             {% endif %}
           </tr>
         {% endfor %}
       {% else %}
         <tr>
-          <td colspan="6">No stock movements recorded for this item yet.</td>
+          <td colspan="{{ 7 if can_edit else 5 }}">No stock movements recorded for this item yet.</td>
         </tr>
       {% endif %}
     </tbody>
@@ -125,5 +137,12 @@
   </div>
 {% endif %}
 
+{% if can_edit %}
+  {% include "inventory/_remove_from_location_modal.html" %}
+{% endif %}
+
 <p><a href="{{ url_for('inventory.list_stock') }}">&larr; Back to Stock Overview</a></p>
+{% if can_edit %}
+  <script src="{{ url_for('static', filename='js/inventory-remove-from-location.js') }}"></script>
+{% endif %}
 {% endblock %}

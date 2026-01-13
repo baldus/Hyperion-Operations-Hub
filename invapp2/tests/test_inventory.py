@@ -260,6 +260,163 @@ def test_list_stock_includes_location_metadata(client, app):
     assert last_updated == second_date
 
 
+def _default_remove_reason(app):
+    reasons = app.config.get("INVENTORY_REMOVE_REASONS", [])
+    if isinstance(reasons, str):
+        reasons = [reason.strip() for reason in reasons.split(",") if reason.strip()]
+    return reasons[0] if reasons else "Adjustment"
+
+
+def test_remove_from_location_all_creates_movement(client, app):
+    with app.app_context():
+        location = Location(code="REM-LOC")
+        item = Item(sku="REM-1", name="Remove Item")
+        db.session.add_all([location, item])
+        db.session.flush()
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                location_id=location.id,
+                quantity=Decimal("8"),
+                movement_type="ADJUST",
+            )
+        )
+        db.session.commit()
+        item_id = item.id
+        location_id = location.id
+        reason = _default_remove_reason(app)
+
+    response = client.post(
+        "/inventory/remove_from_location",
+        data={
+            "item_id": item_id,
+            "location_id": location_id,
+            "remove_mode": "all",
+            "reason": reason,
+            "notes": "testing",
+            "next": f"/inventory/stock/{item_id}",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        total = (
+            db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+            .filter(Movement.item_id == item_id, Movement.location_id == location_id)
+            .scalar()
+        )
+        assert Decimal(total or 0) == 0
+        removal = Movement.query.filter_by(
+            item_id=item_id,
+            location_id=location_id,
+            movement_type="REMOVE_FROM_LOCATION",
+        ).one()
+        assert reason in (removal.reference or "")
+
+
+def test_remove_from_location_partial_reduces_quantity(client, app):
+    with app.app_context():
+        location = Location(code="REM-LOC2")
+        item = Item(sku="REM-2", name="Remove Item 2")
+        db.session.add_all([location, item])
+        db.session.flush()
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                location_id=location.id,
+                quantity=Decimal("10"),
+                movement_type="ADJUST",
+            )
+        )
+        db.session.commit()
+        item_id = item.id
+        location_id = location.id
+        reason = _default_remove_reason(app)
+
+    response = client.post(
+        "/inventory/remove_from_location",
+        data={
+            "item_id": item_id,
+            "location_id": location_id,
+            "remove_mode": "partial",
+            "quantity": "3",
+            "reason": reason,
+            "next": f"/inventory/stock/{item_id}",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        total = (
+            db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+            .filter(Movement.item_id == item_id, Movement.location_id == location_id)
+            .scalar()
+        )
+        assert Decimal(total or 0) == Decimal("7")
+
+
+def test_remove_from_location_rejects_overage(client, app):
+    with app.app_context():
+        location = Location(code="REM-LOC3")
+        item = Item(sku="REM-3", name="Remove Item 3")
+        db.session.add_all([location, item])
+        db.session.flush()
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                location_id=location.id,
+                quantity=Decimal("5"),
+                movement_type="ADJUST",
+            )
+        )
+        db.session.commit()
+        item_id = item.id
+        location_id = location.id
+        reason = _default_remove_reason(app)
+
+    response = client.post(
+        "/inventory/remove_from_location",
+        data={
+            "item_id": item_id,
+            "location_id": location_id,
+            "remove_mode": "partial",
+            "quantity": "12",
+            "reason": reason,
+            "next": f"/inventory/stock/{item_id}",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "Removal quantity exceeds available stock." in response.get_data(as_text=True)
+
+    with app.app_context():
+        total = (
+            db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+            .filter(Movement.item_id == item_id, Movement.location_id == location_id)
+            .scalar()
+        )
+        assert Decimal(total or 0) == Decimal("5")
+
+
+def test_remove_from_location_requires_admin(app, anon_client):
+    create_user(app, username="operator", password="password", role_names=("inventory",))
+    login(anon_client, username="operator", password="password")
+
+    response = anon_client.post(
+        "/inventory/remove_from_location",
+        data={
+            "item_id": 1,
+            "location_id": 1,
+            "remove_mode": "all",
+            "reason": "Adjustment",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 403
+
+
 def test_list_stock_primary_location_placeholder(client, app):
     with app.app_context():
         secondary = Location(code="SECONDARY")

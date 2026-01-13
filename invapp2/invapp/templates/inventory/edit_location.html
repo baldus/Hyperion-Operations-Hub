@@ -18,4 +18,96 @@
 <form method="POST" action="{{ url_for('inventory.delete_location', location_id=location.id) }}" onsubmit="return confirm('Are you sure you want to delete this location? This action cannot be undone.');">
   <button type="submit" class="action-btn action-btn--danger">Delete Location</button>
 </form>
+
+<hr>
+
+<section>
+  <h3>Items at this location</h3>
+  {% if inventory_lines %}
+    <div class="table-container">
+      <table class="inventory-table">
+        <thead>
+          <tr>
+            <th>SKU</th>
+            <th>Item</th>
+            <th>Lot/Batch</th>
+            <th>On Hand</th>
+            {% if can_remove %}
+              <th>Remove</th>
+            {% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in inventory_lines %}
+            <tr>
+              <td>{{ line.sku }}</td>
+              <td>{{ line.name }}</td>
+              <td>{{ line.lot_number or "Unbatched" }}</td>
+              <td>{{ line.on_hand }}</td>
+              {% if can_remove %}
+                <td>
+                  <button
+                    type="button"
+                    class="bubble-btn danger remove-from-location-btn"
+                    data-item-id="{{ line.item_id }}"
+                    data-item-label="{{ line.sku }} - {{ line.name }}"
+                    data-location-id="{{ location.id }}"
+                    data-location-label="{{ location.code }}"
+                    data-qty="{{ line.on_hand }}"
+                    data-batch-id="{{ line.batch_id if line.batch_id is not none else '' }}"
+                    data-lot-number="{{ line.lot_number or 'Unbatched' }}"
+                    data-batch-count="1"
+                  >
+                    Remove
+                  </button>
+                </td>
+              {% endif %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted">No items currently stored at this location.</p>
+  {% endif %}
+
+  {% if can_remove %}
+    <button type="button" class="action-btn action-btn--danger" id="openRemoveAllFromLocation">
+      Remove all items from this location
+    </button>
+  {% endif %}
+</section>
+
+{% if can_remove %}
+  {% include "inventory/_remove_from_location_modal.html" %}
+
+  <div id="removeAllFromLocationModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="removeAllFromLocationTitle">
+    <div class="modal-content">
+      <h3 id="removeAllFromLocationTitle">Remove all items from {{ location.code }}</h3>
+      <p class="muted">Type the location code to confirm bulk removal.</p>
+      <form method="post" action="{{ url_for('inventory.remove_all_items_from_location', location_id=location.id) }}">
+        <label for="remove-all-confirmation">Location code</label>
+        <input id="remove-all-confirmation" type="text" name="confirmation" required>
+
+        <label for="remove-all-reason">Reason</label>
+        <select id="remove-all-reason" name="reason" required>
+          <option value="">Select reason</option>
+          {% for reason in remove_reasons %}
+            <option value="{{ reason }}">{{ reason }}</option>
+          {% endfor %}
+        </select>
+
+        <label for="remove-all-notes">Notes (optional)</label>
+        <textarea id="remove-all-notes" name="notes" rows="3"></textarea>
+
+        <div class="modal-actions">
+          <button type="button" class="bubble-btn" id="closeRemoveAllFromLocation">Cancel</button>
+          <button type="submit" class="bubble-btn danger">Remove All</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/inventory-remove-from-location.js') }}"></script>
+{% endif %}
 {% endblock %}

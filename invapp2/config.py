@@ -64,5 +64,10 @@ class Config:
         os.getenv("PURCHASING_ATTACHMENT_MAX_SIZE_MB", 25)
     )
 
+    INVENTORY_REMOVE_REASONS = os.getenv(
+        "INVENTORY_REMOVE_REASONS",
+        "Damage,Expired,Quality Hold,Scrap,Adjustment,Other",
+    )
+
     ZEBRA_PRINTER_HOST = os.getenv("ZEBRA_PRINTER_HOST", "localhost")
     ZEBRA_PRINTER_PORT = int(os.getenv("ZEBRA_PRINTER_PORT", 9100))

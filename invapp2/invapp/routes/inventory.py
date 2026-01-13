@@ -2162,6 +2162,8 @@ def list_locations():
 
     balances_by_location: dict[int, list[dict[str, Union[Item, int]]]] = defaultdict(list)
     for location_id, item_id, on_hand in balances:
+        if on_hand is None or on_hand == 0:
+            continue
         item = items.get(item_id)
         if not item:
             continue
@@ -2222,9 +2224,20 @@ def add_location():
 
 
 @bp.route("/location/<int:location_id>/edit", methods=["GET", "POST"])
-@require_roles("admin")
+@require_admin_or_superuser
 def edit_location(location_id):
     location = Location.query.get_or_404(location_id)
+    can_remove = current_user.is_authenticated and (
+        current_user.has_any_role(("admin",)) or is_superuser()
+    )
+
+    def load_location_lines():
+        lines = get_location_inventory_lines(location_id)
+        return [
+            line
+            for line in lines
+            if Decimal(str(line.get("on_hand", 0))) > 0
+        ]
 
     if request.method == "POST":
         code = (request.form.get("code") or "").strip()
@@ -2246,6 +2259,10 @@ def edit_location(location_id):
                 location=location,
                 form_code=code,
                 form_description=description,
+                inventory_lines=load_location_lines(),
+                can_remove=can_remove,
+                remove_reasons=_get_remove_reasons(),
+                next_url=url_for("inventory.edit_location", location_id=location_id),
             )
 
         location.code = code
@@ -2259,7 +2276,68 @@ def edit_location(location_id):
         location=location,
         form_code=location.code,
         form_description=location.description or "",
+        inventory_lines=load_location_lines(),
+        can_remove=can_remove,
+        remove_reasons=_get_remove_reasons(),
+        next_url=url_for("inventory.edit_location", location_id=location_id),
     )
+
+
+@bp.post("/location/<int:location_id>/remove-all-items")
+@require_admin_or_superuser
+def remove_all_items_from_location(location_id: int):
+    location = Location.query.get_or_404(location_id)
+    confirmation = (request.form.get("confirmation") or "").strip()
+    reason = (request.form.get("reason") or "").strip()
+    notes = (request.form.get("notes") or "").strip()
+
+    if confirmation != location.code:
+        flash("Location confirmation does not match.", "danger")
+        return redirect(url_for("inventory.edit_location", location_id=location_id))
+
+    remove_reasons = _get_remove_reasons()
+    if not reason or (remove_reasons and reason not in remove_reasons):
+        flash("Select a valid removal reason.", "danger")
+        return redirect(url_for("inventory.edit_location", location_id=location_id))
+
+    lines = get_location_inventory_lines(location_id)
+    removal_lines = [
+        line
+        for line in lines
+        if Decimal(str(line.get("on_hand", 0))) > 0
+    ]
+    if not removal_lines:
+        flash("No stock available to remove at this location.", "info")
+        return redirect(url_for("inventory.edit_location", location_id=location_id))
+
+    reference = reason if not notes else f"{reason} - {notes}"
+    total_lines = 0
+    total_qty = Decimal("0")
+    with db.session.begin_nested():
+        for line in removal_lines:
+            qty = Decimal(str(line.get("on_hand", 0)))
+            if qty <= 0:
+                continue
+            db.session.add(
+                Movement(
+                    item_id=line["item_id"],
+                    batch_id=line.get("batch_id"),
+                    location_id=location_id,
+                    quantity=-qty,
+                    movement_type="REMOVE_FROM_LOCATION",
+                    person=_movement_person(),
+                    reference=reference,
+                )
+            )
+            total_lines += 1
+            total_qty += qty
+    db.session.commit()
+
+    flash(
+        f"Removed {total_qty} units across {total_lines} items/lots from {location.code}.",
+        "success",
+    )
+    return redirect(url_for("inventory.edit_location", location_id=location_id))
 
 
 @bp.route("/location/<int:location_id>/print-label", methods=["POST"])
@@ -2493,6 +2571,60 @@ def _get_location_on_hand(item_id: int, location_id: int) -> Decimal:
     return Decimal(total or 0)
 
 
+def _get_location_on_hand_by_batch(
+    item_id: int, location_id: int, batch_id: int | None
+) -> Decimal:
+    filters = [Movement.item_id == item_id, Movement.location_id == location_id]
+    if batch_id is None:
+        filters.append(Movement.batch_id.is_(None))
+    else:
+        filters.append(Movement.batch_id == batch_id)
+
+    total = (
+        db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+        .filter(*filters)
+        .scalar()
+    )
+    return Decimal(total or 0)
+
+
+def _get_remove_reasons() -> list[str]:
+    reasons = current_app.config.get("INVENTORY_REMOVE_REASONS", [])
+    if isinstance(reasons, str):
+        reasons = [reason.strip() for reason in reasons.split(",")]
+    return [reason for reason in reasons if reason]
+
+
+def _get_item_location_batch_balances(item_id: int) -> dict[int, list[dict[str, object]]]:
+    rows = (
+        db.session.query(
+            Movement.location_id,
+            Movement.batch_id,
+            Batch.lot_number,
+            func.coalesce(func.sum(Movement.quantity), 0).label("on_hand"),
+        )
+        .outerjoin(Batch, Batch.id == Movement.batch_id)
+        .filter(Movement.item_id == item_id)
+        .filter(or_(Movement.batch_id.is_(None), Batch.removed_at.is_(None)))
+        .group_by(Movement.location_id, Movement.batch_id, Batch.lot_number)
+        .all()
+    )
+
+    balances: dict[int, list[dict[str, object]]] = defaultdict(list)
+    for location_id, batch_id, lot_number, on_hand in rows:
+        qty = Decimal(on_hand or 0)
+        if qty == 0:
+            continue
+        balances[location_id].append(
+            {
+                "batch_id": batch_id,
+                "lot_number": lot_number or "",
+                "quantity": qty,
+            }
+        )
+    return balances
+
+
 def _movement_person() -> str | None:
     if not current_user.is_authenticated:
         return None
@@ -2695,6 +2827,11 @@ def stock_detail(item_id: int):
         .all()
     )
 
+    total_on_hand = db.session.query(
+        func.coalesce(func.sum(Movement.quantity), 0)
+    ).filter(Movement.item_id == item_id).scalar()
+    total_on_hand = Decimal(total_on_hand or 0)
+
     latest_movements = (
         db.session.query(Movement.location_id, Movement.person, Movement.date)
         .filter(Movement.item_id == item_id)
@@ -2707,18 +2844,34 @@ def stock_detail(item_id: int):
             latest_by_location[location_id] = {"person": person, "date": date}
 
     locations_map = {loc.id: loc for loc in all_locations}
+    batch_balances = _get_item_location_batch_balances(item_id)
     locations = []
-    total_on_hand = Decimal("0")
     for location_id, quantity, updated_at in stock_rows:
+        quantity = Decimal(quantity or 0)
+        if quantity == 0:
+            continue
         location = locations_map.get(location_id)
         latest = latest_by_location.get(location_id, {})
-        total_on_hand += Decimal(quantity or 0)
+        batch_entries = batch_balances.get(location_id, [])
+        if len(batch_entries) == 1:
+            batch_entry = batch_entries[0]
+            batch_label = batch_entry["lot_number"] or "Unbatched"
+            batch_id = batch_entry["batch_id"]
+        elif len(batch_entries) > 1:
+            batch_label = "Multiple lots"
+            batch_id = None
+        else:
+            batch_label = "Unbatched"
+            batch_id = None
         locations.append(
             {
                 "location": location,
-                "quantity": quantity or Decimal("0"),
+                "quantity": quantity,
                 "updated_at": updated_at or latest.get("date"),
                 "updated_by": latest.get("person"),
+                "batch_label": batch_label,
+                "batch_id": batch_id,
+                "batch_count": len(batch_entries),
             }
         )
 
@@ -2742,6 +2895,8 @@ def stock_detail(item_id: int):
         all_locations=all_locations,
         transfer_from_locations=transfer_from_locations,
         can_edit=can_edit,
+        remove_reasons=_get_remove_reasons(),
+        next_url=url_for("inventory.stock_detail", item_id=item_id),
     )
 
 
@@ -2945,6 +3100,128 @@ def remove_stock_location(item_id: int):
         "success",
     )
     return redirect(url_for("inventory.stock_detail", item_id=item_id))
+
+
+@bp.post("/remove_from_location")
+@require_admin_or_superuser
+def remove_from_location():
+    item_id = request.form.get("item_id", type=int)
+    location_id = request.form.get("location_id", type=int)
+    raw_batch_id = (request.form.get("batch_id") or "").strip()
+    remove_mode = (request.form.get("remove_mode") or "all").strip()
+    reason = (request.form.get("reason") or "").strip()
+    notes = (request.form.get("notes") or "").strip()
+    next_url = request.form.get("next") or url_for("inventory.list_stock")
+
+    if item_id is None or location_id is None:
+        flash("Select a valid item and location.", "danger")
+        return redirect(next_url)
+
+    item = Item.query.get(item_id)
+    location = Location.query.get(location_id)
+    if item is None or location is None:
+        flash("Item or location not found.", "danger")
+        return redirect(next_url)
+
+    remove_reasons = _get_remove_reasons()
+    if not reason or (remove_reasons and reason not in remove_reasons):
+        flash("Select a valid removal reason.", "danger")
+        return redirect(next_url)
+
+    batch_id = None
+    if raw_batch_id and raw_batch_id.lower() != "none":
+        try:
+            batch_id = int(raw_batch_id)
+        except (TypeError, ValueError):
+            flash("Invalid lot/batch selection.", "danger")
+            return redirect(next_url)
+
+    removal_entries: list[tuple[int | None, Decimal]] = []
+    if batch_id is not None:
+        batch = Batch.query.get(batch_id)
+        if batch is None or batch.item_id != item_id:
+            flash("Invalid lot/batch selection.", "danger")
+            return redirect(next_url)
+        available = _get_location_on_hand_by_batch(item_id, location_id, batch_id)
+        if available <= 0:
+            flash("No stock available to remove for that lot/batch.", "info")
+            return redirect(next_url)
+        if remove_mode == "partial":
+            qty = _parse_stock_quantity(request.form.get("quantity"))
+            if qty is None or qty <= 0:
+                flash("Enter a valid removal quantity.", "danger")
+                return redirect(next_url)
+            if qty > available:
+                flash("Removal quantity exceeds available stock.", "danger")
+                return redirect(next_url)
+        else:
+            qty = available
+        removal_entries.append((batch_id, qty))
+    else:
+        batch_rows = (
+            db.session.query(
+                Movement.batch_id,
+                Batch.lot_number,
+                func.coalesce(func.sum(Movement.quantity), 0).label("on_hand"),
+            )
+            .outerjoin(Batch, Batch.id == Movement.batch_id)
+            .filter(Movement.item_id == item_id, Movement.location_id == location_id)
+            .filter(or_(Movement.batch_id.is_(None), Batch.removed_at.is_(None)))
+            .group_by(Movement.batch_id, Batch.lot_number)
+            .all()
+        )
+        batch_entries = [
+            (batch_id, Decimal(on_hand or 0))
+            for batch_id, _, on_hand in batch_rows
+            if Decimal(on_hand or 0) > 0
+        ]
+        if not batch_entries:
+            flash("No stock available to remove at that location.", "info")
+            return redirect(next_url)
+        if remove_mode == "partial":
+            if len(batch_entries) != 1:
+                flash(
+                    "Partial removal requires a specific lot/batch selection.",
+                    "danger",
+                )
+                return redirect(next_url)
+            available = batch_entries[0][1]
+            qty = _parse_stock_quantity(request.form.get("quantity"))
+            if qty is None or qty <= 0:
+                flash("Enter a valid removal quantity.", "danger")
+                return redirect(next_url)
+            if qty > available:
+                flash("Removal quantity exceeds available stock.", "danger")
+                return redirect(next_url)
+            removal_entries.append((batch_entries[0][0], qty))
+        else:
+            removal_entries = batch_entries
+
+    reference = reason if not notes else f"{reason} - {notes}"
+    total_removed = Decimal("0")
+    with db.session.begin_nested():
+        for entry_batch_id, qty in removal_entries:
+            if qty <= 0:
+                continue
+            db.session.add(
+                Movement(
+                    item_id=item_id,
+                    batch_id=entry_batch_id,
+                    location_id=location_id,
+                    quantity=-qty,
+                    movement_type="REMOVE_FROM_LOCATION",
+                    person=_movement_person(),
+                    reference=reference,
+                )
+            )
+            total_removed += qty
+    db.session.commit()
+
+    flash(
+        f"Removed {total_removed} of {item.sku} from {location.code}.",
+        "success",
+    )
+    return redirect(next_url)
 
 
 @bp.route("/stock/delete-all", methods=["POST"])

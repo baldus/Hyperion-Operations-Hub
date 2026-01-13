@@ -218,6 +218,15 @@ and relationships:
 * **Batch** (`Batch`, table `batch`) – lot/batch records linked to items and
   (optionally) movements.
 
+### Removing stock from a location
+
+Removing inventory from a location records a stock movement entry (type
+`REMOVE_FROM_LOCATION`) instead of deleting items, batches, or locations. The
+movement uses a negative quantity to zero or reduce the on-hand balance for the
+target item/lot/location combination. Reasons for removal are configurable via
+the `INVENTORY_REMOVE_REASONS` app setting (comma-separated list). See
+`invapp/routes/inventory.py` for the handling logic and inventory UI routes.
+
 Relationship map (simplified):
 
 ```
