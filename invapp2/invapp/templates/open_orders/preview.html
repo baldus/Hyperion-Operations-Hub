@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Open Orders Import Preview</h2>
+
+<p><strong>File:</strong> {{ filename }}</p>
+
+<div class="card">
+    <h3>Summary</h3>
+    <ul>
+        <li><strong>New:</strong> {{ summary.counts.new }}</li>
+        <li><strong>Still Open:</strong> {{ summary.counts.still_open }}</li>
+        <li><strong>Completed:</strong> {{ summary.counts.completed }}</li>
+        <li><strong>Changed:</strong> {{ summary.counts.changed }}</li>
+    </ul>
+</div>
+
+<form method="post" action="{{ url_for('open_orders.open_orders_import_commit') }}">
+    <input type="hidden" name="token" value="{{ token }}">
+    <button type="submit" class="action-btn primary-action">Commit Import</button>
+    <a href="{{ url_for('open_orders.open_orders_import') }}" class="action-btn subtle-action">Cancel</a>
+</form>
+
+<div class="card">
+    <h3>New Lines</h3>
+    {% if summary.new_rows %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>SO #</th>
+                    <th>Customer</th>
+                    <th>Item</th>
+                    <th>Qty Remaining</th>
+                    <th>Ship By</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in summary.new_rows %}
+                <tr>
+                    <td>{{ row.so_no }}</td>
+                    <td>{{ row.customer_name }}</td>
+                    <td>{{ row.item_id }}</td>
+                    <td>{{ row.qty_remaining }}</td>
+                    <td>{{ row.ship_by }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No new lines detected.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3>Still Open</h3>
+    {% if summary.still_open_rows %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>SO #</th>
+                    <th>Customer</th>
+                    <th>Item</th>
+                    <th>Qty Remaining</th>
+                    <th>Ship By</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in summary.still_open_rows %}
+                <tr>
+                    <td>{{ row.so_no }}</td>
+                    <td>{{ row.customer_name }}</td>
+                    <td>{{ row.item_id }}</td>
+                    <td>{{ row.qty_remaining }}</td>
+                    <td>{{ row.ship_by }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No still-open lines detected.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3>Changed Lines</h3>
+    {% if summary.changed_rows %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>SO #</th>
+                    <th>Customer</th>
+                    <th>Item</th>
+                    <th>Qty Remaining</th>
+                    <th>Ship By</th>
+                    <th>Changed Fields</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in summary.changed_rows %}
+                <tr>
+                    <td>{{ row.so_no }}</td>
+                    <td>{{ row.customer_name }}</td>
+                    <td>{{ row.item_id }}</td>
+                    <td>{{ row.qty_remaining }}</td>
+                    <td>{{ row.ship_by }}</td>
+                    <td>{{ row.changed_fields | join(', ') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No changed lines detected.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3>Completed Lines</h3>
+    {% if summary.completed_rows %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>SO #</th>
+                    <th>Customer</th>
+                    <th>Item</th>
+                    <th>Qty Remaining</th>
+                    <th>Ship By</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in summary.completed_rows %}
+                <tr>
+                    <td>{{ row.so_no }}</td>
+                    <td>{{ row.customer_name }}</td>
+                    <td>{{ row.item_id }}</td>
+                    <td>{{ row.qty_remaining }}</td>
+                    <td>{{ row.ship_by }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No completed lines detected.</p>
+    {% endif %}
+</div>
+{% endblock %}

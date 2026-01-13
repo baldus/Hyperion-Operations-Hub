@@ -17,3 +17,7 @@ Flask-Login==0.6.3
 
 # Developer tooling / tests
 pytest==8.3.2
+
+# Excel import support
+pandas==2.2.2
+openpyxl==3.1.5

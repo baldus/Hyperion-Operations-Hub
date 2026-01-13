@@ -1531,6 +1531,137 @@ class Reservation(db.Model):
         )
 
 
+class OpenOrderSystemState:
+    NEW = "NEW"
+    OPEN = "OPEN"
+    COMPLETED = "COMPLETED"
+    REOPENED = "REOPENED"
+
+    ACTIVE_STATES = {NEW, OPEN, REOPENED}
+    ALL_STATES = [NEW, OPEN, COMPLETED, REOPENED]
+
+
+class OpenOrderInternalStatus:
+    UNREVIEWED = "UNREVIEWED"
+    IN_PROGRESS = "IN_PROGRESS"
+    NEEDS_FOLLOWUP = "NEEDS_FOLLOWUP"
+    WAITING_CUSTOMER = "WAITING_CUSTOMER"
+    DONE = "DONE"
+
+    ALL_STATUSES = [
+        UNREVIEWED,
+        IN_PROGRESS,
+        NEEDS_FOLLOWUP,
+        WAITING_CUSTOMER,
+        DONE,
+    ]
+
+
+class OpenOrderUpload(db.Model):
+    __tablename__ = "open_order_upload"
+
+    id = db.Column(db.Integer, primary_key=True)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    uploaded_by_user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id", ondelete="SET NULL")
+    )
+    source_filename = db.Column(db.String(512), nullable=False)
+    file_hash = db.Column(db.String(40), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+
+    uploaded_by = db.relationship(
+        "User", backref=db.backref("open_order_uploads", lazy="dynamic")
+    )
+
+    __table_args__ = (db.Index("ix_open_order_upload_uploaded_at", "uploaded_at"),)
+
+
+class OpenOrderLine(db.Model):
+    __tablename__ = "open_order_line"
+
+    id = db.Column(db.Integer, primary_key=True)
+    natural_key = db.Column(db.String(128), nullable=False, unique=True, index=True)
+    so_no = db.Column(db.String(64), nullable=False)
+    so_state = db.Column(db.String(64), nullable=True)
+    so_date = db.Column(db.Date, nullable=True)
+    ship_by = db.Column(db.Date, nullable=True)
+    customer_id = db.Column(db.String(64), nullable=True)
+    customer_name = db.Column(db.String(255), nullable=True)
+    item_id = db.Column(db.String(128), nullable=True)
+    line_description = db.Column(db.Text, nullable=True)
+    uom = db.Column(db.String(64), nullable=True)
+    qty_ordered = db.Column(db.Numeric(12, 3), nullable=True)
+    qty_shipped = db.Column(db.Numeric(12, 3), nullable=True)
+    qty_remaining = db.Column(db.Numeric(12, 3), nullable=True)
+    unit_price = db.Column(db.Numeric(12, 2), nullable=True)
+    part_number = db.Column(db.String(128), nullable=True)
+
+    system_state = db.Column(
+        db.String(32), nullable=False, default=OpenOrderSystemState.NEW
+    )
+    first_seen_upload_id = db.Column(
+        db.Integer, db.ForeignKey("open_order_upload.id", ondelete="SET NULL")
+    )
+    last_seen_upload_id = db.Column(
+        db.Integer, db.ForeignKey("open_order_upload.id", ondelete="SET NULL")
+    )
+    completed_upload_id = db.Column(
+        db.Integer, db.ForeignKey("open_order_upload.id", ondelete="SET NULL")
+    )
+    first_seen_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    last_seen_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    completed_at = db.Column(db.DateTime, nullable=True)
+
+    internal_status = db.Column(
+        db.String(64), nullable=False, default=OpenOrderInternalStatus.UNREVIEWED
+    )
+    owner_user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="SET NULL"))
+    priority = db.Column(db.Integer, nullable=True)
+    promised_date = db.Column(db.Date, nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+
+    first_seen_upload = db.relationship(
+        "OpenOrderUpload", foreign_keys=[first_seen_upload_id]
+    )
+    last_seen_upload = db.relationship(
+        "OpenOrderUpload", foreign_keys=[last_seen_upload_id]
+    )
+    completed_upload = db.relationship(
+        "OpenOrderUpload", foreign_keys=[completed_upload_id]
+    )
+    owner = db.relationship("User")
+
+    __table_args__ = (
+        db.Index("ix_open_order_line_system_state", "system_state"),
+        db.Index("ix_open_order_line_customer_id", "customer_id"),
+        db.Index("ix_open_order_line_so_no", "so_no"),
+        db.Index("ix_open_order_line_item_id", "item_id"),
+    )
+
+
+class OpenOrderLineSnapshot(db.Model):
+    __tablename__ = "open_order_line_snapshot"
+
+    id = db.Column(db.Integer, primary_key=True)
+    upload_id = db.Column(
+        db.Integer, db.ForeignKey("open_order_upload.id", ondelete="CASCADE")
+    )
+    line_id = db.Column(
+        db.Integer, db.ForeignKey("open_order_line.id", ondelete="CASCADE")
+    )
+    snapshot_json = db.Column(db.JSON, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    upload = db.relationship(
+        "OpenOrderUpload",
+        backref=db.backref("line_snapshots", lazy="dynamic", cascade="all, delete-orphan"),
+    )
+    line = db.relationship(
+        "OpenOrderLine",
+        backref=db.backref("snapshots", lazy="dynamic", cascade="all, delete-orphan"),
+    )
+
+
 # Backwards compatibility aliases for legacy imports
 OrderItem = OrderLine
 OrderBOMComponent = OrderComponent
