@@ -37,6 +37,7 @@
         <th>Code</th>
         <th>Description</th>
         <th>Stock</th>
+        <th>Pending Qty</th>
         {% if current_user.is_authenticated and current_user.has_role('admin') %}
         <th>Actions</th>
         {% endif %}
@@ -54,7 +55,9 @@
               {% for balance in balances %}
                 <li>
                   <strong>{{ balance.item.sku }}</strong>
-                  {% if balance.quantity == 0 %}
+                  {% if balance.pending_qty %}
+                    <span class="badge">Qty Pending</span>
+                  {% elif balance.quantity == 0 %}
                     <span class="muted">present (not counted)</span>
                   {% else %}
                     ({{ balance.quantity }})
@@ -65,6 +68,14 @@
             </ul>
           {% else %}
             <span class="muted">No stock</span>
+          {% endif %}
+        </td>
+        <td>
+          {% set pending_count = pending_count_by_location.get(loc.id, 0) %}
+          {% if pending_count %}
+            <span class="badge">{{ pending_count }} pending</span>
+          {% else %}
+            <span class="muted">-</span>
           {% endif %}
         </td>
         {% if current_user.is_authenticated and current_user.has_role('admin') %}

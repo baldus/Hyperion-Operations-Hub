@@ -32,7 +32,7 @@ from sqlalchemy.orm import aliased, joinedload, lazyload, load_only
 from sqlalchemy.orm.exc import DetachedInstanceError
 
 from invapp.auth import blueprint_page_guard
-from invapp.login import current_user
+from invapp.login import current_user, login_required
 from invapp.permissions import resolve_edit_roles
 from invapp.security import require_admin_or_superuser, require_any_role, require_roles
 from invapp.superuser import is_superuser
@@ -56,8 +56,10 @@ from invapp.models import (
 )
 from invapp.services.stock_transfer import (
     MoveLineRequest,
+    PENDING_RECEIPT_MARKER,
     get_location_inventory_lines,
     move_inventory_lines,
+    pending_receipt_case,
 )
 from invapp.services.item_locations import apply_smart_item_locations
 from invapp.utils.csv_export import export_rows_to_csv
@@ -2136,6 +2138,7 @@ def list_locations():
             Movement.location_id,
             Movement.item_id,
             func.sum(Movement.quantity).label("on_hand"),
+            func.max(pending_receipt_case()).label("pending_qty"),
         )
         .join(Item, Item.id == Movement.item_id)
         .join(Location, Location.id == Movement.location_id)
@@ -2153,24 +2156,32 @@ def list_locations():
         )
 
     balances = balances_query.all()
-    item_ids = {item_id for _, item_id, _ in balances}
+    item_ids = {item_id for _, item_id, _, _ in balances}
     items = (
         {i.id: i for i in Item.query.filter(Item.id.in_(item_ids)).all()}
         if item_ids
         else {}
     )
 
-    balances_by_location: dict[int, list[dict[str, Union[Item, int]]]] = defaultdict(list)
-    for location_id, item_id, on_hand in balances:
+    balances_by_location: dict[int, list[dict[str, Union[Item, int, bool]]]] = defaultdict(list)
+    pending_count_by_location: dict[int, int] = defaultdict(int)
+    for location_id, item_id, on_hand, pending_qty in balances:
+        on_hand_value = int(on_hand or 0)
+        is_pending = bool(pending_qty)
+        if on_hand_value == 0 and not is_pending:
+            continue
         item = items.get(item_id)
         if not item:
             continue
         balances_by_location[location_id].append(
             {
                 "item": item,
-                "quantity": int(on_hand),
+                "quantity": on_hand_value,
+                "pending_qty": is_pending,
             }
         )
+        if is_pending:
+            pending_count_by_location[location_id] += 1
 
     for location_balances in balances_by_location.values():
         location_balances.sort(key=lambda entry: entry["item"].sku)
@@ -2183,6 +2194,7 @@ def list_locations():
         pages=pagination.pages,
         search=search,
         balances_by_location=balances_by_location,
+        pending_count_by_location=pending_count_by_location,
     )
 
 
@@ -2222,9 +2234,23 @@ def add_location():
 
 
 @bp.route("/location/<int:location_id>/edit", methods=["GET", "POST"])
-@require_roles("admin")
+@login_required
 def edit_location(location_id):
     location = Location.query.get_or_404(location_id)
+    can_edit_location = current_user.is_authenticated and (
+        current_user.has_any_role(("admin",)) or is_superuser()
+    )
+    can_remove = can_edit_location
+    can_set_pending = current_user.is_authenticated
+    can_move_pending = current_user.is_authenticated
+
+    all_locations = Location.query.order_by(Location.code).all()
+
+    def load_location_lines():
+        return get_location_inventory_lines(location_id, include_pending=True)
+
+    if request.method == "POST" and not can_edit_location:
+        abort(403)
 
     if request.method == "POST":
         code = (request.form.get("code") or "").strip()
@@ -2246,6 +2272,14 @@ def edit_location(location_id):
                 location=location,
                 form_code=code,
                 form_description=description,
+                inventory_lines=load_location_lines(),
+                can_remove=can_remove,
+                can_edit_location=can_edit_location,
+                can_set_pending=can_set_pending,
+                can_move_pending=can_move_pending,
+                all_locations=all_locations,
+                remove_reasons=_get_remove_reasons(),
+                next_url=url_for("inventory.edit_location", location_id=location_id),
             )
 
         location.code = code
@@ -2259,7 +2293,80 @@ def edit_location(location_id):
         location=location,
         form_code=location.code,
         form_description=location.description or "",
+        inventory_lines=load_location_lines(),
+        can_remove=can_remove,
+        can_edit_location=can_edit_location,
+        can_set_pending=can_set_pending,
+        can_move_pending=can_move_pending,
+        all_locations=all_locations,
+        remove_reasons=_get_remove_reasons(),
+        next_url=url_for("inventory.edit_location", location_id=location_id),
     )
+
+
+@bp.post("/location/<int:location_id>/remove-all-items")
+@require_admin_or_superuser
+def remove_all_items_from_location(location_id: int):
+    location = Location.query.get_or_404(location_id)
+    confirmation = (request.form.get("confirmation") or "").strip()
+    reason = (request.form.get("reason") or "").strip()
+    notes = (request.form.get("notes") or "").strip()
+
+    if confirmation != location.code:
+        flash("Location confirmation does not match.", "danger")
+        return redirect(url_for("inventory.edit_location", location_id=location_id))
+
+    remove_reasons = _get_remove_reasons()
+    if not reason or (remove_reasons and reason not in remove_reasons):
+        flash("Select a valid removal reason.", "danger")
+        return redirect(url_for("inventory.edit_location", location_id=location_id))
+
+    lines = get_location_inventory_lines(location_id, include_pending=True)
+    removal_lines = [
+        line
+        for line in lines
+        if Decimal(str(line.get("on_hand", 0))) > 0 or line.get("pending_qty")
+    ]
+    if not removal_lines:
+        flash("No stock available to remove at this location.", "info")
+        return redirect(url_for("inventory.edit_location", location_id=location_id))
+
+    reference = reason if not notes else f"{reason} - {notes}"
+    total_lines = 0
+    total_qty = Decimal("0")
+    with db.session.begin_nested():
+        for line in removal_lines:
+            qty = Decimal(str(line.get("on_hand", 0)))
+            is_pending = bool(line.get("pending_qty"))
+            if qty <= 0 and not is_pending:
+                continue
+            if is_pending and line.get("pending_receipt_id"):
+                pending_movement = Movement.query.get(line["pending_receipt_id"])
+                if _is_pending_receipt(pending_movement):
+                    pending_movement.reference = _resolve_pending_reference(
+                        pending_movement.reference, "voided"
+                    )
+            db.session.add(
+                Movement(
+                    item_id=line["item_id"],
+                    batch_id=line.get("batch_id"),
+                    location_id=location_id,
+                    quantity=-qty if qty > 0 else Decimal("0"),
+                    movement_type="REMOVE_FROM_LOCATION",
+                    person=_movement_person(),
+                    reference=reference,
+                )
+            )
+            total_lines += 1
+            if qty > 0:
+                total_qty += qty
+    db.session.commit()
+
+    flash(
+        f"Removed {total_qty} units across {total_lines} items/lots from {location.code}.",
+        "success",
+    )
+    return redirect(url_for("inventory.edit_location", location_id=location_id))
 
 
 @bp.route("/location/<int:location_id>/print-label", methods=["POST"])
@@ -2493,6 +2600,78 @@ def _get_location_on_hand(item_id: int, location_id: int) -> Decimal:
     return Decimal(total or 0)
 
 
+def _get_location_on_hand_by_batch(
+    item_id: int, location_id: int, batch_id: int | None
+) -> Decimal:
+    filters = [Movement.item_id == item_id, Movement.location_id == location_id]
+    if batch_id is None:
+        filters.append(Movement.batch_id.is_(None))
+    else:
+        filters.append(Movement.batch_id == batch_id)
+
+    total = (
+        db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+        .filter(*filters)
+        .scalar()
+    )
+    return Decimal(total or 0)
+
+
+def _get_remove_reasons() -> list[str]:
+    reasons = current_app.config.get("INVENTORY_REMOVE_REASONS", [])
+    if isinstance(reasons, str):
+        reasons = [reason.strip() for reason in reasons.split(",")]
+    return [reason for reason in reasons if reason]
+
+
+def _get_item_location_batch_balances(item_id: int) -> dict[int, list[dict[str, object]]]:
+    rows = (
+        db.session.query(
+            Movement.location_id,
+            Movement.batch_id,
+            Batch.lot_number,
+            func.coalesce(func.sum(Movement.quantity), 0).label("on_hand"),
+        )
+        .outerjoin(Batch, Batch.id == Movement.batch_id)
+        .filter(Movement.item_id == item_id)
+        .filter(or_(Movement.batch_id.is_(None), Batch.removed_at.is_(None)))
+        .group_by(Movement.location_id, Movement.batch_id, Batch.lot_number)
+        .all()
+    )
+
+    balances: dict[int, list[dict[str, object]]] = defaultdict(list)
+    for location_id, batch_id, lot_number, on_hand in rows:
+        qty = Decimal(on_hand or 0)
+        if qty == 0:
+            continue
+        balances[location_id].append(
+            {
+                "batch_id": batch_id,
+                "lot_number": lot_number or "",
+                "quantity": qty,
+            }
+        )
+    return balances
+
+
+def _is_pending_receipt(movement: Movement | None) -> bool:
+    if movement is None:
+        return False
+    reference = (movement.reference or "").lower()
+    return (
+        movement.movement_type == "RECEIPT"
+        and (movement.quantity or 0) == 0
+        and PENDING_RECEIPT_MARKER in reference
+    )
+
+
+def _resolve_pending_reference(reference: str | None, status: str) -> str:
+    base = (reference or "Receipt").replace(" (quantity pending)", "")
+    base = base.replace("quantity pending", "").strip()
+    base = " ".join(base.split())
+    return f"{base} (quantity {status})"
+
+
 def _movement_person() -> str | None:
     if not current_user.is_authenticated:
         return None
@@ -2519,6 +2698,16 @@ def _stock_overview_query():
         .subquery()
     )
 
+    batch_agg = (
+        db.session.query(
+            Batch.item_id.label("item_id"),
+            func.count(Batch.id).label("batch_count"),
+        )
+        .filter(Batch.removed_at.is_(None))
+        .group_by(Batch.item_id)
+        .subquery()
+    )
+
     primary_location = aliased(Location)
     secondary_location = aliased(Location)
     point_of_use_location = aliased(Location)
@@ -2527,6 +2716,7 @@ def _stock_overview_query():
     location_count = func.coalesce(
         movement_agg.c.location_count, 0
     ).label("location_count")
+    batch_count = func.coalesce(batch_agg.c.batch_count, 0).label("batch_count")
     last_updated = movement_agg.c.last_updated.label("last_updated")
 
     overview_query = (
@@ -2534,6 +2724,7 @@ def _stock_overview_query():
             Item,
             total_qty,
             location_count,
+            batch_count,
             last_updated,
             primary_location,
             secondary_location,
@@ -2541,6 +2732,7 @@ def _stock_overview_query():
         )
         .options(lazyload(Item.default_location))
         .outerjoin(movement_agg, movement_agg.c.item_id == Item.id)
+        .outerjoin(batch_agg, batch_agg.c.item_id == Item.id)
         .outerjoin(primary_location, primary_location.id == Item.default_location_id)
         .outerjoin(secondary_location, secondary_location.id == Item.secondary_location_id)
         .outerjoin(
@@ -2551,6 +2743,7 @@ def _stock_overview_query():
         overview_query,
         total_qty,
         location_count,
+        batch_count,
         last_updated,
         primary_location,
         secondary_location,
@@ -2575,6 +2768,7 @@ def list_stock():
         overview_query,
         total_qty,
         location_count,
+        batch_count,
         last_updated,
         primary_location,
         secondary_location,
@@ -2634,6 +2828,7 @@ def list_stock():
             "item": item,
             "total_qty": float(total or 0),
             "location_count": location_count or 0,
+            "batch_count": batch_count or 0,
             "last_updated": last_updated,
             "primary_location": primary_location,
             "secondary_location": secondary_location,
@@ -2643,6 +2838,7 @@ def list_stock():
             item,
             total,
             location_count,
+            batch_count,
             last_updated,
             primary_location,
             secondary_location,
@@ -2689,11 +2885,17 @@ def stock_detail(item_id: int):
             Movement.location_id,
             func.coalesce(func.sum(Movement.quantity), 0).label("quantity"),
             func.max(Movement.date).label("updated_at"),
+            func.max(pending_receipt_case()).label("pending_qty"),
         )
         .filter(Movement.item_id == item_id)
         .group_by(Movement.location_id)
         .all()
     )
+
+    total_on_hand = db.session.query(
+        func.coalesce(func.sum(Movement.quantity), 0)
+    ).filter(Movement.item_id == item_id).scalar()
+    total_on_hand = Decimal(total_on_hand or 0)
 
     latest_movements = (
         db.session.query(Movement.location_id, Movement.person, Movement.date)
@@ -2707,18 +2909,36 @@ def stock_detail(item_id: int):
             latest_by_location[location_id] = {"person": person, "date": date}
 
     locations_map = {loc.id: loc for loc in all_locations}
+    batch_balances = _get_item_location_batch_balances(item_id)
     locations = []
-    total_on_hand = Decimal("0")
-    for location_id, quantity, updated_at in stock_rows:
+    for location_id, quantity, updated_at, pending_qty in stock_rows:
+        quantity = Decimal(quantity or 0)
+        is_pending = bool(pending_qty)
+        if quantity == 0 and not is_pending:
+            continue
         location = locations_map.get(location_id)
         latest = latest_by_location.get(location_id, {})
-        total_on_hand += Decimal(quantity or 0)
+        batch_entries = batch_balances.get(location_id, [])
+        if len(batch_entries) == 1:
+            batch_entry = batch_entries[0]
+            batch_label = batch_entry["lot_number"] or "Unbatched"
+            batch_id = batch_entry["batch_id"]
+        elif len(batch_entries) > 1:
+            batch_label = "Multiple lots"
+            batch_id = None
+        else:
+            batch_label = "Unbatched"
+            batch_id = None
         locations.append(
             {
                 "location": location,
-                "quantity": quantity or Decimal("0"),
+                "quantity": quantity,
                 "updated_at": updated_at or latest.get("date"),
                 "updated_by": latest.get("person"),
+                "batch_label": batch_label,
+                "batch_id": batch_id,
+                "batch_count": len(batch_entries),
+                "pending_qty": is_pending,
             }
         )
 
@@ -2733,15 +2953,22 @@ def stock_detail(item_id: int):
         current_user.has_any_role(("admin",)) or is_superuser()
     )
 
+    batch_count = (
+        Batch.query.filter(Batch.item_id == item_id, Batch.removed_at.is_(None)).count()
+    )
+
     return render_template(
         "inventory/stock_detail.html",
         item=item,
         total_on_hand=total_on_hand,
+        batch_count=batch_count,
         locations=locations,
         available_locations=available_locations,
         all_locations=all_locations,
         transfer_from_locations=transfer_from_locations,
         can_edit=can_edit,
+        remove_reasons=_get_remove_reasons(),
+        next_url=url_for("inventory.stock_detail", item_id=item_id),
     )
 
 
@@ -2945,6 +3172,250 @@ def remove_stock_location(item_id: int):
         "success",
     )
     return redirect(url_for("inventory.stock_detail", item_id=item_id))
+
+
+@bp.post("/remove_from_location")
+@require_admin_or_superuser
+def remove_from_location():
+    item_id = request.form.get("item_id", type=int)
+    location_id = request.form.get("location_id", type=int)
+    raw_batch_id = (request.form.get("batch_id") or "").strip()
+    remove_mode = (request.form.get("remove_mode") or "all").strip()
+    reason = (request.form.get("reason") or "").strip()
+    notes = (request.form.get("notes") or "").strip()
+    next_url = request.form.get("next") or url_for("inventory.list_stock")
+
+    if item_id is None or location_id is None:
+        flash("Select a valid item and location.", "danger")
+        return redirect(next_url)
+
+    item = Item.query.get(item_id)
+    location = Location.query.get(location_id)
+    if item is None or location is None:
+        flash("Item or location not found.", "danger")
+        return redirect(next_url)
+
+    remove_reasons = _get_remove_reasons()
+    if not reason or (remove_reasons and reason not in remove_reasons):
+        flash("Select a valid removal reason.", "danger")
+        return redirect(next_url)
+
+    batch_id = None
+    if raw_batch_id and raw_batch_id.lower() != "none":
+        try:
+            batch_id = int(raw_batch_id)
+        except (TypeError, ValueError):
+            flash("Invalid lot/batch selection.", "danger")
+            return redirect(next_url)
+
+    removal_entries: list[tuple[int | None, Decimal]] = []
+    if batch_id is not None:
+        batch = Batch.query.get(batch_id)
+        if batch is None or batch.item_id != item_id:
+            flash("Invalid lot/batch selection.", "danger")
+            return redirect(next_url)
+        available = _get_location_on_hand_by_batch(item_id, location_id, batch_id)
+        if available <= 0:
+            flash("No stock available to remove for that lot/batch.", "info")
+            return redirect(next_url)
+        if remove_mode == "partial":
+            qty = _parse_stock_quantity(request.form.get("quantity"))
+            if qty is None or qty <= 0:
+                flash("Enter a valid removal quantity.", "danger")
+                return redirect(next_url)
+            if qty > available:
+                flash("Removal quantity exceeds available stock.", "danger")
+                return redirect(next_url)
+        else:
+            qty = available
+        removal_entries.append((batch_id, qty))
+    else:
+        batch_rows = (
+            db.session.query(
+                Movement.batch_id,
+                Batch.lot_number,
+                func.coalesce(func.sum(Movement.quantity), 0).label("on_hand"),
+            )
+            .outerjoin(Batch, Batch.id == Movement.batch_id)
+            .filter(Movement.item_id == item_id, Movement.location_id == location_id)
+            .filter(or_(Movement.batch_id.is_(None), Batch.removed_at.is_(None)))
+            .group_by(Movement.batch_id, Batch.lot_number)
+            .all()
+        )
+        batch_entries = [
+            (batch_id, Decimal(on_hand or 0))
+            for batch_id, _, on_hand in batch_rows
+            if Decimal(on_hand or 0) > 0
+        ]
+        if not batch_entries:
+            flash("No stock available to remove at that location.", "info")
+            return redirect(next_url)
+        if remove_mode == "partial":
+            if len(batch_entries) != 1:
+                flash(
+                    "Partial removal requires a specific lot/batch selection.",
+                    "danger",
+                )
+                return redirect(next_url)
+            available = batch_entries[0][1]
+            qty = _parse_stock_quantity(request.form.get("quantity"))
+            if qty is None or qty <= 0:
+                flash("Enter a valid removal quantity.", "danger")
+                return redirect(next_url)
+            if qty > available:
+                flash("Removal quantity exceeds available stock.", "danger")
+                return redirect(next_url)
+            removal_entries.append((batch_entries[0][0], qty))
+        else:
+            removal_entries = batch_entries
+
+    reference = reason if not notes else f"{reason} - {notes}"
+    total_removed = Decimal("0")
+    with db.session.begin_nested():
+        for entry_batch_id, qty in removal_entries:
+            if qty <= 0:
+                continue
+            db.session.add(
+                Movement(
+                    item_id=item_id,
+                    batch_id=entry_batch_id,
+                    location_id=location_id,
+                    quantity=-qty,
+                    movement_type="REMOVE_FROM_LOCATION",
+                    person=_movement_person(),
+                    reference=reference,
+                )
+            )
+            total_removed += qty
+    db.session.commit()
+
+    flash(
+        f"Removed {total_removed} of {item.sku} from {location.code}.",
+        "success",
+    )
+    return redirect(next_url)
+
+
+@bp.post("/pending/<int:receipt_id>/set_qty")
+@login_required
+def set_pending_receipt_qty(receipt_id: int):
+    receipt = Movement.query.get_or_404(receipt_id)
+    next_url = request.form.get("next") or url_for("inventory.list_locations")
+
+    if not _is_pending_receipt(receipt):
+        flash("Selected receipt is no longer pending.", "warning")
+        return redirect(next_url)
+
+    qty = _parse_stock_quantity(request.form.get("quantity"))
+    if qty is None or qty <= 0:
+        flash("Enter a valid quantity to set.", "danger")
+        return redirect(next_url)
+
+    batch = Batch.query.get(receipt.batch_id) if receipt.batch_id else None
+
+    with db.session.begin_nested():
+        receipt.reference = _resolve_pending_reference(receipt.reference, "resolved")
+        if batch:
+            batch.quantity = (batch.quantity or 0) + qty
+        db.session.add(
+            Movement(
+                item_id=receipt.item_id,
+                batch_id=receipt.batch_id,
+                location_id=receipt.location_id,
+                quantity=qty,
+                movement_type="RECEIPT",
+                person=_movement_person(),
+                reference="Pending qty set",
+            )
+        )
+    db.session.commit()
+
+    flash("Pending quantity updated.", "success")
+    return redirect(next_url)
+
+
+@bp.post("/pending/<int:receipt_id>/move")
+@login_required
+def move_pending_receipt(receipt_id: int):
+    receipt = Movement.query.get_or_404(receipt_id)
+    next_url = request.form.get("next") or url_for("inventory.list_locations")
+    to_location_id = request.form.get("to_location_id", type=int)
+
+    if not _is_pending_receipt(receipt):
+        flash("Selected receipt is no longer pending.", "warning")
+        return redirect(next_url)
+
+    if not to_location_id:
+        flash("Select a destination location.", "danger")
+        return redirect(next_url)
+
+    to_location = Location.query.get(to_location_id)
+    if not to_location:
+        flash("Destination location not found.", "danger")
+        return redirect(next_url)
+
+    if receipt.location_id == to_location_id:
+        flash("Destination location must be different.", "danger")
+        return redirect(next_url)
+
+    from_location = Location.query.get(receipt.location_id)
+    from_code = from_location.code if from_location else "Unknown"
+
+    with db.session.begin_nested():
+        receipt.location_id = to_location_id
+        db.session.add(
+            Movement(
+                item_id=receipt.item_id,
+                batch_id=receipt.batch_id,
+                location_id=to_location_id,
+                quantity=Decimal("0"),
+                movement_type="MOVE_PENDING",
+                person=_movement_person(),
+                reference=f"Pending qty move {from_code} -> {to_location.code}",
+            )
+        )
+    db.session.commit()
+
+    flash("Pending receipt moved to new location.", "success")
+    return redirect(next_url)
+
+
+@bp.post("/pending/<int:receipt_id>/remove")
+@require_admin_or_superuser
+def remove_pending_receipt(receipt_id: int):
+    receipt = Movement.query.get_or_404(receipt_id)
+    next_url = request.form.get("next") or url_for("inventory.list_locations")
+    reason = (request.form.get("reason") or "").strip()
+    notes = (request.form.get("notes") or "").strip()
+
+    if not _is_pending_receipt(receipt):
+        flash("Selected receipt is no longer pending.", "warning")
+        return redirect(next_url)
+
+    remove_reasons = _get_remove_reasons()
+    if not reason or (remove_reasons and reason not in remove_reasons):
+        flash("Select a valid removal reason.", "danger")
+        return redirect(next_url)
+
+    reference = reason if not notes else f"{reason} - {notes}"
+
+    with db.session.begin_nested():
+        receipt.reference = _resolve_pending_reference(receipt.reference, "voided")
+        db.session.add(
+            Movement(
+                item_id=receipt.item_id,
+                batch_id=receipt.batch_id,
+                location_id=receipt.location_id,
+                quantity=Decimal("0"),
+                movement_type="REMOVE_FROM_LOCATION",
+                person=_movement_person(),
+                reference=reference,
+            )
+        )
+    db.session.commit()
+
+    flash("Pending receipt cleared from location.", "success")
+    return redirect(next_url)
 
 
 @bp.route("/stock/delete-all", methods=["POST"])

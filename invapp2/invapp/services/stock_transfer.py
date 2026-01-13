@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import func, or_
+from sqlalchemy import and_, case, func, or_
 
 from invapp.extensions import db
 from invapp.models import Batch, Item, Location, Movement
@@ -15,6 +15,21 @@ class MoveLineRequest:
     item_id: int
     batch_id: int | None
     quantity: Decimal
+
+
+PENDING_RECEIPT_MARKER = "quantity pending"
+
+
+def pending_receipt_filter():
+    return and_(
+        Movement.movement_type == "RECEIPT",
+        Movement.quantity == 0,
+        Movement.reference.ilike(f"%{PENDING_RECEIPT_MARKER}%"),
+    )
+
+
+def pending_receipt_case():
+    return case((pending_receipt_filter(), 1), else_=0)
 
 
 def _location_on_hand(item_id: int, batch_id: int | None, location_id: int) -> Decimal:
@@ -32,7 +47,9 @@ def _location_on_hand(item_id: int, batch_id: int | None, location_id: int) -> D
     return Decimal(total or 0)
 
 
-def get_location_inventory_lines(location_id: int) -> list[dict[str, object]]:
+def get_location_inventory_lines(
+    location_id: int, *, include_pending: bool = False
+) -> list[dict[str, object]]:
     rows = (
         db.session.query(
             Movement.item_id,
@@ -42,6 +59,13 @@ def get_location_inventory_lines(location_id: int) -> list[dict[str, object]]:
             Movement.batch_id,
             Batch.lot_number,
             func.coalesce(func.sum(Movement.quantity), 0).label("on_hand"),
+            func.max(pending_receipt_case()).label("pending_qty"),
+            func.max(
+                case(
+                    (pending_receipt_filter(), Movement.id),
+                    else_=None,
+                )
+            ).label("pending_receipt_id"),
         )
         .join(Item, Item.id == Movement.item_id)
         .outerjoin(Batch, Batch.id == Movement.batch_id)
@@ -68,10 +92,17 @@ def get_location_inventory_lines(location_id: int) -> list[dict[str, object]]:
         batch_id,
         lot_number,
         on_hand,
+        pending_qty,
+        pending_receipt_id,
     ) in rows:
         on_hand_value = float(on_hand or 0)
+        is_pending = bool(pending_qty)
+        if not include_pending and on_hand_value <= 0:
+            continue
+        if include_pending and on_hand_value <= 0 and not is_pending:
+            continue
         presence_status = (
-            "present_not_counted" if on_hand_value == 0 else "counted"
+            "pending_qty" if is_pending else ("present_not_counted" if on_hand_value == 0 else "counted")
         )
         lines.append(
             {
@@ -83,6 +114,8 @@ def get_location_inventory_lines(location_id: int) -> list[dict[str, object]]:
                 "on_hand": on_hand_value,
                 "presence_status": presence_status,
                 "unit": unit or "",
+                "pending_qty": is_pending,
+                "pending_receipt_id": pending_receipt_id,
             }
         )
     return lines

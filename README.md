@@ -218,6 +218,26 @@ and relationships:
 * **Batch** (`Batch`, table `batch`) – lot/batch records linked to items and
   (optionally) movements.
 
+### Removing stock from a location
+
+Removing inventory from a location records a stock movement entry (type
+`REMOVE_FROM_LOCATION`) instead of deleting items, batches, or locations. The
+movement uses a negative quantity to zero or reduce the on-hand balance for the
+target item/lot/location combination. Reasons for removal are configurable via
+the `INVENTORY_REMOVE_REASONS` app setting (comma-separated list). See
+`invapp/routes/inventory.py` for the handling logic and inventory UI routes.
+
+### Pending quantity receipts
+
+Receipts recorded without a quantity are stored as `Movement` rows with
+`movement_type="RECEIPT"`, `quantity=0`, and a reference containing the marker
+`quantity pending`. Location views include these rows (flagged with a “Qty
+Pending” badge), while aggregate sums continue to ignore them because the
+quantity is zero. Setting a quantity resolves the pending marker and logs a new
+receipt movement for the counted quantity, so totals remain accurate. Batch
+counts include both pending and counted batches, but on-hand totals ignore
+pending quantities.
+
 Relationship map (simplified):
 
 ```

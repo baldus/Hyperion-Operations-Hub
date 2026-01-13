@@ -260,6 +260,301 @@ def test_list_stock_includes_location_metadata(client, app):
     assert last_updated == second_date
 
 
+def _default_remove_reason(app):
+    reasons = app.config.get("INVENTORY_REMOVE_REASONS", [])
+    if isinstance(reasons, str):
+        reasons = [reason.strip() for reason in reasons.split(",") if reason.strip()]
+    return reasons[0] if reasons else "Adjustment"
+
+
+def test_remove_from_location_all_creates_movement(client, app):
+    with app.app_context():
+        location = Location(code="REM-LOC")
+        item = Item(sku="REM-1", name="Remove Item")
+        db.session.add_all([location, item])
+        db.session.flush()
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                location_id=location.id,
+                quantity=Decimal("8"),
+                movement_type="ADJUST",
+            )
+        )
+        db.session.commit()
+        item_id = item.id
+        location_id = location.id
+        reason = _default_remove_reason(app)
+
+    response = client.post(
+        "/inventory/remove_from_location",
+        data={
+            "item_id": item_id,
+            "location_id": location_id,
+            "remove_mode": "all",
+            "reason": reason,
+            "notes": "testing",
+            "next": f"/inventory/stock/{item_id}",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        total = (
+            db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+            .filter(Movement.item_id == item_id, Movement.location_id == location_id)
+            .scalar()
+        )
+        assert Decimal(total or 0) == 0
+        removal = Movement.query.filter_by(
+            item_id=item_id,
+            location_id=location_id,
+            movement_type="REMOVE_FROM_LOCATION",
+        ).one()
+        assert reason in (removal.reference or "")
+
+
+def test_remove_from_location_partial_reduces_quantity(client, app):
+    with app.app_context():
+        location = Location(code="REM-LOC2")
+        item = Item(sku="REM-2", name="Remove Item 2")
+        db.session.add_all([location, item])
+        db.session.flush()
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                location_id=location.id,
+                quantity=Decimal("10"),
+                movement_type="ADJUST",
+            )
+        )
+        db.session.commit()
+        item_id = item.id
+        location_id = location.id
+        reason = _default_remove_reason(app)
+
+    response = client.post(
+        "/inventory/remove_from_location",
+        data={
+            "item_id": item_id,
+            "location_id": location_id,
+            "remove_mode": "partial",
+            "quantity": "3",
+            "reason": reason,
+            "next": f"/inventory/stock/{item_id}",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        total = (
+            db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+            .filter(Movement.item_id == item_id, Movement.location_id == location_id)
+            .scalar()
+        )
+        assert Decimal(total or 0) == Decimal("7")
+
+
+def test_remove_from_location_rejects_overage(client, app):
+    with app.app_context():
+        location = Location(code="REM-LOC3")
+        item = Item(sku="REM-3", name="Remove Item 3")
+        db.session.add_all([location, item])
+        db.session.flush()
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                location_id=location.id,
+                quantity=Decimal("5"),
+                movement_type="ADJUST",
+            )
+        )
+        db.session.commit()
+        item_id = item.id
+        location_id = location.id
+        reason = _default_remove_reason(app)
+
+    response = client.post(
+        "/inventory/remove_from_location",
+        data={
+            "item_id": item_id,
+            "location_id": location_id,
+            "remove_mode": "partial",
+            "quantity": "12",
+            "reason": reason,
+            "next": f"/inventory/stock/{item_id}",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "Removal quantity exceeds available stock." in response.get_data(as_text=True)
+
+    with app.app_context():
+        total = (
+            db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+            .filter(Movement.item_id == item_id, Movement.location_id == location_id)
+            .scalar()
+        )
+        assert Decimal(total or 0) == Decimal("5")
+
+
+def test_remove_from_location_requires_admin(app, anon_client):
+    create_user(app, username="operator", password="password", role_names=("inventory",))
+    login(anon_client, username="operator", password="password")
+
+    response = anon_client.post(
+        "/inventory/remove_from_location",
+        data={
+            "item_id": 1,
+            "location_id": 1,
+            "remove_mode": "all",
+            "reason": "Adjustment",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 403
+
+
+def _create_pending_receipt(app, *, sku="PEND-1", location_code="PEND-LOC"):
+    with app.app_context():
+        location = Location(code=location_code)
+        item = Item(sku=sku, name="Pending Item")
+        db.session.add_all([location, item])
+        db.session.flush()
+        batch = Batch(item_id=item.id, lot_number=f"{sku}-LOT", quantity=0)
+        db.session.add(batch)
+        db.session.flush()
+        receipt = Movement(
+            item_id=item.id,
+            batch_id=batch.id,
+            location_id=location.id,
+            quantity=Decimal("0"),
+            movement_type="RECEIPT",
+            reference="Receipt (quantity pending)",
+        )
+        db.session.add(receipt)
+        db.session.commit()
+        return {
+            "location_id": location.id,
+            "location_code": location.code,
+            "item_id": item.id,
+            "batch_id": batch.id,
+            "receipt_id": receipt.id,
+        }
+
+
+def test_location_list_includes_pending_receipts(client, app):
+    pending = _create_pending_receipt(app)
+
+    response = client.get("/inventory/locations")
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert pending["location_code"] in page
+    assert "Qty Pending" in page
+
+
+def test_pending_receipt_set_qty_updates_stock(client, app):
+    pending = _create_pending_receipt(app, sku="PEND-SET", location_code="PEND-SET-LOC")
+
+    response = client.post(
+        f"/inventory/pending/{pending['receipt_id']}/set_qty",
+        data={"quantity": "5", "next": f"/inventory/location/{pending['location_id']}/edit"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        total = (
+            db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+            .filter(
+                Movement.item_id == pending["item_id"],
+                Movement.location_id == pending["location_id"],
+            )
+            .scalar()
+        )
+        assert Decimal(total or 0) == Decimal("5")
+        pending_receipt = Movement.query.get(pending["receipt_id"])
+        assert "quantity pending" not in (pending_receipt.reference or "").lower()
+        batch = Batch.query.get(pending["batch_id"])
+        assert Decimal(batch.quantity or 0) == Decimal("5")
+
+
+def test_pending_receipt_move_updates_location(client, app):
+    pending = _create_pending_receipt(app, sku="PEND-MOVE", location_code="MOVE-A")
+    with app.app_context():
+        new_location = Location(code="MOVE-B")
+        db.session.add(new_location)
+        db.session.commit()
+        new_location_id = new_location.id
+
+    response = client.post(
+        f"/inventory/pending/{pending['receipt_id']}/move",
+        data={"to_location_id": new_location_id, "next": "/inventory/locations"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        moved_receipt = Movement.query.get(pending["receipt_id"])
+        assert moved_receipt.location_id == new_location_id
+        move_log = Movement.query.filter_by(
+            item_id=pending["item_id"],
+            batch_id=pending["batch_id"],
+            location_id=new_location_id,
+            movement_type="MOVE_PENDING",
+        ).one()
+        assert move_log.quantity == 0
+
+
+def test_pending_receipt_remove_clears_reference(client, app):
+    pending = _create_pending_receipt(app, sku="PEND-REMOVE", location_code="REMOVE-LOC")
+
+    response = client.post(
+        f"/inventory/pending/{pending['receipt_id']}/remove",
+        data={"reason": "Scrap", "next": "/inventory/locations"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        pending_receipt = Movement.query.get(pending["receipt_id"])
+        assert "voided" in (pending_receipt.reference or "").lower()
+        removal = Movement.query.filter_by(
+            item_id=pending["item_id"],
+            batch_id=pending["batch_id"],
+            location_id=pending["location_id"],
+            movement_type="REMOVE_FROM_LOCATION",
+        ).one()
+        assert removal.quantity == 0
+
+
+def test_stock_overview_shows_zero_batches(client, app):
+    with app.app_context():
+        item = Item(sku="ZERO-BATCH", name="Zero Batch Item")
+        db.session.add(item)
+        db.session.commit()
+
+    response = client.get("/inventory/stock")
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "ZERO-BATCH" in page
+    assert "0 Batches" in page
+
+
+def test_stock_detail_shows_zero_batches(client, app):
+    with app.app_context():
+        item = Item(sku="ZERO-BATCH-DETAIL", name="Zero Batch Detail")
+        db.session.add(item)
+        db.session.commit()
+        item_id = item.id
+
+    response = client.get(f"/inventory/stock/{item_id}")
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "0 Batches" in page
+
 def test_list_stock_primary_location_placeholder(client, app):
     with app.app_context():
         secondary = Location(code="SECONDARY")
