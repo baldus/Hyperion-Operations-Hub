@@ -4,10 +4,17 @@
 
 <div class="stock-detail-header">
   <div>
-    <h3>{{ item.sku }} - {{ item.name }}</h3>
-    <p class="muted">{{ item.description or "" }}</p>
+    {% set item_label = item.sku ~ " - " ~ item.name if item else "Item" %}
+    {% if item and item.id %}
+      <h3>
+        <a href="{{ url_for('inventory.view_item', item_id=item.id) }}">{{ item_label }}</a>
+      </h3>
+    {% else %}
+      <h3>{{ item_label }}</h3>
+    {% endif %}
+    <p class="muted">{{ item.description or "" if item else "" }}</p>
     <p>
-      <strong>Unit:</strong> {{ item.unit or "" }}
+      <strong>Unit:</strong> {{ item.unit or "" if item else "" }}
       <span class="stock-detail-metric"><strong>Total on hand:</strong> {{ total_on_hand }}</span>
     </p>
   </div>
