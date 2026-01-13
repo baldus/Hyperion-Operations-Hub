@@ -417,6 +417,96 @@ def test_remove_from_location_requires_admin(app, anon_client):
     assert response.status_code == 403
 
 
+def _create_pending_receipt(app, *, sku="PEND-1", location_code="PEND-LOC"):
+    with app.app_context():
+        location = Location(code=location_code)
+        item = Item(sku=sku, name="Pending Item")
+        db.session.add_all([location, item])
+        db.session.flush()
+        batch = Batch(item_id=item.id, lot_number=f"{sku}-LOT", quantity=0)
+        db.session.add(batch)
+        db.session.flush()
+        receipt = Movement(
+            item_id=item.id,
+            batch_id=batch.id,
+            location_id=location.id,
+            quantity=Decimal("0"),
+            movement_type="RECEIPT",
+            reference="Receipt (quantity pending)",
+        )
+        db.session.add(receipt)
+        db.session.commit()
+        return {
+            "location_id": location.id,
+            "location_code": location.code,
+            "item_id": item.id,
+            "batch_id": batch.id,
+            "receipt_id": receipt.id,
+        }
+
+
+def test_location_list_includes_pending_receipts(client, app):
+    pending = _create_pending_receipt(app)
+
+    response = client.get("/inventory/locations")
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert pending["location_code"] in page
+    assert "Qty Pending" in page
+
+
+def test_pending_receipt_set_qty_updates_stock(client, app):
+    pending = _create_pending_receipt(app, sku="PEND-SET", location_code="PEND-SET-LOC")
+
+    response = client.post(
+        f"/inventory/pending/{pending['receipt_id']}/set_qty",
+        data={"quantity": "5", "next": f"/inventory/location/{pending['location_id']}/edit"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        total = (
+            db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+            .filter(
+                Movement.item_id == pending["item_id"],
+                Movement.location_id == pending["location_id"],
+            )
+            .scalar()
+        )
+        assert Decimal(total or 0) == Decimal("5")
+        pending_receipt = Movement.query.get(pending["receipt_id"])
+        assert "quantity pending" not in (pending_receipt.reference or "").lower()
+        batch = Batch.query.get(pending["batch_id"])
+        assert Decimal(batch.quantity or 0) == Decimal("5")
+
+
+def test_pending_receipt_move_updates_location(client, app):
+    pending = _create_pending_receipt(app, sku="PEND-MOVE", location_code="MOVE-A")
+    with app.app_context():
+        new_location = Location(code="MOVE-B")
+        db.session.add(new_location)
+        db.session.commit()
+        new_location_id = new_location.id
+
+    response = client.post(
+        f"/inventory/pending/{pending['receipt_id']}/move",
+        data={"to_location_id": new_location_id, "next": "/inventory/locations"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        moved_receipt = Movement.query.get(pending["receipt_id"])
+        assert moved_receipt.location_id == new_location_id
+        move_log = Movement.query.filter_by(
+            item_id=pending["item_id"],
+            batch_id=pending["batch_id"],
+            location_id=new_location_id,
+            movement_type="MOVE_PENDING",
+        ).one()
+        assert move_log.quantity == 0
+
 def test_list_stock_primary_location_placeholder(client, app):
     with app.app_context():
         secondary = Location(code="SECONDARY")

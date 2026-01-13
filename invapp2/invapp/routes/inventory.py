@@ -32,7 +32,7 @@ from sqlalchemy.orm import aliased, joinedload, lazyload, load_only
 from sqlalchemy.orm.exc import DetachedInstanceError
 
 from invapp.auth import blueprint_page_guard
-from invapp.login import current_user
+from invapp.login import current_user, login_required
 from invapp.permissions import resolve_edit_roles
 from invapp.security import require_admin_or_superuser, require_any_role, require_roles
 from invapp.superuser import is_superuser
@@ -56,8 +56,10 @@ from invapp.models import (
 )
 from invapp.services.stock_transfer import (
     MoveLineRequest,
+    PENDING_RECEIPT_MARKER,
     get_location_inventory_lines,
     move_inventory_lines,
+    pending_receipt_case,
 )
 from invapp.services.item_locations import apply_smart_item_locations
 from invapp.utils.csv_export import export_rows_to_csv
@@ -2136,6 +2138,7 @@ def list_locations():
             Movement.location_id,
             Movement.item_id,
             func.sum(Movement.quantity).label("on_hand"),
+            func.max(pending_receipt_case()).label("pending_qty"),
         )
         .join(Item, Item.id == Movement.item_id)
         .join(Location, Location.id == Movement.location_id)
@@ -2153,16 +2156,19 @@ def list_locations():
         )
 
     balances = balances_query.all()
-    item_ids = {item_id for _, item_id, _ in balances}
+    item_ids = {item_id for _, item_id, _, _ in balances}
     items = (
         {i.id: i for i in Item.query.filter(Item.id.in_(item_ids)).all()}
         if item_ids
         else {}
     )
 
-    balances_by_location: dict[int, list[dict[str, Union[Item, int]]]] = defaultdict(list)
-    for location_id, item_id, on_hand in balances:
-        if on_hand is None or on_hand == 0:
+    balances_by_location: dict[int, list[dict[str, Union[Item, int, bool]]]] = defaultdict(list)
+    pending_count_by_location: dict[int, int] = defaultdict(int)
+    for location_id, item_id, on_hand, pending_qty in balances:
+        on_hand_value = int(on_hand or 0)
+        is_pending = bool(pending_qty)
+        if on_hand_value == 0 and not is_pending:
             continue
         item = items.get(item_id)
         if not item:
@@ -2170,9 +2176,12 @@ def list_locations():
         balances_by_location[location_id].append(
             {
                 "item": item,
-                "quantity": int(on_hand),
+                "quantity": on_hand_value,
+                "pending_qty": is_pending,
             }
         )
+        if is_pending:
+            pending_count_by_location[location_id] += 1
 
     for location_balances in balances_by_location.values():
         location_balances.sort(key=lambda entry: entry["item"].sku)
@@ -2185,6 +2194,7 @@ def list_locations():
         pages=pagination.pages,
         search=search,
         balances_by_location=balances_by_location,
+        pending_count_by_location=pending_count_by_location,
     )
 
 
@@ -2224,20 +2234,23 @@ def add_location():
 
 
 @bp.route("/location/<int:location_id>/edit", methods=["GET", "POST"])
-@require_admin_or_superuser
+@login_required
 def edit_location(location_id):
     location = Location.query.get_or_404(location_id)
-    can_remove = current_user.is_authenticated and (
+    can_edit_location = current_user.is_authenticated and (
         current_user.has_any_role(("admin",)) or is_superuser()
     )
+    can_remove = can_edit_location
+    can_set_pending = current_user.is_authenticated
+    can_move_pending = current_user.is_authenticated
+
+    all_locations = Location.query.order_by(Location.code).all()
 
     def load_location_lines():
-        lines = get_location_inventory_lines(location_id)
-        return [
-            line
-            for line in lines
-            if Decimal(str(line.get("on_hand", 0))) > 0
-        ]
+        return get_location_inventory_lines(location_id, include_pending=True)
+
+    if request.method == "POST" and not can_edit_location:
+        abort(403)
 
     if request.method == "POST":
         code = (request.form.get("code") or "").strip()
@@ -2261,6 +2274,10 @@ def edit_location(location_id):
                 form_description=description,
                 inventory_lines=load_location_lines(),
                 can_remove=can_remove,
+                can_edit_location=can_edit_location,
+                can_set_pending=can_set_pending,
+                can_move_pending=can_move_pending,
+                all_locations=all_locations,
                 remove_reasons=_get_remove_reasons(),
                 next_url=url_for("inventory.edit_location", location_id=location_id),
             )
@@ -2278,6 +2295,10 @@ def edit_location(location_id):
         form_description=location.description or "",
         inventory_lines=load_location_lines(),
         can_remove=can_remove,
+        can_edit_location=can_edit_location,
+        can_set_pending=can_set_pending,
+        can_move_pending=can_move_pending,
+        all_locations=all_locations,
         remove_reasons=_get_remove_reasons(),
         next_url=url_for("inventory.edit_location", location_id=location_id),
     )
@@ -2300,11 +2321,11 @@ def remove_all_items_from_location(location_id: int):
         flash("Select a valid removal reason.", "danger")
         return redirect(url_for("inventory.edit_location", location_id=location_id))
 
-    lines = get_location_inventory_lines(location_id)
+    lines = get_location_inventory_lines(location_id, include_pending=True)
     removal_lines = [
         line
         for line in lines
-        if Decimal(str(line.get("on_hand", 0))) > 0
+        if Decimal(str(line.get("on_hand", 0))) > 0 or line.get("pending_qty")
     ]
     if not removal_lines:
         flash("No stock available to remove at this location.", "info")
@@ -2316,21 +2337,29 @@ def remove_all_items_from_location(location_id: int):
     with db.session.begin_nested():
         for line in removal_lines:
             qty = Decimal(str(line.get("on_hand", 0)))
-            if qty <= 0:
+            is_pending = bool(line.get("pending_qty"))
+            if qty <= 0 and not is_pending:
                 continue
+            if is_pending and line.get("pending_receipt_id"):
+                pending_movement = Movement.query.get(line["pending_receipt_id"])
+                if _is_pending_receipt(pending_movement):
+                    pending_movement.reference = _resolve_pending_reference(
+                        pending_movement.reference, "voided"
+                    )
             db.session.add(
                 Movement(
                     item_id=line["item_id"],
                     batch_id=line.get("batch_id"),
                     location_id=location_id,
-                    quantity=-qty,
+                    quantity=-qty if qty > 0 else Decimal("0"),
                     movement_type="REMOVE_FROM_LOCATION",
                     person=_movement_person(),
                     reference=reference,
                 )
             )
             total_lines += 1
-            total_qty += qty
+            if qty > 0:
+                total_qty += qty
     db.session.commit()
 
     flash(
@@ -2623,6 +2652,24 @@ def _get_item_location_batch_balances(item_id: int) -> dict[int, list[dict[str, 
             }
         )
     return balances
+
+
+def _is_pending_receipt(movement: Movement | None) -> bool:
+    if movement is None:
+        return False
+    reference = (movement.reference or "").lower()
+    return (
+        movement.movement_type == "RECEIPT"
+        and (movement.quantity or 0) == 0
+        and PENDING_RECEIPT_MARKER in reference
+    )
+
+
+def _resolve_pending_reference(reference: str | None, status: str) -> str:
+    base = (reference or "Receipt").replace(" (quantity pending)", "")
+    base = base.replace("quantity pending", "").strip()
+    base = " ".join(base.split())
+    return f"{base} (quantity {status})"
 
 
 def _movement_person() -> str | None:
@@ -3221,6 +3268,128 @@ def remove_from_location():
         f"Removed {total_removed} of {item.sku} from {location.code}.",
         "success",
     )
+    return redirect(next_url)
+
+
+@bp.post("/pending/<int:receipt_id>/set_qty")
+@login_required
+def set_pending_receipt_qty(receipt_id: int):
+    receipt = Movement.query.get_or_404(receipt_id)
+    next_url = request.form.get("next") or url_for("inventory.list_locations")
+
+    if not _is_pending_receipt(receipt):
+        flash("Selected receipt is no longer pending.", "warning")
+        return redirect(next_url)
+
+    qty = _parse_stock_quantity(request.form.get("quantity"))
+    if qty is None or qty <= 0:
+        flash("Enter a valid quantity to set.", "danger")
+        return redirect(next_url)
+
+    batch = Batch.query.get(receipt.batch_id) if receipt.batch_id else None
+
+    with db.session.begin_nested():
+        receipt.reference = _resolve_pending_reference(receipt.reference, "resolved")
+        if batch:
+            batch.quantity = (batch.quantity or 0) + qty
+        db.session.add(
+            Movement(
+                item_id=receipt.item_id,
+                batch_id=receipt.batch_id,
+                location_id=receipt.location_id,
+                quantity=qty,
+                movement_type="RECEIPT",
+                person=_movement_person(),
+                reference="Pending qty set",
+            )
+        )
+    db.session.commit()
+
+    flash("Pending quantity updated.", "success")
+    return redirect(next_url)
+
+
+@bp.post("/pending/<int:receipt_id>/move")
+@login_required
+def move_pending_receipt(receipt_id: int):
+    receipt = Movement.query.get_or_404(receipt_id)
+    next_url = request.form.get("next") or url_for("inventory.list_locations")
+    to_location_id = request.form.get("to_location_id", type=int)
+
+    if not _is_pending_receipt(receipt):
+        flash("Selected receipt is no longer pending.", "warning")
+        return redirect(next_url)
+
+    if not to_location_id:
+        flash("Select a destination location.", "danger")
+        return redirect(next_url)
+
+    to_location = Location.query.get(to_location_id)
+    if not to_location:
+        flash("Destination location not found.", "danger")
+        return redirect(next_url)
+
+    if receipt.location_id == to_location_id:
+        flash("Destination location must be different.", "danger")
+        return redirect(next_url)
+
+    from_location = Location.query.get(receipt.location_id)
+    from_code = from_location.code if from_location else "Unknown"
+
+    with db.session.begin_nested():
+        receipt.location_id = to_location_id
+        db.session.add(
+            Movement(
+                item_id=receipt.item_id,
+                batch_id=receipt.batch_id,
+                location_id=to_location_id,
+                quantity=Decimal("0"),
+                movement_type="MOVE_PENDING",
+                person=_movement_person(),
+                reference=f"Pending qty move {from_code} -> {to_location.code}",
+            )
+        )
+    db.session.commit()
+
+    flash("Pending receipt moved to new location.", "success")
+    return redirect(next_url)
+
+
+@bp.post("/pending/<int:receipt_id>/remove")
+@require_admin_or_superuser
+def remove_pending_receipt(receipt_id: int):
+    receipt = Movement.query.get_or_404(receipt_id)
+    next_url = request.form.get("next") or url_for("inventory.list_locations")
+    reason = (request.form.get("reason") or "").strip()
+    notes = (request.form.get("notes") or "").strip()
+
+    if not _is_pending_receipt(receipt):
+        flash("Selected receipt is no longer pending.", "warning")
+        return redirect(next_url)
+
+    remove_reasons = _get_remove_reasons()
+    if not reason or (remove_reasons and reason not in remove_reasons):
+        flash("Select a valid removal reason.", "danger")
+        return redirect(next_url)
+
+    reference = reason if not notes else f"{reason} - {notes}"
+
+    with db.session.begin_nested():
+        receipt.reference = _resolve_pending_reference(receipt.reference, "voided")
+        db.session.add(
+            Movement(
+                item_id=receipt.item_id,
+                batch_id=receipt.batch_id,
+                location_id=receipt.location_id,
+                quantity=Decimal("0"),
+                movement_type="REMOVE_FROM_LOCATION",
+                person=_movement_person(),
+                reference=reference,
+            )
+        )
+    db.session.commit()
+
+    flash("Pending receipt cleared from location.", "success")
     return redirect(next_url)
 
 

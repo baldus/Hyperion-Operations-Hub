@@ -1,23 +1,29 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Edit Location</h2>
-<form method="POST">
-  <label for="code">Code:</label><br>
-  <input type="text" name="code" value="{{ form_code if form_code is not none else location.code }}" required><br><br>
+<h2>{{ "Edit Location" if can_edit_location else "Location Details" }}</h2>
 
-  <label for="description">Description:</label><br>
-  <textarea name="description">{{ form_description if form_description is not none else (location.description or '') }}</textarea><br><br>
+{% if can_edit_location %}
+  <form method="POST">
+    <label for="code">Code:</label><br>
+    <input type="text" name="code" value="{{ form_code if form_code is not none else location.code }}" required><br><br>
 
-  <button type="submit" class="action-btn">Update</button>
-</form>
+    <label for="description">Description:</label><br>
+    <textarea name="description">{{ form_description if form_description is not none else (location.description or '') }}</textarea><br><br>
 
-<form method="POST" action="{{ url_for('inventory.print_location_label', location_id=location.id) }}">
-  <button type="submit" class="action-btn">Print Location Label</button>
-</form>
+    <button type="submit" class="action-btn">Update</button>
+  </form>
 
-<form method="POST" action="{{ url_for('inventory.delete_location', location_id=location.id) }}" onsubmit="return confirm('Are you sure you want to delete this location? This action cannot be undone.');">
-  <button type="submit" class="action-btn action-btn--danger">Delete Location</button>
-</form>
+  <form method="POST" action="{{ url_for('inventory.print_location_label', location_id=location.id) }}">
+    <button type="submit" class="action-btn">Print Location Label</button>
+  </form>
+
+  <form method="POST" action="{{ url_for('inventory.delete_location', location_id=location.id) }}" onsubmit="return confirm('Are you sure you want to delete this location? This action cannot be undone.');">
+    <button type="submit" class="action-btn action-btn--danger">Delete Location</button>
+  </form>
+{% else %}
+  <p><strong>Code:</strong> {{ location.code }}</p>
+  <p><strong>Description:</strong> {{ location.description or "-" }}</p>
+{% endif %}
 
 <hr>
 
@@ -32,8 +38,8 @@
             <th>Item</th>
             <th>Lot/Batch</th>
             <th>On Hand</th>
-            {% if can_remove %}
-              <th>Remove</th>
+            {% if can_set_pending or can_remove %}
+              <th>Actions</th>
             {% endif %}
           </tr>
         </thead>
@@ -43,23 +49,66 @@
               <td>{{ line.sku }}</td>
               <td>{{ line.name }}</td>
               <td>{{ line.lot_number or "Unbatched" }}</td>
-              <td>{{ line.on_hand }}</td>
-              {% if can_remove %}
+              <td>
+                {% if line.pending_qty %}
+                  <span class="badge">Qty Pending</span>
+                {% else %}
+                  {{ line.on_hand }}
+                {% endif %}
+              </td>
+              {% if can_set_pending or can_remove %}
                 <td>
-                  <button
-                    type="button"
-                    class="bubble-btn danger remove-from-location-btn"
-                    data-item-id="{{ line.item_id }}"
-                    data-item-label="{{ line.sku }} - {{ line.name }}"
-                    data-location-id="{{ location.id }}"
-                    data-location-label="{{ location.code }}"
-                    data-qty="{{ line.on_hand }}"
-                    data-batch-id="{{ line.batch_id if line.batch_id is not none else '' }}"
-                    data-lot-number="{{ line.lot_number or 'Unbatched' }}"
-                    data-batch-count="1"
-                  >
-                    Remove
-                  </button>
+                  {% if line.pending_qty and can_set_pending %}
+                    <button
+                      type="button"
+                      class="bubble-btn pending-set-qty-btn"
+                      data-receipt-id="{{ line.pending_receipt_id }}"
+                      data-item-label="{{ line.sku }} - {{ line.name }}"
+                      data-location-label="{{ location.code }}"
+                      data-lot-number="{{ line.lot_number or 'Unbatched' }}"
+                    >
+                      Set Qty
+                    </button>
+                    {% if can_move_pending %}
+                      <button
+                        type="button"
+                        class="bubble-btn pending-move-btn"
+                        data-receipt-id="{{ line.pending_receipt_id }}"
+                        data-item-label="{{ line.sku }} - {{ line.name }}"
+                        data-location-label="{{ location.code }}"
+                        data-lot-number="{{ line.lot_number or 'Unbatched' }}"
+                      >
+                        Move
+                      </button>
+                    {% endif %}
+                  {% endif %}
+                  {% if line.pending_qty and can_remove %}
+                    <button
+                      type="button"
+                      class="bubble-btn danger pending-remove-btn"
+                      data-receipt-id="{{ line.pending_receipt_id }}"
+                      data-item-label="{{ line.sku }} - {{ line.name }}"
+                      data-location-label="{{ location.code }}"
+                      data-lot-number="{{ line.lot_number or 'Unbatched' }}"
+                    >
+                      Remove
+                    </button>
+                  {% elif can_remove %}
+                    <button
+                      type="button"
+                      class="bubble-btn danger remove-from-location-btn"
+                      data-item-id="{{ line.item_id }}"
+                      data-item-label="{{ line.sku }} - {{ line.name }}"
+                      data-location-id="{{ location.id }}"
+                      data-location-label="{{ location.code }}"
+                      data-qty="{{ line.on_hand }}"
+                      data-batch-id="{{ line.batch_id if line.batch_id is not none else '' }}"
+                      data-lot-number="{{ line.lot_number or 'Unbatched' }}"
+                      data-batch-count="1"
+                    >
+                      Remove
+                    </button>
+                  {% endif %}
                 </td>
               {% endif %}
             </tr>
@@ -80,6 +129,78 @@
 
 {% if can_remove %}
   {% include "inventory/_remove_from_location_modal.html" %}
+{% endif %}
+
+{% if can_set_pending or can_move_pending %}
+  <div id="pendingSetQtyModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="pendingSetQtyTitle">
+    <div class="modal-content">
+      <h3 id="pendingSetQtyTitle">Set Pending Quantity</h3>
+      <p><strong>Item:</strong> <span id="pending-set-item">-</span></p>
+      <p><strong>Location:</strong> <span id="pending-set-location">-</span></p>
+      <p><strong>Lot/Batch:</strong> <span id="pending-set-lot">-</span></p>
+      <form id="pendingSetQtyForm" method="post" data-action-base="{{ url_for('inventory.set_pending_receipt_qty', receipt_id=0) }}">
+        <input type="hidden" name="next" value="{{ next_url }}">
+        <label for="pending-set-quantity">Quantity</label>
+        <input type="number" id="pending-set-quantity" name="quantity" step="0.001" min="0" required>
+        <div class="modal-actions">
+          <button type="button" class="bubble-btn" id="closePendingSetQtyModal">Cancel</button>
+          <button type="submit" class="bubble-btn">Save Qty</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="pendingMoveModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="pendingMoveTitle">
+    <div class="modal-content">
+      <h3 id="pendingMoveTitle">Move Pending Receipt</h3>
+      <p><strong>Item:</strong> <span id="pending-move-item">-</span></p>
+      <p><strong>Current Location:</strong> <span id="pending-move-location">-</span></p>
+      <p><strong>Lot/Batch:</strong> <span id="pending-move-lot">-</span></p>
+      <form id="pendingMoveForm" method="post" data-action-base="{{ url_for('inventory.move_pending_receipt', receipt_id=0) }}">
+        <input type="hidden" name="next" value="{{ next_url }}">
+        <label for="pending-move-location-id">Destination Location</label>
+        <select id="pending-move-location-id" name="to_location_id" required>
+          <option value="">Select location</option>
+          {% for loc in all_locations %}
+            {% if loc.id != location.id %}
+              <option value="{{ loc.id }}">{{ loc.code }}{% if loc.description %} — {{ loc.description }}{% endif %}</option>
+            {% endif %}
+          {% endfor %}
+        </select>
+        <div class="modal-actions">
+          <button type="button" class="bubble-btn" id="closePendingMoveModal">Cancel</button>
+          <button type="submit" class="bubble-btn">Move</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endif %}
+
+{% if can_remove %}
+  <div id="pendingRemoveModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="pendingRemoveTitle">
+    <div class="modal-content">
+      <h3 id="pendingRemoveTitle">Remove Pending Receipt</h3>
+      <p><strong>Item:</strong> <span id="pending-remove-item">-</span></p>
+      <p><strong>Location:</strong> <span id="pending-remove-location">-</span></p>
+      <p><strong>Lot/Batch:</strong> <span id="pending-remove-lot">-</span></p>
+      <form id="pendingRemoveForm" method="post" data-action-base="{{ url_for('inventory.remove_pending_receipt', receipt_id=0) }}">
+        <input type="hidden" name="next" value="{{ next_url }}">
+        <label for="pending-remove-reason">Reason</label>
+        <select id="pending-remove-reason" name="reason" required>
+          <option value="">Select reason</option>
+          {% for reason in remove_reasons %}
+            <option value="{{ reason }}">{{ reason }}</option>
+          {% endfor %}
+        </select>
+        <label for="pending-remove-notes">Notes (optional)</label>
+        <textarea id="pending-remove-notes" name="notes" rows="3"></textarea>
+        <div class="modal-actions">
+          <button type="button" class="bubble-btn" id="closePendingRemoveModal">Cancel</button>
+          <button type="submit" class="bubble-btn danger">Remove</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <div id="removeAllFromLocationModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="removeAllFromLocationTitle">
     <div class="modal-content">
@@ -109,5 +230,9 @@
   </div>
 
   <script src="{{ url_for('static', filename='js/inventory-remove-from-location.js') }}"></script>
+{% endif %}
+
+{% if can_set_pending or can_move_pending or can_remove %}
+  <script src="{{ url_for('static', filename='js/inventory-pending-qty.js') }}"></script>
 {% endif %}
 {% endblock %}

@@ -227,6 +227,15 @@ target item/lot/location combination. Reasons for removal are configurable via
 the `INVENTORY_REMOVE_REASONS` app setting (comma-separated list). See
 `invapp/routes/inventory.py` for the handling logic and inventory UI routes.
 
+### Pending quantity receipts
+
+Receipts recorded without a quantity are stored as `Movement` rows with
+`movement_type="RECEIPT"`, `quantity=0`, and a reference containing the marker
+`quantity pending`. Location views include these rows (flagged with a “Qty
+Pending” badge), while aggregate sums continue to ignore them because the
+quantity is zero. Setting a quantity resolves the pending marker and logs a new
+receipt movement for the counted quantity, so totals remain accurate.
+
 Relationship map (simplified):
 
 ```
