@@ -239,16 +239,57 @@ def test_list_stock_includes_location_metadata(client, app):
         db.session.commit()
 
     with app.app_context():
-        overview_query, _, _, _, _, _ = inventory._stock_overview_query()
+        overview_query, _, _, _, _, _, _ = inventory._stock_overview_query()
         row = overview_query.filter(Item.sku == "LOC-1").one()
 
-    item_row, total_qty, location_count, last_updated, secondary_loc, pou_loc = row
+    (
+        item_row,
+        total_qty,
+        location_count,
+        last_updated,
+        primary_loc,
+        secondary_loc,
+        pou_loc,
+    ) = row
     assert item_row.name == "Location Item"
+    assert primary_loc.code == "PRIMARY"
     assert secondary_loc.code == "SECONDARY"
     assert pou_loc.code == "POU"
     assert float(total_qty) == 7.0
     assert int(location_count) == 2
     assert last_updated == second_date
+
+
+def test_list_stock_primary_location_placeholder(client, app):
+    with app.app_context():
+        secondary = Location(code="SECONDARY")
+        pou = Location(code="POU")
+        movement_loc = Location(code="MOVE")
+        item = Item(
+            sku="NO-PRIMARY",
+            name="No Primary Item",
+            secondary_location=secondary,
+            point_of_use_location=pou,
+        )
+        db.session.add_all([secondary, pou, movement_loc, item])
+        db.session.flush()
+
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                location_id=movement_loc.id,
+                quantity=Decimal("1"),
+                movement_type="ADJUST",
+                date=datetime(2024, 2, 1, 9, 0),
+            )
+        )
+        db.session.commit()
+
+    response = client.get("/inventory/stock")
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "NO-PRIMARY" in page
+    assert "—" in page
 
 
 def test_list_stock_near_filter(client, stock_items):

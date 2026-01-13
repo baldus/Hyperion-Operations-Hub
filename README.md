@@ -351,6 +351,10 @@ Smart location assignment tests live in `tests/test_item_locations.py`.
 * **CSV import/export paths:** `invapp/routes/inventory.py`
   (`/inventory/items/import`, `/inventory/items/export`, `/inventory/stock/import`,
   `/inventory/stock/export`) with schemas in `invapp/utils/csv_schema.py`.
+* **Stock Overview primary location:** the Stock Overview table reads the
+  primary location from `Item.default_location` (joined in
+  `_stock_overview_query`), and exports it via the stock CSV column
+  `primary_location_code`.
 
 ---
 
