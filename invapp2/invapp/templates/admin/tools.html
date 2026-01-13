@@ -72,4 +72,86 @@
         {% endif %}
     </div>
 </section>
+
+<section class="card-section">
+    <h3>Clear All Inventory (Start Fresh)</h3>
+    <p class="section-intro">
+        Remove every stock movement, batch, and inventory history record so you can restart
+        inventory counts from zero. This keeps items, locations, orders, and users intact.
+    </p>
+    <p class="field-note">
+        {% if last_backup %}
+        Most recent backup: {{ last_backup.started_at.strftime('%b %d, %Y %H:%M UTC') }}
+        ({{ last_backup.status }}{% if last_backup.filename %} • {{ last_backup.filename }}{% endif %})
+        {% else %}
+        Most recent backup: No backups have been recorded yet.
+        {% endif %}
+    </p>
+    <button type="button" class="action-btn action-btn--danger" id="openClearInventoryModal">
+        Clear All Inventory (Start Fresh)
+    </button>
+</section>
+
+<div id="clearInventoryModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="clearInventoryTitle">
+    <div class="modal-content">
+        <h3 id="clearInventoryTitle">Confirm Inventory Wipe</h3>
+        <p class="section-intro">
+            This will permanently delete all inventory quantities, batches, movements, and history records.
+            It cannot be undone.
+        </p>
+        <form method="post" action="{{ url_for('admin.clear_inventory') }}" class="stacked-form">
+            <input type="hidden" name="csrf_token" value="{{ clear_inventory_csrf_token }}">
+            <label class="checkbox-row">
+                <input type="checkbox" name="confirm_clear" value="1" id="confirmClearCheckbox">
+                I understand this will permanently delete inventory quantities and related records and cannot be undone.
+            </label>
+            <label for="confirmPhrase">Type "{{ clear_inventory_phrase }}" to confirm</label>
+            <input type="text" id="confirmPhrase" name="confirm_phrase" autocomplete="off" placeholder="{{ clear_inventory_phrase }}">
+            <label for="confirmPassword">Confirm your password</label>
+            <input type="password" id="confirmPassword" name="confirm_password" autocomplete="current-password">
+            <div class="modal-actions">
+                <button type="button" class="action-btn secondary" id="cancelClearInventory">Cancel</button>
+                <button type="submit" class="action-btn action-btn--danger" id="confirmClearInventory" disabled>
+                    Yes, Clear Inventory
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+const modal = document.getElementById('clearInventoryModal');
+const openButton = document.getElementById('openClearInventoryModal');
+const cancelButton = document.getElementById('cancelClearInventory');
+const confirmButton = document.getElementById('confirmClearInventory');
+const checkbox = document.getElementById('confirmClearCheckbox');
+const phraseInput = document.getElementById('confirmPhrase');
+const passwordInput = document.getElementById('confirmPassword');
+const requiredPhrase = "{{ clear_inventory_phrase }}";
+
+function updateConfirmButton() {
+    const phraseMatches = phraseInput.value.trim().toUpperCase() === requiredPhrase;
+    const passwordReady = passwordInput.value.trim().length > 0;
+    confirmButton.disabled = !(checkbox.checked && phraseMatches && passwordReady);
+}
+
+openButton.addEventListener('click', () => {
+    modal.style.display = 'block';
+    updateConfirmButton();
+});
+
+cancelButton.addEventListener('click', () => {
+    modal.style.display = 'none';
+});
+
+window.addEventListener('click', (event) => {
+    if (event.target === modal) {
+        modal.style.display = 'none';
+    }
+});
+
+checkbox.addEventListener('change', updateConfirmButton);
+phraseInput.addEventListener('input', updateConfirmButton);
+passwordInput.addEventListener('input', updateConfirmButton);
+</script>
 {% endblock %}

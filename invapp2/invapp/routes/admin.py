@@ -47,6 +47,8 @@ bp = Blueprint("admin", __name__, url_prefix="/admin")
 
 _AUTOMATED_RECOVERY_ACTION_ID = "automated-recovery"
 _CONSOLE_RESTART_ACTION_ID = "console-restart"
+_CLEAR_INVENTORY_PHRASE = "CLEAR INVENTORY"
+_CLEAR_INVENTORY_ACTION = "CLEAR_INVENTORY"
 
 
 _RECOVERY_SEQUENCE = (
@@ -595,13 +597,103 @@ def tools():
             .all()
         )
 
+    last_backup = (
+        models.BackupRun.query.order_by(models.BackupRun.started_at.desc()).first()
+        if database_online
+        else None
+    )
+
     return render_template(
         "admin/tools.html",
         system_health=system_health,
         quick_links=quick_links,
         database_online=database_online,
         error_reports=error_reports,
+        last_backup=last_backup,
+        clear_inventory_phrase=_CLEAR_INVENTORY_PHRASE,
+        clear_inventory_csrf_token=_clear_inventory_csrf_token(),
     )
+
+
+def _clear_inventory_csrf_token() -> str:
+    token = session.get("clear_inventory_csrf")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["clear_inventory_csrf"] = token
+    return token
+
+
+def _clear_inventory_records() -> tuple[int, int, int]:
+    consumptions_deleted = models.RoutingStepConsumption.query.delete(
+        synchronize_session=False
+    )
+    movements_deleted = models.Movement.query.delete(synchronize_session=False)
+    batches_deleted = models.Batch.query.delete(synchronize_session=False)
+    return consumptions_deleted, movements_deleted, batches_deleted
+
+
+@bp.post("/settings/clear-inventory")
+@login_required
+@require_admin_or_superuser
+def clear_inventory():
+    if not _database_available():
+        flash("Inventory wipe is unavailable while the database is offline.", "warning")
+        return redirect(url_for("admin.tools"))
+
+    token = request.form.get("csrf_token")
+    if not token or token != session.get("clear_inventory_csrf"):
+        flash("Invalid security token. Please try again.", "danger")
+        return redirect(url_for("admin.tools"))
+
+    confirmation_checked = request.form.get("confirm_clear") == "1"
+    confirmation_phrase = (request.form.get("confirm_phrase") or "").strip().upper()
+    password = request.form.get("confirm_password") or ""
+
+    if not confirmation_checked:
+        flash("Please confirm that you understand the impact of this action.", "danger")
+        return redirect(url_for("admin.tools"))
+
+    if confirmation_phrase != _CLEAR_INVENTORY_PHRASE:
+        flash("The confirmation phrase did not match. Inventory was not cleared.", "danger")
+        return redirect(url_for("admin.tools"))
+
+    if not password or not current_user.check_password(password):
+        flash("Password confirmation failed. Inventory was not cleared.", "danger")
+        return redirect(url_for("admin.tools"))
+
+    try:
+        backup_exporter.create_database_backup_archive(current_app)
+    except Exception as exc:
+        current_app.logger.exception("Inventory wipe backup failed: %s", exc)
+        flash("Backup failed. Inventory was not cleared.", "danger")
+        return redirect(url_for("admin.tools"))
+
+    try:
+        with db.session.begin_nested():
+            consumptions_deleted, movements_deleted, batches_deleted = (
+                _clear_inventory_records()
+            )
+            audit_log = models.AdminAuditLog(
+                user_id=current_user.id,
+                action=_CLEAR_INVENTORY_ACTION,
+                note=(
+                    "Cleared inventory: "
+                    f"{movements_deleted} movements, "
+                    f"{batches_deleted} batches, "
+                    f"{consumptions_deleted} routing consumptions."
+                ),
+                request_ip=request.remote_addr,
+            )
+            db.session.add(audit_log)
+        db.session.commit()
+    except SQLAlchemyError as exc:
+        db.session.rollback()
+        current_app.logger.exception("Failed to clear inventory: %s", exc)
+        flash("Unable to clear inventory data. No changes were applied.", "danger")
+        return redirect(url_for("admin.tools"))
+
+    flash("Inventory cleared successfully. A backup snapshot was recorded.", "success")
+    return redirect(url_for("admin.tools"))
 
 
 @bp.route("/emergency-console", methods=["GET", "POST"])

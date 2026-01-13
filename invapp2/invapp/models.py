@@ -312,6 +312,21 @@ class OpsEventLog(db.Model):
     __table_args__ = (db.Index("ix_ops_event_log_created_at", "created_at"),)
 
 
+class AdminAuditLog(db.Model):
+    __tablename__ = "admin_audit_log"
+
+    id = db.Column(db.Integer, primary_key=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="SET NULL"))
+    action = db.Column(db.String(64), nullable=False)
+    note = db.Column(db.Text, nullable=True)
+    request_ip = db.Column(db.String(64), nullable=True)
+
+    user = db.relationship("User", backref=db.backref("admin_audit_logs", lazy="dynamic"))
+
+    __table_args__ = (db.Index("ix_admin_audit_log_created_at", "created_at"),)
+
+
 class ProductionChartSettings(db.Model):
     __tablename__ = "production_chart_settings"
 
