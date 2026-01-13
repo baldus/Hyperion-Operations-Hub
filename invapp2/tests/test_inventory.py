@@ -36,6 +36,7 @@ from invapp.models import (
 import invapp.routes.inventory as inventory
 from invapp.routes.inventory import (
     AUTO_SKU_START,
+    STOCK_IMPORT_FIELDS,
     UNASSIGNED_LOCATION_CODE,
     _ensure_placeholder_location,
 )
@@ -1099,22 +1100,12 @@ def test_import_export_items_with_notes(client, app):
 
     csv_data = io.StringIO()
     writer = csv.writer(csv_data)
+    from invapp.utils.csv_schema import ITEMS_CSV_HEADERS
+
+    writer.writerow(ITEMS_CSV_HEADERS)
     writer.writerow(
         [
-            "sku",
-            "name",
-            "type",
-            "unit",
-            "description",
-            "min_stock",
-            "notes",
-            "list_price",
-            "last_unit_cost",
-            "item_class",
-        ]
-    )
-    writer.writerow(
-        [
+            "",
             "300",
             "Existing Item",
             "",
@@ -1125,10 +1116,13 @@ def test_import_export_items_with_notes(client, app):
             "5.50",
             "4.40",
             "Legacy",
+            "",
+            "",
         ]
     )
     writer.writerow(
         [
+            "",
             "",
             "New Item",
             "",
@@ -1139,6 +1133,8 @@ def test_import_export_items_with_notes(client, app):
             "6.60",
             "5.50",
             "New",
+            "",
+            "",
         ]
     )
 
@@ -1195,34 +1191,122 @@ def test_import_export_items_with_notes(client, app):
 
     exported = list(csv.reader(io.StringIO(export_response.data.decode("utf-8"))))
     header = exported[0]
-    assert header == [
-        "sku",
-        "name",
-        "type",
-        "unit",
-        "description",
-        "min_stock",
-        "notes",
-        "list_price",
-        "last_unit_cost",
-        "item_class",
-    ]
+    assert header == ITEMS_CSV_HEADERS
 
-    rows = {row[0]: row for row in exported[1:]}  # keyed by sku
-    assert rows["300"][6] == "Updated legacy note"
-    assert rows["300"][7] == "5.50"
-    assert rows["300"][8] == "4.40"
-    assert rows["300"][9] == "Legacy"
+    header_index = {name: idx for idx, name in enumerate(header)}
+    rows = {
+        row[header_index["sku"]]: row for row in exported[1:]
+    }  # keyed by sku
+    assert rows["300"][header_index["notes"]] == "Updated legacy note"
+    assert rows["300"][header_index["list_price"]] == "5.50"
+    assert rows["300"][header_index["last_unit_cost"]] == "4.40"
+    assert rows["300"][header_index["item_class"]] == "Legacy"
 
     # new SKU is auto-generated; grab its notes from the remaining row
     new_rows = [row for sku, row in rows.items() if sku != "300"]
     assert len(new_rows) == 1
-    assert int(new_rows[0][0]) >= 100000
-    assert new_rows[0][6] == "Fresh notes"
-    assert new_rows[0][7] == "6.60"
-    assert new_rows[0][8] == "5.50"
-    assert new_rows[0][9] == "New"
+    assert int(new_rows[0][header_index["sku"]]) >= 100000
+    assert new_rows[0][header_index["notes"]] == "Fresh notes"
+    assert new_rows[0][header_index["list_price"]] == "6.60"
+    assert new_rows[0][header_index["last_unit_cost"]] == "5.50"
+    assert new_rows[0][header_index["item_class"]] == "New"
 
+
+def test_export_stock_headers_match_schema(client, app):
+    with app.app_context():
+        item = Item(sku="SKU-1", name="Widget")
+        location = Location(code="LOC-A")
+        db.session.add_all([item, location])
+        db.session.flush()
+        movement = Movement(
+            item_id=item.id,
+            location_id=location.id,
+            quantity=Decimal("5"),
+            movement_type="ADJUST",
+        )
+        db.session.add(movement)
+        db.session.commit()
+
+    response = client.get("/inventory/stock/export")
+    assert response.status_code == 200
+
+    from invapp.utils.csv_schema import STOCK_CSV_HEADERS
+
+    exported = list(csv.reader(io.StringIO(response.data.decode("utf-8"))))
+    assert exported[0] == STOCK_CSV_HEADERS
+
+
+def test_stock_export_import_round_trip(client, app):
+    with app.app_context():
+        item = Item(sku="SKU-2", name="Gadget")
+        location = Location(code="LOC-B")
+        db.session.add_all([item, location])
+        db.session.flush()
+        batch = Batch(item_id=item.id, lot_number="LOT-1", quantity=Decimal("5"))
+        db.session.add(batch)
+        db.session.flush()
+        item_id = item.id
+        movement = Movement(
+            item_id=item.id,
+            batch_id=batch.id,
+            location_id=location.id,
+            quantity=Decimal("5"),
+            movement_type="ADJUST",
+        )
+        db.session.add(movement)
+        db.session.commit()
+
+    export_response = client.get("/inventory/stock/export")
+    assert export_response.status_code == 200
+
+    exported = list(csv.reader(io.StringIO(export_response.data.decode("utf-8"))))
+    header = exported[0]
+    row = exported[1]
+    header_index = {name: idx for idx, name in enumerate(header)}
+    row[header_index["quantity"]] = "7"
+
+    csv_data = io.StringIO()
+    writer = csv.writer(csv_data)
+    writer.writerow(header)
+    writer.writerow(row)
+
+    upload_response = client.post(
+        "/inventory/stock/import",
+        data={"file": (io.BytesIO(csv_data.getvalue().encode("utf-8")), "stock.csv")},
+        content_type="multipart/form-data",
+    )
+    assert upload_response.status_code == 200
+
+    upload_page = upload_response.get_data(as_text=True)
+    token_match = re.search(r'name="import_token" value="([^"]+)"', upload_page)
+    assert token_match
+    import_token = token_match.group(1)
+
+    mapping_payload = {"step": "mapping", "import_token": import_token}
+    for field in STOCK_IMPORT_FIELDS:
+        field_name = field["field"]
+        if field_name in header:
+            mapping_payload[f"mapping_{field_name}"] = field_name
+
+    mapping_response = client.post("/inventory/stock/import", data=mapping_payload)
+    assert mapping_response.status_code == 302
+
+    with app.app_context():
+        total = (
+            db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+            .filter(Movement.item_id == item_id)
+            .scalar()
+        )
+        assert total == Decimal("12")
+
+
+def test_items_and_stock_shared_headers_match():
+    from invapp.utils.csv_schema import ITEMS_CSV_HEADERS, STOCK_CSV_HEADERS
+
+    shared_headers = {"item_id", "sku", "name"}
+    for header in shared_headers:
+        assert header in ITEMS_CSV_HEADERS
+        assert header in STOCK_CSV_HEADERS
 
 def test_inventory_scan_page(client):
     response = client.get("/inventory/scan")
@@ -1371,12 +1455,12 @@ def test_import_stock_mapping_flow(client, app):
             item_id=Item.query.filter_by(sku="SKU-1").one().id,
             lot_number="BATCH-1",
         ).one()
-        assert batch.quantity == 8
+        assert batch.quantity == Decimal("8")
 
         movements = Movement.query.filter_by(item_id=batch.item_id).order_by(Movement.id).all()
         assert len(movements) == 2
         assert movements[0].location.code == "MAIN"
-        assert movements[0].quantity == 5
+        assert movements[0].quantity == Decimal("5")
         assert movements[0].person == "Alex"
         assert movements[0].reference == "Initial"
 

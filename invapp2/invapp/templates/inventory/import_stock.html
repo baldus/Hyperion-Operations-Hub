@@ -15,9 +15,13 @@
   field before the import is processed.
 </p>
 <p>
-  Expected CSV columns: <code>sku</code>, <code>location_code</code>,
-  <code>quantity</code>, <code>lot_number</code>, <code>person</code>,
-  <code>reference</code>. The <code>location_code</code> field may be left blank
-  to use the unassigned staging location (<code>UNASSIGNED</code>).
+  Expected CSV columns include: <code>item_id</code>, <code>sku</code>,
+  <code>location_id</code>, <code>location_code</code>, <code>quantity</code>,
+  <code>lot_number</code>, <code>batch_id</code>, <code>person</code>,
+  <code>reference</code>, <code>received_date</code>,
+  <code>expiration_date</code>, <code>supplier_name</code>,
+  <code>supplier_code</code>, <code>purchase_order</code>, and
+  <code>notes</code>. The <code>location_code</code> field may be left blank to
+  use the unassigned staging location (<code>UNASSIGNED</code>).
 </p>
 {% endblock %}
