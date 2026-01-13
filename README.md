@@ -366,6 +366,10 @@ Smart location assignment tests live in `tests/test_item_locations.py`.
 * **Verify item location columns**
   * In `psql`, run: `\\d item` and confirm `secondary_location_id` and
     `point_of_use_location_id` exist.
+* **Postgres GROUP BY errors on Stock Overview**
+  * The Stock Overview aggregates movements in a subquery to avoid strict
+    `GROUP BY` issues when joining optional location metadata; ensure local
+    changes keep that aggregation pattern intact.
 
 ---
 

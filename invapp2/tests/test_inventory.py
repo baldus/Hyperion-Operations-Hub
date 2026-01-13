@@ -7,6 +7,7 @@ import re
 import shutil
 import sys
 import tempfile
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -94,7 +95,7 @@ def create_user(app, username="operator", password="password", role_names=("inve
         user.roles = assigned_roles
         db.session.add(user)
         db.session.commit()
-        return user
+    return user
 
 
 def login(client, username="operator", password="password"):
@@ -197,6 +198,57 @@ def test_list_stock_low_filter(client, stock_items):
     assert stock_items["low"] in page
     assert stock_items["near"] not in page
     assert stock_items["ok"] not in page
+
+
+def test_list_stock_includes_location_metadata(client, app):
+    with app.app_context():
+        primary = Location(code="PRIMARY")
+        secondary = Location(code="SECONDARY")
+        pou = Location(code="POU")
+        movement_loc = Location(code="MOVE")
+        item = Item(
+            sku="LOC-1",
+            name="Location Item",
+            default_location=primary,
+            secondary_location=secondary,
+            point_of_use_location=pou,
+        )
+        db.session.add_all([primary, secondary, pou, movement_loc, item])
+        db.session.flush()
+
+        first_date = datetime(2024, 1, 1, 8, 30)
+        second_date = first_date + timedelta(days=1, hours=4)
+        db.session.add_all(
+            [
+                Movement(
+                    item_id=item.id,
+                    location_id=primary.id,
+                    quantity=Decimal("5"),
+                    movement_type="ADJUST",
+                    date=first_date,
+                ),
+                Movement(
+                    item_id=item.id,
+                    location_id=movement_loc.id,
+                    quantity=Decimal("2"),
+                    movement_type="ADJUST",
+                    date=second_date,
+                ),
+            ]
+        )
+        db.session.commit()
+
+    with app.app_context():
+        overview_query, _, _, _, _, _ = inventory._stock_overview_query()
+        row = overview_query.filter(Item.sku == "LOC-1").one()
+
+    item_row, total_qty, location_count, last_updated, secondary_loc, pou_loc = row
+    assert item_row.name == "Location Item"
+    assert secondary_loc.code == "SECONDARY"
+    assert pou_loc.code == "POU"
+    assert float(total_qty) == 7.0
+    assert int(location_count) == 2
+    assert last_updated == second_date
 
 
 def test_list_stock_near_filter(client, stock_items):

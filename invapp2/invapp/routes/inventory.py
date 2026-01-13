@@ -28,7 +28,7 @@ from flask import (
 )
 from sqlalchemy import asc, desc, func, inspect, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import joinedload, lazyload, load_only
+from sqlalchemy.orm import aliased, joinedload, lazyload, load_only
 from sqlalchemy.orm.exc import DetachedInstanceError
 
 from invapp.auth import blueprint_page_guard
@@ -2507,6 +2507,53 @@ def _movement_person() -> str | None:
         return user.username if user else None
 
 
+def _stock_overview_query():
+    movement_agg = (
+        db.session.query(
+            Movement.item_id.label("item_id"),
+            func.coalesce(func.sum(Movement.quantity), 0).label("total_qty"),
+            func.count(func.distinct(Movement.location_id)).label("location_count"),
+            func.max(Movement.date).label("last_updated"),
+        )
+        .group_by(Movement.item_id)
+        .subquery()
+    )
+
+    secondary_location = aliased(Location)
+    point_of_use_location = aliased(Location)
+
+    total_qty = func.coalesce(movement_agg.c.total_qty, 0).label("total_qty")
+    location_count = func.coalesce(
+        movement_agg.c.location_count, 0
+    ).label("location_count")
+    last_updated = movement_agg.c.last_updated.label("last_updated")
+
+    overview_query = (
+        db.session.query(
+            Item,
+            total_qty,
+            location_count,
+            last_updated,
+            secondary_location,
+            point_of_use_location,
+        )
+        .options(lazyload(Item.default_location))
+        .outerjoin(movement_agg, movement_agg.c.item_id == Item.id)
+        .outerjoin(secondary_location, secondary_location.id == Item.secondary_location_id)
+        .outerjoin(
+            point_of_use_location, point_of_use_location.id == Item.point_of_use_location_id
+        )
+    )
+    return (
+        overview_query,
+        total_qty,
+        location_count,
+        last_updated,
+        secondary_location,
+        point_of_use_location,
+    )
+
+
 @bp.route("/stock")
 def list_stock():
     page = request.args.get("page", 1, type=int)
@@ -2520,18 +2567,14 @@ def list_stock():
     if status not in {"all", "low", "near"}:
         status = "all"
 
-    total_qty = func.coalesce(func.sum(Movement.quantity), 0).label("total_qty")
-    location_count = func.count(func.distinct(Movement.location_id)).label(
-        "location_count"
-    )
-    last_updated = func.max(Movement.date).label("last_updated")
-
-    overview_query = (
-        db.session.query(Item, total_qty, location_count, last_updated)
-        .options(lazyload(Item.default_location))
-        .outerjoin(Movement, Movement.item_id == Item.id)
-        .group_by(Item.id)
-    )
+    (
+        overview_query,
+        total_qty,
+        location_count,
+        last_updated,
+        secondary_location,
+        point_of_use_location,
+    ) = _stock_overview_query()
 
     if search:
         like_pattern = f"%{search}%"
@@ -2556,12 +2599,12 @@ def list_stock():
 
     if status in {"low", "near"}:
         multiplier = 1.05 if status == "low" else 1.25
-        overview_query = overview_query.having(
+        overview_query = overview_query.filter(
             total_qty < (func.coalesce(Item.min_stock, 0) * multiplier)
         )
 
     if in_stock:
-        overview_query = overview_query.having(total_qty > 0)
+        overview_query = overview_query.filter(total_qty > 0)
 
     sort_map = {
         "sku": Item.sku,
@@ -2586,8 +2629,17 @@ def list_stock():
             "total_qty": float(total or 0),
             "location_count": location_count or 0,
             "last_updated": last_updated,
+            "secondary_location": secondary_location,
+            "point_of_use_location": point_of_use_location,
         }
-        for item, total, location_count, last_updated in pagination.items
+        for (
+            item,
+            total,
+            location_count,
+            last_updated,
+            secondary_location,
+            point_of_use_location,
+        ) in pagination.items
     ]
 
     locations = Location.query.order_by(Location.code).all()
