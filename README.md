@@ -20,13 +20,20 @@ logging stack.
 4. [Repository Layout](#repository-layout)
 5. [Developer Setup](#developer-setup)
 6. [Database Initialization](#database-initialization)
-7. [Running the Application](#running-the-application)
-8. [Workstation Queues](#workstation-queues)
-9. [Accessing the MDI Dashboards](#accessing-the-mdi-dashboards)
-10. [MDI Meeting Dashboard Experience](#mdi-meeting-dashboard-experience)
-11. [Extending the MDI Module](#extending-the-mdi-module)
-12. [Operational Tips](#operational-tips)
-13. [Home Screen Cubes](#home-screen-cubes)
+7. [Inventory Data Model](#inventory-data-model)
+8. [Item Locations](#item-locations)
+9. [CSV Import/Export](#csv-importexport)
+10. [Migrations](#migrations)
+11. [Tests](#tests)
+12. [Developer Notes](#developer-notes)
+13. [Troubleshooting](#troubleshooting)
+14. [Running the Application](#running-the-application)
+15. [Workstation Queues](#workstation-queues)
+16. [Accessing the MDI Dashboards](#accessing-the-mdi-dashboards)
+17. [MDI Meeting Dashboard Experience](#mdi-meeting-dashboard-experience)
+18. [Extending the MDI Module](#extending-the-mdi-module)
+19. [Operational Tips](#operational-tips)
+20. [Home Screen Cubes](#home-screen-cubes)
 
 ---
 
@@ -192,8 +199,173 @@ with app.app_context():
     db.create_all()
 PY
 ```
-The first launch performs the same migration + seeding steps, so no separate
-migration tool is required.
+The first launch performs the same migration + seeding steps for legacy schema
+alignment. Use Alembic (see [Migrations](#migrations)) for tracked schema
+changes going forward.
+
+---
+
+## Inventory Data Model
+
+Core inventory data lives in `invapp/models.py` and uses the following tables
+and relationships:
+
+* **Item** (`Item`, table `item`) – the SKU/master record for inventory items.
+* **Location** (`Location`, table `location`) – storage or usage locations.
+* **Movement** (`Movement`, table `movement`) – stock ledger entries; on-hand
+  quantities are derived by summing `Movement.quantity` per `item_id` and
+  `location_id`.
+* **Batch** (`Batch`, table `batch`) – lot/batch records linked to items and
+  (optionally) movements.
+
+Relationship map (simplified):
+
+```
+Item (item.id)
+  ├─ default_location_id -> Location (location.id)
+  ├─ secondary_location_id -> Location (location.id)
+  ├─ point_of_use_location_id -> Location (location.id)
+  └─ Movement (movement.item_id, movement.location_id)
+         └─ Batch (batch.id) optional via movement.batch_id
+```
+
+---
+
+## Item Locations
+
+Item-level location fields define preferred storage and usage points:
+
+* **Primary Location** – `Item.default_location_id` (existing field, treated as
+  the primary/default storage location).
+* **Secondary Location** – `Item.secondary_location_id` (optional overflow or
+  alternate storage).
+* **Point-of-Use (POU) Location** – `Item.point_of_use_location_id` (optional,
+  manually managed, never auto-assigned).
+
+Validation rules enforced in the Item create/edit UI and CSV imports:
+
+* Primary and Secondary must be different.
+* Primary and POU must be different.
+* Secondary and POU must be different.
+
+### Smart Location Assignment
+
+When receiving or moving inventory into a selected location, the application
+applies these rules (implemented in `invapp/services/item_locations.py`):
+
+1. **No primary set** → assign the selected location as the primary.
+2. **Primary set**:
+   * If selected location == primary → do nothing.
+   * If selected location != primary → check whether the primary location has
+     on-hand stock for the item (sum of `Movement.quantity` at the primary).
+   * If primary has stock **and** Secondary is empty → set Secondary to the
+     selected location.
+   * If Secondary is already set → do nothing (no overwrites).
+3. **POU is never auto-assigned.** It can only be set in the Item UI or via CSV
+   import fields.
+
+Examples:
+
+* **Example A:** Item has no primary. Receiving into `LOC-A` → primary becomes
+  `LOC-A`.
+* **Example B:** Item primary is `LOC-A` and has stock. Receiving into `LOC-B`
+  with no secondary set → secondary becomes `LOC-B`.
+* **Example C:** Item secondary already set → receiving into `LOC-C` does not
+  overwrite the existing secondary.
+* **Example D:** POU is never auto-set, even if primary/secondary update.
+
+---
+
+## CSV Import/Export
+
+Item CSV import/export is handled in `invapp/routes/inventory.py` using the
+schemas in `invapp/utils/csv_schema.py`.
+
+### Item CSV headers (export + import mapping)
+
+* `item_id`, `sku`, `name`, `type`, `unit`, `description`, `min_stock`,
+  `notes`, `list_price`, `last_unit_cost`, `item_class`
+* `default_location_id`, `default_location_code`
+* `secondary_location_id`, `secondary_location_code`
+* `point_of_use_location_id`, `point_of_use_location_code`
+
+Import behavior:
+
+* Location fields match by **ID first**, then by **location code** if the ID
+  is blank or invalid.
+* Imports **do not** trigger smart location assignment; they set exactly what
+  the CSV provides.
+* Duplicate location selections (primary/secondary/POU) are rejected and the
+  affected rows are skipped with a warning.
+
+Stock CSV import/export remains available via `/inventory/stock/import` and
+`/inventory/stock/export`, using `location_id`/`location_code` plus batch/lot
+columns for on-hand adjustments.
+
+---
+
+## Migrations
+
+Alembic migrations live in `invapp2/migrations`. To apply migrations:
+
+```bash
+cd Hyperion-Operations-Hub/invapp2
+export DB_URL="postgresql+psycopg2://USER:PASSWORD@localhost/invdb"
+alembic upgrade head
+```
+
+To create a new revision:
+
+```bash
+alembic revision -m "describe change"
+```
+
+---
+
+## Tests
+
+Run the full test suite from `invapp2`:
+
+```bash
+pytest
+```
+
+Smart location assignment tests live in `tests/test_item_locations.py`.
+
+---
+
+## Developer Notes
+
+### Schema Discovery Notes
+
+* **Item model:** `invapp/models.py` (`Item`, table `item`).
+* **Location model:** `invapp/models.py` (`Location`, table `location`).
+* **On-hand inventory ledger:** `invapp/models.py` (`Movement`, table
+  `movement`) with sums of `Movement.quantity` per location.
+* **Lot/batch records:** `invapp/models.py` (`Batch`, table `batch`).
+* **Receiving routes:** `invapp/routes/inventory.py` (`/inventory/receiving`)
+  and `invapp/routes/receiving.py` (`/receiving`).
+* **Stock transfer routes/services:** `invapp/routes/inventory.py`
+  (`/inventory/stock/<item_id>/transfer`, `/inventory/move`) and
+  `invapp/services/stock_transfer.py`.
+* **CSV import/export paths:** `invapp/routes/inventory.py`
+  (`/inventory/items/import`, `/inventory/items/export`, `/inventory/stock/import`,
+  `/inventory/stock/export`) with schemas in `invapp/utils/csv_schema.py`.
+
+---
+
+## Troubleshooting
+
+* **Missing column or relation errors after deploy**
+  * Run `alembic upgrade head` and verify `DB_URL` points at the correct
+    database.
+* **Foreign key violations when importing items**
+  * Ensure the referenced `location.id` or `location.code` exists before import.
+* **Multiple Alembic heads**
+  * Run `alembic heads` and merge the revisions or pick the correct branch.
+* **Verify item location columns**
+  * In `psql`, run: `\\d item` and confirm `secondary_location_id` and
+    `point_of_use_location_id` exist.
 
 ---
 

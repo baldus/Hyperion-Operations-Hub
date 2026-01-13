@@ -18,6 +18,10 @@ ITEMS_CSV_COLUMNS: list[tuple[str, str]] = [
     ("item_class", "item_class"),
     ("default_location_id", "default_location_id"),
     ("default_location_code", "default_location_code"),
+    ("secondary_location_id", "secondary_location_id"),
+    ("secondary_location_code", "secondary_location_code"),
+    ("point_of_use_location_id", "point_of_use_location_id"),
+    ("point_of_use_location_code", "point_of_use_location_code"),
 ]
 
 STOCK_CSV_COLUMNS: list[tuple[str, str]] = [
@@ -64,6 +68,29 @@ ITEMS_HEADER_ALIASES: dict[str, Iterable[str]] = {
         "default_location",
         "default_location_name",
         "location_code",
+    ],
+    "secondary_location_id": [
+        "secondary_location_id",
+        "secondary_loc_id",
+        "secondary_location",
+    ],
+    "secondary_location_code": [
+        "secondary_location_code",
+        "secondary_location",
+        "secondary_location_name",
+        "secondary_loc_code",
+    ],
+    "point_of_use_location_id": [
+        "point_of_use_location_id",
+        "point_of_use_loc_id",
+        "pou_location_id",
+        "pou_loc_id",
+    ],
+    "point_of_use_location_code": [
+        "point_of_use_location_code",
+        "point_of_use_location",
+        "pou_location_code",
+        "pou_location",
     ],
 }
 

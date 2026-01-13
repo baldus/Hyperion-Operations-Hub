@@ -10,6 +10,7 @@ from flask import (
 )
 from invapp.extensions import db
 from invapp.models import Receiving, Item, Stock, Location
+from invapp.services.item_locations import apply_smart_item_locations
 from invapp.printing.zebra import (
     print_receiving_label,
     render_receiving_label_png,
@@ -71,6 +72,8 @@ def add_receiving():
             stock = Stock(item_id=item.id, location_id=location_id, quantity=qty)
             db.session.add(stock)
 
+        # Apply smart location assignment after receiving into a location.
+        apply_smart_item_locations(item, location_id, db.session)
         db.session.commit()
 
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":

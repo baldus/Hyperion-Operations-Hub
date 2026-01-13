@@ -29,7 +29,7 @@
   <label for="item_class">Item Class:</label>
   <input type="text" name="item_class" value="{{ item.item_class or '' }}"><br>
 
-  <label for="default_location_id">Default Stock Location:</label>
+  <label for="default_location_id">Primary Location:</label>
   <select name="default_location_id">
     <option value="">-- None --</option>
     {% for loc in locations %}
@@ -38,6 +38,26 @@
     {% endfor %}
   </select>
   <small class="form-text text-muted">Shown when receiving this SKU to guide put-away.</small><br>
+
+  <label for="secondary_location_id">Secondary Location:</label>
+  <select name="secondary_location_id">
+    <option value="">-- None --</option>
+    {% for loc in locations %}
+      {% set selected = 'selected' if item.secondary_location_id == loc.id else '' %}
+      <option value="{{ loc.id }}" {{ selected }}>{{ loc.code }}{% if loc.description %} - {{ loc.description }}{% endif %}</option>
+    {% endfor %}
+  </select>
+  <small class="form-text text-muted">Optional overflow storage location.</small><br>
+
+  <label for="point_of_use_location_id">Point-of-Use Location (POU):</label>
+  <select name="point_of_use_location_id">
+    <option value="">-- None --</option>
+    {% for loc in locations %}
+      {% set selected = 'selected' if item.point_of_use_location_id == loc.id else '' %}
+      <option value="{{ loc.id }}" {{ selected }}>{{ loc.code }}{% if loc.description %} - {{ loc.description }}{% endif %}</option>
+    {% endfor %}
+  </select>
+  <small class="form-text text-muted">Set manually; never auto-assigned.</small><br>
 
   <label for="notes">Notes:</label>
   <textarea name="notes" rows="4">{{ item.notes or '' }}</textarea><br>

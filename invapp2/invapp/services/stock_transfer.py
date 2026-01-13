@@ -7,6 +7,7 @@ from sqlalchemy import func, or_
 
 from invapp.extensions import db
 from invapp.models import Batch, Item, Location, Movement
+from invapp.services.item_locations import apply_smart_item_locations
 
 
 @dataclass(frozen=True)
@@ -161,6 +162,8 @@ def move_inventory_lines(
                     reference=reference,
                 )
             )
+            # Apply smart location assignment for the destination location.
+            apply_smart_item_locations(item, to_location_id, db.session)
             total_qty += line.quantity
 
     return {"total_qty": total_qty, "total_lines": len(lines)}

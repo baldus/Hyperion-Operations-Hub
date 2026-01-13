@@ -1118,6 +1118,10 @@ def test_import_export_items_with_notes(client, app):
             "Legacy",
             "",
             "",
+            "",
+            "",
+            "",
+            "",
         ]
     )
     writer.writerow(
@@ -1133,6 +1137,10 @@ def test_import_export_items_with_notes(client, app):
             "6.60",
             "5.50",
             "New",
+            "",
+            "",
+            "",
+            "",
             "",
             "",
         ]

@@ -59,6 +59,7 @@ from invapp.services.stock_transfer import (
     get_location_inventory_lines,
     move_inventory_lines,
 )
+from invapp.services.item_locations import apply_smart_item_locations
 from invapp.utils.csv_export import export_rows_to_csv
 from invapp.utils.csv_schema import (
     ITEMS_CSV_COLUMNS,
@@ -165,6 +166,26 @@ ITEM_IMPORT_FIELDS = [
     {
         "field": "default_location_code",
         "label": "default_location_code",
+        "required": False,
+    },
+    {
+        "field": "secondary_location_id",
+        "label": "secondary_location_id",
+        "required": False,
+    },
+    {
+        "field": "secondary_location_code",
+        "label": "secondary_location_code",
+        "required": False,
+    },
+    {
+        "field": "point_of_use_location_id",
+        "label": "point_of_use_location_id",
+        "required": False,
+    },
+    {
+        "field": "point_of_use_location_code",
+        "label": "point_of_use_location_code",
         "required": False,
     },
 ]
@@ -344,6 +365,45 @@ def _parse_int(value: str) -> Optional[int]:
         return int(str(value).strip())
     except (TypeError, ValueError):
         return None
+
+
+def _parse_location_id(value: str | None) -> Optional[int]:
+    if value is None:
+        return None
+    value = str(value).strip()
+    if not value:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _validate_item_location_duplicates(
+    primary_location_id: Optional[int],
+    secondary_location_id: Optional[int],
+    point_of_use_location_id: Optional[int],
+) -> list[str]:
+    errors = []
+    if (
+        primary_location_id
+        and secondary_location_id
+        and primary_location_id == secondary_location_id
+    ):
+        errors.append("Primary and secondary locations must be different.")
+    if (
+        primary_location_id
+        and point_of_use_location_id
+        and primary_location_id == point_of_use_location_id
+    ):
+        errors.append("Primary and point-of-use locations must be different.")
+    if (
+        secondary_location_id
+        and point_of_use_location_id
+        and secondary_location_id == point_of_use_location_id
+    ):
+        errors.append("Secondary and point-of-use locations must be different.")
+    return errors
 
 
 def _parse_iso_datetime(value: str) -> Optional[datetime]:
@@ -1238,17 +1298,45 @@ def add_item():
 
         attachment_saved = False
 
-        default_location_id_raw = request.form.get("default_location_id")
-        default_location_id = None
-        if default_location_id_raw:
-            try:
-                default_location_id = int(default_location_id_raw)
-            except (TypeError, ValueError):
-                default_location_id = None
+        location_errors = []
 
-        default_location = (
-            Location.query.get(default_location_id) if default_location_id else None
+        def resolve_location_choice(label: str, field_name: str):
+            raw_value = request.form.get(field_name)
+            if raw_value is None or not str(raw_value).strip():
+                return None
+            location_id = _parse_location_id(raw_value)
+            if location_id is None:
+                location_errors.append(f"{label} selection is invalid.")
+                return None
+            location = Location.query.get(location_id)
+            if location is None:
+                location_errors.append(f"{label} not found.")
+            return location
+
+        default_location = resolve_location_choice("Primary location", "default_location_id")
+        secondary_location = resolve_location_choice(
+            "Secondary location",
+            "secondary_location_id",
         )
+        point_of_use_location = resolve_location_choice(
+            "Point-of-use location",
+            "point_of_use_location_id",
+        )
+
+        location_errors.extend(
+            _validate_item_location_duplicates(
+                default_location.id if default_location else None,
+                secondary_location.id if secondary_location else None,
+                point_of_use_location.id if point_of_use_location else None,
+            )
+        )
+
+        if location_errors:
+            for error in location_errors:
+                flash(error, "danger")
+            return render_template(
+                "inventory/add_item.html", next_sku=next_sku, locations=locations
+            )
 
         item = Item(
             sku=next_sku,
@@ -1262,6 +1350,8 @@ def add_item():
             last_unit_cost=_parse_decimal(request.form.get("last_unit_cost")),
             item_class=item_class,
             default_location=default_location,
+            secondary_location=secondary_location,
+            point_of_use_location=point_of_use_location,
         )
         db.session.add(item)
         db.session.flush()
@@ -1327,16 +1417,53 @@ def edit_item(item_id):
             item.last_unit_cost = _parse_decimal(request.form.get("last_unit_cost"))
             item.item_class = request.form.get("item_class", "").strip() or None
 
-            default_location_id_raw = request.form.get("default_location_id")
-            if default_location_id_raw:
-                try:
-                    parsed_id = int(default_location_id_raw)
-                    location_choice = Location.query.get(parsed_id)
-                    item.default_location_id = location_choice.id if location_choice else None
-                except (TypeError, ValueError):
-                    item.default_location_id = None
-            else:
-                item.default_location_id = None
+            location_errors = []
+
+            def resolve_location_choice(label: str, field_name: str):
+                raw_value = request.form.get(field_name)
+                if raw_value is None or not str(raw_value).strip():
+                    return None
+                location_id = _parse_location_id(raw_value)
+                if location_id is None:
+                    location_errors.append(f"{label} selection is invalid.")
+                    return None
+                location = Location.query.get(location_id)
+                if location is None:
+                    location_errors.append(f"{label} not found.")
+                return location
+
+            default_location = resolve_location_choice("Primary location", "default_location_id")
+            secondary_location = resolve_location_choice(
+                "Secondary location",
+                "secondary_location_id",
+            )
+            point_of_use_location = resolve_location_choice(
+                "Point-of-use location",
+                "point_of_use_location_id",
+            )
+
+            location_errors.extend(
+                _validate_item_location_duplicates(
+                    default_location.id if default_location else None,
+                    secondary_location.id if secondary_location else None,
+                    point_of_use_location.id if point_of_use_location else None,
+                )
+            )
+
+            if location_errors:
+                for error in location_errors:
+                    flash(error, "danger")
+                return render_template(
+                    "inventory/edit_item.html", item=item, locations=locations
+                )
+
+            item.default_location_id = default_location.id if default_location else None
+            item.secondary_location_id = (
+                secondary_location.id if secondary_location else None
+            )
+            item.point_of_use_location_id = (
+                point_of_use_location.id if point_of_use_location else None
+            )
 
             attachment_file = request.files.get("attachment")
             attachment_saved, error_message = _save_item_attachment(item, attachment_file)
@@ -1693,6 +1820,7 @@ def import_items():
             locations_by_code = {loc.code: loc for loc in locations_by_id.values()}
 
             count_new, count_updated = 0, 0
+            errors = []
             for row in reader:
                 item_id = _parse_int(extract(row, "id"))
                 sku = extract(row, "sku").strip()
@@ -1744,14 +1872,37 @@ def import_items():
                     else None
                 )
 
-                default_location_id = _parse_int(extract(row, "default_location_id"))
-                default_location_code = extract(row, "default_location_code").strip()
+                row_errors = []
 
-                default_location = None
-                if default_location_id is not None:
-                    default_location = locations_by_id.get(default_location_id)
-                if default_location is None and default_location_code:
-                    default_location = locations_by_code.get(default_location_code)
+                def resolve_location_from_row(prefix: str):
+                    location_id = _parse_int(extract(row, f"{prefix}_id"))
+                    location_code = extract(row, f"{prefix}_code").strip()
+                    location = None
+                    if location_id is not None:
+                        location = locations_by_id.get(location_id)
+                    if location is None and location_code:
+                        location = locations_by_code.get(location_code)
+                    if (location_id is not None or location_code) and location is None:
+                        row_errors.append(
+                            f"Unknown {prefix.replace('_', ' ')} for SKU {sku or '(auto)'}."
+                        )
+                    return location
+
+                default_location = resolve_location_from_row("default_location")
+                secondary_location = resolve_location_from_row("secondary_location")
+                point_of_use_location = resolve_location_from_row("point_of_use_location")
+
+                row_errors.extend(
+                    _validate_item_location_duplicates(
+                        default_location.id if default_location else None,
+                        secondary_location.id if secondary_location else None,
+                        point_of_use_location.id if point_of_use_location else None,
+                    )
+                )
+
+                if row_errors:
+                    errors.extend(row_errors)
+                    continue
 
                 existing = None
                 if item_id is not None:
@@ -1777,9 +1928,26 @@ def import_items():
                         existing.last_unit_cost = last_unit_cost_value
                     if has_item_class_column:
                         existing.item_class = item_class_value or None
-                    if "default_location_id" in selected_mappings or "default_location_code" in selected_mappings:
+                    if (
+                        "default_location_id" in selected_mappings
+                        or "default_location_code" in selected_mappings
+                    ):
                         existing.default_location_id = (
                             default_location.id if default_location else None
+                        )
+                    if (
+                        "secondary_location_id" in selected_mappings
+                        or "secondary_location_code" in selected_mappings
+                    ):
+                        existing.secondary_location_id = (
+                            secondary_location.id if secondary_location else None
+                        )
+                    if (
+                        "point_of_use_location_id" in selected_mappings
+                        or "point_of_use_location_code" in selected_mappings
+                    ):
+                        existing.point_of_use_location_id = (
+                            point_of_use_location.id if point_of_use_location else None
                         )
                     count_updated += 1
                 else:
@@ -1804,6 +1972,12 @@ def import_items():
                         default_location_id=(
                             default_location.id if default_location else None
                         ),
+                        secondary_location_id=(
+                            secondary_location.id if secondary_location else None
+                        ),
+                        point_of_use_location_id=(
+                            point_of_use_location.id if point_of_use_location else None
+                        ),
                     )
                     db.session.add(item)
                     count_new += 1
@@ -1820,6 +1994,13 @@ def import_items():
                 ),
                 "success",
             )
+            if errors:
+                preview = "; ".join(errors[:5])
+                extra = "" if len(errors) <= 5 else f" (and {len(errors) - 5} more)"
+                flash(
+                    f"Skipped {len(errors)} rows due to location validation errors: {preview}{extra}",
+                    "warning",
+                )
             return redirect(url_for("inventory.list_items"))
 
         file = request.files.get("file")
@@ -1869,11 +2050,17 @@ def export_items():
     """
     Export items to CSV.
     """
-    items = Item.query.options(joinedload(Item.default_location)).order_by(Item.sku).all()
+    items = Item.query.options(
+        joinedload(Item.default_location),
+        joinedload(Item.secondary_location),
+        joinedload(Item.point_of_use_location),
+    ).order_by(Item.sku).all()
 
     def iter_rows():
         for item in items:
             default_location = item.default_location
+            secondary_location = item.secondary_location
+            point_of_use_location = item.point_of_use_location
             yield {
                 "id": item.id,
                 "sku": item.sku,
@@ -1891,6 +2078,18 @@ def export_items():
                 ),
                 "default_location_code": (
                     default_location.code if default_location else None
+                ),
+                "secondary_location_id": (
+                    secondary_location.id if secondary_location else None
+                ),
+                "secondary_location_code": (
+                    secondary_location.code if secondary_location else None
+                ),
+                "point_of_use_location_id": (
+                    point_of_use_location.id if point_of_use_location else None
+                ),
+                "point_of_use_location_code": (
+                    point_of_use_location.code if point_of_use_location else None
                 ),
             }
 
@@ -2586,6 +2785,8 @@ def transfer_stock(item_id: int):
                 reference=reference,
             )
         )
+        # Apply smart location assignment for the destination location.
+        apply_smart_item_locations(item, to_location_id, db.session)
     db.session.commit()
 
     flash(
@@ -2634,6 +2835,8 @@ def add_stock_location(item_id: int):
                 reference=reference,
             )
         )
+        # Apply smart location assignment for the newly added location.
+        apply_smart_item_locations(item, location_id, db.session)
     db.session.commit()
 
     flash(
@@ -3174,6 +3377,8 @@ def receiving():
             reference=reference
         )
         db.session.add(mv)
+        # Apply smart location assignment after the receipt is recorded.
+        apply_smart_item_locations(item, location_id, db.session)
         db.session.commit()
 
         if defer_qty or qty_missing:

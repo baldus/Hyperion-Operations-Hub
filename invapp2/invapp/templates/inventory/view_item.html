@@ -49,6 +49,36 @@
       <dd>{{ item.item_class or '-' }}</dd>
     </div>
     <div class="detail-list__row">
+      <dt>Primary Location</dt>
+      <dd>
+        {% if item.default_location %}
+          {{ item.default_location.code }}{% if item.default_location.description %} — {{ item.default_location.description }}{% endif %}
+        {% else %}
+          -
+        {% endif %}
+      </dd>
+    </div>
+    <div class="detail-list__row">
+      <dt>Secondary Location</dt>
+      <dd>
+        {% if item.secondary_location %}
+          {{ item.secondary_location.code }}{% if item.secondary_location.description %} — {{ item.secondary_location.description }}{% endif %}
+        {% else %}
+          -
+        {% endif %}
+      </dd>
+    </div>
+    <div class="detail-list__row">
+      <dt>Point-of-Use Location</dt>
+      <dd>
+        {% if item.point_of_use_location %}
+          {{ item.point_of_use_location.code }}{% if item.point_of_use_location.description %} — {{ item.point_of_use_location.description }}{% endif %}
+        {% else %}
+          -
+        {% endif %}
+      </dd>
+    </div>
+    <div class="detail-list__row">
       <dt>Notes</dt>
       <dd>{% if item.notes %}{{ item.notes }}{% else %}<span class="text-muted">No notes yet.</span>{% endif %}</dd>
     </div>

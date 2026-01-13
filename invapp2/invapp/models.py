@@ -423,6 +423,10 @@ class LabelProcessAssignment(db.Model):
 
 class Item(db.Model):
     __tablename__ = "item"
+    __table_args__ = (
+        db.Index("ix_item_secondary_location_id", "secondary_location_id"),
+        db.Index("ix_item_point_of_use_location_id", "point_of_use_location_id"),
+    )
     id = db.Column(db.Integer, primary_key=True)  # system key
     sku = db.Column(db.String, unique=True, nullable=False)  # part number
     name = db.Column(db.String, nullable=False)
@@ -437,10 +441,26 @@ class Item(db.Model):
     default_location_id = db.Column(
         db.Integer, db.ForeignKey("location.id"), nullable=True
     )
+    secondary_location_id = db.Column(
+        db.Integer, db.ForeignKey("location.id"), nullable=True
+    )
+    point_of_use_location_id = db.Column(
+        db.Integer, db.ForeignKey("location.id"), nullable=True
+    )
 
     default_location = db.relationship(
         "Location",
         foreign_keys=[default_location_id],
+        lazy="joined",
+    )
+    secondary_location = db.relationship(
+        "Location",
+        foreign_keys=[secondary_location_id],
+        lazy="joined",
+    )
+    point_of_use_location = db.relationship(
+        "Location",
+        foreign_keys=[point_of_use_location_id],
         lazy="joined",
     )
     # NOTE: ``default_location_id`` is backfilled for legacy databases in
