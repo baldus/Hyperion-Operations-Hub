@@ -28,6 +28,7 @@ STOCK_CSV_COLUMNS: list[tuple[str, str]] = [
     ("item_id", "item_id"),
     ("sku", "sku"),
     ("name", "name"),
+    ("primary_location_code", "primary_location_code"),
     ("location_id", "location_id"),
     ("location_code", "location_code"),
     ("batch_id", "batch_id"),

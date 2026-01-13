@@ -96,6 +96,14 @@
             {% endif %}
           </a>
         </th>
+        <th>
+          <a href="{{ build_stock_url(sort='primary', dir='desc' if sort == 'primary' and direction == 'asc' else 'asc', page=1) }}">
+            Primary Location
+            {% if sort == 'primary' %}
+              <span class="sort-indicator">{{ '▲' if direction == 'asc' else '▼' }}</span>
+            {% endif %}
+          </a>
+        </th>
         <th>Secondary</th>
         <th>POU</th>
         <th>
@@ -133,6 +141,13 @@
             <td>{{ entry.total_qty }}</td>
             <td>{{ entry.location_count }}</td>
             <td>
+              {% if entry.primary_location %}
+                {{ entry.primary_location.code }}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td>
               {% if entry.secondary_location %}
                 {{ entry.secondary_location.code }}
               {% else %}
@@ -158,7 +173,7 @@
         {% endfor %}
       {% else %}
         <tr>
-          <td colspan="8">No items match the selected filter.</td>
+          <td colspan="9">No items match the selected filter.</td>
         </tr>
       {% endif %}
     </tbody>

@@ -2519,6 +2519,7 @@ def _stock_overview_query():
         .subquery()
     )
 
+    primary_location = aliased(Location)
     secondary_location = aliased(Location)
     point_of_use_location = aliased(Location)
 
@@ -2534,11 +2535,13 @@ def _stock_overview_query():
             total_qty,
             location_count,
             last_updated,
+            primary_location,
             secondary_location,
             point_of_use_location,
         )
         .options(lazyload(Item.default_location))
         .outerjoin(movement_agg, movement_agg.c.item_id == Item.id)
+        .outerjoin(primary_location, primary_location.id == Item.default_location_id)
         .outerjoin(secondary_location, secondary_location.id == Item.secondary_location_id)
         .outerjoin(
             point_of_use_location, point_of_use_location.id == Item.point_of_use_location_id
@@ -2549,6 +2552,7 @@ def _stock_overview_query():
         total_qty,
         location_count,
         last_updated,
+        primary_location,
         secondary_location,
         point_of_use_location,
     )
@@ -2572,6 +2576,7 @@ def list_stock():
         total_qty,
         location_count,
         last_updated,
+        primary_location,
         secondary_location,
         point_of_use_location,
     ) = _stock_overview_query()
@@ -2611,6 +2616,7 @@ def list_stock():
         "name": Item.name,
         "qty": total_qty,
         "locations": location_count,
+        "primary": primary_location.code,
         "updated": last_updated,
         "min_stock": Item.min_stock,
     }
@@ -2629,6 +2635,7 @@ def list_stock():
             "total_qty": float(total or 0),
             "location_count": location_count or 0,
             "last_updated": last_updated,
+            "primary_location": primary_location,
             "secondary_location": secondary_location,
             "point_of_use_location": point_of_use_location,
         }
@@ -2637,6 +2644,7 @@ def list_stock():
             total,
             location_count,
             last_updated,
+            primary_location,
             secondary_location,
             point_of_use_location,
         ) in pagination.items
@@ -3286,6 +3294,9 @@ def export_stock():
                 "item_id": item_id,
                 "sku": item.sku if item else None,
                 "name": item.name if item else None,
+                "primary_location_code": (
+                    item.default_location.code if item and item.default_location else None
+                ),
                 "location_id": location_id,
                 "location_code": location.code if location else None,
                 "batch_id": batch_id,
