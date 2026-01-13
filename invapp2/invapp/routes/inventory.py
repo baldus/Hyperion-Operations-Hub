@@ -8,7 +8,7 @@ import tempfile
 import time
 import uuid
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Mapping, Optional, Union
 
@@ -58,6 +58,17 @@ from invapp.services.stock_transfer import (
     MoveLineRequest,
     get_location_inventory_lines,
     move_inventory_lines,
+)
+from invapp.utils.csv_export import export_rows_to_csv
+from invapp.utils.csv_schema import (
+    ITEMS_CSV_COLUMNS,
+    ITEMS_CSV_HEADERS,
+    ITEMS_HEADER_ALIASES,
+    STOCK_CSV_COLUMNS,
+    STOCK_CSV_HEADERS,
+    STOCK_HEADER_ALIASES,
+    expected_headers,
+    resolve_import_mappings,
 )
 from werkzeug.utils import secure_filename
 
@@ -139,16 +150,23 @@ def _next_auto_sku() -> str:
 
 
 ITEM_IMPORT_FIELDS = [
-    {"field": "sku", "label": "SKU", "required": False},
-    {"field": "name", "label": "Name", "required": True},
-    {"field": "type", "label": "Type", "required": False},
-    {"field": "unit", "label": "Unit", "required": False},
-    {"field": "description", "label": "Description", "required": False},
-    {"field": "min_stock", "label": "Minimum Stock", "required": False},
-    {"field": "notes", "label": "Notes", "required": False},
-    {"field": "list_price", "label": "List Price", "required": False},
-    {"field": "last_unit_cost", "label": "Last Unit Cost", "required": False},
-    {"field": "item_class", "label": "Item Class", "required": False},
+    {"field": "id", "label": "item_id", "required": False},
+    {"field": "sku", "label": "sku", "required": False},
+    {"field": "name", "label": "name", "required": True},
+    {"field": "type", "label": "type", "required": False},
+    {"field": "unit", "label": "unit", "required": False},
+    {"field": "description", "label": "description", "required": False},
+    {"field": "min_stock", "label": "min_stock", "required": False},
+    {"field": "notes", "label": "notes", "required": False},
+    {"field": "list_price", "label": "list_price", "required": False},
+    {"field": "last_unit_cost", "label": "last_unit_cost", "required": False},
+    {"field": "item_class", "label": "item_class", "required": False},
+    {"field": "default_location_id", "label": "default_location_id", "required": False},
+    {
+        "field": "default_location_code",
+        "label": "default_location_code",
+        "required": False,
+    },
 ]
 
 
@@ -158,12 +176,22 @@ LOCATION_IMPORT_FIELDS = [
 ]
 
 STOCK_IMPORT_FIELDS = [
-    {"field": "sku", "label": "Item SKU", "required": True},
-    {"field": "location_code", "label": "Location Code", "required": False},
-    {"field": "quantity", "label": "Quantity", "required": True},
-    {"field": "lot_number", "label": "Lot Number", "required": False},
-    {"field": "person", "label": "Person", "required": False},
-    {"field": "reference", "label": "Reference", "required": False},
+    {"field": "item_id", "label": "item_id", "required": False},
+    {"field": "sku", "label": "sku", "required": False},
+    {"field": "name", "label": "name", "required": False},
+    {"field": "location_id", "label": "location_id", "required": False},
+    {"field": "location_code", "label": "location_code", "required": False},
+    {"field": "batch_id", "label": "batch_id", "required": False},
+    {"field": "lot_number", "label": "lot_number", "required": False},
+    {"field": "quantity", "label": "quantity", "required": True},
+    {"field": "person", "label": "person", "required": False},
+    {"field": "reference", "label": "reference", "required": False},
+    {"field": "received_date", "label": "received_date", "required": False},
+    {"field": "expiration_date", "label": "expiration_date", "required": False},
+    {"field": "supplier_name", "label": "supplier_name", "required": False},
+    {"field": "supplier_code", "label": "supplier_code", "required": False},
+    {"field": "purchase_order", "label": "purchase_order", "required": False},
+    {"field": "notes", "label": "notes", "required": False},
 ]
 
 
@@ -308,6 +336,42 @@ def _decimal_to_string(value):
         return ""
     return f"{Decimal(value):.2f}"
 
+
+def _parse_int(value: str) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_iso_datetime(value: str) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _parse_iso_date(value: str) -> Optional[date]:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _log_unmapped_headers(namespace: str, headers: list[str], mapped: dict[str, str]):
+    unmapped = sorted({header for header in headers if header not in mapped.values()})
+    if unmapped:
+        current_app.logger.warning(
+            "CSV import for %s ignored unmapped columns: %s",
+            namespace,
+            ", ".join(unmapped),
+        )
 
 def _prepare_import_mapping_context(
     csv_text, fields, namespace, selected_mappings=None, token=None
@@ -1543,11 +1607,24 @@ def import_items():
 
                 return redirect(url_for("inventory.import_items"))
 
+            reader = csv.DictReader(io.StringIO(csv_text))
+            if not reader.fieldnames:
+                flash("Uploaded CSV does not contain a header row.", "danger")
+
+                _remove_import_csv("items", import_token)
+
+                return redirect(url_for("inventory.import_items"))
+
+            auto_mappings = resolve_import_mappings(
+                reader.fieldnames, ITEM_IMPORT_FIELDS, ITEMS_HEADER_ALIASES
+            )
             selected_mappings = {}
             for field_cfg in ITEM_IMPORT_FIELDS:
                 selected_header = request.form.get(f"mapping_{field_cfg['field']}", "")
                 if selected_header:
                     selected_mappings[field_cfg["field"]] = selected_header
+                elif field_cfg["field"] in auto_mappings:
+                    selected_mappings[field_cfg["field"]] = auto_mappings[field_cfg["field"]]
 
             missing_required = [
                 field_cfg["label"]
@@ -1555,8 +1632,11 @@ def import_items():
                 if field_cfg["required"] and field_cfg["field"] not in selected_mappings
             ]
             if missing_required:
+                expected = ", ".join(expected_headers(ITEMS_CSV_COLUMNS))
                 flash(
-                    "Please select a column for: " + ", ".join(missing_required) + ".",
+                    "Missing required columns: "
+                    + ", ".join(missing_required)
+                    + f". Expected headers include: {expected}.",
                     "danger",
                 )
                 context = _prepare_item_import_mapping_context(
@@ -1572,15 +1652,6 @@ def import_items():
                     }
                 )
                 return render_template("inventory/import_mapping.html", **context)
-
-
-            reader = csv.DictReader(io.StringIO(csv_text))
-            if not reader.fieldnames:
-                flash("Uploaded CSV does not contain a header row.", "danger")
-
-                _remove_import_csv("items", import_token)
-
-                return redirect(url_for("inventory.import_items"))
 
             invalid_columns = [
                 header
@@ -1607,6 +1678,8 @@ def import_items():
                 return render_template("inventory/import_mapping.html", **context)
 
 
+            _log_unmapped_headers("items", reader.fieldnames, selected_mappings)
+
             next_sku = _next_auto_sku_value()
 
             def extract(row, field):
@@ -1616,8 +1689,12 @@ def import_items():
                 value = row.get(header)
                 return value if value is not None else ""
 
+            locations_by_id = {loc.id: loc for loc in Location.query.all()}
+            locations_by_code = {loc.code: loc for loc in locations_by_id.values()}
+
             count_new, count_updated = 0, 0
             for row in reader:
+                item_id = _parse_int(extract(row, "id"))
                 sku = extract(row, "sku").strip()
                 name = extract(row, "name").strip()
                 unit = (
@@ -1667,12 +1744,29 @@ def import_items():
                     else None
                 )
 
-                existing = Item.query.filter_by(sku=sku).first() if sku else None
+                default_location_id = _parse_int(extract(row, "default_location_id"))
+                default_location_code = extract(row, "default_location_code").strip()
+
+                default_location = None
+                if default_location_id is not None:
+                    default_location = locations_by_id.get(default_location_id)
+                if default_location is None and default_location_code:
+                    default_location = locations_by_code.get(default_location_code)
+
+                existing = None
+                if item_id is not None:
+                    existing = Item.query.get(item_id)
+                if existing is None and sku:
+                    existing = Item.query.filter_by(sku=sku).first()
                 if existing:
-                    existing.name = name or existing.name
-                    existing.unit = unit or existing.unit
-                    existing.description = description or existing.description
-                    existing.min_stock = min_stock or existing.min_stock
+                    if name:
+                        existing.name = name
+                    if "unit" in selected_mappings:
+                        existing.unit = unit
+                    if "description" in selected_mappings:
+                        existing.description = description or None
+                    if "min_stock" in selected_mappings:
+                        existing.min_stock = min_stock
                     if has_type_column:
                         existing.type = item_type or None
                     if has_notes_column:
@@ -1683,6 +1777,10 @@ def import_items():
                         existing.last_unit_cost = last_unit_cost_value
                     if has_item_class_column:
                         existing.item_class = item_class_value or None
+                    if "default_location_id" in selected_mappings or "default_location_code" in selected_mappings:
+                        existing.default_location_id = (
+                            default_location.id if default_location else None
+                        )
                     count_updated += 1
                 else:
                     if not sku:
@@ -1693,7 +1791,7 @@ def import_items():
                         name=name,
                         type=(item_type or None) if has_type_column else None,
                         unit=unit,
-                        description=description,
+                        description=description or None,
                         min_stock=min_stock,
                         notes=notes_value if has_notes_column else None,
                         list_price=list_price_value if has_list_price_column else None,
@@ -1702,6 +1800,9 @@ def import_items():
                         ),
                         item_class=(
                             (item_class_value or None) if has_item_class_column else None
+                        ),
+                        default_location_id=(
+                            default_location.id if default_location else None
                         ),
                     )
                     db.session.add(item)
@@ -1733,7 +1834,13 @@ def import_items():
             return redirect(request.url)
 
 
-        context = _prepare_item_import_mapping_context(csv_text)
+        headers = next(csv.reader(io.StringIO(csv_text)), [])
+        auto_mappings = resolve_import_mappings(
+            headers, ITEM_IMPORT_FIELDS, ITEMS_HEADER_ALIASES
+        )
+        context = _prepare_item_import_mapping_context(
+            csv_text, selected_mappings=auto_mappings
+        )
         context.update(
             {
                 "submit_label": "Import Items",
@@ -1760,43 +1867,35 @@ def import_items():
 @bp.route("/items/export")
 def export_items():
     """
-    Export items to CSV (without id).
+    Export items to CSV.
     """
-    items = Item.query.all()
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(
-        [
-            "sku",
-            "name",
-            "type",
-            "unit",
-            "description",
-            "min_stock",
-            "notes",
-            "list_price",
-            "last_unit_cost",
-            "item_class",
-        ]
-    )
-    for i in items:
-        writer.writerow(
-            [
-                i.sku,
-                i.name,
-                i.type or "",
-                i.unit,
-                i.description,
-                i.min_stock,
-                i.notes or "",
-                _decimal_to_string(i.list_price),
-                _decimal_to_string(i.last_unit_cost),
-                i.item_class or "",
-            ]
-        )
-    response = Response(output.getvalue(), mimetype="text/csv")
-    response.headers["Content-Disposition"] = "attachment; filename=items.csv"
-    return response
+    items = Item.query.options(joinedload(Item.default_location)).order_by(Item.sku).all()
+
+    def iter_rows():
+        for item in items:
+            default_location = item.default_location
+            yield {
+                "id": item.id,
+                "sku": item.sku,
+                "name": item.name,
+                "type": item.type,
+                "unit": item.unit,
+                "description": item.description,
+                "min_stock": item.min_stock,
+                "notes": item.notes,
+                "list_price": item.list_price,
+                "last_unit_cost": item.last_unit_cost,
+                "item_class": item.item_class,
+                "default_location_id": (
+                    default_location.id if default_location else None
+                ),
+                "default_location_code": (
+                    default_location.code if default_location else None
+                ),
+            }
+
+    filename = f"items_export_{date.today().isoformat()}.csv"
+    return export_rows_to_csv(iter_rows(), ITEMS_CSV_COLUMNS, filename)
 
 
 ############################
@@ -2662,11 +2761,22 @@ def import_stock():
                 _remove_import_csv("stock", import_token)
                 return redirect(url_for("inventory.import_stock"))
 
+            reader = csv.DictReader(io.StringIO(csv_text))
+            if not reader.fieldnames:
+                flash("Uploaded CSV does not contain a header row.", "danger")
+                _remove_import_csv("stock", import_token)
+                return redirect(url_for("inventory.import_stock"))
+
+            auto_mappings = resolve_import_mappings(
+                reader.fieldnames, STOCK_IMPORT_FIELDS, STOCK_HEADER_ALIASES
+            )
             selected_mappings = {}
             for field_cfg in STOCK_IMPORT_FIELDS:
                 selected_header = request.form.get(f"mapping_{field_cfg['field']}", "")
                 if selected_header:
                     selected_mappings[field_cfg["field"]] = selected_header
+                elif field_cfg["field"] in auto_mappings:
+                    selected_mappings[field_cfg["field"]] = auto_mappings[field_cfg["field"]]
 
             missing_required = [
                 field_cfg["label"]
@@ -2674,8 +2784,11 @@ def import_stock():
                 if field_cfg["required"] and field_cfg["field"] not in selected_mappings
             ]
             if missing_required:
+                expected = ", ".join(expected_headers(STOCK_CSV_COLUMNS))
                 flash(
-                    "Please select a column for: " + ", ".join(missing_required) + ".",
+                    "Missing required columns: "
+                    + ", ".join(missing_required)
+                    + f". Expected headers include: {expected}.",
                     "danger",
                 )
                 context = _prepare_stock_import_mapping_context(
@@ -2692,11 +2805,29 @@ def import_stock():
                 )
                 return render_template("inventory/import_mapping.html", **context)
 
-            reader = csv.DictReader(io.StringIO(csv_text))
-            if not reader.fieldnames:
-                flash("Uploaded CSV does not contain a header row.", "danger")
-                _remove_import_csv("stock", import_token)
-                return redirect(url_for("inventory.import_stock"))
+            if (
+                "item_id" not in selected_mappings
+                and "sku" not in selected_mappings
+            ):
+                expected = ", ".join(expected_headers(STOCK_CSV_COLUMNS))
+                flash(
+                    "Stock imports require item_id or sku. "
+                    f"Expected headers include: {expected}.",
+                    "danger",
+                )
+                context = _prepare_stock_import_mapping_context(
+                    csv_text,
+                    selected_mappings=selected_mappings,
+                    token=import_token,
+                )
+                context.update(
+                    {
+                        "mapping_title": "Map Stock Adjustment Columns",
+                        "submit_label": "Import Stock Adjustments",
+                        "start_over_url": url_for("inventory.import_stock"),
+                    }
+                )
+                return render_template("inventory/import_mapping.html", **context)
 
             invalid_columns = [
                 header
@@ -2722,10 +2853,15 @@ def import_stock():
                 )
                 return render_template("inventory/import_mapping.html", **context)
 
-            item_map = {i.sku: i for i in Item.query.all()}
-            loc_map = {l.code: l for l in Location.query.all()}
+            _log_unmapped_headers("stock", reader.fieldnames, selected_mappings)
 
-            placeholder_location = _ensure_placeholder_location(loc_map)
+            items = Item.query.all()
+            item_map_by_sku = {i.sku: i for i in items}
+            item_map_by_id = {i.id: i for i in items}
+            loc_map_by_code = {l.code: l for l in Location.query.all()}
+            loc_map_by_id = {l.id: l for l in loc_map_by_code.values()}
+
+            placeholder_location = _ensure_placeholder_location(loc_map_by_code)
 
             def extract(row, field):
                 header = selected_mappings.get(field)
@@ -2736,31 +2872,46 @@ def import_stock():
 
             count_new, count_updated = 0, 0
             for row in reader:
+                item_id = _parse_int(extract(row, "item_id"))
                 sku = extract(row, "sku").strip()
-                if not sku:
+                if not item_id and not sku:
                     continue
 
                 quantity_raw = extract(row, "quantity").strip()
-                try:
-                    qty = int(quantity_raw)
-                except (TypeError, ValueError):
+                qty = _parse_decimal(quantity_raw)
+                if qty is None:
                     continue
 
+                loc_id = _parse_int(extract(row, "location_id"))
                 loc_code = extract(row, "location_code").strip()
                 lot_number = extract(row, "lot_number").strip() or None
                 person = extract(row, "person").strip() or None
                 reference = extract(row, "reference").strip() or "Bulk Adjust"
 
-                item = item_map.get(sku)
+                item = item_map_by_id.get(item_id) if item_id else None
+                if item is None and sku:
+                    item = item_map_by_sku.get(sku)
                 if not item:
                     continue
 
-                location = loc_map.get(loc_code) if loc_code else None
+                location = loc_map_by_id.get(loc_id) if loc_id is not None else None
+                if location is None and loc_code:
+                    location = loc_map_by_code.get(loc_code)
                 if not location:
                     location = placeholder_location
 
+                batch_id = _parse_int(extract(row, "batch_id"))
+                received_date_raw = extract(row, "received_date").strip()
+                expiration_date_raw = extract(row, "expiration_date").strip()
+                supplier_name = extract(row, "supplier_name").strip() or None
+                supplier_code = extract(row, "supplier_code").strip() or None
+                purchase_order = extract(row, "purchase_order").strip() or None
+                notes = extract(row, "notes").strip() or None
+
                 batch = None
-                if lot_number:
+                if batch_id is not None:
+                    batch = Batch.query.get(batch_id)
+                if batch is None and lot_number:
                     batch = Batch.query.filter_by(
                         item_id=item.id, lot_number=lot_number
                     ).first()
@@ -2772,6 +2923,21 @@ def import_stock():
                     else:
                         count_updated += 1
                     batch.quantity = (batch.quantity or 0) + qty
+                if batch:
+                    received_date = _parse_iso_datetime(received_date_raw)
+                    expiration_date = _parse_iso_date(expiration_date_raw)
+                    if received_date is not None:
+                        batch.received_date = received_date
+                    if expiration_date is not None:
+                        batch.expiration_date = expiration_date
+                    if "supplier_name" in selected_mappings:
+                        batch.supplier_name = supplier_name
+                    if "supplier_code" in selected_mappings:
+                        batch.supplier_code = supplier_code
+                    if "purchase_order" in selected_mappings:
+                        batch.purchase_order = purchase_order
+                    if "notes" in selected_mappings:
+                        batch.notes = notes
 
                 mv = Movement(
                     item_id=item.id,
@@ -2803,7 +2969,13 @@ def import_stock():
             flash("CSV import files must be UTF-8 encoded.", "danger")
             return redirect(request.url)
 
-        context = _prepare_stock_import_mapping_context(csv_text)
+        headers = next(csv.reader(io.StringIO(csv_text)), [])
+        auto_mappings = resolve_import_mappings(
+            headers, STOCK_IMPORT_FIELDS, STOCK_HEADER_ALIASES
+        )
+        context = _prepare_stock_import_mapping_context(
+            csv_text, selected_mappings=auto_mappings
+        )
         context.update(
             {
                 "mapping_title": "Map Stock Adjustment Columns",
@@ -2831,14 +3003,14 @@ def import_stock():
 @bp.route("/stock/export")
 def export_stock():
     """
-    Export current stock balances to CSV (without id).
+    Export current stock balances to CSV.
     """
     rows = (
         db.session.query(
             Movement.item_id,
             Movement.batch_id,
             Movement.location_id,
-            func.coalesce(func.sum(Movement.quantity), 0).label("on_hand")
+            func.coalesce(func.sum(Movement.quantity), 0).label("quantity"),
         )
         .outerjoin(Batch, Batch.id == Movement.batch_id)
         .filter(or_(Movement.batch_id.is_(None), Batch.removed_at.is_(None)))
@@ -2846,24 +3018,36 @@ def export_stock():
         .all()
     )
 
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["sku", "item_name", "location", "lot_number", "on_hand"])
-
     items = {i.id: i for i in Item.query.all()}
     locations = {l.id: l for l in Location.query.all()}
     batches = {b.id: b for b in Batch.query.all()}
 
-    for item_id, batch_id, location_id, on_hand in rows:
-        sku = items[item_id].sku if item_id in items else "UNKNOWN"
-        name = items[item_id].name if item_id in items else "UNKNOWN"
-        loc = locations[location_id].code if location_id in locations else "UNKNOWN"
-        lot = batches[batch_id].lot_number if batch_id and batch_id in batches else "-"
-        writer.writerow([sku, name, loc, lot, on_hand])
+    def iter_rows():
+        for item_id, batch_id, location_id, quantity in rows:
+            item = items.get(item_id)
+            location = locations.get(location_id)
+            batch = batches.get(batch_id) if batch_id else None
+            yield {
+                "item_id": item_id,
+                "sku": item.sku if item else None,
+                "name": item.name if item else None,
+                "location_id": location_id,
+                "location_code": location.code if location else None,
+                "batch_id": batch_id,
+                "lot_number": batch.lot_number if batch else None,
+                "quantity": quantity,
+                "person": None,
+                "reference": None,
+                "received_date": batch.received_date if batch else None,
+                "expiration_date": batch.expiration_date if batch else None,
+                "supplier_name": batch.supplier_name if batch else None,
+                "supplier_code": batch.supplier_code if batch else None,
+                "purchase_order": batch.purchase_order if batch else None,
+                "notes": batch.notes if batch else None,
+            }
 
-    response = Response(output.getvalue(), mimetype="text/csv")
-    response.headers["Content-Disposition"] = "attachment; filename=stock.csv"
-    return response
+    filename = f"stock_export_{date.today().isoformat()}.csv"
+    return export_rows_to_csv(iter_rows(), STOCK_CSV_COLUMNS, filename)
 
 
 
