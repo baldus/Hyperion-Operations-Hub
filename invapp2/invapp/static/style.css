@@ -1442,6 +1442,17 @@ body.light .home-link-card {
     font-weight: 600;
 }
 
+.stacked-form .checkbox-row {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 10px;
+    font-weight: 500;
+}
+
+.stacked-form .checkbox-row input[type="checkbox"] {
+    margin-top: 2px;
+}
+
 .stacked-form input,
 .stacked-form select,
 .stacked-form textarea {
