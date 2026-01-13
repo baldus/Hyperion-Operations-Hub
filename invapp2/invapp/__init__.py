@@ -160,6 +160,8 @@ def _ensure_inventory_schema(engine):
         "last_unit_cost": "NUMERIC(12, 2)",
         "item_class": "VARCHAR",
         "default_location_id": "INTEGER",
+        "secondary_location_id": "INTEGER",
+        "point_of_use_location_id": "INTEGER",
     }
 
     for column_name, column_type in item_required_columns.items():
@@ -171,8 +173,26 @@ def _ensure_inventory_schema(engine):
         and fk.get("referred_table") == "location"
         for fk in item_foreign_keys
     )
+    has_secondary_location_fk = any(
+        set(fk.get("constrained_columns", []) or []) == {"secondary_location_id"}
+        and fk.get("referred_table") == "location"
+        for fk in item_foreign_keys
+    )
+    has_point_of_use_location_fk = any(
+        set(fk.get("constrained_columns", []) or []) == {"point_of_use_location_id"}
+        and fk.get("referred_table") == "location"
+        for fk in item_foreign_keys
+    )
     default_location_column_exists = "default_location_id" in item_columns or any(
         table_name == "item" and column_name == "default_location_id"
+        for table_name, column_name, _ in item_columns_to_add
+    )
+    secondary_location_column_exists = "secondary_location_id" in item_columns or any(
+        table_name == "item" and column_name == "secondary_location_id"
+        for table_name, column_name, _ in item_columns_to_add
+    )
+    point_of_use_location_column_exists = "point_of_use_location_id" in item_columns or any(
+        table_name == "item" and column_name == "point_of_use_location_id"
         for table_name, column_name, _ in item_columns_to_add
     )
 
@@ -236,6 +256,55 @@ def _ensure_inventory_schema(engine):
                     "FOREIGN KEY (default_location_id) REFERENCES location(id)"
                 )
             )
+    if (
+        secondary_location_column_exists
+        and not has_secondary_location_fk
+        and engine.dialect.name != "sqlite"
+        and "location" in inspector.get_table_names()
+    ):
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE item ADD CONSTRAINT fk_item_secondary_location "
+                    "FOREIGN KEY (secondary_location_id) REFERENCES location(id)"
+                )
+            )
+    if (
+        point_of_use_location_column_exists
+        and not has_point_of_use_location_fk
+        and engine.dialect.name != "sqlite"
+        and "location" in inspector.get_table_names()
+    ):
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE item ADD CONSTRAINT fk_item_point_of_use_location "
+                    "FOREIGN KEY (point_of_use_location_id) REFERENCES location(id)"
+                )
+            )
+
+    if engine.dialect.name != "sqlite" and "item" in inspector.get_table_names():
+        try:
+            item_indexes = {index["name"] for index in inspector.get_indexes("item")}
+        except (NoSuchTableError, OperationalError):
+            item_indexes = set()
+
+        if "ix_item_secondary_location_id" not in item_indexes:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_item_secondary_location_id "
+                        "ON item (secondary_location_id)"
+                    )
+                )
+        if "ix_item_point_of_use_location_id" not in item_indexes:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_item_point_of_use_location_id "
+                        "ON item (point_of_use_location_id)"
+                    )
+                )
 
 
 def _ensure_purchasing_schema(engine):

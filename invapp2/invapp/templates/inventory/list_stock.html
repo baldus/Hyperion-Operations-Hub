@@ -96,6 +96,8 @@
             {% endif %}
           </a>
         </th>
+        <th>Secondary</th>
+        <th>POU</th>
         <th>
           <a href="{{ build_stock_url(sort='min_stock', dir='desc' if sort == 'min_stock' and direction == 'asc' else 'asc', page=1) }}">
             Min Stock
@@ -130,6 +132,20 @@
             <td>{{ entry.item.name }}</td>
             <td>{{ entry.total_qty }}</td>
             <td>{{ entry.location_count }}</td>
+            <td>
+              {% if entry.secondary_location %}
+                {{ entry.secondary_location.code }}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td>
+              {% if entry.point_of_use_location %}
+                {{ entry.point_of_use_location.code }}
+              {% else %}
+                -
+              {% endif %}
+            </td>
             <td>{{ min_stock }}</td>
             <td>
               {% if entry.last_updated %}
@@ -142,7 +158,7 @@
         {% endfor %}
       {% else %}
         <tr>
-          <td colspan="6">No items match the selected filter.</td>
+          <td colspan="8">No items match the selected filter.</td>
         </tr>
       {% endif %}
     </tbody>

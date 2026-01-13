@@ -46,11 +46,11 @@
   {% endif %}
 
   {% if default_location %}
-    <p id="default-location-display" class="form-hint">Default location: {{ default_location.code }}{% if default_location.description %} ({{ default_location.description }}){% endif %}</p>
+    <p id="default-location-display" class="form-hint">Primary location: {{ default_location.code }}{% if default_location.description %} ({{ default_location.description }}){% endif %}</p>
   {% elif defaults.get('sku') %}
-    <p id="default-location-display" class="form-hint">No default location set for this SKU.</p>
+    <p id="default-location-display" class="form-hint">No primary location set for this SKU.</p>
   {% else %}
-    <p id="default-location-display" class="form-hint">Enter a SKU to see its default location.</p>
+    <p id="default-location-display" class="form-hint">Enter a SKU to see its primary location.</p>
   {% endif %}
 
   <label>Person Receiving:</label><br>
@@ -190,12 +190,12 @@
 
       if (location && location.code) {
         const extra = location.description ? ` (${location.description})` : '';
-        defaultLocationDisplay.textContent = `Default location: ${location.code}${extra}`;
+        defaultLocationDisplay.textContent = `Primary location: ${location.code}${extra}`;
         if (locationSelect && location.id !== undefined && location.id !== null) {
           locationSelect.value = String(location.id);
         }
       } else {
-        setDefaultLocationMessage('No default location set for this SKU.');
+        setDefaultLocationMessage('No primary location set for this SKU.');
       }
     };
 
@@ -215,7 +215,7 @@
       if (!skuInput) return;
       const sku = (skuInput.value || '').trim();
       if (!sku) {
-        setDefaultLocationMessage('Enter a SKU to see its default location.');
+        setDefaultLocationMessage('Enter a SKU to see its primary location.');
         setItemDetailsMessage('Enter a SKU to see the item name and description.');
         return;
       }
