@@ -82,6 +82,16 @@ DEFAULT_PAGE_ACCESS: Mapping[str, Mapping[str, Sequence[str] | str]] = {
         "view_roles": ("viewer", "editor", "admin", "reports", "user"),
         "edit_roles": ("admin", "reports"),
     },
+    "open_orders": {
+        "label": "Open Orders",
+        "view_roles": ("admin",),
+        "edit_roles": ("admin",),
+    },
+    "open_orders_import": {
+        "label": "Open Orders Import",
+        "view_roles": ("admin",),
+        "edit_roles": ("admin",),
+    },
     "work": {
         "label": "Workstations",
         "view_roles": ("public", "viewer", "editor", "admin", "production", "user"),

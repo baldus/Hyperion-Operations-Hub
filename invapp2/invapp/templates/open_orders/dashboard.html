@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Open Orders</h2>
+
+<div class="page-actions">
+    {% if is_superuser() %}
+        <a href="{{ url_for('open_orders.open_orders_import') }}" class="action-btn primary-action">Import Open Orders</a>
+    {% endif %}
+</div>
+
+<form method="get" class="orders-filter">
+    <label for="filter-customer" class="sr-only">Customer</label>
+    <input id="filter-customer" type="search" name="customer" placeholder="Customer" value="{{ filters.customer }}">
+    <label for="filter-so" class="sr-only">SO #</label>
+    <input id="filter-so" type="search" name="so_no" placeholder="SO #" value="{{ filters.so_no }}">
+    <label for="filter-item" class="sr-only">Item</label>
+    <input id="filter-item" type="search" name="item_id" placeholder="Item ID" value="{{ filters.item_id }}">
+    <select name="internal_status">
+        <option value="">All statuses</option>
+        {% for status in internal_statuses %}
+            <option value="{{ status }}" {% if filters.internal_status == status %}selected{% endif %}>{{ status.replace('_', ' ').title() }}</option>
+        {% endfor %}
+    </select>
+    <select name="owner_id">
+        <option value="">All owners</option>
+        {% for owner in owners %}
+            <option value="{{ owner.id }}" {% if filters.owner_id == owner.id|string %}selected{% endif %}>{{ owner.username }}</option>
+        {% endfor %}
+    </select>
+    <input type="number" name="priority" placeholder="Priority" value="{{ filters.priority }}" min="0">
+    <label class="checkbox-inline">
+        <input type="checkbox" name="overdue" value="1" {% if filters.overdue %}checked{% endif %}> Overdue
+    </label>
+    <button type="submit">Filter</button>
+    {% if filters.customer or filters.internal_status or filters.owner_id or filters.priority or filters.item_id or filters.so_no or filters.overdue %}
+        <a href="{{ url_for('open_orders.open_orders_dashboard') }}" class="action-btn subtle-action">Clear</a>
+    {% endif %}
+</form>
+
+{% if lines %}
+<table class="table">
+    <thead>
+        <tr>
+            <th>SO #</th>
+            <th>Customer</th>
+            <th>Item</th>
+            <th>Ship By</th>
+            <th>Qty Remaining</th>
+            <th>State</th>
+            <th>Internal Status</th>
+            <th>Owner</th>
+            <th>Priority</th>
+            <th>Promised</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for line in lines %}
+        <tr>
+            <td>{{ line.so_no }}</td>
+            <td>{{ line.customer_name }}</td>
+            <td>{{ line.item_id }}</td>
+            <td>{{ line.ship_by }}</td>
+            <td>{{ line.qty_remaining }}</td>
+            <td>{{ line.system_state }}</td>
+            <td>{{ line.internal_status }}</td>
+            <td>{{ line.owner.username if line.owner else '' }}</td>
+            <td>{{ line.priority if line.priority is not none else '' }}</td>
+            <td>{{ line.promised_date if line.promised_date else '' }}</td>
+            <td>
+                <a href="{{ url_for('open_orders.open_orders_detail', line_id=line.id) }}" class="action-btn subtle-action">Details</a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+    <div class="empty-state">
+        <p>No open order lines match the current filters.</p>
+    </div>
+{% endif %}
+{% endblock %}

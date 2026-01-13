@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Open Order Line</h2>
+
+<div class="page-actions">
+    <a href="{{ url_for('open_orders.open_orders_dashboard') }}" class="action-btn subtle-action">Back to Open Orders</a>
+</div>
+
+<div class="card">
+    <h3>Order Details</h3>
+    <p><strong>SO #:</strong> {{ line.so_no }}</p>
+    <p><strong>Customer:</strong> {{ line.customer_name }}</p>
+    <p><strong>Item:</strong> {{ line.item_id }}</p>
+    <p><strong>Description:</strong> {{ line.line_description }}</p>
+    <p><strong>Ship By:</strong> {{ line.ship_by }}</p>
+    <p><strong>Qty Remaining:</strong> {{ line.qty_remaining }}</p>
+    <p><strong>System State:</strong> {{ line.system_state }}</p>
+</div>
+
+<div class="card">
+    <h3>Workflow</h3>
+    {% if is_superuser() %}
+        <form method="post" action="{{ url_for('open_orders.update_open_order_workflow', line_id=line.id) }}">
+            <label for="internal-status">Internal Status</label>
+            <select id="internal-status" name="internal_status">
+                {% for status in internal_statuses %}
+                    <option value="{{ status }}" {% if line.internal_status == status %}selected{% endif %}>{{ status.replace('_', ' ').title() }}</option>
+                {% endfor %}
+            </select>
+
+            <label for="owner-user">Owner</label>
+            <select id="owner-user" name="owner_user_id">
+                <option value="">Unassigned</option>
+                {% for owner in owners %}
+                    <option value="{{ owner.id }}" {% if line.owner_user_id == owner.id %}selected{% endif %}>{{ owner.username }}</option>
+                {% endfor %}
+            </select>
+
+            <label for="priority">Priority</label>
+            <input id="priority" type="number" name="priority" value="{{ line.priority if line.priority is not none else '' }}" min="0">
+
+            <label for="promised-date">Promised Date</label>
+            <input id="promised-date" type="date" name="promised_date" value="{{ line.promised_date.isoformat() if line.promised_date else '' }}">
+
+            <label for="notes">Notes</label>
+            <textarea id="notes" name="notes" rows="4">{{ line.notes or '' }}</textarea>
+
+            <button type="submit" class="action-btn primary-action">Save Workflow</button>
+        </form>
+    {% else %}
+        <p><strong>Internal Status:</strong> {{ line.internal_status }}</p>
+        <p><strong>Owner:</strong> {{ line.owner.username if line.owner else 'Unassigned' }}</p>
+        <p><strong>Priority:</strong> {{ line.priority if line.priority is not none else 'N/A' }}</p>
+        <p><strong>Promised Date:</strong> {{ line.promised_date if line.promised_date else 'N/A' }}</p>
+        <p><strong>Notes:</strong> {{ line.notes or 'None' }}</p>
+    {% endif %}
+</div>
+{% endblock %}

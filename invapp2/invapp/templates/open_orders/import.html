@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Open Orders Import</h2>
+
+<div class="page-actions">
+    <a href="{{ url_for('open_orders.open_orders_dashboard') }}" class="action-btn subtle-action">View Open Orders</a>
+</div>
+
+<div class="card">
+    <h3>Upload Open Orders Report</h3>
+    <p>Upload the latest Open Orders Excel report (.xlsx). You will be able to preview the diff before committing.</p>
+
+    <form method="post" action="{{ url_for('open_orders.open_orders_import_preview') }}" enctype="multipart/form-data">
+        <label for="open-orders-file">Open Orders Excel (.xlsx)</label>
+        <input id="open-orders-file" type="file" name="open_orders_file" accept=".xlsx" required>
+        <button type="submit" class="action-btn primary-action">Preview Import</button>
+    </form>
+</div>
+
+{% if last_upload %}
+    <div class="card">
+        <h3>Last Import</h3>
+        <p><strong>Uploaded:</strong> {{ last_upload.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</p>
+        <p><strong>Filename:</strong> {{ last_upload.source_filename }}</p>
+        {% if last_upload.notes %}
+            <p>{{ last_upload.notes }}</p>
+        {% endif %}
+    </div>
+{% else %}
+    <div class="empty-state">
+        <p>No open orders imports have been completed yet.</p>
+    </div>
+{% endif %}
+{% endblock %}

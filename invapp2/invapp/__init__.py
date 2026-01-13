@@ -30,6 +30,7 @@ from .routes import (
     inventory,
     item_search,
     orders,
+    open_orders,
     purchasing,
     quality,
     printers,
@@ -65,6 +66,7 @@ NAVIGATION_PAGES: tuple[tuple[str, str, str], ...] = (
     ("quality", "quality.quality_home", "Quality"),
     ("work", "work.station_overview", "Workstations"),
     ("production", "production.history", "Production History"),
+    ("open_orders_import", "open_orders.open_orders_import", "Open Orders Import"),
 )
 
 
@@ -880,6 +882,8 @@ def create_app(config_override=None):
         def navigation_links():
             links: list[dict[str, str]] = []
             for page_name, endpoint, display_label in NAVIGATION_PAGES:
+                if page_name == "open_orders_import" and not is_superuser():
+                    continue
                 if not can_access_page(page_name):
                     continue
                 try:
@@ -921,6 +925,7 @@ def create_app(config_override=None):
     app.register_blueprint(purchasing.bp)
     app.register_blueprint(quality.bp)
     app.register_blueprint(work.bp)
+    app.register_blueprint(open_orders.bp)
     init_blueprint()
     app.register_blueprint(mdi_bp)
     app.register_blueprint(settings.bp)
