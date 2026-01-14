@@ -1,7 +1,7 @@
 import logging
 import secrets
 from decimal import Decimal
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import ClassVar
 
 from flask import current_app
@@ -1636,6 +1636,12 @@ class OpenOrderLineSnapshot(db.Model):
         nullable=False,
     )
     snapshot_json = db.Column(db.JSON, nullable=False)
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        server_default=db.func.now(),
+        default=lambda: datetime.now(timezone.utc),
+    )
 
     upload = db.relationship(
         "OpenOrderUpload",
