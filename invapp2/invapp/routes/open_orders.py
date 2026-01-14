@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from functools import wraps
+from functools import lru_cache, wraps
 from io import BytesIO
 
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
@@ -17,12 +17,16 @@ from invapp.models import (
     User,
 )
 from invapp.permissions import principal_has_any_role, resolve_view_roles
+from sqlalchemy import func
+from sqlalchemy.orm import load_only
+
 from invapp.services.open_orders import (
     add_action_item,
     add_note,
     commit_open_orders_import,
     compute_open_order_diff,
     load_staged_open_orders,
+    open_orders_schema_status,
     parse_open_orders,
     stage_open_orders_import,
     clear_staged_open_orders,
@@ -32,6 +36,39 @@ from invapp.superuser import is_superuser, superuser_required
 
 
 bp = Blueprint("open_orders", __name__, url_prefix="/open_orders")
+
+
+@lru_cache(maxsize=1)
+def _open_orders_schema_warning() -> str | None:
+    status = open_orders_schema_status()
+    if status.get("has_open_order") and status.get("has_order_id"):
+        return None
+    return "Database schema out of date for Open Orders. Please run `alembic upgrade head`."
+
+
+def _open_order_base_query():
+    status = open_orders_schema_status()
+    if status.get("has_order_id"):
+        return OpenOrderLine.query
+    return OpenOrderLine.query.options(
+        load_only(
+            OpenOrderLine.id,
+            OpenOrderLine.so_no,
+            OpenOrderLine.customer_name,
+            OpenOrderLine.item_id,
+            OpenOrderLine.line_description,
+            OpenOrderLine.qty_remaining,
+            OpenOrderLine.ship_by,
+            OpenOrderLine.system_state,
+            OpenOrderLine.completed_at,
+            OpenOrderLine.status,
+            OpenOrderLine.internal_status,
+            OpenOrderLine.owner_user_id,
+            OpenOrderLine.priority,
+            OpenOrderLine.promised_date,
+            OpenOrderLine.notes,
+        )
+    )
 
 
 def open_orders_view_required(view_func):
@@ -49,8 +86,11 @@ def open_orders_view_required(view_func):
 @bp.route("/")
 @open_orders_view_required
 def open_orders_dashboard():
+    schema_warning = _open_orders_schema_warning()
+    if schema_warning:
+        flash(schema_warning, "error")
     status_filter = request.args.get("status", "open").strip().lower()
-    query = OpenOrderLine.query
+    query = _open_order_base_query()
 
     customer = request.args.get("customer", "").strip()
     so_no = request.args.get("so_no", "").strip()
@@ -104,11 +144,13 @@ def open_orders_dashboard():
         "DONE",
     ]
 
+    schema_status = open_orders_schema_status()
     return render_template(
         "open_orders/dashboard.html",
         lines=lines,
         owners=owners,
         internal_status_options=internal_status_options,
+        schema_has_order_id=schema_status.get("has_order_id", False),
         filters={
             "status": status_filter,
             "customer": customer,
@@ -125,29 +167,44 @@ def open_orders_dashboard():
 @bp.route("/completed")
 @open_orders_view_required
 def open_orders_completed():
+    schema_warning = _open_orders_schema_warning()
+    if schema_warning:
+        flash(schema_warning, "error")
+    schema_status = open_orders_schema_status()
     lines = (
-        OpenOrderLine.query.filter(OpenOrderLine.status == "complete")
+        _open_order_base_query().filter(OpenOrderLine.status == "complete")
         .order_by(OpenOrderLine.completed_at.desc().nulls_last())
         .all()
     )
-    return render_template("open_orders/completed.html", lines=lines)
+    return render_template(
+        "open_orders/completed.html",
+        lines=lines,
+        schema_has_order_id=schema_status.get("has_order_id", False),
+    )
 
 
 @bp.route("/import")
 @superuser_required
 def open_orders_import():
+    schema_warning = _open_orders_schema_warning()
+    if schema_warning:
+        flash(schema_warning, "error")
     last_upload = OpenOrderUpload.query.order_by(OpenOrderUpload.uploaded_at.desc()).first()
     last_summary = None
     if last_upload:
         open_count = (
-            OpenOrderLine.query.filter(
+            db.session.query(func.count(OpenOrderLine.id))
+            .filter(
                 OpenOrderLine.last_seen_upload_id == last_upload.id,
                 OpenOrderLine.status != "complete",
-            ).count()
+            )
+            .scalar()
         )
-        completed_count = OpenOrderLine.query.filter(
-            OpenOrderLine.completed_upload_id == last_upload.id
-        ).count()
+        completed_count = (
+            db.session.query(func.count(OpenOrderLine.id))
+            .filter(OpenOrderLine.completed_upload_id == last_upload.id)
+            .scalar()
+        )
         last_summary = {
             "upload": last_upload,
             "open_count": open_count,
@@ -160,6 +217,9 @@ def open_orders_import():
 @bp.route("/import/preview", methods=["POST"])
 @superuser_required
 def preview_open_orders_import():
+    schema_warning = _open_orders_schema_warning()
+    if schema_warning:
+        flash(schema_warning, "error")
     uploaded_file = request.files.get("file")
     if not uploaded_file or not uploaded_file.filename:
         flash("Select an Excel file to import.", "error")
@@ -188,7 +248,7 @@ def preview_open_orders_import():
     previous_open_lines = []
     if previous_upload:
         previous_open_lines = (
-            OpenOrderLine.query.filter(
+            _open_order_base_query().filter(
                 OpenOrderLine.status != "complete",
                 OpenOrderLine.last_seen_upload_id == previous_upload.id,
             )
@@ -301,6 +361,10 @@ def update_open_order_workflow(line_id: int):
 @bp.route("/orders/<int:order_id>")
 @open_orders_view_required
 def open_order_detail(order_id: int):
+    schema_warning = _open_orders_schema_warning()
+    if schema_warning:
+        flash(schema_warning, "error")
+        return redirect(url_for("open_orders.open_orders_dashboard"))
     order = OpenOrder.query.get_or_404(order_id)
     lines = (
         OpenOrderLine.query.filter(OpenOrderLine.order_id == order.id)

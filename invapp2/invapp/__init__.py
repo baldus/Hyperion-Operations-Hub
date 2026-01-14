@@ -5,6 +5,9 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import click
+from alembic.config import Config as AlembicConfig
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 
 from flask import Flask, current_app, jsonify, render_template, request, session, url_for
 from sqlalchemy import func, inspect, text
@@ -130,6 +133,27 @@ def _ensure_core_roles() -> None:
 
     if created:
         db.session.commit()
+
+
+def _log_migration_status(app: Flask) -> None:
+    if app.config.get("TESTING"):
+        return
+    try:
+        alembic_ini = Path(app.root_path).parent / "alembic.ini"
+        config = AlembicConfig(str(alembic_ini))
+        script = ScriptDirectory.from_config(config)
+        head = script.get_current_head()
+        context = MigrationContext.configure(db.engine)
+        current = context.get_current_revision()
+        if current != head:
+            app.logger.warning(
+                "Database schema out of date (current=%s, head=%s). Run `alembic upgrade head`.",
+                current,
+                head,
+            )
+    except Exception as exc:  # pragma: no cover - best effort logging
+        app.logger.warning("Unable to determine Alembic migration status: %s", exc)
+
 
 def _ensure_inventory_schema(engine):
     """Backfill legacy inventory tables with the current columns."""
@@ -836,6 +860,7 @@ def create_app(config_override=None):
                         exc,
                         exc_info=current_app.debug,
                     )
+                _log_migration_status(app)
             except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
                 database_available = False
                 database_error_message = (

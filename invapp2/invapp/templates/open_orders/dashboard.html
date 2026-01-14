@@ -54,7 +54,7 @@
         {% for line in lines %}
         <tr class="{% if line.status == 'complete' %}muted{% endif %}">
             <td>
-                {% if line.order_id %}
+                {% if schema_has_order_id and line.order_id %}
                     <a href="{{ url_for('open_orders.open_order_detail', order_id=line.order_id) }}">{{ line.so_no }}</a>
                 {% else %}
                     {{ line.so_no }}

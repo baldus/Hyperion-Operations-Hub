@@ -13,9 +13,11 @@ from typing import Iterable
 
 from flask import current_app
 from io import BytesIO
+from functools import lru_cache
 
 
 from invapp.extensions import db
+from sqlalchemy import inspect
 from invapp.models import (
     OpenOrder,
     OpenOrderActionItem,
@@ -289,6 +291,22 @@ def _serialize_snapshot(record: dict) -> dict:
     return {key: _serialize_snapshot_value(value) for key, value in record.items()}
 
 
+@lru_cache(maxsize=1)
+def open_orders_schema_status() -> dict[str, bool]:
+    try:
+        inspector = inspect(db.engine)
+    except Exception:
+        return {"has_open_order": True, "has_order_id": True}
+
+    tables = set(inspector.get_table_names())
+    has_open_order = "open_order" in tables
+    has_order_id = False
+    if "open_order_line" in tables:
+        columns = {col.get("name") for col in inspector.get_columns("open_order_line")}
+        has_order_id = "order_id" in columns
+    return {"has_open_order": has_open_order, "has_order_id": has_order_id}
+
+
 def get_or_create_order_header(
     *,
     so_no: str,
@@ -420,6 +438,11 @@ def commit_open_orders_import(
 ) -> OpenOrderUpload:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     current_rows = parse_open_orders(file_bytes)
+    schema_status = open_orders_schema_status()
+    if not schema_status.get("has_open_order") or not schema_status.get("has_order_id"):
+        raise ValueError(
+            "Open Orders schema is out of date. Run `alembic upgrade head` to apply migrations."
+        )
 
     previous_upload = None
     if previous_upload_id is not None:
