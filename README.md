@@ -33,7 +33,8 @@ logging stack.
 17. [MDI Meeting Dashboard Experience](#mdi-meeting-dashboard-experience)
 18. [Extending the MDI Module](#extending-the-mdi-module)
 19. [Operational Tips](#operational-tips)
-20. [Home Screen Cubes](#home-screen-cubes)
+20. [Open Orders Imports](#open-orders-imports)
+21. [Home Screen Cubes](#home-screen-cubes)
 
 ---
 
@@ -518,6 +519,16 @@ retaining easy access to historical entries through the status filter.
   database is offline; the UI exposes next-step commands to restart services.
 * **Testing** – `pytest` tests live under `invapp2/tests`. Activate the virtual
   environment and run `pytest` before opening pull requests.
+
+---
+
+## Open Orders Imports
+
+Open Orders uploads keep historical lines instead of deleting them. Lines that
+disappear from the newest upload are marked as `complete` with a completion
+timestamp, and the dashboard filter lets users switch between **Open**,
+**Completed**, and **All** lines. Click a sales order number to open the order
+detail page and attach notes or action items that persist across future uploads.
 
 ---
 
