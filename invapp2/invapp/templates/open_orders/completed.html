@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Completed Open Orders</h2>
+
+{% if lines %}
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>SO No</th>
+            <th>Customer</th>
+            <th>Item</th>
+            <th>Description</th>
+            <th>Completed At</th>
+            <th>Last Qty Remaining</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for line in lines %}
+        <tr>
+            <td>{{ line.so_no }}</td>
+            <td>{{ line.customer_name }}</td>
+            <td>{{ line.item_id }}</td>
+            <td>{{ line.line_description }}</td>
+            <td>{{ line.completed_at or '' }}</td>
+            <td>{{ line.qty_remaining }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No completed lines found.</p>
+{% endif %}
+{% endblock %}
