@@ -18,6 +18,9 @@
                     <a href="{{ link.href }}" class="nav-btn">{{ link.label }}</a>
                     {% endfor %}
                     <a href="{{ url_for('mdi.meeting_view') }}" class="nav-btn">MDI Dashboards</a>
+                    {% if is_superuser() %}
+                    <a href="{{ url_for('open_orders.open_orders_import') }}" class="nav-btn">Open Orders Import</a>
+                    {% endif %}
                 </nav>
             </div>
             <div class="header-actions">

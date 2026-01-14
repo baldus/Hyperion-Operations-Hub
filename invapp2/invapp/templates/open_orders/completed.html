@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Completed Open Orders</h2>
+
+{% if lines %}
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>SO No</th>
+            <th>Customer</th>
+            <th>Item</th>
+            <th>Description</th>
+            <th>Completed At</th>
+            <th>Last Qty Remaining</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for line in lines %}
+        <tr>
+            <td>
+                {% if schema_has_order_id and line.order_id %}
+                    <a href="{{ url_for('open_orders.open_order_detail', order_id=line.order_id) }}">{{ line.so_no }}</a>
+                {% else %}
+                    {{ line.so_no }}
+                {% endif %}
+            </td>
+            <td>{{ line.customer_name }}</td>
+            <td>{{ line.item_id }}</td>
+            <td>{{ line.line_description }}</td>
+            <td>{{ line.completed_at or '' }}</td>
+            <td>{{ line.qty_remaining }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No completed lines found.</p>
+{% endif %}
+{% endblock %}

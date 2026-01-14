@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Open Order {{ order.so_no }}</h2>
+
+<div class="content-card">
+    <p><strong>Customer:</strong> {{ order.customer_name or '—' }}</p>
+    <p><strong>Customer ID:</strong> {{ order.customer_id or '—' }}</p>
+</div>
+
+<h3>Lines</h3>
+{% if lines %}
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Item</th>
+            <th>Description</th>
+            <th>Qty Remaining</th>
+            <th>Ship By</th>
+            <th>Status</th>
+            <th>Completed At</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for line in lines %}
+        <tr class="{% if line.status == 'complete' %}muted{% endif %}">
+            <td>{{ line.item_id }}</td>
+            <td>{{ line.line_description }}</td>
+            <td>{{ line.qty_remaining }}</td>
+            <td>{{ line.ship_by or '' }}</td>
+            <td>{{ line.status }}</td>
+            <td>{{ line.completed_at or '' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No lines found for this order.</p>
+{% endif %}
+
+<h3>Notes</h3>
+<form method="post" action="{{ url_for('open_orders.add_open_order_note', order_id=order.id) }}" class="inline-form">
+    <textarea name="body" rows="3" placeholder="Add a note" required></textarea>
+    <button type="submit" class="action-btn primary-action">Add Note</button>
+</form>
+
+{% if notes %}
+<ul class="notes-list">
+    {% for note in notes %}
+    <li>
+        <p>{{ note.body }}</p>
+        <small>By {{ note.created_by.username if note.created_by else 'Unknown' }} • {{ note.created_at }}</small>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<p>No notes yet.</p>
+{% endif %}
+
+<h3>Action Items</h3>
+<form method="post" action="{{ url_for('open_orders.add_open_order_action_item', order_id=order.id) }}" class="inline-form">
+    <input type="text" name="title" placeholder="New action item" required>
+    <input type="date" name="due_date">
+    <button type="submit" class="action-btn primary-action">Add Item</button>
+</form>
+
+{% if action_items %}
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Done</th>
+            <th>Title</th>
+            <th>Due Date</th>
+            <th>Completed</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in action_items %}
+        <tr class="{% if item.is_done %}muted{% endif %}">
+            <td>
+                <form method="post" action="{{ url_for('open_orders.toggle_open_order_action_item', item_id=item.id) }}">
+                    <input type="hidden" name="is_done" value="{% if item.is_done %}0{% else %}1{% endif %}">
+                    <button type="submit" class="action-btn subtle-action">{% if item.is_done %}Undo{% else %}Done{% endif %}</button>
+                </form>
+            </td>
+            <td>{{ item.title }}</td>
+            <td>{{ item.due_date or '' }}</td>
+            <td>
+                {% if item.is_done %}
+                    {{ item.done_at or '' }}
+                {% else %}
+                    —
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No action items yet.</p>
+{% endif %}
+{% endblock %}

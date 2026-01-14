@@ -38,6 +38,10 @@ def handle_exception(error: Exception):
         error_message = str(error) or error_message
 
     current_app.logger.exception("Unhandled exception", exc_info=error)
+    try:
+        db.session.rollback()
+    except Exception:  # pragma: no cover - best effort cleanup
+        pass
 
     status_code = 500
     if isinstance(error, HTTPException) and error.code:
