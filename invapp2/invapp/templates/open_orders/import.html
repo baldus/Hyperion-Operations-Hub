@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Open Orders Import</h2>
+
+{% if last_summary %}
+<div class="content-card">
+    <h3>Last Import</h3>
+    <p><strong>Uploaded:</strong> {{ last_summary.upload.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</p>
+    <p><strong>Filename:</strong> {{ last_summary.upload.source_filename }}</p>
+    <p><strong>Open lines:</strong> {{ last_summary.open_count }}</p>
+    <p><strong>Completed lines:</strong> {{ last_summary.completed_count }}</p>
+</div>
+{% endif %}
+
+<form method="post" action="{{ url_for('open_orders.preview_open_orders_import') }}" enctype="multipart/form-data">
+    <div class="form-group">
+        <label for="open-orders-file">Upload Open Orders (.xlsx)</label>
+        <input id="open-orders-file" type="file" name="file" accept=".xlsx" required>
+    </div>
+    <div class="form-group">
+        <label for="open-orders-notes">Notes</label>
+        <textarea id="open-orders-notes" name="notes" rows="3" placeholder="Optional import notes"></textarea>
+    </div>
+    <button type="submit" class="action-btn primary-action">Preview Import</button>
+    <a href="{{ url_for('open_orders.open_orders_dashboard') }}" class="action-btn subtle-action">View Dashboard</a>
+</form>
+{% endblock %}
