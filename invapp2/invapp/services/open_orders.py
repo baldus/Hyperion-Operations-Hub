@@ -270,6 +270,18 @@ def _apply_external_fields(line: OpenOrderLine, record: dict) -> None:
         setattr(line, field, record.get(field))
 
 
+def _serialize_snapshot_value(value: object) -> object:
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
+    return value
+
+
+def _serialize_snapshot(record: dict) -> dict:
+    return {key: _serialize_snapshot_value(value) for key, value in record.items()}
+
+
 def _stage_directory() -> Path:
     base = Path(tempfile.gettempdir()) / "hyperion_open_orders"
     base.mkdir(parents=True, exist_ok=True)
@@ -412,7 +424,7 @@ def commit_open_orders_import(
         snapshot = OpenOrderLineSnapshot(
             upload_id=upload.id,
             line_id=line.id,
-            snapshot_json=record,
+            snapshot_json=_serialize_snapshot(record),
         )
         db.session.add(snapshot)
 

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from invapp.services.open_orders import compute_open_order_diff
+from invapp.services.open_orders import compute_open_order_diff, _serialize_snapshot
 
 
 @dataclass
@@ -111,3 +111,19 @@ def test_compute_open_order_diff_detects_new_completed_changed():
     assert diff.completed_keys == {"D"}
     assert diff.still_open_keys == {"A", "B"}
     assert {entry["current"]["natural_key"] for entry in diff.changed_rows} == {"B"}
+
+
+def test_serialize_snapshot_handles_dates_and_decimals():
+    record = {
+        "so_date": date(2024, 9, 1),
+        "ship_by": date(2024, 10, 1),
+        "unit_price": Decimal("12.34"),
+        "qty_remaining": 5,
+    }
+
+    serialized = _serialize_snapshot(record)
+
+    assert serialized["so_date"] == "2024-09-01"
+    assert serialized["ship_by"] == "2024-10-01"
+    assert serialized["unit_price"] == "12.34"
+    assert serialized["qty_remaining"] == 5
