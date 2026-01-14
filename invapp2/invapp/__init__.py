@@ -5,6 +5,10 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import click
+from alembic import command as alembic_command
+from alembic.config import Config as AlembicConfig
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 
 from flask import Flask, current_app, jsonify, render_template, request, session, url_for
 from sqlalchemy import func, inspect, text
@@ -29,6 +33,7 @@ from .routes import (
     errors,
     inventory,
     item_search,
+    open_orders,
     orders,
     purchasing,
     quality,
@@ -56,6 +61,7 @@ from .home_layout import (
 from .superuser import is_superuser
 from .services import backup_service, status_bus
 from .services.db_schema import ensure_app_setting_schema
+from .utils.schema_audit import audit_open_orders_schema
 
 
 NAVIGATION_PAGES: tuple[tuple[str, str, str], ...] = (
@@ -129,6 +135,46 @@ def _ensure_core_roles() -> None:
 
     if created:
         db.session.commit()
+
+
+def _log_migration_status(app: Flask) -> None:
+    if app.config.get("TESTING"):
+        return
+    try:
+        alembic_ini = Path(app.root_path).parent / "alembic.ini"
+        config = AlembicConfig(str(alembic_ini))
+        script = ScriptDirectory.from_config(config)
+        head = script.get_current_head()
+        context = MigrationContext.configure(db.engine)
+        current = context.get_current_revision()
+        app.logger.info("Alembic revision status: current=%s, head=%s", current, head)
+        if current != head:
+            app.logger.warning(
+                "Database schema out of date (current=%s, head=%s). Run `alembic upgrade head`.",
+                current,
+                head,
+            )
+    except Exception as exc:  # pragma: no cover - best effort logging
+        app.logger.warning("Unable to determine Alembic migration status: %s", exc)
+
+
+def _auto_migrate_enabled() -> bool:
+    return os.getenv("AUTO_MIGRATE_ON_STARTUP", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _run_migrations_if_enabled(app: Flask) -> None:
+    if app.config.get("TESTING"):
+        return
+    if not _auto_migrate_enabled():
+        return
+    try:
+        alembic_ini = Path(app.root_path).parent / "alembic.ini"
+        config = AlembicConfig(str(alembic_ini))
+        app.logger.warning("AUTO_MIGRATE_ON_STARTUP enabled; running alembic upgrade head.")
+        alembic_command.upgrade(config, "head")
+    except Exception as exc:  # pragma: no cover - best effort logging
+        app.logger.warning("Automatic migration failed: %s", exc, exc_info=app.debug)
+
 
 def _ensure_inventory_schema(engine):
     """Backfill legacy inventory tables with the current columns."""
@@ -800,6 +846,7 @@ def create_app(config_override=None):
                 pass
         else:
             try:
+                _run_migrations_if_enabled(app)
                 db.create_all()
                 ensure_app_setting_schema(db.engine, current_app.logger)
                 _ensure_inventory_schema(db.engine)
@@ -835,6 +882,7 @@ def create_app(config_override=None):
                         exc,
                         exc_info=current_app.debug,
                     )
+                _log_migration_status(app)
             except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
                 database_available = False
                 database_error_message = (
@@ -911,6 +959,15 @@ def create_app(config_override=None):
             "is_superuser": is_superuser,
         }
 
+    @app.teardown_request
+    def cleanup_session(exc: Exception | None):
+        if exc is not None:
+            try:
+                db.session.rollback()
+            except Exception:  # pragma: no cover - best effort cleanup
+                pass
+        db.session.remove()
+
     # register blueprints
     app.register_blueprint(auth.bp)
     app.register_blueprint(errors.bp)
@@ -918,6 +975,7 @@ def create_app(config_override=None):
     app.register_blueprint(item_search.bp)
     app.register_blueprint(reports.bp)
     app.register_blueprint(orders.bp)
+    app.register_blueprint(open_orders.bp)
     app.register_blueprint(purchasing.bp)
     app.register_blueprint(quality.bp)
     app.register_blueprint(work.bp)
@@ -1202,6 +1260,20 @@ def create_app(config_override=None):
         click.echo("Repairing RMA status event primary key sequence...")
         _repair_rma_status_event_sequence(db.engine)
         click.echo("Sequence repair completed.")
+
+    @app.cli.command("open-orders-schema-audit")
+    def open_orders_schema_audit_command() -> None:
+        """Print missing Open Orders schema columns."""
+
+        report = audit_open_orders_schema(db.engine)
+        missing = report.get("missing", {})
+        if not missing:
+            click.echo("Open Orders schema audit: OK")
+            return
+        click.echo("Open Orders schema audit: missing columns detected")
+        for table_name, columns in missing.items():
+            click.echo(f"- {table_name}: {', '.join(columns)}")
+        click.echo("Run `alembic upgrade head` to apply migrations.")
 
     if not app.config.get("TESTING", False) and app.config.get("BACKUP_SCHEDULER_ENABLED", True):
         if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":

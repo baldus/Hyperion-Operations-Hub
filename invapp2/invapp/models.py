@@ -1,7 +1,7 @@
 import logging
 import secrets
 from decimal import Decimal
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import ClassVar
 
 from flask import current_app
@@ -1529,6 +1529,266 @@ class Reservation(db.Model):
             f"<Reservation order_line={self.order_line_id} item={self.item_id} "
             f"qty={self.quantity}>"
         )
+
+
+class OpenOrderUpload(db.Model):
+    __tablename__ = "open_order_upload"
+
+    id = db.Column(db.Integer, primary_key=True)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    uploaded_by_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    source_filename = db.Column(db.String(255), nullable=False)
+    file_hash = db.Column(db.String(64), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+
+    uploaded_by = db.relationship(
+        "User",
+        foreign_keys=[uploaded_by_user_id],
+        backref=db.backref("open_order_uploads", lazy="dynamic"),
+    )
+
+
+class OpenOrderLine(db.Model):
+    __tablename__ = "open_order_line"
+
+    id = db.Column(db.Integer, primary_key=True)
+    natural_key = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("open_order.id"), nullable=True)
+    so_no = db.Column(db.String(64), nullable=True)
+    so_state = db.Column(db.String(32), nullable=True)
+    so_date = db.Column(db.Date, nullable=True)
+    ship_by = db.Column(db.Date, nullable=True)
+    customer_id = db.Column(db.String(64), nullable=True)
+    customer_name = db.Column(db.String(255), nullable=True)
+    item_id = db.Column(db.String(64), nullable=True)
+    line_description = db.Column(db.Text, nullable=True)
+    uom = db.Column(db.String(32), nullable=True)
+    qty_ordered = db.Column(db.Integer, nullable=True)
+    qty_shipped = db.Column(db.Integer, nullable=True)
+    qty_remaining = db.Column(db.Integer, nullable=True)
+    unit_price = db.Column(db.Numeric(12, 2), nullable=True)
+    part_number = db.Column(db.String(128), nullable=True)
+
+    status = db.Column(
+        db.String(32),
+        nullable=False,
+        default="open",
+        server_default="open",
+    )
+    system_state = db.Column(db.String(32), nullable=False, default="NEW")
+    first_seen_upload_id = db.Column(
+        db.Integer,
+        db.ForeignKey("open_order_upload.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    last_seen_upload_id = db.Column(
+        db.Integer,
+        db.ForeignKey("open_order_upload.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    completed_upload_id = db.Column(
+        db.Integer,
+        db.ForeignKey("open_order_upload.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    first_seen_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    last_seen_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    internal_status = db.Column(db.String(32), nullable=False, default="UNREVIEWED")
+    owner_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    completed_by_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    priority = db.Column(db.Integer, nullable=True)
+    promised_date = db.Column(db.Date, nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+
+    owner = db.relationship(
+        "User",
+        foreign_keys=[owner_user_id],
+        backref=db.backref("open_order_lines", lazy="dynamic"),
+    )
+    first_seen_upload = db.relationship(
+        "OpenOrderUpload",
+        foreign_keys=[first_seen_upload_id],
+    )
+    last_seen_upload = db.relationship(
+        "OpenOrderUpload",
+        foreign_keys=[last_seen_upload_id],
+    )
+    completed_upload = db.relationship(
+        "OpenOrderUpload",
+        foreign_keys=[completed_upload_id],
+    )
+    order = db.relationship(
+        "OpenOrder",
+        foreign_keys=[order_id],
+        backref=db.backref("lines", lazy="dynamic"),
+    )
+    completed_by = db.relationship(
+        "User",
+        foreign_keys=[completed_by_user_id],
+        backref=db.backref("completed_open_order_lines", lazy="dynamic"),
+    )
+
+
+class OpenOrder(db.Model):
+    __tablename__ = "open_order"
+
+    id = db.Column(db.Integer, primary_key=True)
+    so_no = db.Column(db.String(64), nullable=False)
+    customer_id = db.Column(db.String(64), nullable=True)
+    customer_name = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        server_default=db.func.now(),
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        server_default=db.func.now(),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint("so_no", "customer_id", name="uq_open_order_so_customer"),
+        db.Index("ix_open_order_so_no", "so_no"),
+    )
+
+
+class OpenOrderNote(db.Model):
+    __tablename__ = "open_order_note"
+
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(
+        db.Integer,
+        db.ForeignKey("open_order.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    body = db.Column(db.Text, nullable=False)
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        server_default=db.func.now(),
+        default=lambda: datetime.now(timezone.utc),
+    )
+    created_by_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    updated_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=True,
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    order = db.relationship(
+        "OpenOrder",
+        foreign_keys=[order_id],
+        backref=db.backref("notes", lazy="dynamic"),
+    )
+    created_by = db.relationship(
+        "User",
+        foreign_keys=[created_by_user_id],
+        backref=db.backref("open_order_notes", lazy="dynamic"),
+    )
+
+
+class OpenOrderActionItem(db.Model):
+    __tablename__ = "open_order_action_item"
+
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(
+        db.Integer,
+        db.ForeignKey("open_order.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    title = db.Column(db.String(255), nullable=False)
+    is_done = db.Column(db.Boolean, default=False, nullable=False)
+    done_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    done_by_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        server_default=db.func.now(),
+        default=lambda: datetime.now(timezone.utc),
+    )
+    created_by_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    sort_order = db.Column(db.Integer, nullable=True)
+    due_date = db.Column(db.Date, nullable=True)
+
+    order = db.relationship(
+        "OpenOrder",
+        foreign_keys=[order_id],
+        backref=db.backref("action_items", lazy="dynamic"),
+    )
+    created_by = db.relationship(
+        "User",
+        foreign_keys=[created_by_user_id],
+        backref=db.backref("open_order_action_items", lazy="dynamic"),
+    )
+    done_by = db.relationship(
+        "User",
+        foreign_keys=[done_by_user_id],
+        backref=db.backref("completed_open_order_action_items", lazy="dynamic"),
+    )
+
+
+class OpenOrderLineSnapshot(db.Model):
+    __tablename__ = "open_order_line_snapshot"
+
+    id = db.Column(db.Integer, primary_key=True)
+    upload_id = db.Column(
+        db.Integer,
+        db.ForeignKey("open_order_upload.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    line_id = db.Column(
+        db.Integer,
+        db.ForeignKey("open_order_line.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    snapshot_json = db.Column(db.JSON, nullable=False)
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        server_default=db.func.now(),
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    upload = db.relationship(
+        "OpenOrderUpload",
+        foreign_keys=[upload_id],
+        backref=db.backref("open_order_line_snapshots", lazy="dynamic"),
+    )
+    line = db.relationship(
+        "OpenOrderLine",
+        foreign_keys=[line_id],
+        backref=db.backref("snapshots", lazy="dynamic"),
+    )
 
 
 # Backwards compatibility aliases for legacy imports

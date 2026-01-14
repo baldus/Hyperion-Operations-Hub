@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Open Orders</h2>
+
+<div class="orders-toolbar">
+    <form method="get" class="orders-filter">
+        <select name="status">
+            <option value="open" {% if filters.status == 'open' %}selected{% endif %}>Open</option>
+            <option value="completed" {% if filters.status == 'completed' %}selected{% endif %}>Completed</option>
+            <option value="all" {% if filters.status == 'all' %}selected{% endif %}>All</option>
+        </select>
+        <input type="search" name="customer" placeholder="Customer" value="{{ filters.customer }}">
+        <input type="search" name="so_no" placeholder="SO No" value="{{ filters.so_no }}">
+        <input type="search" name="item_id" placeholder="Item ID" value="{{ filters.item_id }}">
+        <select name="internal_status">
+            <option value="">All statuses</option>
+            {% for status in internal_status_options %}
+            <option value="{{ status }}" {% if filters.internal_status == status %}selected{% endif %}>{{ status }}</option>
+            {% endfor %}
+        </select>
+        <select name="owner_id">
+            <option value="">All owners</option>
+            {% for owner in owners %}
+            <option value="{{ owner.id }}" {% if filters.owner_id|int == owner.id %}selected{% endif %}>{{ owner.username }}</option>
+            {% endfor %}
+        </select>
+        <input type="number" name="priority" placeholder="Priority" value="{{ filters.priority }}">
+        <label><input type="checkbox" name="overdue" value="1" {% if filters.overdue %}checked{% endif %}> Overdue ship by</label>
+        <button type="submit">Filter</button>
+        <a class="action-btn subtle-action" href="{{ url_for('open_orders.open_orders_dashboard') }}">Clear</a>
+    </form>
+    {% if is_superuser() %}
+    <a href="{{ url_for('open_orders.open_orders_import') }}" class="action-btn subtle-action">Import Open Orders</a>
+    {% endif %}
+</div>
+
+{% if lines %}
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>SO No</th>
+            <th>Customer</th>
+            <th>Item</th>
+            <th>Description</th>
+            <th>Qty Remaining</th>
+            <th>Ship By</th>
+            <th>System State</th>
+            <th>Completed At</th>
+            <th>Workflow</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for line in lines %}
+        <tr class="{% if line.status == 'complete' %}muted{% endif %}">
+            <td>
+                {% if schema_has_order_id and line.order_id %}
+                    <a href="{{ url_for('open_orders.open_order_detail', order_id=line.order_id) }}">{{ line.so_no }}</a>
+                {% else %}
+                    {{ line.so_no }}
+                {% endif %}
+            </td>
+            <td>{{ line.customer_name }}</td>
+            <td>{{ line.item_id }}</td>
+            <td>{{ line.line_description }}</td>
+            <td>{{ line.qty_remaining }}</td>
+            <td>{{ line.ship_by or '' }}</td>
+            <td>{{ line.system_state }}</td>
+            <td>{{ line.completed_at or '' }}</td>
+            <td>
+                {% if is_superuser() %}
+                    <form method="post" action="{{ url_for('open_orders.update_open_order_workflow', line_id=line.id) }}" class="inline-form">
+                        <select name="internal_status">
+                            {% for status in internal_status_options %}
+                            <option value="{{ status }}" {% if line.internal_status == status %}selected{% endif %}>{{ status }}</option>
+                            {% endfor %}
+                        </select>
+                        <select name="owner_user_id">
+                            <option value="">Unassigned</option>
+                            {% for owner in owners %}
+                            <option value="{{ owner.id }}" {% if line.owner_user_id == owner.id %}selected{% endif %}>{{ owner.username }}</option>
+                            {% endfor %}
+                        </select>
+                        <input type="number" name="priority" min="1" value="{{ line.priority or '' }}" placeholder="Priority">
+                        <input type="date" name="promised_date" value="{{ line.promised_date or '' }}">
+                        <input type="text" name="notes" value="{{ line.notes or '' }}" placeholder="Notes">
+                        <button type="submit" class="action-btn subtle-action">Save</button>
+                    </form>
+                {% else %}
+                    <div>
+                        <p>Status: {{ line.internal_status }}</p>
+                        <p>Owner: {{ line.owner.username if line.owner else 'Unassigned' }}</p>
+                        <p>Priority: {{ line.priority or '—' }}</p>
+                        <p>Promised: {{ line.promised_date or '—' }}</p>
+                        <p>Notes: {{ line.notes or '—' }}</p>
+                    </div>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No open order lines found.</p>
+{% endif %}
+{% endblock %}
