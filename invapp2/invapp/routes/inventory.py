@@ -27,7 +27,7 @@ from flask import (
     url_for,
 )
 from sqlalchemy import asc, desc, func, inspect, or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import aliased, joinedload, lazyload, load_only
 from sqlalchemy.orm.exc import DetachedInstanceError
 
@@ -2214,28 +2214,30 @@ def delete_all_locations():
         )
         return redirect(url_for("inventory.list_locations"))
 
+    items_cleared = 0
+    deleted = 0
     try:
-        with db.session.begin():
-            items_cleared = (
-                db.session.query(Item)
-                .filter(
-                    or_(
-                        Item.default_location_id.isnot(None),
-                        Item.secondary_location_id.isnot(None),
-                        Item.point_of_use_location_id.isnot(None),
-                    )
-                )
-                .update(
-                    {
-                        Item.default_location_id: None,
-                        Item.secondary_location_id: None,
-                        Item.point_of_use_location_id: None,
-                    },
-                    synchronize_session=False,
+        items_cleared = (
+            db.session.query(Item)
+            .filter(
+                or_(
+                    Item.default_location_id.isnot(None),
+                    Item.secondary_location_id.isnot(None),
+                    Item.point_of_use_location_id.isnot(None),
                 )
             )
-            deleted = Location.query.delete(synchronize_session=False)
-    except Exception:
+            .update(
+                {
+                    Item.default_location_id: None,
+                    Item.secondary_location_id: None,
+                    Item.point_of_use_location_id: None,
+                },
+                synchronize_session=False,
+            )
+        )
+        deleted = Location.query.delete(synchronize_session=False)
+        db.session.commit()
+    except SQLAlchemyError:
         db.session.rollback()
         current_app.logger.exception("Failed to delete all locations.")
         flash("Failed to delete all locations. Please try again.", "danger")

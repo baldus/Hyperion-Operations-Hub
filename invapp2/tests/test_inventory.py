@@ -229,6 +229,26 @@ def test_delete_all_locations_clears_item_references(client, app):
         assert Location.query.count() == 0
 
 
+def test_delete_all_locations_does_not_call_session_begin(client, app, monkeypatch):
+    with app.app_context():
+        location = Location(code="BEGIN-LOC")
+        db.session.add(location)
+        db.session.commit()
+
+    def _fail_begin(*args, **kwargs):
+        raise AssertionError("db.session.begin should not be called")
+
+    monkeypatch.setattr(db.session, "begin", _fail_begin)
+
+    response = client.post(
+        "/inventory/locations/delete-all",
+        data={"confirm_delete": "DELETE"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+
+
 def test_list_stock_includes_location_metadata(client, app):
     with app.app_context():
         primary = Location(code="PRIMARY")
