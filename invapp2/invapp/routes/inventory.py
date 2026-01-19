@@ -35,7 +35,7 @@ from invapp.auth import blueprint_page_guard
 from invapp.login import current_user, login_required
 from invapp.permissions import resolve_edit_roles
 from invapp.security import require_admin_or_superuser, require_any_role, require_roles
-from invapp.superuser import is_superuser
+from invapp.superuser import is_superuser, superuser_required
 from invapp.models import (
     Batch,
     BillOfMaterial,
@@ -2199,8 +2199,12 @@ def list_locations():
 
 
 @bp.route("/locations/delete-all", methods=["POST"])
-@require_roles("admin")
+@superuser_required
 def delete_all_locations():
+    if request.form.get("confirm_delete") != "DELETE":
+        flash("Type DELETE to confirm deleting all locations.", "warning")
+        return redirect(url_for("inventory.list_locations"))
+
     has_movements = db.session.query(Movement.id).limit(1).first() is not None
     if has_movements:
         flash(
@@ -2210,12 +2214,41 @@ def delete_all_locations():
         )
         return redirect(url_for("inventory.list_locations"))
 
-    deleted = Location.query.delete(synchronize_session=False)
-    db.session.commit()
+    try:
+        with db.session.begin():
+            items_cleared = (
+                db.session.query(Item)
+                .filter(
+                    or_(
+                        Item.default_location_id.isnot(None),
+                        Item.secondary_location_id.isnot(None),
+                        Item.point_of_use_location_id.isnot(None),
+                    )
+                )
+                .update(
+                    {
+                        Item.default_location_id: None,
+                        Item.secondary_location_id: None,
+                        Item.point_of_use_location_id: None,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            deleted = Location.query.delete(synchronize_session=False)
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Failed to delete all locations.")
+        flash("Failed to delete all locations. Please try again.", "danger")
+        return redirect(url_for("inventory.list_locations"))
 
     if deleted:
         label = "location" if deleted == 1 else "locations"
-        flash(f"Deleted {deleted} {label}.", "success")
+        item_label = "item" if items_cleared == 1 else "items"
+        flash(
+            f"Cleared location references on {items_cleared} {item_label} and deleted "
+            f"{deleted} {label}.",
+            "success",
+        )
     else:
         flash("There were no locations to delete.", "info")
 

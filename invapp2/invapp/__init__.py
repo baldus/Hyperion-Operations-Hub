@@ -253,7 +253,8 @@ def _ensure_inventory_schema(engine):
             conn.execute(
                 text(
                     "ALTER TABLE item ADD CONSTRAINT fk_item_default_location "
-                    "FOREIGN KEY (default_location_id) REFERENCES location(id)"
+                    "FOREIGN KEY (default_location_id) REFERENCES location(id) "
+                    "ON DELETE SET NULL"
                 )
             )
     if (
@@ -266,7 +267,8 @@ def _ensure_inventory_schema(engine):
             conn.execute(
                 text(
                     "ALTER TABLE item ADD CONSTRAINT fk_item_secondary_location "
-                    "FOREIGN KEY (secondary_location_id) REFERENCES location(id)"
+                    "FOREIGN KEY (secondary_location_id) REFERENCES location(id) "
+                    "ON DELETE SET NULL"
                 )
             )
     if (
@@ -279,7 +281,8 @@ def _ensure_inventory_schema(engine):
             conn.execute(
                 text(
                     "ALTER TABLE item ADD CONSTRAINT fk_item_point_of_use_location "
-                    "FOREIGN KEY (point_of_use_location_id) REFERENCES location(id)"
+                    "FOREIGN KEY (point_of_use_location_id) REFERENCES location(id) "
+                    "ON DELETE SET NULL"
                 )
             )
 
