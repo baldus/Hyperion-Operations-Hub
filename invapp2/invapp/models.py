@@ -439,13 +439,13 @@ class Item(db.Model):
     last_unit_cost = db.Column(db.Numeric(12, 2))
     item_class = db.Column(db.String)
     default_location_id = db.Column(
-        db.Integer, db.ForeignKey("location.id"), nullable=True
+        db.Integer, db.ForeignKey("location.id", ondelete="SET NULL"), nullable=True
     )
     secondary_location_id = db.Column(
-        db.Integer, db.ForeignKey("location.id"), nullable=True
+        db.Integer, db.ForeignKey("location.id", ondelete="SET NULL"), nullable=True
     )
     point_of_use_location_id = db.Column(
-        db.Integer, db.ForeignKey("location.id"), nullable=True
+        db.Integer, db.ForeignKey("location.id", ondelete="SET NULL"), nullable=True
     )
 
     default_location = db.relationship(

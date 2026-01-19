@@ -200,6 +200,55 @@ def test_list_stock_low_filter(client, stock_items):
     assert stock_items["ok"] not in page
 
 
+def test_delete_all_locations_clears_item_references(client, app):
+    with app.app_context():
+        primary = Location(code="PRIMARY")
+        secondary = Location(code="SECONDARY")
+        item = Item(
+            sku="LOC-REF",
+            name="Location Reference",
+            default_location=primary,
+            secondary_location=secondary,
+        )
+        db.session.add_all([primary, secondary, item])
+        db.session.commit()
+
+    response = client.post(
+        "/inventory/locations/delete-all",
+        data={"confirm_delete": "DELETE"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+
+    with app.app_context():
+        refreshed = Item.query.filter_by(sku="LOC-REF").first()
+        assert refreshed.default_location_id is None
+        assert refreshed.secondary_location_id is None
+        assert refreshed.point_of_use_location_id is None
+        assert Location.query.count() == 0
+
+
+def test_delete_all_locations_does_not_call_session_begin(client, app, monkeypatch):
+    with app.app_context():
+        location = Location(code="BEGIN-LOC")
+        db.session.add(location)
+        db.session.commit()
+
+    def _fail_begin(*args, **kwargs):
+        raise AssertionError("db.session.begin should not be called")
+
+    monkeypatch.setattr(db.session, "begin", _fail_begin)
+
+    response = client.post(
+        "/inventory/locations/delete-all",
+        data={"confirm_delete": "DELETE"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+
+
 def test_list_stock_includes_location_metadata(client, app):
     with app.app_context():
         primary = Location(code="PRIMARY")
