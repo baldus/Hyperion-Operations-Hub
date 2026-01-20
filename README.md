@@ -15,8 +15,9 @@ Hyperion Operations Hub is a Flask-based operations console for manufacturing te
 10. [Logging, Errors, and Debugging](#logging-errors-and-debugging)
 11. [Testing](#testing)
 12. [Deployment Notes](#deployment-notes)
-13. [Contributing / Development Conventions](#contributing--development-conventions)
-14. [How to Make Common Changes](#how-to-make-common-changes)
+13. [Network Stability & Self-Healing (Linux Host)](#network-stability--self-healing-linux-host)
+14. [Contributing / Development Conventions](#contributing--development-conventions)
+15. [How to Make Common Changes](#how-to-make-common-changes)
 
 ---
 
@@ -169,6 +170,10 @@ These are pulled directly from environment variables or startup scripts:
 | `OPS_MONITOR_DB_URL` | DB URL to show in ops monitor (masked). | falls back to `DB_URL` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
 | `OPS_MONITOR_LAUNCH_MODE` | Monitor launch mode (`window`, `background`, `headless`). | `window` | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
 | `OPS_MONITOR_TERMINAL` | Force a specific terminal app. | (none) | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
+| `OPS_MONITOR_CONNECTIVITY_HOST` | Connectivity watchdog host to ping. | `1.1.1.1` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
+| `OPS_MONITOR_CONNECTIVITY_INTERVAL` | Connectivity check interval (seconds). | `10` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
+| `OPS_MONITOR_CONNECTIVITY_TIMEOUT` | Ping timeout (seconds). | `1` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
+| `OPS_MONITOR_CONNECTIVITY_RESTART_COOLDOWN` | Cooldown before restarting NetworkManager again (seconds). | `60` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
 | `PYTHON` | Python executable used for the ops monitor. | current interpreter | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
 | `APP_DIR`, `VENV_DIR`, `REQUIREMENTS_FILE`, `APP_MODULE`, `MONITOR_LOG_FILE` | Startup script overrides for the launcher. | (script defaults) | [`start_operations_console.sh`](start_operations_console.sh) |
 | `HEALTHCHECK_FATAL`, `HEALTHCHECK_DRY_RUN` | Startup healthcheck behavior. | `0` | [`start_operations_console.sh`](start_operations_console.sh), [`invapp2/invapp/healthcheck.py`](invapp2/invapp/healthcheck.py) |
@@ -377,6 +382,36 @@ To add a test:
 - **Gunicorn settings**: `HOST`, `PORT`, `GUNICORN_WORKERS`, and `GUNICORN_TIMEOUT` control the server configuration. See [`start_operations_console.sh`](start_operations_console.sh).
 - **Reverse proxy**: not configured in this repo; if you deploy behind Nginx/Apache, proxy to the Gunicorn bind address.
 - **Backups**: the backup scheduler uses `BACKUP_DIR` or falls back to `instance/backups` or `./backups`. See [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
+
+---
+
+## Network Stability & Self-Healing (Linux Host)
+
+Field deployments can look “connected” while DNS or routing has degraded over time. The host-level safeguards below disable Ethernet power saving, harden DNS resolution, and ensure NetworkManager is always restarted on failure.
+
+### Apply host protections (Ubuntu)
+Run the helper script on the Linux host:
+```bash
+sudo support/network_stability.sh
+```
+
+This script:
+- Writes `/etc/NetworkManager/conf.d/ethernet-powersave.conf` with `ethernet.powersave = 2`.
+- Updates `/etc/systemd/resolved.conf` to explicitly set `DNS=1.1.1.1 8.8.8.8`, `FallbackDNS=9.9.9.9`, and `DNSStubListener=yes`.
+- Adds a systemd drop-in to restart NetworkManager automatically (`/etc/systemd/system/NetworkManager.service.d/override.conf`).
+- Enables and restarts NetworkManager and systemd-resolved, and prints `resolvectl status` for verification.
+
+### Ops monitor connectivity watchdog
+The ops monitor now runs a lightweight connectivity watchdog that pings a reliable external host on a repeating interval. When internet access is lost, the terminal displays a red warning (“WARNING: INTERNET DISCONNECTED”), logs an outage event with timestamp, and attempts to restart NetworkManager. The current connectivity status (online/offline and last successful check) is also kept in memory for future UI indicators. See the watchdog implementation in [`ops_monitor/monitor.py`](ops_monitor/monitor.py).
+
+#### Configure watchdog behavior
+Use environment variables to tune the watchdog:
+```bash
+export OPS_MONITOR_CONNECTIVITY_HOST="1.1.1.1"
+export OPS_MONITOR_CONNECTIVITY_INTERVAL="10"
+export OPS_MONITOR_CONNECTIVITY_TIMEOUT="1"
+export OPS_MONITOR_CONNECTIVITY_RESTART_COOLDOWN="60"
+```
 
 ---
 
