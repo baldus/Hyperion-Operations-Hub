@@ -7,6 +7,8 @@ import shlex
 import sys
 import threading
 import time
+import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -23,9 +25,12 @@ from . import controls
 from .metrics import (
     AccessSnapshot,
     BackupStatus,
+    ConnectivityStatus,
+    OpsEventEntry,
     check_port,
     format_uptime,
     mask_db_url,
+    ping_host,
     read_backup_status,
     read_ops_events,
     read_process_metrics,
@@ -39,6 +44,112 @@ from .metrics import (
 
 
 console = Console()
+
+
+class NetworkWatchdog:
+    def __init__(
+        self,
+        *,
+        host: str,
+        interval: float,
+        timeout: int,
+        restart_cooldown: float,
+    ) -> None:
+        self._host = host
+        self._interval = interval
+        self._timeout = timeout
+        self._restart_cooldown = restart_cooldown
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._events: list[OpsEventEntry] = []
+        self._last_restart: datetime | None = None
+        self._status = ConnectivityStatus(
+            online=True,
+            last_seen=None,
+            last_checked=None,
+            last_failure=None,
+        )
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self._thread.join(timeout=1)
+
+    def snapshot(self) -> tuple[ConnectivityStatus, list[OpsEventEntry]]:
+        with self._lock:
+            status = ConnectivityStatus(
+                online=self._status.online,
+                last_seen=self._status.last_seen,
+                last_checked=self._status.last_checked,
+                last_failure=self._status.last_failure,
+            )
+            events = list(self._events)
+        return status, events
+
+    def _run(self) -> None:
+        was_online = True
+        while not self._stop_event.is_set():
+            now = datetime.utcnow()
+            online = ping_host(self._host, timeout=self._timeout)
+            restart_needed = False
+
+            with self._lock:
+                self._status.last_checked = now
+                if online:
+                    self._status.online = True
+                    self._status.last_seen = now
+                    self._status.last_failure = None
+                else:
+                    self._status.online = False
+                    if was_online:
+                        self._status.last_failure = now
+                        self._record_event(now, "WARNING: INTERNET DISCONNECTED")
+                        restart_needed = self._restart_due(now)
+
+            if not online and restart_needed:
+                self._restart_network_manager()
+
+            was_online = online
+            self._stop_event.wait(self._interval)
+
+    def _record_event(self, timestamp: datetime, message: str) -> None:
+        self._events.append(
+            OpsEventEntry(
+                created_at=timestamp,
+                level="WARNING",
+                message=message,
+                source="network_watchdog",
+                context=None,
+            )
+        )
+        if len(self._events) > 25:
+            self._events = self._events[-25:]
+
+    def _restart_due(self, now: datetime) -> bool:
+        if self._restart_cooldown <= 0:
+            return True
+        if not self._last_restart:
+            self._last_restart = now
+            return True
+        elapsed = (now - self._last_restart).total_seconds()
+        if elapsed >= self._restart_cooldown:
+            self._last_restart = now
+            return True
+        return False
+
+    def _restart_network_manager(self) -> None:
+        try:
+            subprocess.run(
+                ["systemctl", "restart", "NetworkManager"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        except OSError:
+            return
 
 
 def _input_listener(command_queue: "queue.Queue[str]", stop_event: threading.Event) -> None:
@@ -64,6 +175,21 @@ def build_metrics_table(state: dict) -> Table:
     table.add_column("Metric", style="bold cyan")
     table.add_column("Value", style="white")
 
+    internet_status = state.get("internet_status")
+    if isinstance(internet_status, ConnectivityStatus):
+        if internet_status.online:
+            internet_value = Text("ONLINE", style="bold green")
+        else:
+            internet_value = Text("WARNING: INTERNET DISCONNECTED", style="bold red")
+        last_seen = (
+            internet_status.last_seen.strftime("%Y-%m-%d %H:%M:%S UTC")
+            if internet_status.last_seen
+            else "never"
+        )
+    else:
+        internet_value = Text("unknown", style="yellow")
+        last_seen = "n/a"
+
     table.add_row("Status", state.get("status", "Unknown"))
     table.add_row("Uptime", state.get("uptime", "00:00:00"))
     table.add_row("CPU", f"{state.get('cpu', 0):.1f}%")
@@ -71,6 +197,8 @@ def build_metrics_table(state: dict) -> Table:
     table.add_row("Threads", str(state.get("threads", 0)))
     table.add_row("Port", state.get("port_status", "n/a"))
     table.add_row("Clients", str(state.get("connections", 0)))
+    table.add_row("Internet", internet_value)
+    table.add_row("Last seen", last_seen)
     return table
 
 
@@ -210,6 +338,18 @@ def monitor_loop(
     gunicorn_bind = f"{os.getenv('HOST', '0.0.0.0')}:{os.getenv('PORT', '8000')}"
     gunicorn_workers = os.getenv("GUNICORN_WORKERS", "2")
     gunicorn_timeout = os.getenv("GUNICORN_TIMEOUT", "600")
+    internet_host = os.getenv("OPS_MONITOR_CONNECTIVITY_HOST", "1.1.1.1")
+    internet_interval = float(os.getenv("OPS_MONITOR_CONNECTIVITY_INTERVAL", "10"))
+    internet_timeout = int(os.getenv("OPS_MONITOR_CONNECTIVITY_TIMEOUT", "1"))
+    internet_restart_cooldown = float(os.getenv("OPS_MONITOR_CONNECTIVITY_RESTART_COOLDOWN", "60"))
+
+    watchdog = NetworkWatchdog(
+        host=internet_host,
+        interval=internet_interval,
+        timeout=internet_timeout,
+        restart_cooldown=internet_restart_cooldown,
+    )
+    watchdog.start()
 
     live_state = {
         "service_name": service_name,
@@ -243,6 +383,12 @@ def monitor_loop(
         "gunicorn_timeout": gunicorn_timeout,
         "boot_status": "Unknown",
         "sequence_summary": None,
+        "internet_status": ConnectivityStatus(
+            online=True,
+            last_seen=None,
+            last_checked=None,
+            last_failure=None,
+        ),
     }
 
     with Live(render_layout(live_state), console=console, screen=True, refresh_per_second=4) as live:
@@ -256,6 +402,7 @@ def monitor_loop(
             error_snapshot = read_recent_errors(db_url)
             sequence_summary = read_sequence_repair_summary(db_url)
             boot_status = read_boot_status(db_url)
+            internet_status, network_events = watchdog.snapshot()
 
             if metrics is None:
                 status = "Stopped"
@@ -298,7 +445,11 @@ def monitor_loop(
                 "gunicorn_timeout": gunicorn_timeout,
                 "boot_status": boot_status or status_message,
                 "sequence_summary": sequence_summary,
+                "internet_status": internet_status,
             }
+
+            if network_events:
+                events = [*network_events, *events]
 
             live.update(render_layout(live_state))
 
@@ -332,6 +483,7 @@ def monitor_loop(
 
             time.sleep(0.5)
 
+    watchdog.stop()
     stop_event.set()
     input_thread.join(timeout=1)
 

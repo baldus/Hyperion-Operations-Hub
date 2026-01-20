@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import socket
 import time
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -69,6 +70,27 @@ class BackupStatus:
 class ErrorSnapshot:
     entries: list[str]
     status: str
+
+
+@dataclass
+class ConnectivityStatus:
+    online: bool
+    last_seen: datetime | None
+    last_checked: datetime | None
+    last_failure: datetime | None
+
+
+def ping_host(host: str, *, timeout: int = 1) -> bool:
+    try:
+        result = subprocess.run(
+            ["ping", "-c", "1", "-W", str(timeout), host],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return result.returncode == 0
+    except OSError:
+        return False
 
 
 def read_process_metrics(pid: int) -> Optional[ProcessMetrics]:
