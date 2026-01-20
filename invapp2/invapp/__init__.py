@@ -720,6 +720,7 @@ def create_app(config_override=None):
     # backing service is offline.
     app.config.setdefault("DATABASE_AVAILABLE", True)
     app.config.setdefault("DATABASE_ERROR", None)
+    app.config.setdefault("RESTORE_IN_PROGRESS", False)
     app.config.setdefault(
         "DATABASE_RECOVERY_STEPS",
         (
@@ -913,6 +914,16 @@ def create_app(config_override=None):
             ),
             "is_superuser": is_superuser,
         }
+
+    @app.before_request
+    def block_requests_during_restore():
+        if not current_app.config.get("RESTORE_IN_PROGRESS"):
+            return None
+        if request.path.startswith("/static/"):
+            return None
+        if request.endpoint in {"admin.restore_backup"}:
+            return None
+        return render_template("errors/restore_in_progress.html"), 503
 
     # register blueprints
     app.register_blueprint(auth.bp)

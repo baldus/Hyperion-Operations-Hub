@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
@@ -16,6 +17,7 @@ from typing import Iterable
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy.engine.url import make_url
+from sqlalchemy.sql import text
 from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 
 from flask import current_app
@@ -36,6 +38,32 @@ AUTO_BACKUP_ALLOWED_EXTENSIONS = (".zip", ".tar.gz", ".sql", ".dump")
 RESTORE_TIMEOUT_SECONDS = 900
 _WARNED_KEYS: set[str] = set()
 _APP_SETTING_REPAIR_ATTEMPTED = False
+
+
+@dataclass
+class RestoreOutcome:
+    filename: str
+    message: str
+    stdout: str
+    stderr: str
+    duration_seconds: float
+
+
+class RestoreFailure(RuntimeError):
+    def __init__(
+        self,
+        *,
+        filename: str,
+        message: str,
+        stdout: str = "",
+        stderr: str = "",
+        duration_seconds: float = 0.0,
+    ) -> None:
+        super().__init__(message)
+        self.filename = filename
+        self.stdout = stdout
+        self.stderr = stderr
+        self.duration_seconds = duration_seconds
 
 
 def _ensure_directory(path: Path) -> None:
@@ -574,7 +602,80 @@ def _format_bytes(value: float) -> str:
     return f"{value:.1f} PB"
 
 
-def restore_database_backup(app, filename: str, logger: logging.Logger) -> str:
+def _sanitize_restore_output(output: str, *, limit: int = 400) -> str:
+    if not output:
+        return ""
+    sanitized = re.sub(r"password=[^\s'\"]+", "password=***", output, flags=re.IGNORECASE)
+    sanitized = sanitized.replace("PGPASSWORD", "PGPASSWORD=***")
+    sanitized = sanitized.strip()
+    return sanitized[:limit]
+
+
+def _database_identifier_from_env(env: dict[str, str]) -> str:
+    name = env.get("PGDATABASE")
+    if not name:
+        raise RuntimeError("Database name missing for restore.")
+    if not re.fullmatch(r"[A-Za-z0-9_]+", name):
+        raise RuntimeError("Database name contains unsupported characters.")
+    return name
+
+
+def _terminate_app_connections(env: dict[str, str], logger: logging.Logger) -> None:
+    db_name = _database_identifier_from_env(env)
+    sql = (
+        "SELECT pg_terminate_backend(pid) "
+        "FROM pg_stat_activity "
+        "WHERE datname = :db_name "
+        "AND pid <> pg_backend_pid()"
+    )
+    try:
+        with db.engine.begin() as connection:
+            connection.execute(text(sql), {"db_name": db_name})
+            logger.info("Terminated active connections for database %s.", db_name)
+    except Exception as exc:
+        logger.warning("Unable to terminate existing connections: %s", exc)
+
+
+def _reset_public_schema(env: dict[str, str], logger: logging.Logger) -> None:
+    db_name = _database_identifier_from_env(env)
+    commands = [
+        "DROP SCHEMA IF EXISTS public CASCADE;",
+        "CREATE SCHEMA public;",
+        "GRANT ALL ON SCHEMA public TO public;",
+        "GRANT ALL ON SCHEMA public TO CURRENT_USER;",
+    ]
+    psql = ["psql", "-d", db_name, "-v", "ON_ERROR_STOP=1", "-c", "".join(commands)]
+    result = subprocess.run(
+        psql,
+        check=True,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    logger.info("Reset public schema before restore.")
+    if result.stderr:
+        logger.debug("Schema reset stderr: %s", _sanitize_restore_output(result.stderr))
+
+
+def _run_psql_restore(env: dict[str, str], staged_backup: Path, timeout: int) -> subprocess.CompletedProcess:
+    command = [
+        "psql",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-f",
+        str(staged_backup),
+    ]
+    return subprocess.run(
+        command,
+        check=True,
+        env=env,
+        timeout=timeout,
+        capture_output=True,
+        text=True,
+    )
+
+
+def restore_database_backup(app, filename: str, logger: logging.Logger) -> RestoreOutcome:
     if not is_valid_backup_filename(filename):
         raise ValueError("Invalid backup filename.")
 
@@ -596,23 +697,97 @@ def restore_database_backup(app, filename: str, logger: logging.Logger) -> str:
         raise RuntimeError("Database connection info not available for restore.")
 
     timeout = app.config.get("BACKUP_RESTORE_TIMEOUT", RESTORE_TIMEOUT_SECONDS)
+    start_time = datetime.utcnow()
+    stdout = ""
+    stderr = ""
 
-    if staged_backup.suffix == ".sql":
-        command = ["psql", "-f", str(staged_backup)]
-    else:
-        command = [
-            "pg_restore",
-            "--clean",
-            "--if-exists",
-            "--no-owner",
-            "--no-privileges",
-            "-d",
-            env.get("PGDATABASE", ""),
-            str(staged_backup),
-        ]
+    if staged_backup.suffix != ".sql":
+        raise ValueError("Only .sql backups are supported for restore.")
 
-    subprocess.run(command, check=True, env=env, timeout=timeout)
-    return f"Restore completed from {filename}."
+    try:
+        status_bus.log_event(
+            "info",
+            "Backup restore starting.",
+            context={"filename": filename, "stage": "init"},
+            source="backup_restore",
+        )
+        _terminate_app_connections(env, logger)
+
+        status_bus.log_event(
+            "info",
+            "Clearing existing database schema.",
+            context={"filename": filename, "stage": "schema_reset"},
+            source="backup_restore",
+        )
+        _reset_public_schema(env, logger)
+
+        status_bus.log_event(
+            "info",
+            "Applying backup via psql.",
+            context={"filename": filename, "stage": "restore"},
+            source="backup_restore",
+        )
+        result = _run_psql_restore(env, staged_backup, timeout)
+        stdout = result.stdout or ""
+        stderr = result.stderr or ""
+
+        status_bus.log_event(
+            "info",
+            "Backup restore completed.",
+            context={"filename": filename, "stage": "complete"},
+            source="backup_restore",
+        )
+    except subprocess.CalledProcessError as exc:
+        stdout = _sanitize_restore_output(getattr(exc, "stdout", "") or "")
+        stderr = _sanitize_restore_output(getattr(exc, "stderr", "") or str(exc))
+        duration_seconds = (datetime.utcnow() - start_time).total_seconds()
+        status_bus.log_event(
+            "error",
+            "Backup restore failed during command execution.",
+            context={
+                "filename": filename,
+                "stage": "restore",
+                "stderr": stderr,
+            },
+            source="backup_restore",
+        )
+        raise RestoreFailure(
+            filename=filename,
+            message="Restore failed during command execution.",
+            stdout=stdout,
+            stderr=stderr,
+            duration_seconds=duration_seconds,
+        ) from exc
+    except Exception as exc:
+        stderr = _sanitize_restore_output(str(exc))
+        duration_seconds = (datetime.utcnow() - start_time).total_seconds()
+        status_bus.log_event(
+            "error",
+            "Backup restore failed.",
+            context={
+                "filename": filename,
+                "stage": "restore",
+                "stderr": stderr,
+            },
+            source="backup_restore",
+        )
+        raise RestoreFailure(
+            filename=filename,
+            message="Restore failed.",
+            stdout="",
+            stderr=stderr,
+            duration_seconds=duration_seconds,
+        ) from exc
+
+    duration_seconds = (datetime.utcnow() - start_time).total_seconds()
+    message = f"Restore completed from {filename}."
+    return RestoreOutcome(
+        filename=filename,
+        message=message,
+        stdout=_sanitize_restore_output(stdout),
+        stderr=_sanitize_restore_output(stderr),
+        duration_seconds=duration_seconds,
+    )
 
 
 def _create_backup_run(status: str) -> BackupRun | None:
