@@ -492,6 +492,24 @@ class Location(db.Model):
     code = db.Column(db.String, unique=True, nullable=False)
     description = db.Column(db.String)
 
+    @property
+    def parsed_code(self):
+        from invapp.utils.location_parser import parse_location_code
+
+        return parse_location_code(self.code)
+
+    @property
+    def level(self):
+        return self.parsed_code.level
+
+    @property
+    def row(self):
+        return self.parsed_code.row
+
+    @property
+    def bay(self):
+        return self.parsed_code.bay
+
 
 class Batch(db.Model):
     __tablename__ = "batch"

@@ -504,6 +504,66 @@ def test_location_list_includes_pending_receipts(client, app):
     assert "Qty Pending" in page
 
 
+def test_locations_row_filter(client, app):
+    with app.app_context():
+        locations = [
+            Location(code="01-a-12", description="Row A"),
+            Location(code="2-B-03", description="Row B"),
+            Location(code="NOPE", description="Invalid"),
+        ]
+        db.session.add_all(locations)
+        db.session.commit()
+
+    response = client.get("/inventory/locations?row=a&size=50")
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "01-a-12" in page
+    assert "2-B-03" not in page
+    assert "NOPE" not in page
+
+
+def test_locations_description_filter_case_insensitive(client, app):
+    with app.app_context():
+        locations = [
+            Location(code="1-A-1", description="Rack Alpha"),
+            Location(code="1-A-2", description="rack beta"),
+            Location(code="1-A-3", description="Shelf Gamma"),
+        ]
+        db.session.add_all(locations)
+        db.session.commit()
+
+    response = client.get("/inventory/locations?q=RACK&size=50")
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "1-A-1" in page
+    assert "1-A-2" in page
+    assert "1-A-3" not in page
+
+
+def test_locations_sorting_by_row_and_description(client, app):
+    with app.app_context():
+        locations = [
+            Location(code="1-A-10", description="Alpha"),
+            Location(code="1-A-2", description="alpha"),
+            Location(code="2-A-1", description="Zulu"),
+            Location(code="1-B-1", description="Beta"),
+        ]
+        db.session.add_all(locations)
+        db.session.commit()
+
+    response = client.get("/inventory/locations?sort=row&dir=asc&size=50")
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    row_order = [page.index(code) for code in ["1-A-2", "1-A-10", "2-A-1", "1-B-1"]]
+    assert row_order == sorted(row_order)
+
+    response = client.get("/inventory/locations?sort=description&dir=asc&size=50")
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    description_order = [page.index(code) for code in ["1-A-2", "1-A-10", "1-B-1"]]
+    assert description_order == sorted(description_order)
+
+
 def test_pending_receipt_set_qty_updates_stock(client, app):
     pending = _create_pending_receipt(app, sku="PEND-SET", location_code="PEND-SET-LOC")
 
