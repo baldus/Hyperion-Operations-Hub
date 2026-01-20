@@ -1,147 +1,52 @@
 # Hyperion Operations Hub
 
-Hyperion Operations Hub is a Flask-based manufacturing console that unifies
-inventory, production, purchasing, workstation, and reporting workflows behind a
-single login. It targets lightweight industrial deployments (Intel NUC,
-Raspberry Pi, or similar edge nodes) while scaling to centralized PostgreSQL.
-
-The platform now embeds the KPI Board/"mdi-console" experience as the **MDI
-module** so teams can run their daily Management for Daily Improvement cadence
-without juggling a second service. All KPI dashboards, meeting views, CSV import
-utilities, and API endpoints live under Hyperion's authentication, database, and
-logging stack.
-
----
+Hyperion Operations Hub is a Flask-based operations console for manufacturing teams. It unifies inventory, production, purchasing, quality, workstation activity, and KPI reporting behind a single authenticated UI and shared PostgreSQL database. The app is designed for lightweight edge deployments (for example, an industrial mini PC) while still supporting a centralized database. The integrated MDI (Management for Daily Improvement) module provides dashboards and meeting tools within the same app and auth system. For the app entry point and blueprint registration, see [`invapp2/app.py`](invapp2/app.py) and [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py). For the MDI module, see [`invapp2/invapp/mdi`](invapp2/invapp/mdi).
 
 ## Table of Contents
-1. [Platform Overview](#platform-overview)
-2. [MDI (KPI Board) Module](#mdi-kpi-board-module)
-3. [How the Integration Works](#how-the-integration-works)
-4. [Repository Layout](#repository-layout)
-5. [Developer Setup](#developer-setup)
-6. [Database Initialization](#database-initialization)
-7. [Inventory Data Model](#inventory-data-model)
-8. [Item Locations](#item-locations)
-9. [CSV Import/Export](#csv-importexport)
-10. [Migrations](#migrations)
-11. [Tests](#tests)
-12. [Developer Notes](#developer-notes)
-13. [Troubleshooting](#troubleshooting)
-14. [Running the Application](#running-the-application)
-15. [Workstation Queues](#workstation-queues)
-16. [Accessing the MDI Dashboards](#accessing-the-mdi-dashboards)
-17. [MDI Meeting Dashboard Experience](#mdi-meeting-dashboard-experience)
-18. [Extending the MDI Module](#extending-the-mdi-module)
-19. [Operational Tips](#operational-tips)
-20. [Home Screen Cubes](#home-screen-cubes)
+1. [Project Overview](#project-overview)
+2. [Quick Start](#quick-start)
+3. [Architecture & How It’s Organized](#architecture--how-its-organized)
+4. [Configuration](#configuration)
+5. [Web / UI Layer (Templates, Frontend, Static)](#web--ui-layer-templates-frontend-static)
+6. [API / Routes](#api--routes)
+7. [Database](#database)
+8. [Permissions / Roles](#permissions--roles)
+9. [Background Tasks / Schedules](#background-tasks--schedules)
+10. [Logging, Errors, and Debugging](#logging-errors-and-debugging)
+11. [Testing](#testing)
+12. [Deployment Notes](#deployment-notes)
+13. [Contributing / Development Conventions](#contributing--development-conventions)
+14. [How to Make Common Changes](#how-to-make-common-changes)
 
 ---
 
-## Platform Overview
+## Project Overview
 
-| Area | Highlights |
-|------|------------|
-| Inventory & Orders | Track items, batches, movements, reservations, and order BOMs with CSV import/export and audit history. |
-| Production | Capture daily output, workstation queues, and printer-ready labels with Zebra integrations. |
-| Purchasing & Quality | Manage purchase requests, RMAs, and quality notices including attachment storage. |
-| Workstations | Serve instructions, schedules, and barcode workflows tailored for each station. |
-| Reporting | Export bundled data packs and view live dashboards surfaced on the home screen. |
-| Security | Role-based permissions, emergency offline access, and admin auditing baked into the app factory. |
+**What it is:** Hyperion Operations Hub is a Flask web application that runs a manufacturing operations console. It includes inventory control, production tracking, purchasing workflows, quality/RMA handling, workstation tools, administrative tools, and an integrated KPI/MDI dashboard experience in the same application. The main Flask app is created in `create_app()` and registers blueprints for each feature area. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
 
----
+**Who it’s for:** Operations, production, purchasing, and quality teams who need a single source of truth for day-to-day manufacturing workflows with built-in dashboards and audit logging.
 
-## MDI (KPI Board) Module
-
-The `invapp.mdi` package is the transplanted **kpi-board** (formerly
-`mdi_console`) application. It adds:
-
-* `/mdi/meeting` – Kanban-style meeting deck with category cards and CSV tools.
-* `/mdi/report` – CRUD interface for MDI entries, attendance, shortages, etc.
-* `/mdi/<category>` – Category dashboards for Safety, Quality, Delivery, People,
-  and Materials with charts powered by seeded demo data.
-* `/api/mdi_entries` – JSON API consumed by the dashboard JavaScript for live
-  filtering and automation hooks.
-
-All templates extend Hyperion's `base.html`, static assets live under
-`invapp/static/mdi`, and SQLAlchemy models reuse the shared
-`invapp.extensions.db` instance so KPI metrics are persisted in the same
-PostgreSQL database as the rest of the platform.
+**Key capabilities (backed by code):**
+- **Inventory and stock movement tracking**: items, batches (soft-delete), locations, and movement records live in SQLAlchemy models and are served under the `/inventory` blueprint. See [`invapp2/invapp/models.py`](invapp2/invapp/models.py) and [`invapp2/invapp/routes/inventory.py`](invapp2/invapp/routes/inventory.py).
+- **Orders and production records**: order, BOM, routing, and production models are defined in the core models file, and production history routes are registered in the production blueprint. See [`invapp2/invapp/models.py`](invapp2/invapp/models.py) and [`invapp2/invapp/routes/production.py`](invapp2/invapp/routes/production.py).
+- **Purchasing and quality workflows**: purchase requests, quality/RMA models, and route handlers are in the core models and the purchasing/quality blueprints. See [`invapp2/invapp/models.py`](invapp2/invapp/models.py), [`invapp2/invapp/routes/purchasing.py`](invapp2/invapp/routes/purchasing.py), and [`invapp2/invapp/routes/quality.py`](invapp2/invapp/routes/quality.py).
+- **Workstation tools**: the `work` blueprint serves workstation-specific views and tools. See [`invapp2/invapp/routes/work.py`](invapp2/invapp/routes/work.py).
+- **MDI (KPI Board) module**: dashboards, meeting deck, reporting UI, and API endpoints for KPI entries live in the MDI blueprint and its models. See [`invapp2/invapp/mdi`](invapp2/invapp/mdi) and [`invapp2/invapp/mdi/models.py`](invapp2/invapp/mdi/models.py).
+- **Automated backups with scheduling**: APScheduler-driven backups run in the Flask process, with storage and reporting in the backup service. See [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
+- **Operations monitor (terminal UI)**: a separate monitor process surfaces health, logs, and backup status, launched by the startup scripts. See [`ops_monitor`](ops_monitor) and [`start_operations_console.sh`](start_operations_console.sh).
 
 ---
 
-## How the Integration Works
-
-1. **Blueprint** – `invapp.mdi.mdi_bp` registers routes, templates, and static
-   assets with `template_folder="../templates/mdi"` and
-   `static_folder="../static/mdi"` to reuse Hyperion's directory tree.
-2. **Routes** – The original `mdi_console` routes were converted into a single
-   blueprint with modules for `meeting`, `dashboard`, `reports`, and `api`.
-   Every route imports from `invapp.mdi` and uses `url_for('mdi.*')`, removing
-   the duplicated Flask app from the donor project.
-3. **Models** – `invapp.mdi.models` now imports `db` from `invapp.extensions`
-   instead of instantiating its own `SQLAlchemy()`. The `ensure_schema()` helper
-   runs during app startup alongside the legacy schema migrations to add the MDI
-   tables/columns when missing, and `seed_data()` loads demo content.
-4. **Templates & Static Files** – All donor HTML/JS/CSS moved into
-   `invapp/templates/mdi` and `invapp/static/mdi`. Template references were
-   updated to extend Hyperion's base layout and use the `mdi` blueprint’s
-   endpoints.
-5. **App Factory** – `invapp/__init__.py` imports `mdi_bp`, registers the
-   blueprint, and invokes `mdi_models.ensure_schema()` plus
-   `mdi_models.seed_data()` after the legacy schema preparation so new installs
-   automatically expose the KPI features.
-
----
-
-## Repository Layout
-
-```
-invapp2/
-├── app.py
-├── config.py
-├── requirements.txt
-├── start_inventory.sh
-├── invapp/
-│   ├── __init__.py          # App factory + blueprint registration (incl. MDI)
-│   ├── extensions.py        # Shared db/login manager
-│   ├── models.py            # Core inventory/production/auth models
-│   ├── mdi/
-│   │   ├── __init__.py      # mdi_bp blueprint definition
-│   │   ├── models.py        # MDIEntry & CategoryMetric models + seed helpers
-│   │   └── routes/
-│   │       ├── api.py       # /api/mdi_entries CRUD
-│   │       ├── dashboard.py # Safety/Quality/Delivery/People/Materials pages
-│   │       ├── meeting.py   # /mdi/meeting deck
-│   │       └── reports.py   # /mdi/report CRUD & CSV import/export
-│   ├── routes/              # Inventory, orders, purchasing, etc.
-│   ├── templates/
-│   │   ├── base.html
-│   │   └── mdi/
-│   │       ├── base.html
-│   │       ├── meeting_view.html
-│   │       ├── report_entry.html
-│   │       ├── components/*.html
-│   │       └── category templates (safety, quality, delivery, people, materials)
-│   └── static/
-│       ├── js/, css/, uploads…
-│       └── mdi/
-│           ├── css/styles.css
-│           └── js/{main.js, charts.js}
-└── start_operations_console.sh
-```
-
----
-
-## Developer Setup
+## Quick Start
 
 ### Prerequisites
-* Python 3.10+
-* PostgreSQL 13+ with `libpq` headers (`libpq-dev`) and client libs (`libpq5`)
-* `git`, `pip`, `setuptools`, `wheel`
+- **Python 3.10+** (required by the code and dependencies). See [`invapp2/requirements.txt`](invapp2/requirements.txt).
+- **PostgreSQL 13+** reachable by the app (the default DB URL expects Postgres). See [`invapp2/config.py`](invapp2/config.py).
+- **Gunicorn** (installed via requirements; used by the production scripts). See [`invapp2/requirements.txt`](invapp2/requirements.txt).
 
-### Clone & Install
+### Clone & install
 ```bash
-git clone https://github.com/YOUR-ORG/Hyperion-Operations-Hub.git
+git clone <YOUR_REPO_URL>
 cd Hyperion-Operations-Hub/invapp2
 python3 -m venv .venv
 source .venv/bin/activate
@@ -149,398 +54,388 @@ pip install --upgrade pip setuptools wheel
 pip install -r requirements.txt
 ```
 
-### Configure Environment
-Set the database URL, secret key, and bootstrap credentials before launching:
+### Configure environment
+Set required environment variables before running:
 ```bash
 export DB_URL="postgresql+psycopg2://USER:PASSWORD@localhost/invdb"
 export SECRET_KEY="change_me"
 export ADMIN_USER="superuser"
 export ADMIN_PASSWORD="change_me"
 ```
-Optional knobs (see `invapp2/config.py`) include printer hosts, attachment
-extension allow-lists, and admin session timeouts.
+Defaults and additional settings are in [`invapp2/config.py`](invapp2/config.py).
 
-### Backup Configuration
-Automated backups write into a resolved backup directory. The application will
-attempt the following, in order:
-
-1. `BACKUP_DIR` environment variable
-2. `BACKUP_DIR` app config value
-3. `<instance_path>/backups` (default)
-4. `./backups` (fallback)
-
-If a configured path is not writable, the app logs a warning and falls back to
-the next option without blocking startup.
-
-Database restores are restricted to the configured superuser account and
-require explicit UI confirmations before execution.
-
----
-
-## Database Initialization
-
-Running `create_app()` automatically:
-1. Pings the configured PostgreSQL instance.
-2. Calls `db.create_all()` for the core models and the MDI models.
-3. Applies legacy schema migrations (`_ensure_inventory_schema`, etc.).
-4. Executes `mdi_models.ensure_schema()` and `mdi_models.seed_data()` to provision
-   the KPI tables plus demo content.
-5. Seeds the admin account and role definitions.
-
-For a manual bootstrap:
+### Run locally (developer mode)
+From `invapp2/`:
 ```bash
-cd Hyperion-Operations-Hub/invapp2
-source .venv/bin/activate
-flask --app app shell <<'PY'
-from invapp import create_app
-from invapp.extensions import db
-app = create_app()
-with app.app_context():
-    db.create_all()
-PY
+python app.py
 ```
-The first launch performs the same migration + seeding steps for legacy schema
-alignment. Use Alembic (see [Migrations](#migrations)) for tracked schema
-changes going forward.
+This uses Flask’s built-in development server and also launches the operations monitor. See [`invapp2/app.py`](invapp2/app.py).
 
----
-
-## Inventory Data Model
-
-Core inventory data lives in `invapp/models.py` and uses the following tables
-and relationships:
-
-* **Item** (`Item`, table `item`) – the SKU/master record for inventory items.
-* **Location** (`Location`, table `location`) – storage or usage locations.
-* **Movement** (`Movement`, table `movement`) – stock ledger entries; on-hand
-  quantities are derived by summing `Movement.quantity` per `item_id` and
-  `location_id`.
-* **Batch** (`Batch`, table `batch`) – lot/batch records linked to items and
-  (optionally) movements.
-
-### Removing stock from a location
-
-Removing inventory from a location records a stock movement entry (type
-`REMOVE_FROM_LOCATION`) instead of deleting items, batches, or locations. The
-movement uses a negative quantity to zero or reduce the on-hand balance for the
-target item/lot/location combination. Reasons for removal are configurable via
-the `INVENTORY_REMOVE_REASONS` app setting (comma-separated list). See
-`invapp/routes/inventory.py` for the handling logic and inventory UI routes.
-
-### Pending quantity receipts
-
-Receipts recorded without a quantity are stored as `Movement` rows with
-`movement_type="RECEIPT"`, `quantity=0`, and a reference containing the marker
-`quantity pending`. Location views include these rows (flagged with a “Qty
-Pending” badge), while aggregate sums continue to ignore them because the
-quantity is zero. Setting a quantity resolves the pending marker and logs a new
-receipt movement for the counted quantity, so totals remain accurate. Batch
-counts include both pending and counted batches, but on-hand totals ignore
-pending quantities.
-
-Relationship map (simplified):
-
-```
-Item (item.id)
-  ├─ default_location_id -> Location (location.id)
-  ├─ secondary_location_id -> Location (location.id)
-  ├─ point_of_use_location_id -> Location (location.id)
-  └─ Movement (movement.item_id, movement.location_id)
-         └─ Batch (batch.id) optional via movement.batch_id
-```
-
----
-
-## Item Locations
-
-Item-level location fields define preferred storage and usage points:
-
-* **Primary Location** – `Item.default_location_id` (existing field, treated as
-  the primary/default storage location).
-* **Secondary Location** – `Item.secondary_location_id` (optional overflow or
-  alternate storage).
-* **Point-of-Use (POU) Location** – `Item.point_of_use_location_id` (optional,
-  manually managed, never auto-assigned).
-
-Validation rules enforced in the Item create/edit UI and CSV imports:
-
-* Primary and Secondary must be different.
-* Primary and POU must be different.
-* Secondary and POU must be different.
-
-### Smart Location Assignment
-
-When receiving or moving inventory into a selected location, the application
-applies these rules (implemented in `invapp/services/item_locations.py`):
-
-1. **No primary set** → assign the selected location as the primary.
-2. **Primary set**:
-   * If selected location == primary → do nothing.
-   * If selected location != primary → check whether the primary location has
-     on-hand stock for the item (sum of `Movement.quantity` at the primary).
-   * If primary has stock **and** Secondary is empty → set Secondary to the
-     selected location.
-   * If Secondary is already set → do nothing (no overwrites).
-3. **POU is never auto-assigned.** It can only be set in the Item UI or via CSV
-   import fields.
-
-Examples:
-
-* **Example A:** Item has no primary. Receiving into `LOC-A` → primary becomes
-  `LOC-A`.
-* **Example B:** Item primary is `LOC-A` and has stock. Receiving into `LOC-B`
-  with no secondary set → secondary becomes `LOC-B`.
-* **Example C:** Item secondary already set → receiving into `LOC-C` does not
-  overwrite the existing secondary.
-* **Example D:** POU is never auto-set, even if primary/secondary update.
-
----
-
-## CSV Import/Export
-
-Item CSV import/export is handled in `invapp/routes/inventory.py` using the
-schemas in `invapp/utils/csv_schema.py`.
-
-### Item CSV headers (export + import mapping)
-
-* `item_id`, `sku`, `name`, `type`, `unit`, `description`, `min_stock`,
-  `notes`, `list_price`, `last_unit_cost`, `item_class`
-* `default_location_id`, `default_location_code`
-* `secondary_location_id`, `secondary_location_code`
-* `point_of_use_location_id`, `point_of_use_location_code`
-
-Import behavior:
-
-* Location fields match by **ID first**, then by **location code** if the ID
-  is blank or invalid.
-* Imports **do not** trigger smart location assignment; they set exactly what
-  the CSV provides.
-* Duplicate location selections (primary/secondary/POU) are rejected and the
-  affected rows are skipped with a warning.
-
-Stock CSV import/export remains available via `/inventory/stock/import` and
-`/inventory/stock/export`, using `location_id`/`location_code` plus batch/lot
-columns for on-hand adjustments.
-
----
-
-## Migrations
-
-Alembic migrations live in `invapp2/migrations`. To apply migrations:
-
+### Run locally (production-like, Gunicorn)
+From the repository root:
 ```bash
-cd Hyperion-Operations-Hub/invapp2
-export DB_URL="postgresql+psycopg2://USER:PASSWORD@localhost/invdb"
-alembic upgrade head
-```
-
-To create a new revision:
-
-```bash
-alembic revision -m "describe change"
-```
-
----
-
-## Tests
-
-Run the full test suite from `invapp2`:
-
-```bash
-pytest
-```
-
-Smart location assignment tests live in `tests/test_item_locations.py`.
-
----
-
-## Developer Notes
-
-### Schema Discovery Notes
-
-* **Item model:** `invapp/models.py` (`Item`, table `item`).
-* **Location model:** `invapp/models.py` (`Location`, table `location`).
-* **On-hand inventory ledger:** `invapp/models.py` (`Movement`, table
-  `movement`) with sums of `Movement.quantity` per location.
-* **Lot/batch records:** `invapp/models.py` (`Batch`, table `batch`).
-* **Receiving routes:** `invapp/routes/inventory.py` (`/inventory/receiving`)
-  and `invapp/routes/receiving.py` (`/receiving`).
-* **Stock transfer routes/services:** `invapp/routes/inventory.py`
-  (`/inventory/stock/<item_id>/transfer`, `/inventory/move`) and
-  `invapp/services/stock_transfer.py`.
-* **CSV import/export paths:** `invapp/routes/inventory.py`
-  (`/inventory/items/import`, `/inventory/items/export`, `/inventory/stock/import`,
-  `/inventory/stock/export`) with schemas in `invapp/utils/csv_schema.py`.
-* **Stock Overview primary location:** the Stock Overview table reads the
-  primary location from `Item.default_location` (joined in
-  `_stock_overview_query`), and exports it via the stock CSV column
-  `primary_location_code`.
-
----
-
-## Troubleshooting
-
-* **Missing column or relation errors after deploy**
-  * Run `alembic upgrade head` and verify `DB_URL` points at the correct
-    database.
-* **Foreign key violations when importing items**
-  * Ensure the referenced `location.id` or `location.code` exists before import.
-* **Multiple Alembic heads**
-  * Run `alembic heads` and merge the revisions or pick the correct branch.
-* **Verify item location columns**
-  * In `psql`, run: `\\d item` and confirm `secondary_location_id` and
-    `point_of_use_location_id` exist.
-* **Postgres GROUP BY errors on Stock Overview**
-  * The Stock Overview aggregates movements in a subquery to avoid strict
-    `GROUP BY` issues when joining optional location metadata; ensure local
-    changes keep that aggregation pattern intact.
-
----
-
-## Running the Application
-
-### Development Server
-```bash
-cd Hyperion-Operations-Hub/invapp2
-source .venv/bin/activate
-flask --app app run --debug
-```
-
-### Production-style (gunicorn)
-```bash
-cd Hyperion-Operations-Hub
 ./start_operations_console.sh
-# or
-cd invapp2
-source .venv/bin/activate
-gunicorn --bind 0.0.0.0:8000 app:app
 ```
-`start_operations_console.sh` provisions the virtualenv, installs requirements,
-checks database connectivity, and launches gunicorn pointed at `app:app`.
+This script creates a venv, installs dependencies, runs a health check, starts the ops monitor, and launches Gunicorn. See [`start_operations_console.sh`](start_operations_console.sh).
 
-When PostgreSQL is unavailable the UI surfaces recovery guidance (service status
-checks, restarting the DB, confirming `DB_URL`) while still allowing emergency
-admin access so you can correct the outage.
+### Access the UI
+- **UI:** `http://localhost:5000/` (developer mode) or `http://localhost:8000/` (Gunicorn scripts default). Ports are controlled by `PORT`. See [`invapp2/app.py`](invapp2/app.py) and [`start_operations_console.sh`](start_operations_console.sh).
+- **Login:** `http://localhost:5000/auth/login` (or `:8000`), using the `ADMIN_USER` / `ADMIN_PASSWORD` you configured. See [`invapp2/invapp/routes/auth.py`](invapp2/invapp/routes/auth.py) and [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
 
----
-
-## Workstation Queues
-
-Framing operators can manage panel cutting directly from `/work/stations/framing`.
-Admins see a **Panel Length Offset** input to control how much is subtracted from
-each gate's total height when calculating the **Panel Length** shown in the
-queue. The page also surfaces **Panels Needed** and **Panel Material** alongside
-order and item details (falling back to the gate item number when SKU data is
-missing). See [docs/workstations.md](docs/workstations.md) for a full breakdown
-of the columns and offset workflow.
+### Verify it works (checklist)
+- [ ] The app boots without a database error banner on the home page. See startup DB checks in [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
+- [ ] You can log in with your admin credentials. See [`invapp2/invapp/routes/auth.py`](invapp2/invapp/routes/auth.py).
+- [ ] `/mdi/meeting` loads MDI data (it will be seeded on first boot). See [`invapp2/invapp/mdi/routes/meeting.py`](invapp2/invapp/mdi/routes/meeting.py) and seed logic in [`invapp2/invapp/mdi/models.py`](invapp2/invapp/mdi/models.py).
 
 ---
 
-## Accessing the MDI Dashboards
+## Architecture & How It’s Organized
 
-* **MDI Meeting View** – `GET /mdi/meeting`
-  * Defaults to the **Active (not Closed/Received)** filter so closed or received
-    work is hidden on load.
-  * Filter cards by category, status, or date.
-  * Trigger CSV import/export and quick refresh actions.
-* **MDI Report Entry** – `GET /mdi/report`
-  * Provides a multi-category form with context-aware fields.
-  * Submit via `POST /mdi/report/add` or update via
-    `/mdi/report/update/<id>`.
-* **Category Dashboards** – `GET /mdi/safety`, `/mdi/quality`, `/mdi/delivery`,
-  `/mdi/people`, `/mdi/materials`
-  * Show chart blocks, attendance summaries, shortages, and quick links.
-* **JSON API** – `GET/POST/PUT/DELETE /api/mdi_entries`
-  * Consumed by `invapp/static/mdi/js/main.js`; use the same endpoints for
-    integrations or automations.
+### High-level architecture (text diagram)
+```
+[Browser]
+   │
+   ▼
+[Flask App (invapp2/app.py -> invapp.create_app)]
+   │   ├─ Blueprints: inventory, orders, purchasing, quality, work, production, reports, admin, users
+   │   ├─ MDI Blueprint: /mdi/* dashboards & APIs
+   │   ├─ Services: backup scheduler, status bus, stock transfer
+   ▼
+[PostgreSQL DB]
+   │
+   └─ Background: APScheduler for backups + ops_monitor (separate process)
+```
+Blueprint registration and startup flow are in [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py). The ops monitor is a separate process in [`ops_monitor`](ops_monitor).
 
-Read `docs/mdi-dashboard.md` for a facilitator-focused walkthrough of the
-meeting experience. All routes inherit Hyperion's authentication/authorization
-middleware, so access is controlled via the same role definitions as the rest of
-the platform.
+### Repository structure
+```
+Hyperion-Operations-Hub/
+├── invapp2/                  # Main Flask application package
+│   ├── app.py                 # Entry point for dev server
+│   ├── config.py              # Runtime configuration defaults
+│   ├── requirements.txt       # Python dependencies
+│   ├── migrations/            # Alembic migrations
+│   ├── scripts/               # Helper CLI wrappers
+│   ├── tests/                 # Pytest suite
+│   └── invapp/                # Application package (blueprints, models, services)
+├── ops_monitor/               # Terminal-based operations monitor
+├── docs/                      # Additional documentation and guides
+├── support/                   # Diagnostics and log support scripts
+├── start_operations_console.sh# Production-like launcher (Gunicorn + monitor)
+└── README.md
+```
+Important directories and what belongs there:
+- **`invapp2/invapp/`**: Flask app code (blueprints, models, services, templates, static). This is where most feature work happens. See [`invapp2/invapp`](invapp2/invapp).
+- **`invapp2/migrations/`**: Alembic migrations for schema changes. See [`invapp2/migrations`](invapp2/migrations).
+- **`invapp2/tests/`**: pytest tests. See [`invapp2/tests`](invapp2/tests).
+- **`ops_monitor/`**: the terminal UI monitor launched by startup scripts. See [`ops_monitor`](ops_monitor).
+- **`docs/`**: deployment and hardware guidance. See [`docs`](docs).
 
----
-
-## MDI Meeting Dashboard Experience
-
-The meeting dashboard is a Kanban-style deck optimized for daily production
-standups:
-
-* **Default view** – When the page loads it automatically applies the "Active
-  (not Closed/Received)" filter. The status pill in the filter bar is set to the
-  `not_closed_or_received` sentinel, and the JavaScript refresh loop persists
-  that filter in the URL so live updates stay aligned with the server render.
-* **Filters** – Users can switch category, status, and date via the form above
-  the grid. Hitting "Apply Filters" updates the query string so the auto-refresh
-  API calls stay scoped.
-* **Auto-refreshing board** – The deck polls `/api/mdi_entries` every 60 seconds
-  with the active filters. Each category lane summarizes how many items and
-  metrics are present and renders cards for the filtered entries.
-* **Fast actions** – Use **Add Item** to open the report form, **Export CSV** or
-  **Upload CSV** for bulk edits, and the per-card **Mark Complete** button to set
-  an item to `Closed`. Complete actions trigger a refresh so the card leaves the
-  board when the active filter is in use.
-* **Category context** – Each card surfaces the most relevant details for its
-  category (Delivery due dates, People absences/open roles, Materials vendor &
-  PO info, etc.) plus owner, priority, and date logged.
-
-This flow keeps daily huddles focused on work that still needs attention while
-retaining easy access to historical entries through the status filter.
+### Execution flow (startup)
+1. **Entry point**: `invapp2/app.py` creates the Flask app and optionally launches the ops monitor when run directly. See [`invapp2/app.py`](invapp2/app.py).
+2. **App factory**: `create_app()` loads configuration, sets up logging, initializes Flask-Login and SQLAlchemy, and ensures schema and seed data. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
+3. **Blueprint registration**: All feature routes are registered, including the MDI blueprint. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py) and [`invapp2/invapp/mdi/__init__.py`](invapp2/invapp/mdi/__init__.py).
+4. **Backup scheduler**: APScheduler jobs are started in non-test environments. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py) and [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
 
 ---
 
-## Extending the MDI Module
+## Configuration
 
-1. **Add metrics or categories** – Update `CATEGORY_DISPLAY`,
-   `CATEGORY_SEQUENCE`, and `CATEGORY_METRIC_CONFIG` in
-   `invapp/mdi/routes/dashboard.py`. New cards automatically appear in the
-   meeting view once `CATEGORY_DISPLAY` includes them.
-2. **Add persistence fields** – Extend `MDIEntry` or `CategoryMetric` in
-   `invapp/mdi/models.py`. The `ensure_schema()` helper will append missing
-   columns to existing databases when the app restarts.
-3. **Expose new endpoints** – Define additional routes in
-   `invapp/mdi/routes/*.py` and decorate them with `@mdi_bp.route(...)`. The
-   template/static folders are already scoped to `invapp/templates/mdi` and
-   `invapp/static/mdi` so Jinja includes remain local to the module.
-4. **Seed additional demo data** – Modify `seed_data()` to pre-populate whatever
-   KPIs help showcase your deployment; it only inserts data when the tables are
-   empty.
+### Environment variables (runtime)
+These are pulled directly from environment variables or startup scripts:
 
----
+| Variable | Purpose | Default / Example | Source |
+| --- | --- | --- | --- |
+| `DB_URL` | SQLAlchemy database URL (PostgreSQL). | `postgresql+psycopg2://inv:change_me@localhost/invdb` | [`invapp2/config.py`](invapp2/config.py) |
+| `SECRET_KEY` | Flask session secret. | `supersecret` | [`invapp2/config.py`](invapp2/config.py) |
+| `ADMIN_USER` | Bootstrapped admin username. | `superuser` | [`invapp2/config.py`](invapp2/config.py) |
+| `ADMIN_PASSWORD` | Bootstrapped admin password. | `joshbaldus` (change it!) | [`invapp2/config.py`](invapp2/config.py) |
+| `ADMIN_SESSION_TIMEOUT` | Session timeout in seconds. | `300` | [`invapp2/config.py`](invapp2/config.py) |
+| `BACKUP_DIR` | Preferred backup directory used by the backup service. | (none) | [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py) |
+| `BACKUP_DIR_AUTO` | Directory for auto-imported backups. | (none) | [`invapp2/config.py`](invapp2/config.py) |
+| `MDI_DEFAULT_RECIPIENTS` | Default recipient list for MDI emails. | empty | [`invapp2/config.py`](invapp2/config.py) |
+| `MDI_DEFAULT_SENDER` | Default sender (empty so mail client can choose). | empty | [`invapp2/config.py`](invapp2/config.py) |
+| `FRAMING_PANEL_OFFSET` | Offset for framing panel UI. | `0` | [`invapp2/config.py`](invapp2/config.py) |
+| `PURCHASING_ATTACHMENT_UPLOAD_FOLDER` | Override attachment upload directory. | `<repo>/invapp2/invapp/static/purchase_request_attachments` | [`invapp2/config.py`](invapp2/config.py) |
+| `PURCHASING_ATTACHMENT_MAX_SIZE_MB` | Max attachment size (MB). | `25` | [`invapp2/config.py`](invapp2/config.py) |
+| `INVENTORY_REMOVE_REASONS` | CSV list of allowed inventory removal reasons. | `Damage,Expired,...` | [`invapp2/config.py`](invapp2/config.py) |
+| `ZEBRA_PRINTER_HOST` | Zebra printer host. | `localhost` | [`invapp2/config.py`](invapp2/config.py) |
+| `ZEBRA_PRINTER_PORT` | Zebra printer port. | `9100` | [`invapp2/config.py`](invapp2/config.py) |
+| `HOST` | Gunicorn bind host. | `0.0.0.0` | [`start_operations_console.sh`](start_operations_console.sh) |
+| `PORT` | App port (dev server + Gunicorn + monitor). | `5000` (dev) / `8000` (scripts) | [`invapp2/app.py`](invapp2/app.py), [`start_operations_console.sh`](start_operations_console.sh) |
+| `GUNICORN_WORKERS` | Gunicorn worker count. | `2` | [`start_operations_console.sh`](start_operations_console.sh) |
+| `GUNICORN_TIMEOUT` | Gunicorn worker timeout seconds. | `600` | [`start_operations_console.sh`](start_operations_console.sh) |
+| `ENABLE_OPS_MONITOR` | Enable the terminal ops monitor. | `1` | [`start_operations_console.sh`](start_operations_console.sh), [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
+| `OPS_MONITOR_DB_URL` | DB URL to show in ops monitor (masked). | falls back to `DB_URL` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
+| `OPS_MONITOR_LAUNCH_MODE` | Monitor launch mode (`window`, `background`, `headless`). | `window` | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
+| `OPS_MONITOR_TERMINAL` | Force a specific terminal app. | (none) | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
+| `PYTHON` | Python executable used for the ops monitor. | current interpreter | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
+| `APP_DIR`, `VENV_DIR`, `REQUIREMENTS_FILE`, `APP_MODULE`, `MONITOR_LOG_FILE` | Startup script overrides for the launcher. | (script defaults) | [`start_operations_console.sh`](start_operations_console.sh) |
+| `HEALTHCHECK_FATAL`, `HEALTHCHECK_DRY_RUN` | Startup healthcheck behavior. | `0` | [`start_operations_console.sh`](start_operations_console.sh), [`invapp2/invapp/healthcheck.py`](invapp2/invapp/healthcheck.py) |
 
-## Operational Tips
+### Config files and loading
+- **`invapp2/config.py`**: `Config` is loaded in `create_app()` via `app.config.from_object(Config)`. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py) and [`invapp2/config.py`](invapp2/config.py).
+- **Alembic config**: `alembic.ini` points to the migrations folder and defaults to SQLite unless overridden by `DB_URL`. See [`invapp2/alembic.ini`](invapp2/alembic.ini) and [`invapp2/migrations/env.py`](invapp2/migrations/env.py).
 
-* **Backups** – Schedule `pg_dump` jobs for the PostgreSQL database; both core
-  inventory data and MDI KPIs live inside the same schema.
-* **Static uploads** – Grant write access to `invapp/static` (including
-  `invapp/static/mdi`) for the service account if running on hardened systems.
-* **Diagnostics** – Use the admin "Emergency Console" (under Settings) if the
-  database is offline; the UI exposes next-step commands to restart services.
-* **Testing** – `pytest` tests live under `invapp2/tests`. Activate the virtual
-  environment and run `pytest` before opening pull requests.
-
----
-
-## Home Screen Cubes
-
-Home tiles are registered in `invapp2/invapp/home_cubes.py`. To add a new cube:
-
-1. Add a new `CubeDefinition` entry to `HOME_CUBES` with a stable `key`, label,
-   description, and `endpoint` route.
-2. Decide whether the cube should be enabled by default. Add its key to
-   `DEFAULT_HOME_CUBE_KEYS` if it should appear immediately for users without a
-   saved layout.
-3. Update the `home` route in `invapp2/invapp/__init__.py` to compute any data
-   needed by the cube.
-4. Add the cube markup to `invapp2/invapp/templates/home.html` in the cube loop
-   so it can render when visible.
-
-Once registered, the cube automatically appears in the “Available cubes” list
-for users who have access to the associated page.
+### Dev vs prod differences
+- **Dev**: `python invapp2/app.py` runs the Flask dev server on port 5000 and launches the ops monitor in a separate process. See [`invapp2/app.py`](invapp2/app.py).
+- **Prod-like**: `./start_operations_console.sh` runs a health check and launches Gunicorn on port 8000 by default. See [`start_operations_console.sh`](start_operations_console.sh).
 
 ---
 
-## License
+## Web / UI Layer (Templates, Frontend, Static)
 
-Hyperion Operations Hub is released under the MIT License. See
-[LICENSE](LICENSE) for details.
+### Templates
+- Templates live in `invapp2/invapp/templates/` and are organized by feature: `inventory/`, `orders/`, `purchasing/`, `quality/`, `production/`, `work/`, `mdi/`, etc. See [`invapp2/invapp/templates`](invapp2/invapp/templates).
+- The base layout is `invapp2/invapp/templates/base.html`, which other templates extend. See [`invapp2/invapp/templates/base.html`](invapp2/invapp/templates/base.html).
+- MDI templates are under `invapp2/invapp/templates/mdi/` and are registered via the MDI blueprint. See [`invapp2/invapp/mdi/__init__.py`](invapp2/invapp/mdi/__init__.py) and [`invapp2/invapp/templates/mdi`](invapp2/invapp/templates/mdi).
+
+### Static assets
+- Static files live in `invapp2/invapp/static/` (global) and `invapp2/invapp/static/mdi/` (MDI-specific CSS/JS). See [`invapp2/invapp/static`](invapp2/invapp/static) and [`invapp2/invapp/static/mdi`](invapp2/invapp/static/mdi).
+- Uploaded files (work instructions, item attachments, purchasing attachments, quality attachments) are configured to be stored under `invapp2/invapp/static/` subfolders by default. See [`invapp2/config.py`](invapp2/config.py).
+
+### How to add/edit a page safely
+1. **Add a route** in the relevant blueprint (e.g., `invapp2/invapp/routes/inventory.py` for inventory pages). See blueprint usage in [`invapp2/invapp/routes/inventory.py`](invapp2/invapp/routes/inventory.py).
+2. **Create a template** under the matching folder in `invapp2/invapp/templates/` and extend `base.html`. See [`invapp2/invapp/templates/base.html`](invapp2/invapp/templates/base.html).
+3. **Protect the page** with permission checks using `blueprint_page_guard` or `ensure_page_access`. See [`invapp2/invapp/auth.py`](invapp2/invapp/auth.py) and [`invapp2/invapp/permissions.py`](invapp2/invapp/permissions.py).
+
+### Forms and validation
+This app uses standard Flask form handling with `request.form` and manual validation in route handlers (no WTForms). For examples, see purchasing and MDI report handlers in [`invapp2/invapp/routes/purchasing.py`](invapp2/invapp/routes/purchasing.py) and [`invapp2/invapp/mdi/routes/reports.py`](invapp2/invapp/mdi/routes/reports.py).
+
+---
+
+## API / Routes
+
+### Route organization
+- **Blueprints** are organized per feature and registered in `create_app()`. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
+- Example blueprint files:
+  - Inventory: [`invapp2/invapp/routes/inventory.py`](invapp2/invapp/routes/inventory.py)
+  - Orders: [`invapp2/invapp/routes/orders.py`](invapp2/invapp/routes/orders.py)
+  - Purchasing: [`invapp2/invapp/routes/purchasing.py`](invapp2/invapp/routes/purchasing.py)
+  - Quality: [`invapp2/invapp/routes/quality.py`](invapp2/invapp/routes/quality.py)
+  - Workstations: [`invapp2/invapp/routes/work.py`](invapp2/invapp/routes/work.py)
+  - Production: [`invapp2/invapp/routes/production.py`](invapp2/invapp/routes/production.py)
+  - Reports: [`invapp2/invapp/routes/reports.py`](invapp2/invapp/routes/reports.py)
+  - Admin: [`invapp2/invapp/routes/admin.py`](invapp2/invapp/routes/admin.py)
+  - Users: [`invapp2/invapp/routes/users.py`](invapp2/invapp/routes/users.py)
+  - MDI: [`invapp2/invapp/mdi/routes`](invapp2/invapp/mdi/routes)
+
+### Key endpoints (examples)
+> **Note:** Most routes are HTML views; API endpoints are JSON and typically live under `/api` or `/mdi/api`.
+
+- **Login page**: `GET /auth/login` → renders login template. See [`invapp2/invapp/routes/auth.py`](invapp2/invapp/routes/auth.py).
+- **Home dashboard**: `GET /` → renders home dashboard with summaries. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
+- **Inventory dashboard**: `GET /inventory/` → inventory home page. See [`invapp2/invapp/routes/inventory.py`](invapp2/invapp/routes/inventory.py).
+- **MDI meeting deck**: `GET /mdi/meeting` → meeting dashboard. See [`invapp2/invapp/mdi/routes/meeting.py`](invapp2/invapp/mdi/routes/meeting.py).
+
+#### JSON APIs
+- **Item search**: `GET /api/items/search?q=<query>` returns a list of matching items (requires purchasing access). Example response:
+  ```json
+  [
+    {
+      "id": 123,
+      "item_number": "ABC-123",
+      "name": "Widget",
+      "on_hand_total": 42,
+      "locations": [
+        {"code": "A1", "description": "Shelf A1", "quantity": 40}
+      ]
+    }
+  ]
+  ```
+  See [`invapp2/invapp/routes/item_search.py`](invapp2/invapp/routes/item_search.py).
+
+- **Item stock**: `GET /api/items/<item_id>/stock` returns totals + location breakdown. See [`invapp2/invapp/routes/item_search.py`](invapp2/invapp/routes/item_search.py).
+
+- **MDI entries API**: `GET /mdi/api/mdi_entries?category=Safety&status=Open&date=YYYY-MM-DD` returns filtered KPI entries. See [`invapp2/invapp/mdi/routes/api.py`](invapp2/invapp/mdi/routes/api.py).
+
+- **MDI create entry**: `POST /mdi/api/mdi_entries` with JSON payload creates a new entry. See [`invapp2/invapp/mdi/routes/api.py`](invapp2/invapp/mdi/routes/api.py).
+
+Auth requirements are enforced by blueprint guards and permission checks in each route. See [`invapp2/invapp/auth.py`](invapp2/invapp/auth.py) and [`invapp2/invapp/permissions.py`](invapp2/invapp/permissions.py).
+
+---
+
+## Database
+
+### Engine and connection
+- Uses **PostgreSQL** via SQLAlchemy. Connection string is `DB_URL` / `SQLALCHEMY_DATABASE_URI`. See [`invapp2/config.py`](invapp2/config.py).
+- SQLAlchemy is initialized in the app factory. See [`invapp2/invapp/extensions.py`](invapp2/invapp/extensions.py) and [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
+
+### Models / schema overview
+Core entities are defined in `invapp2/invapp/models.py`:
+- **Users / Roles / Permissions**: `User`, `Role`, `PageAccessRule`. See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+- **Inventory**: `Item`, `Batch` (soft delete), `Location`, `Movement`, `Reservation`. See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+- **Orders**: `Order`, `OrderLine`, `OrderComponent`, `BillOfMaterial`, `RoutingStep`. See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+- **Purchasing**: `PurchaseRequest`, `PurchaseRequestAttachment`. See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+- **Quality**: `RMARequest`, `RMAAttachment`, `RMAStatusEvent`. See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+- **Production**: `ProductionDailyRecord`, `ProductionCustomer`, `ProductionOutputFormula`. See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+- **Admin/Logging**: `AccessLog`, `AdminAuditLog`, `OpsEventLog`, `BackupRun`. See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+
+MDI entities are defined in `invapp2/invapp/mdi/models.py`:
+- `MDIEntry` and `CategoryMetric` power dashboards and APIs. See [`invapp2/invapp/mdi/models.py`](invapp2/invapp/mdi/models.py).
+
+### Migrations
+This repo includes Alembic migrations in `invapp2/migrations/`:
+```bash
+cd invapp2
+export DB_URL="postgresql+psycopg2://USER:PASSWORD@localhost/invdb"
+alembic -c alembic.ini upgrade head
+```
+- Create a new migration:
+  ```bash
+  alembic -c alembic.ini revision --autogenerate -m "add_new_field"
+  ```
+- Roll back one migration:
+  ```bash
+  alembic -c alembic.ini downgrade -1
+  ```
+Alembic reads `DB_URL` at runtime. See [`invapp2/migrations/env.py`](invapp2/migrations/env.py).
+
+### Startup schema/seed behavior
+`create_app()` will `db.create_all()`, apply legacy schema backfills, ensure MDI tables, seed MDI demo data, and create a default admin user/roles. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py) and [`invapp2/invapp/mdi/models.py`](invapp2/invapp/mdi/models.py).
+
+### Common DB tasks
+- **Health check**:
+  ```bash
+  python -m invapp.healthcheck --fatal
+  ```
+  See [`invapp2/invapp/healthcheck.py`](invapp2/invapp/healthcheck.py).
+- **Primary key sequence check/repair**:
+  ```bash
+  python -m invapp.db_sanity_check
+  python -m invapp.db_sanity_check --fix
+  ```
+  See [`invapp2/invapp/db_sanity_check.py`](invapp2/invapp/db_sanity_check.py).
+- **Batch soft-delete check**:
+  ```bash
+  python -m invapp.batch_soft_delete_check
+  ```
+  See [`invapp2/invapp/batch_soft_delete_check.py`](invapp2/invapp/batch_soft_delete_check.py).
+
+### Data integrity / constraints to know
+- **Batch soft deletes**: `Batch` uses `removed_at` with a custom query class to hide removed records by default. See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+- **Sequence repair**: primary key sequences are repaired during startup and via CLI tooling to recover from manual data imports. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py) and [`invapp2/invapp/db_sanity_check.py`](invapp2/invapp/db_sanity_check.py).
+
+---
+
+## Permissions / Roles
+
+### Roles
+- Core roles are created on startup (`admin`, `viewer`, `editor`, `purchasing`, `quality`, `public`). See `_ensure_core_roles()` in [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
+- A legacy `user` role is created if a user is saved with no explicit roles. See [`invapp2/invapp/routes/users.py`](invapp2/invapp/routes/users.py).
+
+### Page permissions
+- Default page access rules live in `DEFAULT_PAGE_ACCESS` and can be overridden in the database. See [`invapp2/invapp/permissions.py`](invapp2/invapp/permissions.py).
+- Guards and permission checks are used in routes via `blueprint_page_guard` and `ensure_page_access`. See [`invapp2/invapp/auth.py`](invapp2/invapp/auth.py) and [`invapp2/invapp/permissions.py`](invapp2/invapp/permissions.py).
+
+### Emergency/offline access
+If the database is offline at startup, the app uses an `OfflineAdminUser` that grants temporary access so operators can troubleshoot. See [`invapp2/invapp/offline.py`](invapp2/invapp/offline.py).
+
+---
+
+## Background Tasks / Schedules
+
+- **Automated backups** use APScheduler inside the Flask process. Jobs run on a configurable interval and log to the backup directory. See [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
+- The scheduler is started in `create_app()` when not in testing mode. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
+- **Ops monitor** is a separate Python process launched by the startup scripts (not a Flask background task). See [`ops_monitor`](ops_monitor) and [`start_operations_console.sh`](start_operations_console.sh).
+
+To disable automated backups in dev, set `BACKUP_SCHEDULER_ENABLED` to `False` in config overrides when calling `create_app()` (it defaults to `True`). See scheduler checks in [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
+
+---
+
+## Logging, Errors, and Debugging
+
+- **App logs**: `create_app()` configures a rotating log file (default `support/operations.log`) and also sends warnings to the status bus. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
+- **Backup logs**: stored in `backup.log` within the backup directory. See [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
+- **Status bus**: logs events to memory and the `ops_event_log` table for the ops monitor. See [`invapp2/invapp/services/status_bus.py`](invapp2/invapp/services/status_bus.py).
+- **Diagnostics script**: `support/run_diagnostics.sh` collects system status for troubleshooting. See [`support/run_diagnostics.sh`](support/run_diagnostics.sh).
+
+Common debugging steps:
+- Run the health check before startup: `python -m invapp.healthcheck --fatal`. See [`invapp2/invapp/healthcheck.py`](invapp2/invapp/healthcheck.py).
+- Watch `support/operations.log` and the ops monitor UI for database errors and backup status. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py) and [`ops_monitor/monitor.py`](ops_monitor/monitor.py).
+
+---
+
+## Testing
+
+- Tests are in `invapp2/tests/` and use `pytest`. See [`invapp2/tests`](invapp2/tests) and [`invapp2/requirements.txt`](invapp2/requirements.txt).
+- Run the full suite:
+  ```bash
+  cd invapp2
+  pytest
+  ```
+
+To add a test:
+1. Create a new `test_*.py` file in `invapp2/tests/`.
+2. Use existing tests as references for expected fixtures and patterns. See [`invapp2/tests`](invapp2/tests).
+
+---
+
+## Deployment Notes
+
+- **Recommended launch path**: use `./start_operations_console.sh` from the repo root. It creates a venv, installs deps, runs a health check, and launches Gunicorn. See [`start_operations_console.sh`](start_operations_console.sh).
+- **Gunicorn settings**: `HOST`, `PORT`, `GUNICORN_WORKERS`, and `GUNICORN_TIMEOUT` control the server configuration. See [`start_operations_console.sh`](start_operations_console.sh).
+- **Reverse proxy**: not configured in this repo; if you deploy behind Nginx/Apache, proxy to the Gunicorn bind address.
+- **Backups**: the backup scheduler uses `BACKUP_DIR` or falls back to `instance/backups` or `./backups`. See [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
+
+---
+
+## Contributing / Development Conventions
+
+- **Framework**: Flask + SQLAlchemy. See [`invapp2/requirements.txt`](invapp2/requirements.txt).
+- **Blueprints**: Feature-specific routes live in `invapp2/invapp/routes/` and are registered in `create_app()`. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
+- **Templates**: Jinja templates per feature in `invapp2/invapp/templates/`. See [`invapp2/invapp/templates`](invapp2/invapp/templates).
+- **Static assets**: stored in `invapp2/invapp/static/`. See [`invapp2/invapp/static`](invapp2/invapp/static).
+
+Additional documentation:
+- [Deployment guide](docs/deployment-guide.md)
+- [Database schema](docs/database-schema.md)
+- [Workstations guide](docs/workstations.md)
+- [MDI dashboard](docs/mdi-dashboard.md)
+
+---
+
+## How to Make Common Changes
+
+### Add a new page
+1. Choose the appropriate blueprint (or create a new one) under `invapp2/invapp/routes/`.
+2. Add a new route function that renders a template. Example blueprint structure: [`invapp2/invapp/routes/inventory.py`](invapp2/invapp/routes/inventory.py).
+3. Create a new template under `invapp2/invapp/templates/<feature>/` and extend `base.html`. See [`invapp2/invapp/templates/base.html`](invapp2/invapp/templates/base.html).
+4. Add permission guards using `blueprint_page_guard` or `ensure_page_access`. See [`invapp2/invapp/auth.py`](invapp2/invapp/auth.py) and [`invapp2/invapp/permissions.py`](invapp2/invapp/permissions.py).
+
+### Add a new DB field + migration
+1. Update the SQLAlchemy model in `invapp2/invapp/models.py` (or `invapp2/invapp/mdi/models.py` for MDI tables).
+2. Generate an Alembic migration:
+   ```bash
+   cd invapp2
+   alembic -c alembic.ini revision --autogenerate -m "add_field"
+   ```
+3. Apply the migration:
+   ```bash
+   alembic -c alembic.ini upgrade head
+   ```
+4. If the field is required by legacy schema checks, update `_ensure_*_schema` in `invapp2/invapp/__init__.py` accordingly. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
+
+### Add a new API endpoint
+1. Add a new route under the appropriate blueprint (e.g., `/api/...` in `invapp2/invapp/routes/item_search.py`). See [`invapp2/invapp/routes/item_search.py`](invapp2/invapp/routes/item_search.py).
+2. Return JSON via `jsonify` and enforce permissions using `blueprint_page_guard` or role checks. See [`invapp2/invapp/auth.py`](invapp2/invapp/auth.py) and [`invapp2/invapp/permissions.py`](invapp2/invapp/permissions.py).
+3. Add tests in `invapp2/tests/`.
+
+### Add a new navigation item
+1. Add the page to `NAVIGATION_PAGES` in `invapp2/invapp/__init__.py`. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
+2. Ensure there is a corresponding permission rule in `DEFAULT_PAGE_ACCESS`. See [`invapp2/invapp/permissions.py`](invapp2/invapp/permissions.py).
+
+### Add a new user role restriction
+1. Add (or ensure) the role exists in the database (see role creation in `invapp2/invapp/__init__.py` and `invapp2/invapp/routes/users.py`). See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py) and [`invapp2/invapp/routes/users.py`](invapp2/invapp/routes/users.py).
+2. Update `DEFAULT_PAGE_ACCESS` with the new role where appropriate. See [`invapp2/invapp/permissions.py`](invapp2/invapp/permissions.py).
+3. Use permission guards in route handlers to enforce access. See [`invapp2/invapp/permissions.py`](invapp2/invapp/permissions.py).
+
+### Add a new MDI category dashboard
+1. Update category definitions in `invapp2/invapp/mdi/models.py` and `invapp2/invapp/mdi/routes/dashboard.py` (category lists, colors, and metric config). See [`invapp2/invapp/mdi/models.py`](invapp2/invapp/mdi/models.py) and [`invapp2/invapp/mdi/routes/dashboard.py`](invapp2/invapp/mdi/routes/dashboard.py).
+2. Add a new template in `invapp2/invapp/templates/mdi/` for the dashboard view and update routing in `invapp2/invapp/mdi/routes/dashboard.py`. See [`invapp2/invapp/templates/mdi`](invapp2/invapp/templates/mdi) and [`invapp2/invapp/mdi/routes/dashboard.py`](invapp2/invapp/mdi/routes/dashboard.py).
+
+---
+
+## Open Questions
+
+None at this time. All documentation above is based on current repository code.
