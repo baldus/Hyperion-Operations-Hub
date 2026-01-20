@@ -247,6 +247,12 @@ def build_backup_panel(status: BackupStatus) -> Panel:
         f"[b]Last path[/b]: {status.last_run_filepath or 'n/a'}",
         f"[b]Last success[/b]: {status.last_success_at.strftime('%Y-%m-%d %H:%M UTC') if status.last_success_at else 'n/a'}",
         f"[b]Next run[/b]: {status.next_run_at.strftime('%Y-%m-%d %H:%M UTC') if status.next_run_at else 'n/a'}",
+        f"[b]Restore state[/b]: {status.restore_state}",
+        f"[b]Restore file[/b]: {status.restore_filename or 'n/a'}",
+        f"[b]Restore started[/b]: {status.restore_started_at.strftime('%Y-%m-%d %H:%M UTC') if status.restore_started_at else 'n/a'}",
+        f"[b]Restore last status[/b]: {status.restore_last_status or 'n/a'}",
+        f"[b]Restore last result[/b]: {status.restore_last_message or 'n/a'}",
+        f"[b]Restore last at[/b]: {status.restore_last_at.strftime('%Y-%m-%d %H:%M UTC') if status.restore_last_at else 'n/a'}",
     ]
     return Panel("\n".join(lines), title="Backup Status", box=box.ROUNDED, padding=(1, 1))
 
@@ -374,6 +380,12 @@ def monitor_loop(
             last_run_filepath=None,
             last_success_at=None,
             next_run_at=None,
+            restore_state="idle",
+            restore_filename=None,
+            restore_last_status=None,
+            restore_last_message=None,
+            restore_last_at=None,
+            restore_started_at=None,
         ),
         "events": [],
         "error_snapshot": read_recent_errors(db_url),

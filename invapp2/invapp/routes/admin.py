@@ -34,6 +34,7 @@ from sqlalchemy.sql.sqltypes import Numeric
 
 from invapp import models
 from invapp.extensions import db
+from invapp.db_maintenance import repair_primary_key_sequences
 
 from invapp.login import current_user, login_required, logout_user
 from invapp.offline import is_emergency_mode_active
@@ -1023,18 +1024,24 @@ def _log_backup_restore_attempt(
     filename: str,
     outcome: str,
     reason: str | None = None,
+    duration_seconds: float | None = None,
+    error_output: str | None = None,
 ) -> None:
     timestamp = datetime.utcnow().isoformat() + "Z"
     username = getattr(current_user, "username", "unknown")
     detail = reason or "n/a"
+    duration = f"{duration_seconds:.2f}s" if duration_seconds is not None else "n/a"
+    error_summary = error_output or "n/a"
     log = current_app.logger.info if outcome == "success" else current_app.logger.warning
     log(
-        "Backup restore attempt timestamp=%s username=%s filename=%s outcome=%s reason=%s",
+        "Backup restore attempt timestamp=%s username=%s filename=%s outcome=%s duration=%s reason=%s error=%s",
         timestamp,
         username,
         filename,
         outcome,
+        duration,
         detail,
+        error_summary,
     )
 
 
@@ -1080,21 +1087,6 @@ def restore_backup():
         )
         abort(403)
 
-    if hasattr(os, "geteuid") and os.geteuid() != 0:
-        flash("Restore is restricted to the system superuser.", "danger")
-        _record_backup_restore_event(
-            filename=filename or "unknown",
-            status="failed",
-            action="restore",
-            message="Restore blocked: OS user is not root.",
-        )
-        _log_backup_restore_attempt(
-            filename=filename or "unknown",
-            outcome="failure",
-            reason="os user not root",
-        )
-        return redirect(url_for("admin.backups_home"))
-
     token = request.form.get("csrf_token")
     if not token or token != session.get("backup_restore_csrf"):
         flash("Invalid restore request. Please try again.", "danger")
@@ -1127,23 +1119,10 @@ def restore_backup():
         return redirect(url_for("admin.backups_home"))
 
     confirmation = (request.form.get("confirm_restore") or "").strip()
-    acknowledged = request.form.get("confirm_ack") == "yes"
-    if not acknowledged:
-        flash("Please confirm the restore acknowledgement checkbox.", "warning")
-        _record_backup_restore_event(
-            filename=filename,
-            status="failed",
-            action="restore",
-            message="Restore blocked: acknowledgement missing.",
-        )
-        _log_backup_restore_attempt(
-            filename=filename,
-            outcome="failure",
-            reason="missing acknowledgement",
-        )
-        return redirect(url_for("admin.backups_home"))
-    if confirmation != "RESTORE":
-        flash("Type RESTORE to confirm the backup restore.", "warning")
+    confirm_phrase = (request.form.get("confirm_phrase") or "").strip()
+    expected_confirmation = f"RESTORE {filename}"
+    if confirmation != expected_confirmation:
+        flash("Type RESTORE <filename> to confirm the backup restore.", "warning")
         _record_backup_restore_event(
             filename=filename,
             status="failed",
@@ -1154,6 +1133,20 @@ def restore_backup():
             filename=filename,
             outcome="failure",
             reason="confirmation text mismatch",
+        )
+        return redirect(url_for("admin.backups_home"))
+    if confirm_phrase != "I UNDERSTAND THIS WILL OVERWRITE DATA":
+        flash("Type the full overwrite acknowledgement phrase to continue.", "warning")
+        _record_backup_restore_event(
+            filename=filename,
+            status="failed",
+            action="restore",
+            message="Restore blocked: acknowledgement phrase mismatch.",
+        )
+        _log_backup_restore_attempt(
+            filename=filename,
+            outcome="failure",
+            reason="acknowledgement phrase mismatch",
         )
         return redirect(url_for("admin.backups_home"))
 
@@ -1179,10 +1172,34 @@ def restore_backup():
         message="Restore initiated.",
     )
 
+    current_app.config["RESTORE_IN_PROGRESS"] = True
+    current_app.config["RESTORE_FILENAME"] = filename
+    current_app.config["RESTORE_STARTED_AT"] = datetime.utcnow()
+
+    start_time = datetime.utcnow()
+    db.session.remove()
+    if db.engine.dialect.name != "sqlite":
+        try:
+            db.engine.dispose()
+        except Exception:
+            pass
+
     try:
         logger = current_app.logger
-        result_message = backup_service.restore_database_backup(current_app, filename, logger)
+        result = backup_service.restore_database_backup(current_app, filename, logger)
+        db.session.remove()
+        sequence_summary = repair_primary_key_sequences(
+            db.engine, db.Model, logger=current_app.logger
+        )
+        current_app.config["SEQUENCE_REPAIR_SUMMARY"] = sequence_summary
+        status_bus.log_event(
+            "info",
+            "Sequence repair completed after restore.",
+            context=sequence_summary,
+            source="sequence_repair",
+        )
     except (ValueError, FileNotFoundError) as exc:
+        duration_seconds = (datetime.utcnow() - start_time).total_seconds()
         _record_backup_restore_event(
             filename=filename,
             status="failed",
@@ -1193,36 +1210,71 @@ def restore_backup():
             filename=filename,
             outcome="failure",
             reason=str(exc),
+            duration_seconds=duration_seconds,
         )
         flash(str(exc), "danger")
         return redirect(url_for("admin.backups_home"))
-    except Exception as exc:
+    except backup_service.RestoreExecutionError as exc:
+        duration_seconds = (datetime.utcnow() - start_time).total_seconds()
+        error_summary = backup_service.sanitize_restore_output(exc.stderr or exc.stdout)
         current_app.logger.exception("Restore failed: %s", exc)
+        status_bus.log_event(
+            "error",
+            f"Restore failed for {filename}.",
+            context={"filename": filename, "error": error_summary},
+            source="backup_restore",
+        )
         _record_backup_restore_event(
             filename=filename,
             status="failed",
             action="restore",
-            message=str(exc),
+            message=f"Restore failed after {duration_seconds:.2f}s: {error_summary or 'n/a'}",
         )
         _log_backup_restore_attempt(
             filename=filename,
             outcome="failure",
             reason="exception during restore",
+            duration_seconds=duration_seconds,
+            error_output=error_summary,
         )
         flash("Restore failed. Check logs for details.", "danger")
         return redirect(url_for("admin.backups_home"))
+    except Exception as exc:
+        duration_seconds = (datetime.utcnow() - start_time).total_seconds()
+        current_app.logger.exception("Restore failed: %s", exc)
+        _record_backup_restore_event(
+            filename=filename,
+            status="failed",
+            action="restore",
+            message=f"Restore failed after {duration_seconds:.2f}s: {exc}",
+        )
+        _log_backup_restore_attempt(
+            filename=filename,
+            outcome="failure",
+            reason="exception during restore",
+            duration_seconds=duration_seconds,
+        )
+        flash("Restore failed. Check logs for details.", "danger")
+        return redirect(url_for("admin.backups_home"))
+    finally:
+        current_app.config["RESTORE_IN_PROGRESS"] = False
+        current_app.config["RESTORE_LAST_FINISHED_AT"] = datetime.utcnow()
 
+    duration_seconds = result.duration_seconds
     _record_backup_restore_event(
         filename=filename,
         status="succeeded",
         action="restore",
-        message=result_message,
+        message=f"{result.message} Duration: {duration_seconds:.2f}s.",
     )
     _log_backup_restore_attempt(
         filename=filename,
         outcome="success",
         reason="restore completed",
+        duration_seconds=duration_seconds,
     )
+    current_app.config["RESTORE_LAST_STATUS"] = "succeeded"
+    current_app.config["RESTORE_LAST_FILENAME"] = filename
     flash("Restore completed. Restart the console if needed.", "success")
     return redirect(url_for("admin.backups_home"))
 

@@ -64,6 +64,12 @@ class BackupStatus:
     last_run_filepath: str | None
     last_success_at: datetime | None
     next_run_at: datetime | None
+    restore_state: str
+    restore_filename: str | None
+    restore_last_status: str | None
+    restore_last_message: str | None
+    restore_last_at: datetime | None
+    restore_started_at: datetime | None
 
 
 @dataclass
@@ -259,6 +265,12 @@ def read_backup_status(db_url: str | None, *, default_frequency: int = 4) -> Bac
             last_run_filepath=None,
             last_success_at=None,
             next_run_at=None,
+            restore_state="idle",
+            restore_filename=None,
+            restore_last_status=None,
+            restore_last_message=None,
+            restore_last_at=None,
+            restore_started_at=None,
         )
     frequency = default_frequency
     frequency_source = "default"
@@ -268,6 +280,12 @@ def read_backup_status(db_url: str | None, *, default_frequency: int = 4) -> Bac
     last_run_filename = None
     last_run_filepath = None
     last_success_at = None
+    restore_state = "idle"
+    restore_filename = None
+    restore_last_status = None
+    restore_last_message = None
+    restore_last_at = None
+    restore_started_at = None
     try:
         engine = create_engine(db_url, pool_pre_ping=True)
         with engine.connect() as conn:
@@ -321,6 +339,43 @@ def read_backup_status(db_url: str | None, *, default_frequency: int = 4) -> Bac
             ).first()
             if last_success:
                 last_success_at = last_success.started_at
+
+            latest_started = conn.execute(
+                text(
+                    """
+                    SELECT occurred_at, backup_filename, message
+                    FROM backup_restore_event
+                    WHERE action = 'restore' AND status = 'started'
+                    ORDER BY occurred_at DESC
+                    LIMIT 1
+                    """
+                )
+            ).first()
+            if latest_started:
+                restore_started_at = latest_started.occurred_at
+                restore_filename = latest_started.backup_filename
+
+            latest_terminal = conn.execute(
+                text(
+                    """
+                    SELECT occurred_at, backup_filename, status, message
+                    FROM backup_restore_event
+                    WHERE action = 'restore' AND status IN ('succeeded', 'failed')
+                    ORDER BY occurred_at DESC
+                    LIMIT 1
+                    """
+                )
+            ).first()
+            if latest_terminal:
+                restore_last_at = latest_terminal.occurred_at
+                restore_last_status = latest_terminal.status
+                restore_last_message = latest_terminal.message
+                if not restore_filename:
+                    restore_filename = latest_terminal.backup_filename
+            if restore_started_at and (
+                restore_last_at is None or restore_started_at > restore_last_at
+            ):
+                restore_state = "running"
         engine.dispose()
     except Exception:
         pass
@@ -339,6 +394,12 @@ def read_backup_status(db_url: str | None, *, default_frequency: int = 4) -> Bac
         last_run_filepath=last_run_filepath,
         last_success_at=last_success_at,
         next_run_at=next_run_at,
+        restore_state=restore_state,
+        restore_filename=restore_filename,
+        restore_last_status=restore_last_status,
+        restore_last_message=restore_last_message,
+        restore_last_at=restore_last_at,
+        restore_started_at=restore_started_at,
     )
 
 

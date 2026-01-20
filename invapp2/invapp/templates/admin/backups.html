@@ -58,13 +58,23 @@
                 {% endfor %}
             </select>
 
-            <label class="checkbox">
-                <input type="checkbox" name="confirm_ack" value="yes" required>
-                I understand this will overwrite the current database.
-            </label>
+            <label for="confirm-restore">Type RESTORE &lt;filename&gt; to confirm</label>
+            <input
+                id="confirm-restore"
+                type="text"
+                name="confirm_restore"
+                placeholder="RESTORE backup_2024-01-01.sql"
+                required
+            >
 
-            <label for="confirm-restore">Type RESTORE to confirm</label>
-            <input id="confirm-restore" type="text" name="confirm_restore" placeholder="RESTORE" required>
+            <label for="confirm-phrase">Type the overwrite acknowledgement phrase</label>
+            <input
+                id="confirm-phrase"
+                type="text"
+                name="confirm_phrase"
+                placeholder="I UNDERSTAND THIS WILL OVERWRITE DATA"
+                required
+            >
 
             <button type="submit" class="action-btn">Restore Backup</button>
         </form>

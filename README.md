@@ -12,12 +12,13 @@ Hyperion Operations Hub is a Flask-based operations console for manufacturing te
 7. [Database](#database)
 8. [Permissions / Roles](#permissions--roles)
 9. [Background Tasks / Schedules](#background-tasks--schedules)
-10. [Logging, Errors, and Debugging](#logging-errors-and-debugging)
-11. [Testing](#testing)
-12. [Deployment Notes](#deployment-notes)
-13. [Network Stability & Self-Healing (Linux Host)](#network-stability--self-healing-linux-host)
-14. [Contributing / Development Conventions](#contributing--development-conventions)
-15. [How to Make Common Changes](#how-to-make-common-changes)
+10. [Backups & Restore](#backups--restore)
+11. [Logging, Errors, and Debugging](#logging-errors-and-debugging)
+12. [Testing](#testing)
+13. [Deployment Notes](#deployment-notes)
+14. [Network Stability & Self-Healing (Linux Host)](#network-stability--self-healing-linux-host)
+15. [Contributing / Development Conventions](#contributing--development-conventions)
+16. [How to Make Common Changes](#how-to-make-common-changes)
 
 ---
 
@@ -154,6 +155,7 @@ These are pulled directly from environment variables or startup scripts:
 | `ADMIN_SESSION_TIMEOUT` | Session timeout in seconds. | `300` | [`invapp2/config.py`](invapp2/config.py) |
 | `BACKUP_DIR` | Preferred backup directory used by the backup service. | (none) | [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py) |
 | `BACKUP_DIR_AUTO` | Directory for auto-imported backups. | (none) | [`invapp2/config.py`](invapp2/config.py) |
+| `BACKUP_RESTORE_TIMEOUT` | Optional restore timeout in seconds (defaults to 900). | `900` | [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py) |
 | `MDI_DEFAULT_RECIPIENTS` | Default recipient list for MDI emails. | empty | [`invapp2/config.py`](invapp2/config.py) |
 | `MDI_DEFAULT_SENDER` | Default sender (empty so mail client can choose). | empty | [`invapp2/config.py`](invapp2/config.py) |
 | `FRAMING_PANEL_OFFSET` | Offset for framing panel UI. | `0` | [`invapp2/config.py`](invapp2/config.py) |
@@ -345,6 +347,57 @@ If the database is offline at startup, the app uses an `OfflineAdminUser` that g
 - **Ops monitor** is a separate Python process launched by the startup scripts (not a Flask background task). See [`ops_monitor`](ops_monitor) and [`start_operations_console.sh`](start_operations_console.sh).
 
 To disable automated backups in dev, set `BACKUP_SCHEDULER_ENABLED` to `False` in config overrides when calling `create_app()` (it defaults to `True`). See scheduler checks in [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
+
+---
+
+## Backups & Restore
+
+### How backups are created
+- Automated database backups are scheduled by APScheduler and run inside the Flask app process. Each run executes `pg_dump --format=plain` against the database configured by `DB_URL`. See backup job scheduling and pg_dump usage in [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
+- The schedule interval is stored in the `app_setting` table under `backup_frequency_hours` and can be edited in the admin backup settings UI. See the admin settings route in [`invapp2/invapp/routes/admin.py`](invapp2/invapp/routes/admin.py).
+- Each backup run is recorded in the `backup_run` table for audit and status display, including status, file path, and message. See the `BackupRun` model in [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+
+### Where backups are stored
+- The backup service chooses a writable backup root in this order:
+  1. `BACKUP_DIR` environment variable (if set).
+  2. `BACKUP_DIR` in Flask config (if set).
+  3. `<instance_path>/backups` (default instance fallback).
+  4. `<cwd>/backups` (last resort).
+  See path resolution in [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
+- Backups are stored in subfolders:
+  - `db/` for database `.sql` dumps.
+  - `files/` for archived attachments/data directories.
+  - `tmp/` for staging during restore.
+
+### Restore flow (no root required)
+- Restore is **superuser-only** (the configured `ADMIN_USER`) and requires a logged-in session. The route enforces CSRF and explicit confirmations. See the restore handler in [`invapp2/invapp/routes/admin.py`](invapp2/invapp/routes/admin.py).
+- A safe restore requires typing:
+  - `RESTORE <exact filename>` (example: `RESTORE backup_2024-01-01.sql`)
+  - `I UNDERSTAND THIS WILL OVERWRITE DATA`
+  See the admin restore form in [`invapp2/invapp/templates/admin/backups.html`](invapp2/invapp/templates/admin/backups.html).
+- Restore uses `psql` with credentials derived from `DB_URL` (or pre-set `PGHOST/PGUSER/PGPASSWORD/PGDATABASE`) and does **not** require the OS user to be root. See restore execution in [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
+- The restore process:
+  1. Stages the selected backup into a `tmp/restore_<timestamp>` folder.
+  2. Attempts to terminate active DB sessions (best-effort).
+  3. Drops and recreates the `public` schema.
+  4. Applies the `.sql` backup via `psql`.
+  5. Runs sequence repair to realign primary key sequences. See `repair_primary_key_sequences()` in [`invapp2/invapp/db_maintenance.py`](invapp2/invapp/db_maintenance.py).
+- While restore is running, the app enters a maintenance mode that blocks other requests and serves a “Restore in progress” page. See the maintenance guard in [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py) and the template in [`invapp2/invapp/templates/errors/restore_in_progress.html`](invapp2/invapp/templates/errors/restore_in_progress.html).
+
+### Permissions model
+- Only the configured application superuser can restore (default `ADMIN_USER=superuser`). Non-superusers receive a 403. See `is_superuser()` and the restore route checks in [`invapp2/invapp/superuser.py`](invapp2/invapp/superuser.py) and [`invapp2/invapp/routes/admin.py`](invapp2/invapp/routes/admin.py).
+- Every restore attempt is written to `backup_restore_event` with the user, filename, outcome, duration, and message for audit purposes. See the `BackupRestoreEvent` model in [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+
+### Viewing status in the ops monitor
+- The ops monitor shows backup and restore status in the “Backup Status” panel (last backup run, last restore result, and current restore state), and also shows restore logs/output in the log panel. See the monitor UI in [`ops_monitor/monitor.py`](ops_monitor/monitor.py) and status queries in [`ops_monitor/metrics.py`](ops_monitor/metrics.py).
+- Restore progress and output are sent to the operations log file and (when available) the status bus to surface in the terminal. See restore logging in [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
+
+### Troubleshooting restore failures
+- **`psql` not installed**: Install PostgreSQL client tools (`psql`) on the host. Restore requires the client binary. See `restore_database_backup()` in [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
+- **Wrong `DB_URL`**: Confirm the DB URL, username, password, host, and database name match the target database. See environment configuration in [`invapp2/config.py`](invapp2/config.py).
+- **Permission errors / cannot terminate sessions**: The configured DB role needs sufficient privileges to terminate other sessions and drop the `public` schema. If termination is blocked, ensure the role can manage connections or manually disconnect other clients before retrying. See the termination step in [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
+- **Locked sessions / active connections**: Stop other app instances or background workers so `pg_terminate_backend` succeeds, then retry. Restore is safest when only one app instance is running.
+- **Restore appears stuck**: Check the ops monitor log panel and `support/operations.log` for progress output and errors. See logging setup in [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
 
 ---
 

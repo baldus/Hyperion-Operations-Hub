@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card-section">
+    <h2>Restore in progress</h2>
+    <p class="lead">
+        A database restore is currently running. The console is temporarily in maintenance mode
+        to prevent changes while data is being restored.
+    </p>
+    <div class="alert alert-warning">
+        Please wait for the restore to complete. You can monitor progress in the operations status terminal.
+    </div>
+</section>
+{% endblock %}

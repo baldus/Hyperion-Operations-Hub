@@ -720,6 +720,7 @@ def create_app(config_override=None):
     # backing service is offline.
     app.config.setdefault("DATABASE_AVAILABLE", True)
     app.config.setdefault("DATABASE_ERROR", None)
+    app.config.setdefault("RESTORE_IN_PROGRESS", False)
     app.config.setdefault(
         "DATABASE_RECOVERY_STEPS",
         (
@@ -756,6 +757,21 @@ def create_app(config_override=None):
     login_manager.init_app(app)
     login_manager.anonymous_user = OfflineAdminUser
     login_manager.login_view = "auth.login"
+
+    @app.before_request
+    def _block_requests_during_restore():
+        if not app.config.get("RESTORE_IN_PROGRESS"):
+            return None
+        endpoint = request.endpoint or ""
+        allowed_endpoints = {
+            "admin.backups_home",
+            "admin.restore_backup",
+            "auth.login",
+            "auth.logout",
+        }
+        if endpoint in allowed_endpoints or endpoint.startswith("static"):
+            return None
+        return render_template("errors/restore_in_progress.html"), 503
 
     @login_manager.user_loader
     def load_user(user_id: str):
