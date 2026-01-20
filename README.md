@@ -484,6 +484,56 @@ Additional documentation:
 3. Create a new template under `invapp2/invapp/templates/<feature>/` and extend `base.html`. See [`invapp2/invapp/templates/base.html`](invapp2/invapp/templates/base.html).
 4. Add permission guards using `blueprint_page_guard` or `ensure_page_access`. See [`invapp2/invapp/auth.py`](invapp2/invapp/auth.py) and [`invapp2/invapp/permissions.py`](invapp2/invapp/permissions.py).
 
+### Inventory Locations filters & sorting (Row + Description)
+Use this when adjusting how the Inventory **Locations** page parses codes, filters by row/description, or changes the sort order.
+
+**Where the page lives**
+- **Route:** `GET /inventory/locations` in [`invapp2/invapp/routes/inventory.py`](invapp2/invapp/routes/inventory.py).
+- **Template:** [`invapp2/invapp/templates/inventory/list_locations.html`](invapp2/invapp/templates/inventory/list_locations.html).
+- **Parser helper:** [`invapp2/invapp/utils/location_parser.py`](invapp2/invapp/utils/location_parser.py).
+- **Computed model properties:** `Location.level`, `Location.row`, `Location.bay` in [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+
+**Parsing rules (Level-Row-Bay)**
+- Expected format: `Level-Row-Bay` (e.g., `1-A-1`, `01-A-12`, `2-B-03`).
+- Whitespace is trimmed and row is uppercased.
+- If the code does **not** match the pattern, `level`, `row`, and `bay` are `None`.
+- Examples:
+  - `1-A-1` ➜ level `1`, row `A`, bay `1`
+  - `01-a-12` ➜ level `1`, row `A`, bay `12`
+  - ` 2 - B - 03 ` ➜ level `2`, row `B`, bay `3`
+  - `A-1` or `1A1` ➜ all `None`
+
+**Query params and behavior**
+- `row`: exact row match (`A`, `B`, etc.). Values are normalized to uppercase.
+- `q`: description filter (case-insensitive substring match).
+- `sort`: `code` (default), `row`, `description`, `level`, or `bay`.
+- `dir`: `asc` or `desc`.
+- `page` and `size`: pagination controls (existing behavior).
+
+Examples:
+```
+/inventory/locations?row=A&q=rack&sort=row&dir=asc
+/inventory/locations?sort=description&dir=desc
+```
+
+**Sorting details**
+- **Row sort:** Row alphabetically, then level numeric, then bay numeric (stable tiebreaker).
+- **Code sort:** Natural order using parsed values (so `1-A-2` comes before `1-A-10`).
+- **Description sort:** Case-insensitive, with code order as the secondary tiebreaker.
+
+**Filters UI**
+- Row dropdown is populated from distinct parsed rows in current `Location.code` values.
+- Description filter is a text input that updates the `q` query parameter.
+- Clear Filters removes row/description/sort params.
+
+Screenshot placeholder (replace with a real screenshot when available):
+![Locations filters UI](docs/screenshots/locations-filters.png)
+
+**Edge cases / limitations**
+- Non-standard codes (no `Level-Row-Bay` pattern) keep `level/row/bay` as `None` and sort after valid codes.
+- Row filtering only matches parsed rows; invalid codes are excluded when a row filter is active.
+- Filtering happens in SQL where possible (description), while row parsing/sorting relies on application logic.
+
 ### Add a new DB field + migration
 1. Update the SQLAlchemy model in `invapp2/invapp/models.py` (or `invapp2/invapp/mdi/models.py` for MDI tables).
 2. Generate an Alembic migration:

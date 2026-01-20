@@ -2,6 +2,7 @@ import base64
 import csv
 import io
 import json
+import math
 import os
 import secrets
 import tempfile
@@ -73,6 +74,7 @@ from invapp.utils.csv_schema import (
     expected_headers,
     resolve_import_mappings,
 )
+from invapp.utils.location_parser import parse_location_code
 from werkzeug.utils import secure_filename
 
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
@@ -2107,7 +2109,26 @@ def list_locations():
     page = request.args.get("page", 1, type=int)
     size = request.args.get("size", 20, type=int)
     search = (request.args.get("search") or "").strip()
+    row_filter_raw = (request.args.get("row") or "").strip()
+    row_filter = row_filter_raw.upper() or None
+    description_query = (request.args.get("q") or "").strip()
+    sort_param = (request.args.get("sort") or "code").strip().lower()
+    sort_dir = (request.args.get("dir") or "asc").strip().lower()
+    if sort_param not in {"code", "row", "description", "level", "bay"}:
+        sort_param = "code"
+    if sort_dir not in {"asc", "desc"}:
+        sort_dir = "asc"
     like_pattern = f"%{search}%" if search else None
+    description_pattern = f"%{description_query}%" if description_query else None
+
+    available_rows_query = Location.query.with_entities(Location.code).all()
+    available_rows = sorted(
+        {
+            parsed.row
+            for (code,) in available_rows_query
+            if (parsed := parse_location_code(code)).row
+        }
+    )
 
     locations_query = Location.query
     if like_pattern:
@@ -2131,7 +2152,86 @@ def list_locations():
             )
         )
 
-    pagination = locations_query.paginate(page=page, per_page=size, error_out=False)
+    if description_pattern:
+        locations_query = locations_query.filter(
+            Location.description.ilike(description_pattern)
+        )
+
+    locations = locations_query.all()
+    parsed_by_location = {
+        location.id: parse_location_code(location.code) for location in locations
+    }
+
+    if row_filter:
+        locations = [
+            location
+            for location in locations
+            if parsed_by_location.get(location.id).row == row_filter
+        ]
+
+    def natural_code_key(location: Location) -> tuple:
+        parsed = parsed_by_location.get(location.id)
+        if not parsed or parsed.level is None or parsed.row is None or parsed.bay is None:
+            return (math.inf, "", math.inf, (location.code or "").lower())
+        return (parsed.level, parsed.row, parsed.bay, (location.code or "").lower())
+
+    def row_sort_key(location: Location) -> tuple:
+        parsed = parsed_by_location.get(location.id)
+        row = parsed.row if parsed else None
+        level = parsed.level if parsed else None
+        bay = parsed.bay if parsed else None
+        return (
+            row is None,
+            row or "",
+            level is None,
+            level or 0,
+            bay is None,
+            bay or 0,
+            (location.code or "").lower(),
+        )
+
+    def description_sort_key(location: Location) -> tuple:
+        description = (location.description or "").lower()
+        return (description, natural_code_key(location))
+
+    def level_sort_key(location: Location) -> tuple:
+        parsed = parsed_by_location.get(location.id)
+        level = parsed.level if parsed else None
+        return (
+            level is None,
+            level or 0,
+            parsed.row if parsed else "",
+            parsed.bay if parsed else 0,
+            (location.code or "").lower(),
+        )
+
+    def bay_sort_key(location: Location) -> tuple:
+        parsed = parsed_by_location.get(location.id)
+        bay = parsed.bay if parsed else None
+        return (
+            bay is None,
+            bay or 0,
+            parsed.row if parsed else "",
+            parsed.level if parsed else 0,
+            (location.code or "").lower(),
+        )
+
+    sort_key_map = {
+        "code": natural_code_key,
+        "row": row_sort_key,
+        "description": description_sort_key,
+        "level": level_sort_key,
+        "bay": bay_sort_key,
+    }
+    locations.sort(key=sort_key_map[sort_param], reverse=sort_dir == "desc")
+
+    total_locations = len(locations)
+    size = max(size, 1)
+    pages = max(1, math.ceil(total_locations / size)) if total_locations else 1
+    page = min(max(page, 1), pages)
+    start = (page - 1) * size
+    end = start + size
+    page_locations = locations[start:end]
 
     balances_query = (
         db.session.query(
@@ -2145,6 +2245,10 @@ def list_locations():
         .group_by(Movement.location_id, Movement.item_id)
     )
 
+    location_ids = [location.id for location in page_locations]
+    if location_ids:
+        balances_query = balances_query.filter(Movement.location_id.in_(location_ids))
+
     if like_pattern:
         balances_query = balances_query.filter(
             or_(
@@ -2155,7 +2259,10 @@ def list_locations():
             )
         )
 
-    balances = balances_query.all()
+    if location_ids:
+        balances = balances_query.all()
+    else:
+        balances = []
     item_ids = {item_id for _, item_id, _, _ in balances}
     items = (
         {i.id: i for i in Item.query.filter(Item.id.in_(item_ids)).all()}
@@ -2188,11 +2295,25 @@ def list_locations():
 
     return render_template(
         "inventory/list_locations.html",
-        locations=pagination.items,
+        locations=page_locations,
         page=page,
         size=size,
-        pages=pagination.pages,
+        pages=pages,
         search=search,
+        row_filter=row_filter or "",
+        description_query=description_query,
+        sort=sort_param,
+        sort_dir=sort_dir,
+        available_rows=available_rows,
+        total_locations=total_locations,
+        query_params={
+            "search": search or None,
+            "row": row_filter or None,
+            "q": description_query or None,
+            "sort": sort_param,
+            "dir": sort_dir,
+            "size": size,
+        },
         balances_by_location=balances_by_location,
         pending_count_by_location=pending_count_by_location,
     )

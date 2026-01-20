@@ -22,17 +22,60 @@
 <br>
 
 <form method="get" class="inline-form">
-  <input
-    type="text"
-    name="search"
-    placeholder="Search by SKU, item name, or location"
-    value="{{ search }}"
-  >
-  <button type="submit" class="bubble-btn">Search</button>
+  <input type="hidden" name="size" value="{{ size }}">
   {% if search %}
-    <a href="{{ url_for('inventory.list_locations') }}" class="bubble-btn">Clear</a>
+    <input type="hidden" name="search" value="{{ search }}">
+  {% endif %}
+  <label for="row-filter" class="field-label">Row</label>
+  <select id="row-filter" name="row">
+    <option value="">All Rows</option>
+    {% for row in available_rows %}
+      <option value="{{ row }}" {% if row == row_filter %}selected{% endif %}>{{ row }}</option>
+    {% endfor %}
+  </select>
+  <label for="description-filter" class="field-label">Description</label>
+  <input
+    id="description-filter"
+    type="text"
+    name="q"
+    placeholder="Description contains..."
+    value="{{ description_query }}"
+  >
+  <label for="sort-filter" class="field-label">Sort by</label>
+  <select id="sort-filter" name="sort">
+    <option value="code" {% if sort == "code" %}selected{% endif %}>Code (natural)</option>
+    <option value="row" {% if sort == "row" %}selected{% endif %}>Row</option>
+    <option value="description" {% if sort == "description" %}selected{% endif %}>Description</option>
+    <option value="level" {% if sort == "level" %}selected{% endif %}>Level</option>
+    <option value="bay" {% if sort == "bay" %}selected{% endif %}>Bay</option>
+  </select>
+  <label for="dir-filter" class="field-label">Order</label>
+  <select id="dir-filter" name="dir">
+    <option value="asc" {% if sort_dir == "asc" %}selected{% endif %}>Ascending</option>
+    <option value="desc" {% if sort_dir == "desc" %}selected{% endif %}>Descending</option>
+  </select>
+  <button type="submit" class="bubble-btn">Apply</button>
+  {% if row_filter or description_query or search or sort != "code" or sort_dir != "asc" %}
+    <a href="{{ url_for('inventory.list_locations') }}" class="bubble-btn">Clear Filters</a>
   {% endif %}
 </form>
+
+<div class="muted">
+  <strong>{{ total_locations }}</strong> results
+  {% set active_filters = [] %}
+  {% if row_filter %}
+    {% set _ = active_filters.append('Row=' ~ row_filter) %}
+  {% endif %}
+  {% if description_query %}
+    {% set _ = active_filters.append("Description contains '" ~ description_query ~ "'") %}
+  {% endif %}
+  {% if search %}
+    {% set _ = active_filters.append("Item search contains '" ~ search ~ "'") %}
+  {% endif %}
+  {% if active_filters %}
+    <span>Filters: {{ active_filters | join(', ') }}</span>
+  {% endif %}
+</div>
 
 <br>
 <br>
@@ -42,6 +85,9 @@
     <thead>
       <tr>
         <th>Code</th>
+        <th>Level</th>
+        <th>Row</th>
+        <th>Bay</th>
         <th>Description</th>
         <th>Stock</th>
         <th>Pending Qty</th>
@@ -54,6 +100,9 @@
       {% for loc in locations %}
       <tr>
         <td><a href="{{ url_for('inventory.edit_location', location_id=loc.id) }}">{{ loc.code }}</a></td>
+        <td>{{ loc.level if loc.level is not none else '-' }}</td>
+        <td>{{ loc.row if loc.row is not none else '-' }}</td>
+        <td>{{ loc.bay if loc.bay is not none else '-' }}</td>
         <td>{{ loc.description }}</td>
         <td>
           {% set balances = balances_by_location.get(loc.id, []) %}
@@ -99,10 +148,10 @@
 </div>
 <div class="pagination">
   {% if page > 1 %}
-    <a href="{{ url_for('inventory.list_locations', page=page-1, size=size) }}">Previous</a>
+    <a href="{{ url_for('inventory.list_locations', page=page-1, **query_params) }}">Previous</a>
   {% endif %}
   {% if page < pages %}
-    <a href="{{ url_for('inventory.list_locations', page=page+1, size=size) }}">Next</a>
+    <a href="{{ url_for('inventory.list_locations', page=page+1, **query_params) }}">Next</a>
   {% endif %}
 </div>
 {% endblock %}
