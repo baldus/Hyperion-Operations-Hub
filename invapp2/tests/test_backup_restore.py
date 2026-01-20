@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from invapp import create_app
 from invapp.extensions import db
-from invapp.models import Role, User
+from invapp.models import BackupRestoreEvent, Role, User
 from invapp.services import backup_service
 
 
@@ -98,13 +99,118 @@ def test_restore_permissions(client, app):
     response = client.get("/admin/backups")
     assert response.status_code == 403
 
+    client.get("/auth/logout", follow_redirects=True)
+
     login_superuser(client)
     response = client.get("/admin/backups")
     assert response.status_code == 200
 
 
+def test_restore_requires_superuser(client, app):
+    with app.app_context():
+        admin_role = Role.query.filter_by(name="admin").first()
+        if admin_role is None:
+            admin_role = Role(name="admin", description="Administrator")
+            db.session.add(admin_role)
+            db.session.commit()
+        user = User(username="jane")
+        user.set_password("pw123")
+        user.roles.append(admin_role)
+        db.session.add(user)
+        db.session.commit()
+
+    login_user(client, "jane", "pw123")
+    with client.session_transaction() as session:
+        session["backup_restore_csrf"] = "token"
+
+    response = client.post(
+        "/admin/backups/restore",
+        data={
+            "backup_filename": "backup.sql",
+            "confirm_restore": "RESTORE backup.sql",
+            "confirm_phrase": "I UNDERSTAND THIS WILL OVERWRITE DATA",
+            "confirm_ack": "yes",
+            "csrf_token": "token",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 403
+
+
+def test_restore_rejects_bad_confirmation(client, app):
+    login_superuser(client)
+    with client.session_transaction() as session:
+        session["backup_restore_csrf"] = "token"
+
+    response = client.post(
+        "/admin/backups/restore",
+        data={
+            "backup_filename": "backup.sql",
+            "confirm_restore": "RESTORE wrong.sql",
+            "confirm_phrase": "I UNDERSTAND THIS WILL OVERWRITE DATA",
+            "confirm_ack": "yes",
+            "csrf_token": "token",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Type RESTORE backup.sql to confirm the backup restore." in response.data
+
+
+def test_restore_uses_psql_without_root(app, monkeypatch, tmp_path):
+    monkeypatch.setenv("BACKUP_DIR", str(tmp_path))
+    monkeypatch.setenv("DB_URL", "postgresql://user:pass@localhost/invdb")
+    backup_path = tmp_path / "db" / "backup.sql"
+    backup_path.parent.mkdir(parents=True, exist_ok=True)
+    backup_path.write_text("SELECT 1;", encoding="utf-8")
+
+    calls = []
+
+    def fake_run(cmd, check=True, env=None, timeout=None, capture_output=False, text=False):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(backup_service.subprocess, "run", fake_run)
+
+    result = backup_service.restore_database_backup(app, "backup.sql", app.logger)
+
+    assert any(call[0] == "psql" for call in calls)
+    assert result.message == "Restore completed from backup.sql."
+
+
+def test_restore_writes_audit_events(client, app, monkeypatch):
+    login_superuser(client)
+    with client.session_transaction() as session:
+        session["backup_restore_csrf"] = "token"
+
+    outcome = backup_service.RestoreOutcome(
+        filename="backup.sql",
+        message="Restore completed from backup.sql.",
+        stdout="ok",
+        stderr="",
+        duration_seconds=1.5,
+    )
+    monkeypatch.setattr(backup_service, "restore_database_backup", lambda *args, **kwargs: outcome)
+
+    response = client.post(
+        "/admin/backups/restore",
+        data={
+            "backup_filename": "backup.sql",
+            "confirm_restore": "RESTORE backup.sql",
+            "confirm_phrase": "I UNDERSTAND THIS WILL OVERWRITE DATA",
+            "confirm_ack": "yes",
+            "csrf_token": "token",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    with app.app_context():
+        assert BackupRestoreEvent.query.count() >= 2
+
+
 def test_restore_rejects_path_traversal(client, app, monkeypatch):
-    monkeypatch.setattr("os.geteuid", lambda: 0)
     login_superuser(client)
 
     with client.session_transaction() as session:
@@ -114,7 +220,8 @@ def test_restore_rejects_path_traversal(client, app, monkeypatch):
         "/admin/backups/restore",
         data={
             "backup_filename": "../../etc/passwd",
-            "confirm_restore": "RESTORE",
+            "confirm_restore": "RESTORE ../../etc/passwd",
+            "confirm_phrase": "I UNDERSTAND THIS WILL OVERWRITE DATA",
             "confirm_ack": "yes",
             "csrf_token": "token",
         },

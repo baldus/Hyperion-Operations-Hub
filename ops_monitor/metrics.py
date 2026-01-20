@@ -64,6 +64,11 @@ class BackupStatus:
     last_run_filepath: str | None
     last_success_at: datetime | None
     next_run_at: datetime | None
+    restore_last_at: datetime | None
+    restore_last_status: str | None
+    restore_last_filename: str | None
+    restore_last_message: str | None
+    restore_last_username: str | None
 
 
 @dataclass
@@ -259,6 +264,11 @@ def read_backup_status(db_url: str | None, *, default_frequency: int = 4) -> Bac
             last_run_filepath=None,
             last_success_at=None,
             next_run_at=None,
+            restore_last_at=None,
+            restore_last_status=None,
+            restore_last_filename=None,
+            restore_last_message=None,
+            restore_last_username=None,
         )
     frequency = default_frequency
     frequency_source = "default"
@@ -268,6 +278,11 @@ def read_backup_status(db_url: str | None, *, default_frequency: int = 4) -> Bac
     last_run_filename = None
     last_run_filepath = None
     last_success_at = None
+    restore_last_at = None
+    restore_last_status = None
+    restore_last_filename = None
+    restore_last_message = None
+    restore_last_username = None
     try:
         engine = create_engine(db_url, pool_pre_ping=True)
         with engine.connect() as conn:
@@ -321,6 +336,25 @@ def read_backup_status(db_url: str | None, *, default_frequency: int = 4) -> Bac
             ).first()
             if last_success:
                 last_success_at = last_success.started_at
+
+            restore_row = conn.execute(
+                text(
+                    """
+                    SELECT occurred_at, status, backup_filename, message, username
+                    FROM backup_restore_event
+                    WHERE action = :action
+                    ORDER BY occurred_at DESC
+                    LIMIT 1
+                    """
+                ),
+                {"action": "restore"},
+            ).first()
+            if restore_row:
+                restore_last_at = restore_row.occurred_at
+                restore_last_status = restore_row.status
+                restore_last_filename = restore_row.backup_filename
+                restore_last_message = restore_row.message
+                restore_last_username = restore_row.username
         engine.dispose()
     except Exception:
         pass
@@ -339,6 +373,11 @@ def read_backup_status(db_url: str | None, *, default_frequency: int = 4) -> Bac
         last_run_filepath=last_run_filepath,
         last_success_at=last_success_at,
         next_run_at=next_run_at,
+        restore_last_at=restore_last_at,
+        restore_last_status=restore_last_status,
+        restore_last_filename=restore_last_filename,
+        restore_last_message=restore_last_message,
+        restore_last_username=restore_last_username,
     )
 
 

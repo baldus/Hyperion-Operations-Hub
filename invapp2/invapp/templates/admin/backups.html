@@ -50,10 +50,10 @@
     {% if is_superuser() %}
         <form method="post" action="{{ url_for('admin.restore_backup') }}" class="stacked-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <label for="backup-filename">Select a database backup (.sql or .dump)</label>
+            <label for="backup-filename">Select a database backup (.sql)</label>
             <select id="backup-filename" name="backup_filename" required>
                 <option value="">Select a backup</option>
-                {% for backup in backups if backup.kind == 'db' %}
+                {% for backup in backups if backup.kind == 'db' and backup.filename.endswith('.sql') %}
                     <option value="{{ backup.filename }}">{{ backup.filename }}</option>
                 {% endfor %}
             </select>
@@ -63,8 +63,23 @@
                 I understand this will overwrite the current database.
             </label>
 
-            <label for="confirm-restore">Type RESTORE to confirm</label>
-            <input id="confirm-restore" type="text" name="confirm_restore" placeholder="RESTORE" required>
+            <label for="confirm-restore">Type RESTORE &lt;filename&gt; to confirm</label>
+            <input
+                id="confirm-restore"
+                type="text"
+                name="confirm_restore"
+                placeholder="RESTORE <filename>"
+                required
+            >
+
+            <label for="confirm-phrase">Type the acknowledgement phrase to continue</label>
+            <input
+                id="confirm-phrase"
+                type="text"
+                name="confirm_phrase"
+                placeholder="I UNDERSTAND THIS WILL OVERWRITE DATA"
+                required
+            >
 
             <button type="submit" class="action-btn">Restore Backup</button>
         </form>

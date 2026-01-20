@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Restore in Progress</h2>
+<div class="alert alert-warning">
+    A database restore is currently running. The console is in maintenance mode to prevent
+    changes while data is being replaced.
+</div>
+<p>Please wait for the restore to finish, then refresh this page.</p>
+{% endblock %}

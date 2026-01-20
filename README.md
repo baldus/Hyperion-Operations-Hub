@@ -12,12 +12,13 @@ Hyperion Operations Hub is a Flask-based operations console for manufacturing te
 7. [Database](#database)
 8. [Permissions / Roles](#permissions--roles)
 9. [Background Tasks / Schedules](#background-tasks--schedules)
-10. [Logging, Errors, and Debugging](#logging-errors-and-debugging)
-11. [Testing](#testing)
-12. [Deployment Notes](#deployment-notes)
-13. [Network Stability & Self-Healing (Linux Host)](#network-stability--self-healing-linux-host)
-14. [Contributing / Development Conventions](#contributing--development-conventions)
-15. [How to Make Common Changes](#how-to-make-common-changes)
+10. [Backups & Restore](#backups--restore)
+11. [Logging, Errors, and Debugging](#logging-errors-and-debugging)
+12. [Testing](#testing)
+13. [Deployment Notes](#deployment-notes)
+14. [Network Stability & Self-Healing (Linux Host)](#network-stability--self-healing-linux-host)
+15. [Contributing / Development Conventions](#contributing--development-conventions)
+16. [How to Make Common Changes](#how-to-make-common-changes)
 
 ---
 
@@ -345,6 +346,51 @@ If the database is offline at startup, the app uses an `OfflineAdminUser` that g
 - **Ops monitor** is a separate Python process launched by the startup scripts (not a Flask background task). See [`ops_monitor`](ops_monitor) and [`start_operations_console.sh`](start_operations_console.sh).
 
 To disable automated backups in dev, set `BACKUP_SCHEDULER_ENABLED` to `False` in config overrides when calling `create_app()` (it defaults to `True`). See scheduler checks in [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
+
+---
+
+## Backups & Restore
+
+### How backups are created
+- **Scheduler**: the Flask process runs APScheduler jobs that perform database backups on a configurable interval. The interval lives in the `app_setting` key `backup_frequency_hours` (default 4 hours). See the scheduler and settings logic in [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py) and scheduler startup in [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
+- **Artifacts**: database backups are plain `.sql` files created by `pg_dump`, and critical file attachments are archived alongside them. See the backup creation helpers in [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
+
+### Where backups are stored
+- **Primary directory**: `BACKUP_DIR` (env or config). If not writable, the service falls back to `<instance>/backups` and then `./backups`. See [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
+- **Subfolders**:
+  - `db/` for database `.sql` backups
+  - `files/` for attachment archives
+  - `tmp/` for staging work during restore
+
+### How restore works now (no root required)
+- **Superuser-only**: only the configured application superuser can access restore controls or execute a restore. See [`invapp2/invapp/superuser.py`](invapp2/invapp/superuser.py) and the admin restore route in [`invapp2/invapp/routes/admin.py`](invapp2/invapp/routes/admin.py).
+- **No OS root required**: restore uses `psql` with the `DB_URL` credentials; it does *not* require sudo/root or service restarts. See restore execution in [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
+- **Safe flow**:
+  1. The user must type `RESTORE <filename>` and `I UNDERSTAND THIS WILL OVERWRITE DATA` to confirm. See the restore form and validation in [`invapp2/invapp/templates/admin/backups.html`](invapp2/invapp/templates/admin/backups.html) and [`invapp2/invapp/routes/admin.py`](invapp2/invapp/routes/admin.py).
+  2. The app enters maintenance mode during the restore to prevent other requests. See the restore guard in [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
+  3. Active DB sessions are terminated (best-effort), the `public` schema is dropped/recreated, then the `.sql` is applied via `psql`. See restore steps in [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
+  4. Sequence repair runs after a successful restore to re-sync primary key sequences. See the post-restore step in [`invapp2/invapp/routes/admin.py`](invapp2/invapp/routes/admin.py).
+
+### Required environment variables
+- `DB_URL`: SQLAlchemy/PostgreSQL URL used by `pg_dump` and `psql`.
+- `BACKUP_DIR`: base folder for backup storage (optional, but recommended).
+- `BACKUP_DIR_AUTO`: directory for auto-imported backups (optional).
+See configuration defaults in [`invapp2/config.py`](invapp2/config.py) and backup handling in [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
+
+### Permissions model (restore)
+- **Restore**: superuser-only (the configured `ADMIN_USER` account).
+- **Backup listing/download**: admin or superuser per the admin routes.
+See access enforcement in [`invapp2/invapp/superuser.py`](invapp2/invapp/superuser.py) and [`invapp2/invapp/routes/admin.py`](invapp2/invapp/routes/admin.py).
+
+### Viewing restore/backup status (ops monitor)
+- The popout status terminal shows **backup status** in the “Backup Status” panel and recent **restore events** in the Events panel.
+- Restore progress events (start/reset/apply/complete) and sanitized stdout/stderr are published to the status bus (`ops_event_log`), so they appear in the terminal UI. See [`invapp2/invapp/services/status_bus.py`](invapp2/invapp/services/status_bus.py), [`ops_monitor/metrics.py`](ops_monitor/metrics.py), and [`ops_monitor/monitor.py`](ops_monitor/monitor.py).
+
+### Troubleshooting restore failures
+- **`DB_URL` incorrect**: `psql` will fail to connect. Verify `DB_URL` and that the database exists. See config defaults in [`invapp2/config.py`](invapp2/config.py).
+- **`psql` not installed**: install PostgreSQL client tools on the host (`psql` must be on `PATH`).
+- **Permission errors**: ensure the database user has rights to drop/create schema and restore objects.
+- **Locked sessions**: if active sessions block schema drops, ensure the DB user can terminate connections or stop the app briefly before retrying.
 
 ---
 

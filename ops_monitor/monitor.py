@@ -238,6 +238,9 @@ def build_controls_panel(verbose: bool) -> Panel:
 
 
 def build_backup_panel(status: BackupStatus) -> Panel:
+    restore_state = "n/a"
+    if status.restore_last_status:
+        restore_state = "running" if status.restore_last_status == "started" else status.restore_last_status
     lines = [
         f"[b]Frequency[/b]: {status.frequency_hours}h ({status.frequency_source})",
         f"[b]Last run[/b]: {status.last_run_at.strftime('%Y-%m-%d %H:%M UTC') if status.last_run_at else 'n/a'}",
@@ -247,6 +250,11 @@ def build_backup_panel(status: BackupStatus) -> Panel:
         f"[b]Last path[/b]: {status.last_run_filepath or 'n/a'}",
         f"[b]Last success[/b]: {status.last_success_at.strftime('%Y-%m-%d %H:%M UTC') if status.last_success_at else 'n/a'}",
         f"[b]Next run[/b]: {status.next_run_at.strftime('%Y-%m-%d %H:%M UTC') if status.next_run_at else 'n/a'}",
+        f"[b]Restore state[/b]: {restore_state}",
+        f"[b]Restore time[/b]: {status.restore_last_at.strftime('%Y-%m-%d %H:%M UTC') if status.restore_last_at else 'n/a'}",
+        f"[b]Restore file[/b]: {status.restore_last_filename or 'n/a'}",
+        f"[b]Restore by[/b]: {status.restore_last_username or 'n/a'}",
+        f"[b]Restore message[/b]: {status.restore_last_message or 'n/a'}",
     ]
     return Panel("\n".join(lines), title="Backup Status", box=box.ROUNDED, padding=(1, 1))
 
@@ -374,6 +382,11 @@ def monitor_loop(
             last_run_filepath=None,
             last_success_at=None,
             next_run_at=None,
+            restore_last_at=None,
+            restore_last_status=None,
+            restore_last_filename=None,
+            restore_last_message=None,
+            restore_last_username=None,
         ),
         "events": [],
         "error_snapshot": read_recent_errors(db_url),
