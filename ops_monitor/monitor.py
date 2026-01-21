@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import getpass
 import logging
 import os
 import shlex
@@ -10,6 +11,7 @@ import sys
 import termios
 import threading
 import time
+import traceback
 import tty
 from pathlib import Path
 from typing import Optional
@@ -143,18 +145,37 @@ def configure_terminal_logger() -> logging.Logger:
     if logger.handlers:
         return logger
     logger.setLevel(logging.INFO)
-    log_path = Path("/var/log/hyperion_terminal_display.log")
+    log_dir = Path("/var/log/hyperion")
+    log_path = log_dir / "terminal_monitor.log"
     try:
+        log_dir.mkdir(parents=True, exist_ok=True)
         handler = logging.FileHandler(log_path)
     except OSError:
-        log_path = Path("support/hyperion_terminal_display.log")
+        log_path = Path("support/hyperion_terminal_monitor.log")
         log_path.parent.mkdir(parents=True, exist_ok=True)
         handler = logging.FileHandler(log_path)
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
     handler.setFormatter(formatter)
     logger.addHandler(handler)
-    logger.info("terminal display started")
+    logger.info("terminal monitor started")
     return logger
+
+
+def log_startup_context(logger: logging.Logger, *, headless: bool) -> None:
+    logger.info(
+        "startup context: cwd=%s user=%s term=%s stdin_tty=%s stdout_tty=%s backend=rich headless=%s",
+        os.getcwd(),
+        getpass.getuser(),
+        os.getenv("TERM"),
+        sys.stdin.isatty(),
+        sys.stdout.isatty(),
+        headless,
+    )
+
+
+def read_network_status_line() -> str:
+    status = read_network_status()
+    return status.raw
 
 
 def build_header(service_name: str, status_text: str) -> Panel:
@@ -260,6 +281,7 @@ def build_controls_panel(verbose: bool) -> Panel:
             state="on" if verbose else "off"
         ),
         "[b]q[/b] Quit monitor",
+        "Press q or Esc to exit",
     ]
     return Panel("\n".join(lines), title="Controls", box=box.ROUNDED, padding=(1, 1))
 
@@ -369,7 +391,7 @@ def render_layout(state: dict) -> Layout:
 
 
 def monitor_loop(
-    target_pid: int,
+    target_pid: Optional[int],
     restart_cmd: Optional[str],
     log_file: Path,
     app_port: int,
@@ -453,7 +475,7 @@ def monitor_loop(
     ) as live:
         last_render = 0.0
         while not stop_event.is_set():
-            metrics = read_process_metrics(tracked_pid)
+            metrics = read_process_metrics(tracked_pid) if tracked_pid else None
             port_status = check_port(app_port)
             log_snapshot = read_log_lines(log_file, max_lines=log_max_lines)
             access_snapshot = read_recent_access(db_url)
@@ -514,15 +536,27 @@ def monitor_loop(
                     elif key == "end":
                         log_scroll = max_scroll
                 elif key == "r":
-                    status_message, new_pid = controls.restart_process(tracked_pid, restart_cmd)
-                    if new_pid:
-                        tracked_pid = new_pid
+                    if tracked_pid:
+                        status_message, new_pid = controls.restart_process(tracked_pid, restart_cmd)
+                        if new_pid:
+                            tracked_pid = new_pid
+                    else:
+                        status_message = "Restart unavailable (no target PID)"
                 elif key == "s":
-                    status_message = controls.graceful_shutdown(tracked_pid)
+                    if tracked_pid:
+                        status_message = controls.graceful_shutdown(tracked_pid)
+                    else:
+                        status_message = "Shutdown unavailable (no target PID)"
                 elif key == "k":
-                    status_message = controls.force_kill(tracked_pid)
+                    if tracked_pid:
+                        status_message = controls.force_kill(tracked_pid)
+                    else:
+                        status_message = "Kill unavailable (no target PID)"
                 elif key == "u":
-                    status_message = controls.reload_config(tracked_pid)
+                    if tracked_pid:
+                        status_message = controls.reload_config(tracked_pid)
+                    else:
+                        status_message = "Reload unavailable (no target PID)"
                 elif key == "c":
                     status_message = controls.clear_logs(log_file)
                 elif key == "v":
@@ -558,8 +592,6 @@ def monitor_loop(
                 "focused_panel": focused_panels[focus_index],
             }
 
-            if metrics is None and not restart_cmd:
-                stop_event.set()
             now = time.monotonic()
             if now - last_render >= refresh_interval or resize_pending:
                 live.update(render_layout(live_state))
@@ -572,30 +604,104 @@ def monitor_loop(
     stop_event.set()
 
 
+def headless_loop(
+    logger: logging.Logger,
+    *,
+    interval: float,
+) -> None:
+    logger.info("headless monitor loop starting (interval=%ss)", interval)
+    while True:
+        status_line = read_network_status_line()
+        logger.info("network status: %s", status_line)
+        time.sleep(max(interval, 1.0))
+
+
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Operations console for Hyperion Operations Hub")
-    parser.add_argument("--target-pid", type=int, required=True, help="PID of the application to monitor")
+    parser.add_argument("--target-pid", type=int, help="PID of the application to monitor")
     parser.add_argument("--app-port", type=int, default=int(os.getenv("PORT", 8000)), help="Application port to probe")
     parser.add_argument("--restart-cmd", type=str, default=None, help="Command used to restart the app")
     parser.add_argument("--log-file", type=Path, default=Path("support/operations.log"), help="Log file to tail")
     parser.add_argument("--service-name", type=str, default="Hyperion Operations Hub")
+    parser.add_argument("--headless", action="store_true", help="Run without interactive UI")
+    parser.add_argument("--doctor", action="store_true", help="Print diagnostics and exit")
     return parser.parse_args(argv)
+
+
+def run_doctor(logger: logging.Logger, args: argparse.Namespace) -> int:
+    status = read_network_status()
+    log_dir = Path("/var/log/hyperion")
+    log_path = log_dir / "terminal_monitor.log"
+    can_write = True
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write("")
+    except OSError:
+        can_write = False
+
+    print("Hyperion Terminal Monitor Doctor")
+    print(f"  stdin_tty: {sys.stdin.isatty()}")
+    print(f"  stdout_tty: {sys.stdout.isatty()}")
+    print(f"  TERM: {os.getenv('TERM')}")
+    print(f"  network_status_path: {Path('/var/lib/hyperion/network_status.txt')}")
+    print(f"  network_status_raw: {status.raw}")
+    print(f"  log_path: {log_path}")
+    print(f"  log_writable: {can_write}")
+    logger.info("doctor run complete (log_writable=%s)", can_write)
+    return 0
 
 
 def main(argv: Optional[list[str]] = None) -> None:
     args = parse_args(argv)
+    if not os.getenv("TERM") or os.getenv("TERM") == "dumb":
+        os.environ["TERM"] = "xterm-256color"
+    global console
+    console = Console()
+    logger = configure_terminal_logger()
+    if args.doctor:
+        sys.exit(run_doctor(logger, args))
+
+    stdin_tty = sys.stdin.isatty()
+    stdout_tty = sys.stdout.isatty()
+    headless = args.headless or not (stdin_tty and stdout_tty)
+    log_startup_context(logger, headless=headless)
+
+    if headless:
+        try:
+            headless_loop(logger, interval=float(os.getenv("OPS_MONITOR_REFRESH_INTERVAL", "5")))
+        except KeyboardInterrupt:
+            logger.info("headless monitor stopped by user")
+            return
+        except Exception:
+            logger.exception("headless monitor crashed")
+            sys.exit(1)
     restart_cmd = args.restart_cmd
     if restart_cmd:
         restart_cmd = shlex.split(restart_cmd)
         restart_cmd = " ".join(shlex.quote(part) for part in restart_cmd)
 
-    monitor_loop(
-        target_pid=args.target_pid,
-        restart_cmd=restart_cmd,
-        log_file=args.log_file,
-        app_port=args.app_port,
-        service_name=args.service_name,
-    )
+    if args.target_pid is None:
+        logger.error("target pid is required for interactive mode")
+        if stdin_tty and stdout_tty:
+            console.print("[bold red]Error:[/bold red] --target-pid is required for interactive mode.")
+            time.sleep(10)
+        sys.exit(1)
+
+    try:
+        monitor_loop(
+            target_pid=args.target_pid,
+            restart_cmd=restart_cmd,
+            log_file=args.log_file,
+            app_port=args.app_port,
+            service_name=args.service_name,
+        )
+    except Exception:
+        logger.error("terminal monitor crashed:\n%s", traceback.format_exc())
+        if stdin_tty and stdout_tty:
+            console.print("[bold red]Terminal monitor crashed. Check logs for details.[/bold red]")
+            time.sleep(10)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

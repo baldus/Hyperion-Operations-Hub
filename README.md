@@ -506,13 +506,24 @@ The `support/network_stability.sh` script still applies additional host protecti
 sudo support/network_stability.sh
 ```
 
-### Server/System Terminal Display
+### Server/System Terminal Monitor
 The Ops Monitor terminal display exists for host-level health visibility even when the web UI is unreachable (for example, during a network outage). It runs alongside the web server and provides live status, logs, and interactive controls.
 
 **How it runs**
 - `start_operations_console.sh` launches the ops monitor by default (`ENABLE_OPS_MONITOR=1`). See [`start_operations_console.sh`](start_operations_console.sh).
 - The monitor implementation is `ops_monitor/monitor.py`, launched via `ops_monitor/launcher.py`.
-- A diagnostic log is written to `/var/log/hyperion_terminal_display.log` (fallbacks to `support/hyperion_terminal_display.log` if permissions prevent writing to `/var/log`).
+- A diagnostic log is written to `/var/log/hyperion/terminal_monitor.log` (fallbacks to `support/hyperion_terminal_monitor.log` if permissions prevent writing to `/var/log`).
+- You can run the monitor headless (no TTY required) with `OPS_MONITOR_LAUNCH_MODE=headless` or `./start_operations_console.sh --monitor-headless`.
+
+**Manual run**
+```bash
+python -m ops_monitor.monitor --target-pid <PID> --app-port 8000 --service-name "Hyperion Operations Hub"
+```
+
+**Doctor mode**
+```bash
+python -m ops_monitor.monitor --doctor
+```
 
 **Key bindings (cheat sheet)**
 - Navigation: `Tab` / `Shift+Tab`, arrow keys, or `j/k`
@@ -523,6 +534,15 @@ The Ops Monitor terminal display exists for host-level health visibility even wh
 **Refresh & layout tuning**
 - Set `OPS_MONITOR_REFRESH_INTERVAL` for update cadence (seconds).
 - Set `OPS_MONITOR_LOG_MAX_LINES` and `OPS_MONITOR_LOG_WINDOW` to adjust scrollback and viewport size.
+
+**Systemd (headless)**
+- Unit template: `deployment/systemd/hyperion-terminal-monitor.service`
+- Install (update paths to match your host):
+  ```bash
+  sudo install -m 0644 deployment/systemd/hyperion-terminal-monitor.service /etc/systemd/system/hyperion-terminal-monitor.service
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now hyperion-terminal-monitor.service
+  ```
 
 ### Network Status Display (Server Terminal)
 Network status is intentionally **not** shown in the web UI; if connectivity is down, the site may be unreachable. Instead, the Ops Monitor terminal display reads the watchdog status file and renders it directly on the server console.
@@ -556,10 +576,15 @@ Network status is intentionally **not** shown in the web UI; if connectivity is 
   - Confirm the watchdog service is running: `systemctl status internet-watchdog.service`.
   - Check file permissions: `ls -l /var/lib/hyperion/network_status.txt`.
   - Verify the log: `sudo tail -f /var/log/internet_watchdog.log`.
+- **Monitor opens then closes**:
+  - Check `/var/log/hyperion/terminal_monitor.log` for a traceback.
+  - Confirm you launched it in a real TTY (or use `--monitor-headless`).
+  - Confirm `TERM` is valid (non-empty and not `dumb`).
+  - Run `python -m ops_monitor.monitor --doctor`.
 - **Controls not responding**:
   - Confirm the terminal has focus (click inside the terminal window).
   - If running inside tmux/screen, check that keybindings are not overridden.
-  - Set `OPS_MONITOR_DEBUG=1` and inspect `/var/log/hyperion_terminal_display.log`.
+  - Set `OPS_MONITOR_DEBUG=1` and inspect `/var/log/hyperion/terminal_monitor.log`.
 
 ---
 

@@ -33,6 +33,8 @@ def _monitor_command(
     ]
     if restart_cmd:
         args.append(f"--restart-cmd={restart_cmd}")
+    if os.getenv("OPS_MONITOR_LAUNCH_MODE", "").lower() == "headless":
+        args.append("--headless")
     return args
 
 

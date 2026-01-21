@@ -1,6 +1,43 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SHOW_USAGE=0
+while [ "${1:-}" != "" ]; do
+    case "$1" in
+        --monitor)
+            export ENABLE_OPS_MONITOR=1
+            shift
+            ;;
+        --no-monitor)
+            export ENABLE_OPS_MONITOR=0
+            shift
+            ;;
+        --monitor-headless)
+            export ENABLE_OPS_MONITOR=1
+            export OPS_MONITOR_LAUNCH_MODE="headless"
+            shift
+            ;;
+        --help|-h)
+            SHOW_USAGE=1
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+if [ "$SHOW_USAGE" -eq 1 ]; then
+    cat <<'USAGE'
+Usage: ./start_operations_console.sh [--monitor|--no-monitor|--monitor-headless]
+
+--monitor           Enable the terminal ops monitor (default).
+--no-monitor        Disable the terminal ops monitor.
+--monitor-headless  Run the monitor without a TTY (logs only).
+USAGE
+    exit 0
+fi
+
 APT_UPDATED=0
 
 run_as_root() {
