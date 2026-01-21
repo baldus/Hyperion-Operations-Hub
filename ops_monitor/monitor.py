@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
+import getpass
+import logging
 import os
-import queue
 import shlex
+import signal
 import sys
+import termios
 import threading
 import time
 import subprocess
-from datetime import datetime
+import traceback
+import tty
 from pathlib import Path
 from typing import Optional
 
@@ -25,13 +30,13 @@ from . import controls
 from .metrics import (
     AccessSnapshot,
     BackupStatus,
-    ConnectivityStatus,
-    OpsEventEntry,
+    NetworkStatus,
     check_port,
     format_uptime,
     mask_db_url,
-    ping_host,
     read_backup_status,
+    read_log_lines,
+    read_network_status,
     read_ops_events,
     read_process_metrics,
     read_recent_access,
@@ -39,128 +44,162 @@ from .metrics import (
     read_boot_status,
     read_sequence_repair_summary,
     summarize_connections,
-    tail_log,
 )
 
 
 console = Console()
 
 
-class NetworkWatchdog:
-    def __init__(
-        self,
-        *,
-        host: str,
-        interval: float,
-        timeout: int,
-        restart_cooldown: float,
-    ) -> None:
-        self._host = host
-        self._interval = interval
-        self._timeout = timeout
-        self._restart_cooldown = restart_cooldown
-        self._lock = threading.Lock()
-        self._stop_event = threading.Event()
-        self._events: list[OpsEventEntry] = []
-        self._last_restart: datetime | None = None
-        self._status = ConnectivityStatus(
-            online=True,
-            last_seen=None,
-            last_checked=None,
-            last_failure=None,
+class TerminalInput:
+    def __init__(self) -> None:
+        self._fd = sys.stdin.fileno()
+        self._original_attrs = termios.tcgetattr(self._fd)
+        self._original_flags = fcntl.fcntl(self._fd, fcntl.F_GETFL)
+        self._buffer = ""
+
+    def __enter__(self) -> "TerminalInput":
+        tty.setcbreak(self._fd)
+        fcntl.fcntl(self._fd, fcntl.F_SETFL, self._original_flags | os.O_NONBLOCK)
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        termios.tcsetattr(self._fd, termios.TCSADRAIN, self._original_attrs)
+        fcntl.fcntl(self._fd, fcntl.F_SETFL, self._original_flags)
+
+    def _parse_buffer(self) -> list[str]:
+        keys: list[str] = []
+        while self._buffer:
+            if self._buffer[0] != "\x1b":
+                ch = self._buffer[0]
+                self._buffer = self._buffer[1:]
+                if ch in ("\r", "\n"):
+                    keys.append("enter")
+                elif ch == "\t":
+                    keys.append("tab")
+                elif ch == "q":
+                    keys.append("q")
+                elif ch == "f":
+                    keys.append("f")
+                elif ch == "j":
+                    keys.append("down")
+                elif ch == "k":
+                    keys.append("up")
+                elif ch in {"r", "s", "u", "c", "v"}:
+                    keys.append(ch)
+                continue
+
+            sequences = {
+                "\x1b[A": "up",
+                "\x1b[B": "down",
+                "\x1b[C": "right",
+                "\x1b[D": "left",
+                "\x1b[5~": "pgup",
+                "\x1b[6~": "pgdn",
+                "\x1b[H": "home",
+                "\x1b[F": "end",
+                "\x1b[1~": "home",
+                "\x1b[4~": "end",
+                "\x1b[7~": "home",
+                "\x1b[8~": "end",
+                "\x1b[Z": "backtab",
+            }
+
+            matched = False
+            for seq, name in sequences.items():
+                if self._buffer.startswith(seq):
+                    keys.append(name)
+                    self._buffer = self._buffer[len(seq) :]
+                    matched = True
+                    break
+
+            if matched:
+                continue
+
+            if self._buffer == "\x1b":
+                keys.append("esc")
+                self._buffer = ""
+                break
+
+            if self._buffer.startswith("\x1b") and len(self._buffer) < 3:
+                break
+
+            self._buffer = self._buffer[1:]
+        return keys
+
+    def read_keys(self) -> list[str]:
+        keys: list[str] = []
+        while True:
+            try:
+                chunk = os.read(self._fd, 64)
+            except BlockingIOError:
+                break
+            if not chunk:
+                break
+            self._buffer += chunk.decode(errors="ignore")
+        if self._buffer:
+            keys.extend(self._parse_buffer())
+        return keys
+
+
+def configure_terminal_logger() -> logging.Logger:
+    logger = logging.getLogger("ops_monitor")
+    if logger.handlers:
+        return logger
+    logger.setLevel(logging.INFO)
+    log_dir = Path("/var/log/hyperion")
+    log_path = log_dir / "terminal_monitor.log"
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        handler = logging.FileHandler(log_path)
+    except OSError:
+        log_path = Path("support/hyperion_terminal_monitor.log")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.FileHandler(log_path)
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.info("terminal monitor started")
+    return logger
+
+
+def _monitor_version() -> str:
+    env_version = os.getenv("HYPERION_MONITOR_VERSION")
+    if env_version:
+        return env_version
+    repo_root = Path(__file__).resolve().parent.parent
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=repo_root,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
         )
-        self._thread = threading.Thread(target=self._run, daemon=True)
-
-    def start(self) -> None:
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._stop_event.set()
-        self._thread.join(timeout=1)
-
-    def snapshot(self) -> tuple[ConnectivityStatus, list[OpsEventEntry]]:
-        with self._lock:
-            status = ConnectivityStatus(
-                online=self._status.online,
-                last_seen=self._status.last_seen,
-                last_checked=self._status.last_checked,
-                last_failure=self._status.last_failure,
-            )
-            events = list(self._events)
-        return status, events
-
-    def _run(self) -> None:
-        was_online = True
-        while not self._stop_event.is_set():
-            now = datetime.utcnow()
-            online = ping_host(self._host, timeout=self._timeout)
-            restart_needed = False
-
-            with self._lock:
-                self._status.last_checked = now
-                if online:
-                    self._status.online = True
-                    self._status.last_seen = now
-                    self._status.last_failure = None
-                else:
-                    self._status.online = False
-                    if was_online:
-                        self._status.last_failure = now
-                        self._record_event(now, "WARNING: INTERNET DISCONNECTED")
-                        restart_needed = self._restart_due(now)
-
-            if not online and restart_needed:
-                self._restart_network_manager()
-
-            was_online = online
-            self._stop_event.wait(self._interval)
-
-    def _record_event(self, timestamp: datetime, message: str) -> None:
-        self._events.append(
-            OpsEventEntry(
-                created_at=timestamp,
-                level="WARNING",
-                message=message,
-                source="network_watchdog",
-                context=None,
-            )
-        )
-        if len(self._events) > 25:
-            self._events = self._events[-25:]
-
-    def _restart_due(self, now: datetime) -> bool:
-        if self._restart_cooldown <= 0:
-            return True
-        if not self._last_restart:
-            self._last_restart = now
-            return True
-        elapsed = (now - self._last_restart).total_seconds()
-        if elapsed >= self._restart_cooldown:
-            self._last_restart = now
-            return True
-        return False
-
-    def _restart_network_manager(self) -> None:
-        try:
-            subprocess.run(
-                ["systemctl", "restart", "NetworkManager"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-        except OSError:
-            return
+        if result.returncode == 0:
+            return result.stdout.strip() or "unknown"
+    except OSError:
+        return "unknown"
+    return "unknown"
 
 
-def _input_listener(command_queue: "queue.Queue[str]", stop_event: threading.Event) -> None:
-    while not stop_event.is_set():
-        try:
-            ch = console.input("[bold cyan]ops> ").strip().lower()
-            if ch:
-                command_queue.put(ch[0])
-        except (EOFError, KeyboardInterrupt):
-            stop_event.set()
-            break
+def log_startup_context(logger: logging.Logger, *, headless: bool) -> None:
+    version = _monitor_version()
+    logger.info(
+        "startup context: cwd=%s user=%s term=%s stdin_tty=%s stdout_tty=%s backend=rich headless=%s version=%s",
+        os.getcwd(),
+        getpass.getuser(),
+        os.getenv("TERM"),
+        sys.stdin.isatty(),
+        sys.stdout.isatty(),
+        headless,
+        version,
+    )
+
+
+def read_network_status_line() -> str:
+    status = read_network_status()
+    return status.raw
 
 
 def build_header(service_name: str, status_text: str) -> Panel:
@@ -175,20 +214,16 @@ def build_metrics_table(state: dict) -> Table:
     table.add_column("Metric", style="bold cyan")
     table.add_column("Value", style="white")
 
-    internet_status = state.get("internet_status")
-    if isinstance(internet_status, ConnectivityStatus):
-        if internet_status.online:
-            internet_value = Text("ONLINE", style="bold green")
+    network_status = state.get("network_status")
+    if isinstance(network_status, NetworkStatus):
+        if network_status.status.startswith("OFFLINE"):
+            network_value = Text(f"!!! {network_status.raw}", style="bold red")
+        elif network_status.status.startswith("ONLINE"):
+            network_value = Text(network_status.raw, style="bold green")
         else:
-            internet_value = Text("WARNING: INTERNET DISCONNECTED", style="bold red")
-        last_seen = (
-            internet_status.last_seen.strftime("%Y-%m-%d %H:%M:%S UTC")
-            if internet_status.last_seen
-            else "never"
-        )
+            network_value = Text(network_status.raw, style="yellow")
     else:
-        internet_value = Text("unknown", style="yellow")
-        last_seen = "n/a"
+        network_value = Text("UNKNOWN | network watchdog not running", style="yellow")
 
     table.add_row("Status", state.get("status", "Unknown"))
     table.add_row("Uptime", state.get("uptime", "00:00:00"))
@@ -197,17 +232,50 @@ def build_metrics_table(state: dict) -> Table:
     table.add_row("Threads", str(state.get("threads", 0)))
     table.add_row("Port", state.get("port_status", "n/a"))
     table.add_row("Clients", str(state.get("connections", 0)))
-    table.add_row("Internet", internet_value)
-    table.add_row("Last seen", last_seen)
+    table.add_row("Network", network_value)
     return table
 
 
-def build_log_panel(log_lines: list[str], path: Path) -> Panel:
-    rendered = "\n".join(log_lines) if log_lines else "(no log entries yet)"
-    return Panel(rendered, title=f"Log tail — {path}", box=box.ROUNDED, padding=(1, 1))
+def build_metrics_panel(state: dict, focused: bool) -> Panel:
+    title_style = "bold yellow" if focused else None
+    return Panel(
+        build_metrics_table(state),
+        title="System Health",
+        title_align="left",
+        title_style=title_style,
+        box=box.ROUNDED,
+        padding=(1, 1),
+    )
 
 
-def build_access_panel(access_snapshot: AccessSnapshot) -> Panel:
+def build_log_panel(
+    log_lines: list[str],
+    path: Path,
+    *,
+    follow: bool,
+    scroll_index: int,
+    window_size: int,
+    focused: bool,
+) -> Panel:
+    total = len(log_lines)
+    if total > window_size:
+        start = max(total - window_size, 0) if follow else min(scroll_index, total - window_size)
+    else:
+        start = 0
+    windowed = log_lines[start : start + window_size]
+    rendered = "\n".join(windowed) if windowed else "(no log entries yet)"
+    title = f"Log tail — {path}"
+    if total > window_size:
+        if follow:
+            title = f"{title} (follow)"
+        else:
+            end_index = min(start + window_size, total)
+            title = f"{title} (paused {start + 1}-{end_index}/{total})"
+    title_style = "bold yellow" if focused else None
+    return Panel(rendered, title=title, title_style=title_style, box=box.ROUNDED, padding=(1, 1))
+
+
+def build_access_panel(access_snapshot: AccessSnapshot, focused: bool) -> Panel:
     users = access_snapshot.users or ["(no recent users)"]
     pages = access_snapshot.pages or ["(no recent page activity)"]
     rendered = "\n".join(
@@ -219,11 +287,15 @@ def build_access_panel(access_snapshot: AccessSnapshot) -> Panel:
             *[f"- {page}" for page in pages],
         ]
     )
-    return Panel(rendered, title=access_snapshot.status, box=box.ROUNDED, padding=(1, 1))
+    title_style = "bold yellow" if focused else None
+    return Panel(rendered, title=access_snapshot.status, title_style=title_style, box=box.ROUNDED, padding=(1, 1))
 
 
 def build_controls_panel(verbose: bool) -> Panel:
     lines = [
+        "[b]tab[/b] Next panel  [b]shift+tab[/b] Previous panel",
+        "[b]↑/↓[/b] or [b]j/k[/b] Move focus  [b]enter[/b] Select  [b]f[/b] Follow log",
+        "[b]pgup/pgdn[/b] Scroll log  [b]home/end[/b] Jump",
         "[b]r[/b] Restart application",
         "[b]s[/b] Graceful shutdown",
         "[b]k[/b] Force kill",
@@ -233,11 +305,12 @@ def build_controls_panel(verbose: bool) -> Panel:
             state="on" if verbose else "off"
         ),
         "[b]q[/b] Quit monitor",
+        "Press q or Esc to exit",
     ]
     return Panel("\n".join(lines), title="Controls", box=box.ROUNDED, padding=(1, 1))
 
 
-def build_backup_panel(status: BackupStatus) -> Panel:
+def build_backup_panel(status: BackupStatus, focused: bool) -> Panel:
     restore_state = "n/a"
     if status.restore_last_status:
         restore_state = "running" if status.restore_last_status == "started" else status.restore_last_status
@@ -256,22 +329,25 @@ def build_backup_panel(status: BackupStatus) -> Panel:
         f"[b]Restore by[/b]: {status.restore_last_username or 'n/a'}",
         f"[b]Restore message[/b]: {status.restore_last_message or 'n/a'}",
     ]
-    return Panel("\n".join(lines), title="Backup Status", box=box.ROUNDED, padding=(1, 1))
+    title_style = "bold yellow" if focused else None
+    return Panel("\n".join(lines), title="Backup Status", title_style=title_style, box=box.ROUNDED, padding=(1, 1))
 
 
-def build_events_panel(events: list) -> Panel:
+def build_events_panel(events: list, focused: bool) -> Panel:
     if not events:
-        return Panel("(no recent warnings/errors)", title="Events", box=box.ROUNDED, padding=(1, 1))
+        title_style = "bold yellow" if focused else None
+        return Panel("(no recent warnings/errors)", title="Events", title_style=title_style, box=box.ROUNDED, padding=(1, 1))
     lines = []
     for event in events:
         timestamp = event.created_at.strftime("%H:%M:%S") if event.created_at else "--:--:--"
         level = event.level
         message = event.message
         lines.append(f"[{level}] {timestamp} {message}")
-    return Panel("\n".join(lines), title="Recent Events", box=box.ROUNDED, padding=(1, 1))
+    title_style = "bold yellow" if focused else None
+    return Panel("\n".join(lines), title="Recent Events", title_style=title_style, box=box.ROUNDED, padding=(1, 1))
 
 
-def build_health_panel(state: dict) -> Panel:
+def build_health_panel(state: dict, focused: bool) -> Panel:
     lines = [
         f"[b]DB_URL[/b]: {state.get('db_url_masked', 'n/a')}",
         f"[b]Gunicorn bind[/b]: {state.get('gunicorn_bind', 'n/a')}",
@@ -288,16 +364,30 @@ def build_health_panel(state: dict) -> Panel:
             f"{summary.get('skipped', 0)} skipped, "
             f"{summary.get('failed', 0)} failed"
         )
-    return Panel("\n".join(lines), title="Health", box=box.ROUNDED, padding=(1, 1))
+    title_style = "bold yellow" if focused else None
+    return Panel("\n".join(lines), title="Health", title_style=title_style, box=box.ROUNDED, padding=(1, 1))
 
 
-def build_errors_panel(error_snapshot) -> Panel:
+def build_errors_panel(error_snapshot, focused: bool) -> Panel:
     lines = error_snapshot.entries or ["(no recent exceptions)"]
-    return Panel("\n".join(lines), title=error_snapshot.status, box=box.ROUNDED, padding=(1, 1))
+    title_style = "bold yellow" if focused else None
+    return Panel("\n".join(lines), title=error_snapshot.status, title_style=title_style, box=box.ROUNDED, padding=(1, 1))
 
 
 def render_layout(state: dict) -> Layout:
     layout = Layout()
+    terminal_size = console.size
+    if terminal_size.width < 80 or terminal_size.height < 24:
+        layout.split_column(Layout(name="main"))
+        layout["main"].update(
+            Panel(
+                "Terminal window too small. Resize to at least 80x24.",
+                title="Terminal Monitor",
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
+        return layout
     layout.split_column(
         Layout(name="header", size=3),
         Layout(name="body"),
@@ -313,31 +403,53 @@ def render_layout(state: dict) -> Layout:
     layout["right"].split_column(Layout(name="logs"), Layout(name="events"), Layout(name="errors", size=8))
 
     layout["header"].update(build_header(state.get("service_name", "Operations"), state.get("status", "Unknown")))
-    layout["metrics"].update(build_metrics_table(state))
-    layout["backup"].update(build_backup_panel(state.get("backup_status")))
-    layout["health"].update(build_health_panel(state))
-    layout["access"].update(build_access_panel(state.get("access_snapshot", AccessSnapshot([], [], "Access"))))
-    layout["logs"].update(build_log_panel(state.get("log_lines", []), state.get("log_path", Path("log"))))
-    layout["events"].update(build_events_panel(state.get("events", [])))
-    layout["errors"].update(build_errors_panel(state.get("error_snapshot")))
+    focused_panel = state.get("focused_panel")
+    layout["metrics"].update(build_metrics_panel(state, focused_panel == "metrics"))
+    layout["backup"].update(build_backup_panel(state.get("backup_status"), focused_panel == "backup"))
+    layout["health"].update(build_health_panel(state, focused_panel == "health"))
+    layout["access"].update(
+        build_access_panel(state.get("access_snapshot", AccessSnapshot([], [], "Access")), focused_panel == "access")
+    )
+    layout["logs"].update(
+        build_log_panel(
+            state.get("log_lines", []),
+            state.get("log_path", Path("log")),
+            follow=state.get("log_follow", True),
+            scroll_index=state.get("log_scroll", 0),
+            window_size=state.get("log_window", 18),
+            focused=focused_panel == "logs",
+        )
+    )
+    layout["events"].update(build_events_panel(state.get("events", []), focused_panel == "events"))
+    layout["errors"].update(build_errors_panel(state.get("error_snapshot"), focused_panel == "errors"))
     layout["footer"].update(build_controls_panel(state.get("verbose", False)))
     return layout
 
 
 def monitor_loop(
-    target_pid: int,
+    target_pid: Optional[int],
     restart_cmd: Optional[str],
     log_file: Path,
     app_port: int,
     service_name: str,
+    logger: logging.Logger,
 ) -> None:
-    command_queue: "queue.Queue[str]" = queue.Queue()
     stop_event = threading.Event()
+    debug_input = os.getenv("OPS_MONITOR_DEBUG", "0") == "1"
+    refresh_interval = float(os.getenv("OPS_MONITOR_REFRESH_INTERVAL", "0.5"))
+    log_max_lines = int(os.getenv("OPS_MONITOR_LOG_MAX_LINES", "200"))
+    log_window = int(os.getenv("OPS_MONITOR_LOG_WINDOW", "18"))
+    log_follow = True
+    log_scroll = 0
+    focused_panels = ["metrics", "logs", "events", "errors", "backup", "health", "access"]
+    focus_index = 0
+    resize_pending = False
 
-    input_thread = threading.Thread(target=_input_listener, args=(command_queue, stop_event), daemon=True)
-    input_thread.start()
+    def handle_resize(signum, frame):
+        nonlocal resize_pending
+        resize_pending = True
 
-    log_cursor: dict[str, int] = {}
+    signal.signal(signal.SIGWINCH, handle_resize)
     status_message = "System Online"
     verbose = False
     tracked_pid = target_pid
@@ -346,19 +458,6 @@ def monitor_loop(
     gunicorn_bind = f"{os.getenv('HOST', '0.0.0.0')}:{os.getenv('PORT', '8000')}"
     gunicorn_workers = os.getenv("GUNICORN_WORKERS", "2")
     gunicorn_timeout = os.getenv("GUNICORN_TIMEOUT", "600")
-    internet_host = os.getenv("OPS_MONITOR_CONNECTIVITY_HOST", "1.1.1.1")
-    internet_interval = float(os.getenv("OPS_MONITOR_CONNECTIVITY_INTERVAL", "10"))
-    internet_timeout = int(os.getenv("OPS_MONITOR_CONNECTIVITY_TIMEOUT", "1"))
-    internet_restart_cooldown = float(os.getenv("OPS_MONITOR_CONNECTIVITY_RESTART_COOLDOWN", "60"))
-
-    watchdog = NetworkWatchdog(
-        host=internet_host,
-        interval=internet_interval,
-        timeout=internet_timeout,
-        restart_cooldown=internet_restart_cooldown,
-    )
-    watchdog.start()
-
     live_state = {
         "service_name": service_name,
         "status": "Starting",
@@ -396,135 +495,264 @@ def monitor_loop(
         "gunicorn_timeout": gunicorn_timeout,
         "boot_status": "Unknown",
         "sequence_summary": None,
-        "internet_status": ConnectivityStatus(
-            online=True,
-            last_seen=None,
-            last_checked=None,
-            last_failure=None,
-        ),
+        "network_status": read_network_status(),
+        "log_follow": log_follow,
+        "log_scroll": log_scroll,
+        "log_window": log_window,
+        "focused_panel": focused_panels[focus_index],
     }
 
-    with Live(render_layout(live_state), console=console, screen=True, refresh_per_second=4) as live:
+    with TerminalInput() as terminal_input, Live(
+        render_layout(live_state),
+        console=console,
+        screen=True,
+        refresh_per_second=4,
+        auto_refresh=False,
+    ) as live:
+        last_render = 0.0
         while not stop_event.is_set():
-            metrics = read_process_metrics(tracked_pid)
-            port_status = check_port(app_port)
-            log_snapshot = tail_log(log_file, state=log_cursor)
-            access_snapshot = read_recent_access(db_url)
-            backup_status = read_backup_status(db_url)
-            events = read_ops_events(db_url)
-            error_snapshot = read_recent_errors(db_url)
-            sequence_summary = read_sequence_repair_summary(db_url)
-            boot_status = read_boot_status(db_url)
-            internet_status, network_events = watchdog.snapshot()
-
-            if metrics is None:
-                status = "Stopped"
-                uptime = "00:00:00"
-                cpu = memory = threads = connections = 0
-                if restart_cmd:
-                    status_message = "App offline; press r to restart."
-                else:
-                    status_message = "App offline"
-            else:
-                status = "Running"
-                uptime = format_uptime(metrics.uptime)
-                cpu = metrics.cpu_percent
-                memory = metrics.memory_mb
-                threads = metrics.thread_count
-                try:
-                    connections = summarize_connections(psutil.net_connections(), app_port)
-                except Exception:
-                    connections = metrics.connections
-
-            live_state = {
-                "service_name": service_name,
-                "status": f"{status} — {status_message}",
-                "uptime": uptime,
-                "cpu": cpu,
-                "memory": memory,
-                "threads": threads,
-                "port_status": "online" if port_status.reachable else "offline",
-                "connections": connections,
-                "log_lines": log_snapshot.lines,
-                "log_path": log_snapshot.path,
-                "verbose": verbose,
-                "access_snapshot": access_snapshot,
-                "backup_status": backup_status,
-                "events": events,
-                "error_snapshot": error_snapshot,
-                "db_url_masked": db_url_masked,
-                "gunicorn_bind": gunicorn_bind,
-                "gunicorn_workers": gunicorn_workers,
-                "gunicorn_timeout": gunicorn_timeout,
-                "boot_status": boot_status or status_message,
-                "sequence_summary": sequence_summary,
-                "internet_status": internet_status,
-            }
-
-            if network_events:
-                events = [*network_events, *events]
-
-            live.update(render_layout(live_state))
-
             try:
-                command = command_queue.get_nowait()
-            except queue.Empty:
-                command = None
+                metrics = read_process_metrics(tracked_pid) if tracked_pid else None
+                port_status = check_port(app_port)
+                log_snapshot = read_log_lines(log_file, max_lines=log_max_lines)
+                access_snapshot = read_recent_access(db_url)
+                backup_status = read_backup_status(db_url)
+                events = read_ops_events(db_url)
+                error_snapshot = read_recent_errors(db_url)
+                sequence_summary = read_sequence_repair_summary(db_url)
+                boot_status = read_boot_status(db_url)
+                network_status = read_network_status()
+                log_lines = log_snapshot.lines
+                total_lines = len(log_lines)
+                max_scroll = max(total_lines - log_window, 0)
+                if log_follow:
+                    log_scroll = max_scroll
+                else:
+                    log_scroll = max(0, min(log_scroll, max_scroll))
 
-            if command:
-                if command == "q":
-                    stop_event.set()
-                    status_message = "Exiting monitor"
-                elif command == "r":
-                    status_message, new_pid = controls.restart_process(tracked_pid, restart_cmd)
-                    if new_pid:
-                        tracked_pid = new_pid
-                elif command == "s":
-                    status_message = controls.graceful_shutdown(tracked_pid)
-                elif command == "k":
-                    status_message = controls.force_kill(tracked_pid)
-                elif command == "u":
-                    status_message = controls.reload_config(tracked_pid)
-                elif command == "c":
-                    status_message = controls.clear_logs(log_file)
-                elif command == "v":
-                    verbose = not verbose
-                    status_message = controls.toggle_verbose(tracked_pid, verbose)
+                if metrics is None:
+                    status = "Stopped"
+                    uptime = "00:00:00"
+                    cpu = memory = threads = connections = 0
+                    if restart_cmd:
+                        status_message = "App offline; press r to restart."
+                    else:
+                        status_message = "App offline"
+                else:
+                    status = "Running"
+                    uptime = format_uptime(metrics.uptime)
+                    cpu = metrics.cpu_percent
+                    memory = metrics.memory_mb
+                    threads = metrics.thread_count
+                    try:
+                        connections = summarize_connections(psutil.net_connections(), app_port)
+                    except Exception:
+                        connections = metrics.connections
 
-            if metrics is None and not restart_cmd:
-                stop_event.set()
+                for key in terminal_input.read_keys():
+                    if debug_input:
+                        logger.info("key pressed: %s", key)
+                    if key in {"q", "esc"}:
+                        stop_event.set()
+                        status_message = "Exiting monitor"
+                    elif key in {"tab", "right", "down"}:
+                        focus_index = (focus_index + 1) % len(focused_panels)
+                    elif key in {"backtab", "left", "up"}:
+                        focus_index = (focus_index - 1) % len(focused_panels)
+                    elif key == "enter" and focused_panels[focus_index] == "logs":
+                        log_follow = not log_follow
+                    elif key == "f" and focused_panels[focus_index] == "logs":
+                        log_follow = not log_follow
+                    elif key in {"pgup", "pgdn", "home", "end"} and focused_panels[focus_index] == "logs":
+                        log_follow = False
+                        if key == "pgup":
+                            log_scroll = max(log_scroll - log_window, 0)
+                        elif key == "pgdn":
+                            log_scroll = min(log_scroll + log_window, max_scroll)
+                        elif key == "home":
+                            log_scroll = 0
+                        elif key == "end":
+                            log_scroll = max_scroll
+                    elif key == "r":
+                        if tracked_pid:
+                            status_message, new_pid = controls.restart_process(tracked_pid, restart_cmd)
+                            if new_pid:
+                                tracked_pid = new_pid
+                        else:
+                            status_message = "Restart unavailable (no target PID)"
+                    elif key == "s":
+                        if tracked_pid:
+                            status_message = controls.graceful_shutdown(tracked_pid)
+                        else:
+                            status_message = "Shutdown unavailable (no target PID)"
+                    elif key == "k":
+                        if tracked_pid:
+                            status_message = controls.force_kill(tracked_pid)
+                        else:
+                            status_message = "Kill unavailable (no target PID)"
+                    elif key == "u":
+                        if tracked_pid:
+                            status_message = controls.reload_config(tracked_pid)
+                        else:
+                            status_message = "Reload unavailable (no target PID)"
+                    elif key == "c":
+                        status_message = controls.clear_logs(log_file)
+                    elif key == "v":
+                        verbose = not verbose
+                        status_message = controls.toggle_verbose(tracked_pid, verbose)
 
-            time.sleep(0.5)
+                live_state = {
+                    "service_name": service_name,
+                    "status": f"{status} — {status_message}",
+                    "uptime": uptime,
+                    "cpu": cpu,
+                    "memory": memory,
+                    "threads": threads,
+                    "port_status": "online" if port_status.reachable else "offline",
+                    "connections": connections,
+                    "log_lines": log_lines,
+                    "log_path": log_snapshot.path,
+                    "verbose": verbose,
+                    "access_snapshot": access_snapshot,
+                    "backup_status": backup_status,
+                    "events": events,
+                    "error_snapshot": error_snapshot,
+                    "db_url_masked": db_url_masked,
+                    "gunicorn_bind": gunicorn_bind,
+                    "gunicorn_workers": gunicorn_workers,
+                    "gunicorn_timeout": gunicorn_timeout,
+                    "boot_status": boot_status or status_message,
+                    "sequence_summary": sequence_summary,
+                    "network_status": network_status,
+                    "log_follow": log_follow,
+                    "log_scroll": log_scroll,
+                    "log_window": log_window,
+                    "focused_panel": focused_panels[focus_index],
+                }
 
-    watchdog.stop()
+                now = time.monotonic()
+                if now - last_render >= refresh_interval or resize_pending:
+                    live.update(render_layout(live_state))
+                    live.refresh()
+                    last_render = now
+                    resize_pending = False
+            except Exception:
+                logger.error("terminal monitor loop exception:\n%s", traceback.format_exc())
+                live.update(
+                    Panel(
+                        "Terminal monitor crashed. Check /var/log/hyperion/terminal_monitor.log.",
+                        title="Error",
+                        box=box.ROUNDED,
+                        padding=(1, 2),
+                    )
+                )
+                live.refresh()
+                raise
+
+            time.sleep(0.05)
+
     stop_event.set()
-    input_thread.join(timeout=1)
+
+
+def headless_loop(
+    logger: logging.Logger,
+    *,
+    interval: float,
+) -> None:
+    logger.info("headless monitor loop starting (interval=%ss)", interval)
+    while True:
+        status_line = read_network_status_line()
+        logger.info("network status: %s", status_line)
+        time.sleep(max(interval, 1.0))
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Operations console for Hyperion Operations Hub")
-    parser.add_argument("--target-pid", type=int, required=True, help="PID of the application to monitor")
+    parser.add_argument("--target-pid", type=int, help="PID of the application to monitor")
     parser.add_argument("--app-port", type=int, default=int(os.getenv("PORT", 8000)), help="Application port to probe")
     parser.add_argument("--restart-cmd", type=str, default=None, help="Command used to restart the app")
     parser.add_argument("--log-file", type=Path, default=Path("support/operations.log"), help="Log file to tail")
     parser.add_argument("--service-name", type=str, default="Hyperion Operations Hub")
+    parser.add_argument("--headless", action="store_true", help="Run without interactive UI")
+    parser.add_argument("--doctor", action="store_true", help="Print diagnostics and exit")
     return parser.parse_args(argv)
+
+
+def run_doctor(logger: logging.Logger, args: argparse.Namespace) -> int:
+    status = read_network_status()
+    log_dir = Path("/var/log/hyperion")
+    log_path = log_dir / "terminal_monitor.log"
+    can_write = True
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write("")
+    except OSError:
+        can_write = False
+
+    print("Hyperion Terminal Monitor Doctor")
+    print(f"  stdin_tty: {sys.stdin.isatty()}")
+    print(f"  stdout_tty: {sys.stdout.isatty()}")
+    print(f"  TERM: {os.getenv('TERM')}")
+    print(f"  network_status_path: {Path('/var/lib/hyperion/network_status.txt')}")
+    print(f"  network_status_raw: {status.raw}")
+    print(f"  log_path: {log_path}")
+    print(f"  log_writable: {can_write}")
+    logger.info("doctor run complete (log_writable=%s)", can_write)
+    return 0
 
 
 def main(argv: Optional[list[str]] = None) -> None:
     args = parse_args(argv)
+    if not os.getenv("TERM") or os.getenv("TERM") == "dumb":
+        os.environ["TERM"] = "xterm-256color"
+    global console
+    console = Console()
+    logger = configure_terminal_logger()
+    if args.doctor:
+        sys.exit(run_doctor(logger, args))
+
+    stdin_tty = sys.stdin.isatty()
+    stdout_tty = sys.stdout.isatty()
+    headless = args.headless or not (stdin_tty and stdout_tty)
+    log_startup_context(logger, headless=headless)
+
+    if headless:
+        try:
+            headless_loop(logger, interval=float(os.getenv("OPS_MONITOR_REFRESH_INTERVAL", "5")))
+        except KeyboardInterrupt:
+            logger.info("headless monitor stopped by user")
+            return
+        except Exception:
+            logger.exception("headless monitor crashed")
+            sys.exit(1)
     restart_cmd = args.restart_cmd
     if restart_cmd:
         restart_cmd = shlex.split(restart_cmd)
         restart_cmd = " ".join(shlex.quote(part) for part in restart_cmd)
 
-    monitor_loop(
-        target_pid=args.target_pid,
-        restart_cmd=restart_cmd,
-        log_file=args.log_file,
-        app_port=args.app_port,
-        service_name=args.service_name,
-    )
+    if args.target_pid is None:
+        logger.error("target pid is required for interactive mode")
+        if stdin_tty and stdout_tty:
+            console.print("[bold red]Error:[/bold red] --target-pid is required for interactive mode.")
+            time.sleep(10)
+        sys.exit(1)
+
+    try:
+        monitor_loop(
+            target_pid=args.target_pid,
+            restart_cmd=restart_cmd,
+            log_file=args.log_file,
+            app_port=args.app_port,
+            service_name=args.service_name,
+            logger=logger,
+        )
+    except Exception:
+        logger.error("terminal monitor crashed:\n%s", traceback.format_exc())
+        if stdin_tty and stdout_tty:
+            console.print("[bold red]Terminal monitor crashed. Check logs for details.[/bold red]")
+            time.sleep(10)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,49 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SHOW_USAGE=0
+while [ "${1:-}" != "" ]; do
+    case "$1" in
+        --monitor)
+            export ENABLE_OPS_MONITOR=1
+            shift
+            ;;
+        --no-monitor)
+            export ENABLE_OPS_MONITOR=0
+            shift
+            ;;
+        --monitor-headless)
+            export ENABLE_OPS_MONITOR=1
+            export OPS_MONITOR_LAUNCH_MODE="headless"
+            shift
+            ;;
+        --monitor-tmux)
+            export ENABLE_OPS_MONITOR=1
+            export OPS_MONITOR_LAUNCH_MODE="tmux"
+            shift
+            ;;
+        --help|-h)
+            SHOW_USAGE=1
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+if [ "$SHOW_USAGE" -eq 1 ]; then
+    cat <<'USAGE'
+Usage: ./start_operations_console.sh [--monitor|--no-monitor|--monitor-headless]
+
+--monitor           Enable the terminal ops monitor (default).
+--no-monitor        Disable the terminal ops monitor.
+--monitor-headless  Run the monitor without a TTY (logs only).
+--monitor-tmux      Launch the monitor in a tmux session.
+USAGE
+    exit 0
+fi
+
 APT_UPDATED=0
 
 run_as_root() {
@@ -76,6 +119,8 @@ VENV_DIR="${VENV_DIR:-$APP_DIR/.venv}"
 REQUIREMENTS_FILE="${REQUIREMENTS_FILE:-$APP_DIR/requirements.txt}"
 APP_MODULE="${APP_MODULE:-app:app}"
 MONITOR_LOG_FILE="${MONITOR_LOG_FILE:-$SCRIPT_DIR/support/operations.log}"
+WATCHDOG_SCRIPT_SOURCE="${WATCHDOG_SCRIPT_SOURCE:-$SCRIPT_DIR/support/internet_watchdog.sh}"
+WATCHDOG_SERVICE_SOURCE="${WATCHDOG_SERVICE_SOURCE:-$SCRIPT_DIR/support/systemd/internet-watchdog.service}"
 
 if [ ! -d "$APP_DIR" ]; then
     echo "❌ Unable to locate application directory: $APP_DIR" >&2
@@ -86,6 +131,31 @@ fi
 cd "$APP_DIR"
 
 ensure_python_tooling
+
+install_watchdog_files() {
+    if [ ! -f "$WATCHDOG_SCRIPT_SOURCE" ]; then
+        echo "⚠️ Watchdog script not found at $WATCHDOG_SCRIPT_SOURCE; skipping install" >&2
+        return
+    fi
+    if [ ! -f "$WATCHDOG_SERVICE_SOURCE" ]; then
+        echo "⚠️ Watchdog unit file not found at $WATCHDOG_SERVICE_SOURCE; skipping install" >&2
+        return
+    fi
+
+    echo "🔹 Installing internet watchdog files"
+    run_as_root install -d -m 0755 /usr/local/bin
+    run_as_root install -m 0755 "$WATCHDOG_SCRIPT_SOURCE" /usr/local/bin/internet_watchdog.sh
+    run_as_root install -d -m 0755 /etc/systemd/system
+    run_as_root install -m 0644 "$WATCHDOG_SERVICE_SOURCE" /etc/systemd/system/internet-watchdog.service
+    run_as_root install -d -m 0755 /var/lib/hyperion
+    run_as_root systemctl daemon-reload
+}
+
+if [ "${INSTALL_WATCHDOG:-0}" -eq 1 ]; then
+    install_watchdog_files
+else
+    echo "ℹ️ Skipping watchdog install (set INSTALL_WATCHDOG=1 to install systemd files)"
+fi
 
 create_virtualenv() {
     local target_dir="$1"

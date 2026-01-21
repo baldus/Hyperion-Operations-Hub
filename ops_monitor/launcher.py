@@ -33,6 +33,8 @@ def _monitor_command(
     ]
     if restart_cmd:
         args.append(f"--restart-cmd={restart_cmd}")
+    if os.getenv("OPS_MONITOR_LAUNCH_MODE", "").lower() == "headless":
+        args.append("--headless")
     return args
 
 
@@ -53,6 +55,14 @@ def _safe_popen(args: list[str], env: dict[str, str], use_shell: bool = False) -
 
 def _launch_in_terminal(command: list[str]) -> bool:
     launch_mode = os.getenv("OPS_MONITOR_LAUNCH_MODE", "window").lower()
+    if launch_mode == "tmux":
+        if shutil.which("tmux") is None:
+            return False
+        command_line = shlex.join(command)
+        return _safe_popen(
+            ["tmux", "new-session", "-d", "-s", "hyperion-monitor", command_line],
+            env={**os.environ, "PYTHONPATH": os.environ.get("PYTHONPATH", str(Path(__file__).resolve().parent.parent))},
+        )
     if launch_mode in {"background", "headless"}:
         return False
 

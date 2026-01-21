@@ -1,0 +1,16 @@
+[Unit]
+Description=Hyperion Internet Connectivity Watchdog
+After=network-online.target NetworkManager.service systemd-resolved.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Environment=CHECK_HOST=1.1.1.1
+Environment=INTERVAL=10
+ExecStart=/usr/local/bin/internet_watchdog.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

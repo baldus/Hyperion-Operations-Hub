@@ -169,12 +169,12 @@ These are pulled directly from environment variables or startup scripts:
 | `GUNICORN_TIMEOUT` | Gunicorn worker timeout seconds. | `600` | [`start_operations_console.sh`](start_operations_console.sh) |
 | `ENABLE_OPS_MONITOR` | Enable the terminal ops monitor. | `1` | [`start_operations_console.sh`](start_operations_console.sh), [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
 | `OPS_MONITOR_DB_URL` | DB URL to show in ops monitor (masked). | falls back to `DB_URL` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
-| `OPS_MONITOR_LAUNCH_MODE` | Monitor launch mode (`window`, `background`, `headless`). | `window` | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
+| `OPS_MONITOR_LAUNCH_MODE` | Monitor launch mode (`window`, `background`, `headless`, `tmux`). | `window` | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
 | `OPS_MONITOR_TERMINAL` | Force a specific terminal app. | (none) | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
-| `OPS_MONITOR_CONNECTIVITY_HOST` | Connectivity watchdog host to ping. | `1.1.1.1` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
-| `OPS_MONITOR_CONNECTIVITY_INTERVAL` | Connectivity check interval (seconds). | `10` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
-| `OPS_MONITOR_CONNECTIVITY_TIMEOUT` | Ping timeout (seconds). | `1` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
-| `OPS_MONITOR_CONNECTIVITY_RESTART_COOLDOWN` | Cooldown before restarting NetworkManager again (seconds). | `60` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
+| `OPS_MONITOR_REFRESH_INTERVAL` | Terminal refresh interval (seconds). | `0.5` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
+| `OPS_MONITOR_LOG_MAX_LINES` | Max log lines kept for scrollback. | `200` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
+| `OPS_MONITOR_LOG_WINDOW` | Visible log window height (lines). | `18` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
+| `OPS_MONITOR_DEBUG` | Log terminal key events for diagnostics. | `0` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
 | `PYTHON` | Python executable used for the ops monitor. | current interpreter | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
 | `APP_DIR`, `VENV_DIR`, `REQUIREMENTS_FILE`, `APP_MODULE`, `MONITOR_LOG_FILE` | Startup script overrides for the launcher. | (script defaults) | [`start_operations_console.sh`](start_operations_console.sh) |
 | `HEALTHCHECK_FATAL`, `HEALTHCHECK_DRY_RUN` | Startup healthcheck behavior. | `0` | [`start_operations_console.sh`](start_operations_console.sh), [`invapp2/invapp/healthcheck.py`](invapp2/invapp/healthcheck.py) |
@@ -431,33 +431,163 @@ To add a test:
 
 ---
 
-## Network Stability & Self-Healing (Linux Host)
+## Network Stability & Internet Watchdog
 
-Field deployments can look “connected” while DNS or routing has degraded over time. The host-level safeguards below disable Ethernet power saving, harden DNS resolution, and ensure NetworkManager is always restarted on failure.
+Field deployments can look “connected” while DNS or routing has degraded overnight. The Internet Watchdog is a host-level systemd service that continuously checks true reachability and performs self-healing actions when connectivity drops.
 
-### Apply host protections (Ubuntu)
-Run the helper script on the Linux host:
+### What it does
+- **Runs continuously as a systemd service** so it survives reboots and long runtimes.
+- **Writes a single-line status file** that the Ops Monitor terminal display reads for its network row.
+- **Logs outage/recovery events** for troubleshooting.
+- **Attempts recovery actions** (systemd-resolved + NetworkManager restarts, nmcli toggles) when connectivity is lost.
+
+### Components & paths
+- **Watchdog script (source)**: `support/internet_watchdog.sh`
+- **Installed script**: `/usr/local/bin/internet_watchdog.sh`
+- **systemd unit (source)**: `support/systemd/internet-watchdog.service`
+- **Installed unit**: `/etc/systemd/system/internet-watchdog.service`
+- **Status file**: `/var/lib/hyperion/network_status.txt`
+- **Log file**: `/var/log/internet_watchdog.log`
+
+### Install / update the watchdog (Ubuntu)
+Manual install (recommended for first-time setup):
+```bash
+sudo install -m 0755 support/internet_watchdog.sh /usr/local/bin/internet_watchdog.sh
+sudo install -m 0644 support/systemd/internet-watchdog.service /etc/systemd/system/internet-watchdog.service
+sudo install -d -m 0755 /var/lib/hyperion
+sudo systemctl daemon-reload
+sudo systemctl enable --now internet-watchdog.service
+```
+
+Optional: refresh watchdog files via the startup helper (idempotent):
+```bash
+INSTALL_WATCHDOG=1 sudo ./start_operations_console.sh
+```
+
+### Configure check host & interval
+Defaults are `CHECK_HOST=1.1.1.1` and `INTERVAL=10` (seconds). You can override them with a systemd drop-in:
+```bash
+sudo systemctl edit internet-watchdog.service
+```
+Add:
+```
+[Service]
+Environment=CHECK_HOST=8.8.8.8
+Environment=INTERVAL=5
+```
+Then reload:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart internet-watchdog.service
+```
+
+### Troubleshooting
+- **Service status**: `sudo systemctl status internet-watchdog.service`
+- **Recent logs**: `sudo journalctl -u internet-watchdog.service -n 200 --no-pager`
+- **Watchdog log file**: `sudo tail -f /var/log/internet_watchdog.log`
+- **Status file**: `cat /var/lib/hyperion/network_status.txt`
+
+### Verification checklist
+- **Simulate offline**: unplug the ethernet cable *or* block ping temporarily:
+  ```bash
+  sudo iptables -I OUTPUT -p icmp --icmp-type echo-request -j DROP
+  ```
+  Watch `/var/lib/hyperion/network_status.txt` for `OFFLINE` and confirm the red warning in the Ops Monitor terminal display.
+- **Restore connectivity**:
+  ```bash
+  sudo iptables -D OUTPUT -p icmp --icmp-type echo-request -j DROP
+  ```
+  Confirm the status line returns to `ONLINE` and the terminal display turns green.
+- **Confirm service after reboot**: `systemctl is-enabled internet-watchdog.service` and `systemctl status internet-watchdog.service`.
+
+### Optional: host hardening helpers
+The `support/network_stability.sh` script still applies additional host protections (Ethernet power-saving disablement, DNS hardening, NetworkManager restart policy). Run it once if needed:
 ```bash
 sudo support/network_stability.sh
 ```
 
-This script:
-- Writes `/etc/NetworkManager/conf.d/ethernet-powersave.conf` with `ethernet.powersave = 2`.
-- Updates `/etc/systemd/resolved.conf` to explicitly set `DNS=1.1.1.1 8.8.8.8`, `FallbackDNS=9.9.9.9`, and `DNSStubListener=yes`.
-- Adds a systemd drop-in to restart NetworkManager automatically (`/etc/systemd/system/NetworkManager.service.d/override.conf`).
-- Enables and restarts NetworkManager and systemd-resolved, and prints `resolvectl status` for verification.
+### Server/System Terminal Monitor
+The Ops Monitor terminal display exists for host-level health visibility even when the web UI is unreachable (for example, during a network outage). It runs alongside the web server and provides live status, logs, and interactive controls.
 
-### Ops monitor connectivity watchdog
-The ops monitor now runs a lightweight connectivity watchdog that pings a reliable external host on a repeating interval. When internet access is lost, the terminal displays a red warning (“WARNING: INTERNET DISCONNECTED”), logs an outage event with timestamp, and attempts to restart NetworkManager. The current connectivity status (online/offline and last successful check) is also kept in memory for future UI indicators. See the watchdog implementation in [`ops_monitor/monitor.py`](ops_monitor/monitor.py).
+**How it runs**
+- `start_operations_console.sh` launches the ops monitor by default (`ENABLE_OPS_MONITOR=1`). See [`start_operations_console.sh`](start_operations_console.sh).
+- The monitor implementation is `ops_monitor/monitor.py`, launched via `ops_monitor/launcher.py`.
+- A diagnostic log is written to `/var/log/hyperion/terminal_monitor.log` (fallbacks to `support/hyperion_terminal_monitor.log` if permissions prevent writing to `/var/log`).
+- You can run the monitor headless (no TTY required) with `OPS_MONITOR_LAUNCH_MODE=headless` or `./start_operations_console.sh --monitor-headless`.
+- Prefer tmux for a durable interactive session: `./start_operations_console.sh --monitor-tmux` (attach with `tmux attach -t hyperion-monitor`).
 
-#### Configure watchdog behavior
-Use environment variables to tune the watchdog:
+**Manual run**
 ```bash
-export OPS_MONITOR_CONNECTIVITY_HOST="1.1.1.1"
-export OPS_MONITOR_CONNECTIVITY_INTERVAL="10"
-export OPS_MONITOR_CONNECTIVITY_TIMEOUT="1"
-export OPS_MONITOR_CONNECTIVITY_RESTART_COOLDOWN="60"
+python -m ops_monitor.monitor --target-pid <PID> --app-port 8000 --service-name "Hyperion Operations Hub"
 ```
+
+**Doctor mode**
+```bash
+python -m ops_monitor.monitor --doctor
+```
+
+**Key bindings (cheat sheet)**
+- Navigation: `Tab` / `Shift+Tab`, arrow keys, or `j/k`
+- Select/activate: `Enter`
+- Quit/back: `q` or `Esc`
+- Log panel: `PageUp/PageDown`, `Home/End`, `f` to toggle follow mode
+
+**Refresh & layout tuning**
+- Set `OPS_MONITOR_REFRESH_INTERVAL` for update cadence (seconds).
+- Set `OPS_MONITOR_LOG_MAX_LINES` and `OPS_MONITOR_LOG_WINDOW` to adjust scrollback and viewport size.
+
+**Systemd (headless)**
+- Unit template: `deployment/systemd/hyperion-terminal-monitor.service`
+- Install (update paths to match your host):
+  ```bash
+  sudo install -m 0644 deployment/systemd/hyperion-terminal-monitor.service /etc/systemd/system/hyperion-terminal-monitor.service
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now hyperion-terminal-monitor.service
+  ```
+
+### Network Status Display (Server Terminal)
+Network status is intentionally **not** shown in the web UI; if connectivity is down, the site may be unreachable. Instead, the Ops Monitor terminal display reads the watchdog status file and renders it directly on the server console.
+
+**Where the status comes from**
+- Watchdog output: `/var/lib/hyperion/network_status.txt`
+- Ops Monitor display logic: `ops_monitor/monitor.py` reads the file and highlights OFFLINE lines in red.
+
+**What to look for**
+- In the Ops Monitor terminal window, find the **Network** row in the System Health metrics table.
+- If the line begins with `OFFLINE`, it is shown in red with a loud prefix (`!!!`) to draw attention.
+- If the file is missing or empty, the display shows `UNKNOWN | network watchdog not running`.
+
+**Quick verification**
+- Read the file directly:
+  ```bash
+  cat /var/lib/hyperion/network_status.txt
+  ```
+- Simulate offline:
+  ```bash
+  sudo iptables -I OUTPUT -p icmp --icmp-type echo-request -j DROP
+  ```
+  Confirm the status line flips to `OFFLINE` and the terminal display turns red.
+- Restore:
+  ```bash
+  sudo iptables -D OUTPUT -p icmp --icmp-type echo-request -j DROP
+  ```
+
+**Troubleshooting**
+- **Network status not showing**:
+  - Confirm the watchdog service is running: `systemctl status internet-watchdog.service`.
+  - Check file permissions: `ls -l /var/lib/hyperion/network_status.txt`.
+  - Verify the log: `sudo tail -f /var/log/internet_watchdog.log`.
+- **Monitor opens then closes**:
+  - Check `/var/log/hyperion/terminal_monitor.log` for a traceback.
+  - Confirm you launched it in a real TTY (or use `--monitor-headless`).
+  - Confirm `TERM` is valid (non-empty and not `dumb`).
+  - Run `python -m ops_monitor.monitor --doctor`.
+- **Terminal too small**:
+  - Resize the window to at least 80x24; the monitor will display a warning until the terminal is large enough.
+- **Controls not responding**:
+  - Confirm the terminal has focus (click inside the terminal window).
+  - If running inside tmux/screen, check that keybindings are not overridden.
+  - Set `OPS_MONITOR_DEBUG=1` and inspect `/var/log/hyperion/terminal_monitor.log`.
 
 ---
 

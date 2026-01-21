@@ -1,0 +1,17 @@
+[Unit]
+Description=Hyperion Terminal Monitor (Headless)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=2
+Environment=HYPERION_HOME=/opt/hyperion
+Environment=PYTHON=/opt/hyperion/invapp2/.venv/bin/python
+Environment=PYTHONPATH=/opt/hyperion
+WorkingDirectory=/opt/hyperion
+ExecStart=/usr/bin/env bash -lc '${PYTHON:-/usr/bin/python3} -m ops_monitor.monitor --headless --app-port=8000 --service-name "Hyperion Operations Hub"'
+
+[Install]
+WantedBy=multi-user.target
