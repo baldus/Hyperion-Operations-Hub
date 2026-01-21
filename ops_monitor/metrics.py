@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import socket
 import time
-import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -78,24 +77,29 @@ class ErrorSnapshot:
 
 
 @dataclass
-class ConnectivityStatus:
-    online: bool
-    last_seen: datetime | None
-    last_checked: datetime | None
-    last_failure: datetime | None
+class NetworkStatus:
+    status: str
+    raw: str
 
 
-def ping_host(host: str, *, timeout: int = 1) -> bool:
+def read_network_status(
+    status_path: Path = Path("/var/lib/hyperion/network_status.txt"),
+) -> NetworkStatus:
+    fallback = "UNKNOWN | network watchdog not running"
     try:
-        result = subprocess.run(
-            ["ping", "-c", "1", "-W", str(timeout), host],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        return result.returncode == 0
+        raw = status_path.read_text(encoding="utf-8").strip()
     except OSError:
-        return False
+        return NetworkStatus(status="UNKNOWN", raw=fallback)
+
+    if not raw:
+        return NetworkStatus(status="UNKNOWN", raw="UNKNOWN | network status file is empty")
+
+    status = raw.split("|", 1)[0].strip() if "|" in raw else raw.strip()
+    if not status:
+        status = "UNKNOWN"
+    return NetworkStatus(status=status.upper(), raw=raw)
+
+
 
 
 def read_process_metrics(pid: int) -> Optional[ProcessMetrics]:

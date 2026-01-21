@@ -171,10 +171,6 @@ These are pulled directly from environment variables or startup scripts:
 | `OPS_MONITOR_DB_URL` | DB URL to show in ops monitor (masked). | falls back to `DB_URL` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
 | `OPS_MONITOR_LAUNCH_MODE` | Monitor launch mode (`window`, `background`, `headless`). | `window` | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
 | `OPS_MONITOR_TERMINAL` | Force a specific terminal app. | (none) | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
-| `OPS_MONITOR_CONNECTIVITY_HOST` | Connectivity watchdog host to ping. | `1.1.1.1` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
-| `OPS_MONITOR_CONNECTIVITY_INTERVAL` | Connectivity check interval (seconds). | `10` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
-| `OPS_MONITOR_CONNECTIVITY_TIMEOUT` | Ping timeout (seconds). | `1` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
-| `OPS_MONITOR_CONNECTIVITY_RESTART_COOLDOWN` | Cooldown before restarting NetworkManager again (seconds). | `60` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
 | `PYTHON` | Python executable used for the ops monitor. | current interpreter | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
 | `APP_DIR`, `VENV_DIR`, `REQUIREMENTS_FILE`, `APP_MODULE`, `MONITOR_LOG_FILE` | Startup script overrides for the launcher. | (script defaults) | [`start_operations_console.sh`](start_operations_console.sh) |
 | `HEALTHCHECK_FATAL`, `HEALTHCHECK_DRY_RUN` | Startup healthcheck behavior. | `0` | [`start_operations_console.sh`](start_operations_console.sh), [`invapp2/invapp/healthcheck.py`](invapp2/invapp/healthcheck.py) |
@@ -437,7 +433,7 @@ Field deployments can look “connected” while DNS or routing has degraded ove
 
 ### What it does
 - **Runs continuously as a systemd service** so it survives reboots and long runtimes.
-- **Writes a single-line status file** that the Ops Console UI reads for its network banner.
+- **Writes a single-line status file** that the Ops Monitor terminal display reads for its network row.
 - **Logs outage/recovery events** for troubleshooting.
 - **Attempts recovery actions** (systemd-resolved + NetworkManager restarts, nmcli toggles) when connectivity is lost.
 
@@ -448,7 +444,6 @@ Field deployments can look “connected” while DNS or routing has degraded ove
 - **Installed unit**: `/etc/systemd/system/internet-watchdog.service`
 - **Status file**: `/var/lib/hyperion/network_status.txt`
 - **Log file**: `/var/log/internet_watchdog.log`
-- **Ops Console API**: `GET /health/network` (returns JSON status used by the admin tools banner)
 
 ### Install / update the watchdog (Ubuntu)
 Manual install (recommended for first-time setup):
@@ -487,19 +482,18 @@ sudo systemctl restart internet-watchdog.service
 - **Recent logs**: `sudo journalctl -u internet-watchdog.service -n 200 --no-pager`
 - **Watchdog log file**: `sudo tail -f /var/log/internet_watchdog.log`
 - **Status file**: `cat /var/lib/hyperion/network_status.txt`
-- **UI banner**: Admin Tools → System Health → Network banner (green = online, red = offline, yellow = unknown)
 
 ### Verification checklist
 - **Simulate offline**: unplug the ethernet cable *or* block ping temporarily:
   ```bash
   sudo iptables -I OUTPUT -p icmp --icmp-type echo-request -j DROP
   ```
-  Watch `/var/lib/hyperion/network_status.txt` for `OFFLINE` and confirm the red warning banner in the Ops Console.
+  Watch `/var/lib/hyperion/network_status.txt` for `OFFLINE` and confirm the red warning in the Ops Monitor terminal display.
 - **Restore connectivity**:
   ```bash
   sudo iptables -D OUTPUT -p icmp --icmp-type echo-request -j DROP
   ```
-  Confirm the status line returns to `ONLINE` and the banner turns green.
+  Confirm the status line returns to `ONLINE` and the terminal display turns green.
 - **Confirm service after reboot**: `systemctl is-enabled internet-watchdog.service` and `systemctl status internet-watchdog.service`.
 
 ### Optional: host hardening helpers
@@ -507,6 +501,33 @@ The `support/network_stability.sh` script still applies additional host protecti
 ```bash
 sudo support/network_stability.sh
 ```
+
+### Network Status Display (Server Terminal)
+Network status is intentionally **not** shown in the web UI; if connectivity is down, the site may be unreachable. Instead, the Ops Monitor terminal display reads the watchdog status file and renders it directly on the server console.
+
+**Where the status comes from**
+- Watchdog output: `/var/lib/hyperion/network_status.txt`
+- Ops Monitor display logic: `ops_monitor/monitor.py` reads the file and highlights OFFLINE lines in red.
+
+**What to look for**
+- In the Ops Monitor terminal window, find the **Network** row in the System Health metrics table.
+- If the line begins with `OFFLINE`, it is shown in red with a loud prefix (`!!!`) to draw attention.
+- If the file is missing or empty, the display shows `UNKNOWN | network watchdog not running`.
+
+**Quick verification**
+- Read the file directly:
+  ```bash
+  cat /var/lib/hyperion/network_status.txt
+  ```
+- Simulate offline:
+  ```bash
+  sudo iptables -I OUTPUT -p icmp --icmp-type echo-request -j DROP
+  ```
+  Confirm the status line flips to `OFFLINE` and the terminal display turns red.
+- Restore:
+  ```bash
+  sudo iptables -D OUTPUT -p icmp --icmp-type echo-request -j DROP
+  ```
 
 ---
 

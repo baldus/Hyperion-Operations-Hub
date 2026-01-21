@@ -27,7 +27,6 @@ from .routes import (
     admin,
     auth,
     errors,
-    health,
     inventory,
     item_search,
     orders,
@@ -929,7 +928,6 @@ def create_app(config_override=None):
     # register blueprints
     app.register_blueprint(auth.bp)
     app.register_blueprint(errors.bp)
-    app.register_blueprint(health.bp)
     app.register_blueprint(inventory.bp)
     app.register_blueprint(item_search.bp)
     app.register_blueprint(reports.bp)
