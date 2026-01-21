@@ -211,15 +211,19 @@ TIMEOUT="${GUNICORN_TIMEOUT:-600}"
 if [ "$ENABLE_TERMINAL_MONITOR" != "0" ]; then
     monitor_args=()
     if [ "$TERMINAL_MONITOR_MODE" = "headless" ]; then
-        monitor_args+=(--no-tmux --headless)
+        monitor_args+=(--headless)
     elif [ "$TERMINAL_MONITOR_MODE" = "tmux" ]; then
         if ! command -v tmux >/dev/null 2>&1; then
             echo "⚠️ tmux not found; falling back to headless terminal monitor logging"
-            monitor_args+=(--no-tmux --headless)
+            monitor_args+=(--headless)
         fi
     fi
     echo "🔹 Launching Hyperion terminal monitor (${TERMINAL_MONITOR_MODE})"
-    "$SCRIPT_DIR/scripts/run_terminal_monitor.sh" "${monitor_args[@]}" &
+    if command -v setsid >/dev/null 2>&1; then
+        setsid "$SCRIPT_DIR/scripts/monitor_launch.sh" "${monitor_args[@]}" >/dev/null 2>&1 &
+    else
+        nohup "$SCRIPT_DIR/scripts/monitor_launch.sh" "${monitor_args[@]}" >/dev/null 2>&1 &
+    fi
 fi
 
 if [ -z "${GUNICORN_TIMEOUT:-}" ]; then

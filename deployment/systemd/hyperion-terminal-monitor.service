@@ -11,7 +11,7 @@ Environment=HYPERION_HOME=/opt/hyperion
 Environment=PYTHON=/opt/hyperion/invapp2/.venv/bin/python
 Environment=PYTHONPATH=/opt/hyperion
 WorkingDirectory=/opt/hyperion
-ExecStart=/usr/bin/env bash -lc '/opt/hyperion/scripts/run_terminal_monitor.sh --no-tmux --headless'
+ExecStart=/usr/bin/env bash -lc '/opt/hyperion/scripts/monitor_launch.sh --headless'
 
 [Install]
 WantedBy=multi-user.target

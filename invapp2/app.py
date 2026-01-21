@@ -17,10 +17,10 @@ if __name__ == "__main__":
     # Development fallback: the production entry point now uses Gunicorn.
     port = int(os.getenv("PORT", 5000))
     if os.getenv("ENABLE_TERMINAL_MONITOR", os.getenv("ENABLE_OPS_MONITOR", "1")) != "0":
-        monitor_script = PROJECT_ROOT / "scripts" / "run_terminal_monitor.sh"
+        monitor_script = PROJECT_ROOT / "scripts" / "monitor_launch.sh"
         if monitor_script.exists():
             subprocess.Popen(
-                [str(monitor_script), "--no-tmux", "--headless"],
+                [str(monitor_script), "--headless"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,

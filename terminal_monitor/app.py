@@ -145,6 +145,8 @@ class TerminalMonitorApp(App):
         ("/", "search_logs", "Search"),
         ("pageup", "page_up", "Scroll up"),
         ("pagedown", "page_down", "Scroll down"),
+        ("j", "focus_down", "Down"),
+        ("k", "focus_up", "Up"),
         ("up", "focus_up", "Up"),
         ("down", "focus_down", "Down"),
         ("left", "focus_left", "Left"),
@@ -172,7 +174,7 @@ class TerminalMonitorApp(App):
                 yield InfoPanel("Backups", panel_id="backups")
                 yield LogPanel(self.log_sources, id="logs")
         yield Static(
-            "q quit · tab focus · arrows move · f follow · / search · pgup/pgdn scroll",
+            "q quit · tab focus · arrows/j/k move · enter activate · f follow · / search · pgup/pgdn scroll",
             id="status-bar",
         )
 
@@ -221,7 +223,7 @@ class TerminalMonitorApp(App):
         try:
             status = read_network_status()
             if status.status == "OFFLINE":
-                panel.update_lines([status.raw], style="bold red")
+                panel.update_lines([f"!! {status.raw} !!"], style="bold red")
             elif status.status == "UNKNOWN":
                 panel.update_lines([status.raw], style="yellow")
             else:

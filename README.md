@@ -36,7 +36,7 @@ Hyperion Operations Hub is a Flask-based operations console for manufacturing te
 - **Workstation tools**: the `work` blueprint serves workstation-specific views and tools. See [`invapp2/invapp/routes/work.py`](invapp2/invapp/routes/work.py).
 - **MDI (KPI Board) module**: dashboards, meeting deck, reporting UI, and API endpoints for KPI entries live in the MDI blueprint and its models. See [`invapp2/invapp/mdi`](invapp2/invapp/mdi) and [`invapp2/invapp/mdi/models.py`](invapp2/invapp/mdi/models.py).
 - **Automated backups with scheduling**: APScheduler-driven backups run in the Flask process, with storage and reporting in the backup service. See [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
-- **Operations monitor (terminal UI)**: a separate monitor process surfaces host health, logs, and backup status, launched by the startup scripts. See [`terminal_monitor`](terminal_monitor) and [`scripts/run_terminal_monitor.sh`](scripts/run_terminal_monitor.sh).
+- **Operations monitor (terminal UI)**: a separate monitor process surfaces host health, logs, and backup status, launched by the startup scripts. See [`terminal_monitor`](terminal_monitor) and [`scripts/monitor_launch.sh`](scripts/monitor_launch.sh).
 
 ---
 
@@ -342,7 +342,7 @@ If the database is offline at startup, the app uses an `OfflineAdminUser` that g
 
 - **Automated backups** use APScheduler inside the Flask process. Jobs run on a configurable interval and log to the backup directory. See [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
 - The scheduler is started in `create_app()` when not in testing mode. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
-- **Terminal monitor** is a separate Python process launched by the startup scripts (not a Flask background task). See [`terminal_monitor`](terminal_monitor) and [`scripts/run_terminal_monitor.sh`](scripts/run_terminal_monitor.sh).
+- **Terminal monitor** is a separate Python process launched by the startup scripts (not a Flask background task). See [`terminal_monitor`](terminal_monitor) and [`scripts/monitor_launch.sh`](scripts/monitor_launch.sh).
 
 To disable automated backups in dev, set `BACKUP_SCHEDULER_ENABLED` to `False` in config overrides when calling `create_app()` (it defaults to `True`). See scheduler checks in [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
 
@@ -511,25 +511,36 @@ The server/system terminal monitor is a TUI designed for host-level visibility w
 ### How to run
 Interactive (preferred, via tmux):
 ```bash
-./scripts/run_terminal_monitor.sh
+./scripts/monitor_launch.sh
 tmux attach -t hyperion
+```
+
+Attach directly (from a GUI terminal):
+```bash
+./scripts/monitor_attach.sh
 ```
 
 Headless (logs only, suitable for systemd):
 ```bash
-./scripts/run_terminal_monitor.sh --no-tmux --headless
+./scripts/monitor_launch.sh --headless
 ```
 
 Doctor mode:
 ```bash
-python -m terminal_monitor.app --doctor
+./scripts/monitor_doctor.sh
 ```
 
 Dependencies live in [`invapp2/requirements.txt`](invapp2/requirements.txt) (Textual + Rich are required).
 
+### How it launches
+- **Default/most reliable:** `monitor_launch.sh` creates or reuses the tmux session `hyperion` and runs the monitor in a `monitor` window.
+- **GUI (best effort):** if `DISPLAY` is set and a GUI terminal is available, it opens a new terminal that runs `monitor_attach.sh` to attach to tmux.
+- **Local console:** you can run the monitor directly in any TTY via `./scripts/monitor_launch.sh` (it will run in the foreground if tmux is unavailable).
+- **Headless logging:** use `--headless` or the systemd unit for always-on status logging.
+
 ### Keybindings (cheat sheet)
 - **Quit:** `q`
-- **Focus/Navigation:** `Tab`, arrow keys
+- **Focus/Navigation:** `Tab`, arrow keys, `j/k`
 - **Activate:** `Enter`
 - **Log panel:** `f` follow toggle · `/` search · `PageUp/PageDown` scroll
 
@@ -542,9 +553,11 @@ Dependencies live in [`invapp2/requirements.txt`](invapp2/requirements.txt) (Tex
 - **Live Logs:** Tail `/var/log/hyperion/terminal_monitor.log` by default, with quick cycling to watchdog and backup logs.
 
 ### Troubleshooting
+- **Monitor not visible:** Run `./scripts/monitor_doctor.sh` to inspect tmux/GUI/TTY availability.
+- **No GUI terminal available:** Use `tmux attach -t hyperion` after running `./scripts/monitor_launch.sh`.
 - **Monitor closes immediately:** Check `/var/log/hyperion/terminal_monitor.log` for a traceback.
-- **TERM/TTY issues:** Ensure `TERM` is set and you’re in a real TTY. Run `python -m terminal_monitor.app --doctor` for diagnostics.
-- **Headless behavior:** If no TTY is detected, the monitor automatically switches to headless logging unless `--headless` is provided.
+- **Launcher decisions:** Check `/var/log/hyperion/terminal_monitor_launcher.log`.
+- **TERM/TTY issues:** Ensure `TERM` is set and you’re in a real TTY; the monitor switches to headless automatically when no TTY is detected.
 - **Systemd headless service:** Use the template in `deployment/systemd/hyperion-terminal-monitor.service`.
 
 ### Systemd (headless template)
