@@ -2,6 +2,7 @@
 set -euo pipefail
 
 HEADLESS=0
+GUI=0
 PASS_THROUGH=()
 
 while [ "${1:-}" != "" ]; do
@@ -10,11 +11,16 @@ while [ "${1:-}" != "" ]; do
             HEADLESS=1
             shift
             ;;
+        --gui)
+            GUI=1
+            shift
+            ;;
         --help|-h)
             cat <<'USAGE'
-Usage: ./scripts/monitor_launch.sh [--headless] [-- <extra args>]
+Usage: ./scripts/monitor_launch.sh [--headless] [--gui] [-- <extra args>]
 
 --headless   Force headless logging mode.
+--gui        Attempt to open a GUI terminal (best effort).
 USAGE
             exit 0
             ;;
@@ -35,9 +41,11 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-LOG_DIR="/var/log/hyperion"
+LOG_DIR="${HYPERION_LOG_DIR:-$HOME/.local/state/hyperion/logs}"
 LOG_FILE="$LOG_DIR/terminal_monitor_launcher.log"
-FALLBACK_LOG="/tmp/hyperion_terminal_monitor_launcher.log"
+FALLBACK_LOG="/tmp/hyperion/terminal_monitor_launcher.log"
+APP_LOG="$LOG_DIR/terminal_monitor_app.log"
+PID_FILE="${HYPERION_MONITOR_PID_FILE:-$LOG_DIR/terminal_monitor.pid}"
 
 log() {
     local message="$1"
@@ -48,6 +56,8 @@ log() {
     fi
     printf "%s %s\n" "$ts" "$message" >> "$LOG_FILE"
 }
+
+trap 'log "launcher error: exit=$? cmd=${BASH_COMMAND}"' ERR
 
 ensure_dir() {
     local target="$1"
@@ -61,22 +71,46 @@ ensure_dir() {
     fi
 }
 
-ensure_dir /var/log/hyperion
+ensure_dir "$LOG_DIR"
+if [ ! -d "$LOG_DIR" ]; then
+    LOG_DIR="/tmp/hyperion"
+    LOG_FILE="$LOG_DIR/terminal_monitor_launcher.log"
+    APP_LOG="$LOG_DIR/terminal_monitor_app.log"
+    PID_FILE="${HYPERION_MONITOR_PID_FILE:-$LOG_DIR/terminal_monitor.pid}"
+    ensure_dir "$LOG_DIR"
+fi
 ensure_dir /var/lib/hyperion
 
 if [ -z "${TERM:-}" ] || [ "${TERM:-}" = "dumb" ]; then
     export TERM=xterm-256color
 fi
 
-PYTHON_BIN="${PYTHON:-python}"
+resolve_python() {
+    if [ -n "${VENV_DIR:-}" ] && [ -x "${VENV_DIR}/bin/python" ]; then
+        echo "${VENV_DIR}/bin/python"
+        return
+    fi
+    if [ -x "$REPO_ROOT/invapp2/.venv/bin/python" ]; then
+        echo "$REPO_ROOT/invapp2/.venv/bin/python"
+        return
+    fi
+    if [ -n "${PYTHON:-}" ]; then
+        echo "$PYTHON"
+        return
+    fi
+    echo "python3"
+}
+
+PYTHON_BIN="$(resolve_python)"
 CMD=("$PYTHON_BIN" -m terminal_monitor.app)
 if [ "$HEADLESS" -eq 1 ]; then
     CMD+=(--headless)
 fi
 CMD+=("${PASS_THROUGH[@]}")
 
-log "launcher start headless=$HEADLESS tty=$( [ -t 0 ] && echo yes || echo no ) tmux=${TMUX:-none} display=${DISPLAY:-none}"
+log "launcher start headless=$HEADLESS gui=$GUI tty=$( [ -t 0 ] && echo yes || echo no ) tmux=${TMUX:-none} display=${DISPLAY:-none}"
 log "command: PYTHONPATH=$REPO_ROOT ${CMD[*]}"
+log "python: $PYTHON_BIN"
 
 if [ -n "${TMUX:-}" ]; then
     log "detected tmux session; launching in new tmux window"
@@ -86,31 +120,35 @@ if [ -n "${TMUX:-}" ]; then
         log "monitor window already exists; selected"
         exit 0
     fi
-    tmux new-window -n monitor "PYTHONPATH=$REPO_ROOT ${CMD[*]}"
-    log "monitor window created in current tmux session"
-    exit 0
+    if tmux new-window -n monitor "HYPERION_LOG_DIR=$LOG_DIR PYTHONPATH=$REPO_ROOT ${CMD[*]}"; then
+        log "monitor window created in current tmux session"
+        exit 0
+    else
+        log "failed to create monitor window in tmux; falling back to headless"
+        HEADLESS=1
+    fi
 fi
 
-if command -v tmux >/dev/null 2>&1; then
-    log "tmux available; creating/reusing session 'hyperion'"
-    if tmux has-session -t hyperion >/dev/null 2>&1; then
-        if tmux list-windows -t hyperion -F '#W' | grep -Fx "monitor" >/dev/null 2>&1; then
-            log "monitor window already exists in hyperion session"
+if command -v tmux >/dev/null 2>&1 && [ "$HEADLESS" -eq 0 ]; then
+    log "tmux available; creating/reusing session 'hyperion-monitor'"
+    if tmux has-session -t hyperion-monitor >/dev/null 2>&1; then
+        if tmux list-windows -t hyperion-monitor -F '#W' | grep -Fx "monitor" >/dev/null 2>&1; then
+            log "monitor window already exists in hyperion-monitor session"
         else
-            tmux new-window -t hyperion -n monitor "PYTHONPATH=$REPO_ROOT ${CMD[*]}"
-            log "monitor window created in hyperion session"
+            tmux new-window -t hyperion-monitor -n monitor "HYPERION_LOG_DIR=$LOG_DIR PYTHONPATH=$REPO_ROOT ${CMD[*]}"
+            log "monitor window created in hyperion-monitor session"
         fi
     else
-        tmux new-session -d -s hyperion -n monitor "PYTHONPATH=$REPO_ROOT ${CMD[*]}"
-        log "tmux session 'hyperion' created with monitor window"
+        tmux new-session -d -s hyperion-monitor -n monitor "HYPERION_LOG_DIR=$LOG_DIR PYTHONPATH=$REPO_ROOT ${CMD[*]}"
+        log "tmux session 'hyperion-monitor' created with monitor window"
     fi
-    echo "✅ Terminal monitor running in tmux session 'hyperion'."
-    echo "Attach with: tmux attach -t hyperion"
+    echo "✅ Terminal monitor running in tmux session 'hyperion-monitor'."
+    echo "Attach with: tmux attach -t hyperion-monitor"
 
-    if [ -n "${DISPLAY:-}" ]; then
+    if [ "$GUI" -eq 1 ] && [ -n "${DISPLAY:-}" ]; then
         for term in gnome-terminal konsole xterm x-terminal-emulator; do
             if command -v "$term" >/dev/null 2>&1; then
-                log "GUI detected ($term); attempting to open terminal to attach"
+                log "GUI requested; attempting to open terminal ($term) to attach"
                 if [ "$term" = "gnome-terminal" ]; then
                     gnome-terminal -- "$SCRIPT_DIR/monitor_attach.sh" || true
                 elif [ "$term" = "konsole" ]; then
@@ -121,33 +159,44 @@ if command -v tmux >/dev/null 2>&1; then
                 break
             fi
         done
-    else
-        log "no DISPLAY; skipping GUI launch"
+    elif [ "$GUI" -eq 1 ]; then
+        log "GUI requested but no DISPLAY; skipping GUI launch"
     fi
     exit 0
 fi
 
-if [ -n "${DISPLAY:-}" ]; then
+if ! command -v tmux >/dev/null 2>&1; then
+    log "tmux not available; defaulting to headless mode"
+    HEADLESS=1
+fi
+
+if [ "$GUI" -eq 1 ] && [ -n "${DISPLAY:-}" ]; then
     for term in gnome-terminal konsole xterm x-terminal-emulator; do
         if command -v "$term" >/dev/null 2>&1; then
             log "tmux unavailable; opening GUI terminal ($term)"
             if [ "$term" = "gnome-terminal" ]; then
-                gnome-terminal -- env PYTHONPATH="$REPO_ROOT" "${CMD[@]}" || true
+                gnome-terminal -- env HYPERION_LOG_DIR="$LOG_DIR" PYTHONPATH="$REPO_ROOT" "${CMD[@]}" || true
             elif [ "$term" = "konsole" ]; then
-                konsole -e env PYTHONPATH="$REPO_ROOT" "${CMD[@]}" || true
+                konsole -e env HYPERION_LOG_DIR="$LOG_DIR" PYTHONPATH="$REPO_ROOT" "${CMD[@]}" || true
             else
-                "$term" -e env PYTHONPATH="$REPO_ROOT" "${CMD[@]}" || true
+                "$term" -e env HYPERION_LOG_DIR="$LOG_DIR" PYTHONPATH="$REPO_ROOT" "${CMD[@]}" || true
             fi
             exit 0
         fi
     done
-    log "DISPLAY set but no GUI terminal found; falling back"
+    log "GUI requested but no GUI terminal found; falling back"
+elif [ "$GUI" -eq 1 ]; then
+    log "GUI requested but DISPLAY not set; falling back"
 fi
 
 if [ -t 0 ] && [ -t 1 ] && [ "$HEADLESS" -eq 0 ]; then
     log "running monitor in foreground"
-    exec env PYTHONPATH="$REPO_ROOT" "${CMD[@]}"
+    exec env HYPERION_LOG_DIR="$LOG_DIR" PYTHONPATH="$REPO_ROOT" "${CMD[@]}"
 else
-    log "no tty available; running headless"
-    exec env PYTHONPATH="$REPO_ROOT" "${CMD[@]}" --headless
+    log "no tty available or headless forced; running headless in background"
+    ensure_dir "$LOG_DIR"
+    nohup env HYPERION_LOG_DIR="$LOG_DIR" PYTHONPATH="$REPO_ROOT" "${CMD[@]}" --headless >> "$APP_LOG" 2>&1 &
+    echo $! > "$PID_FILE"
+    log "headless monitor pid=$(cat "$PID_FILE") log=$APP_LOG"
+    echo "✅ Headless monitor started. Log: $APP_LOG"
 fi

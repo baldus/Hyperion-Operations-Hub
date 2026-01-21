@@ -169,11 +169,13 @@ These are pulled directly from environment variables or startup scripts:
 | `GUNICORN_WORKERS` | Gunicorn worker count. | `2` | [`start_operations_console.sh`](start_operations_console.sh) |
 | `GUNICORN_TIMEOUT` | Gunicorn worker timeout seconds. | `600` | [`start_operations_console.sh`](start_operations_console.sh) |
 | `ENABLE_TERMINAL_MONITOR` | Enable the terminal monitor. | `1` | [`start_operations_console.sh`](start_operations_console.sh), [`invapp2/app.py`](invapp2/app.py) |
-| `ENABLE_OPS_MONITOR` | Legacy alias for enabling the terminal monitor. | `1` | [`invapp2/app.py`](invapp2/app.py) |
+| `ENABLE_OPS_MONITOR` | Legacy alias for enabling the terminal monitor (kept in sync). | `1` | [`start_operations_console.sh`](start_operations_console.sh) |
 | `TERMINAL_MONITOR_MODE` | Monitor launch mode (`tmux`, `headless`). | `tmux` | [`start_operations_console.sh`](start_operations_console.sh) |
 | `TERMINAL_MONITOR_DB_URL` | DB URL for backup panel (falls back to `DB_URL`). | (none) | [`terminal_monitor/app.py`](terminal_monitor/app.py) |
 | `OPS_MONITOR_DB_URL` | Legacy alias for the backup DB URL. | falls back to `DB_URL` | [`terminal_monitor/app.py`](terminal_monitor/app.py) |
 | `HYPERION_APP_SERVICE` | Optional systemd service name for the Services panel. | (none) | [`terminal_monitor/panels/services.py`](terminal_monitor/panels/services.py) |
+| `HYPERION_LOG_DIR` | Base directory for monitor logs (launcher + app). | `$HOME/.local/state/hyperion/logs` | [`scripts/monitor_launch.sh`](scripts/monitor_launch.sh), [`terminal_monitor/util/logging.py`](terminal_monitor/util/logging.py) |
+| `HYPERION_MONITOR_PID_FILE` | PID file path for headless monitor. | `<log_dir>/terminal_monitor.pid` | [`scripts/monitor_launch.sh`](scripts/monitor_launch.sh) |
 | `PYTHON` | Python executable used by scripts and systemd units. | current interpreter | [`start_operations_console.sh`](start_operations_console.sh) |
 | `APP_DIR`, `VENV_DIR`, `REQUIREMENTS_FILE`, `APP_MODULE` | Startup script overrides for the launcher. | (script defaults) | [`start_operations_console.sh`](start_operations_console.sh) |
 | `HEALTHCHECK_FATAL`, `HEALTHCHECK_DRY_RUN` | Startup healthcheck behavior. | `0` | [`start_operations_console.sh`](start_operations_console.sh), [`invapp2/invapp/healthcheck.py`](invapp2/invapp/healthcheck.py) |
@@ -512,7 +514,7 @@ The server/system terminal monitor is a TUI designed for host-level visibility w
 Interactive (preferred, via tmux):
 ```bash
 ./scripts/monitor_launch.sh
-tmux attach -t hyperion
+tmux attach -t hyperion-monitor
 ```
 
 Attach directly (from a GUI terminal):
@@ -525,6 +527,18 @@ Headless (logs only, suitable for systemd):
 ./scripts/monitor_launch.sh --headless
 ```
 
+Start via the main launcher (same behavior, non-blocking):
+```bash
+./start_operations_console.sh --monitor-tmux
+./start_operations_console.sh --monitor-headless
+./start_operations_console.sh --monitor-gui
+```
+
+Force GUI terminal (best effort, not default):
+```bash
+./scripts/monitor_launch.sh --gui
+```
+
 Doctor mode:
 ```bash
 ./scripts/monitor_doctor.sh
@@ -533,8 +547,8 @@ Doctor mode:
 Dependencies live in [`invapp2/requirements.txt`](invapp2/requirements.txt) (Textual + Rich are required).
 
 ### How it launches
-- **Default/most reliable:** `monitor_launch.sh` creates or reuses the tmux session `hyperion` and runs the monitor in a `monitor` window.
-- **GUI (best effort):** if `DISPLAY` is set and a GUI terminal is available, it opens a new terminal that runs `monitor_attach.sh` to attach to tmux.
+- **Default/most reliable:** `monitor_launch.sh` creates or reuses the tmux session `hyperion-monitor` and runs the monitor in a `monitor` window.
+- **GUI (best effort):** only when `--gui` is supplied and a GUI terminal is available; it opens a new terminal that runs `monitor_attach.sh` to attach to tmux.
 - **Local console:** you can run the monitor directly in any TTY via `./scripts/monitor_launch.sh` (it will run in the foreground if tmux is unavailable).
 - **Headless logging:** use `--headless` or the systemd unit for always-on status logging.
 
@@ -550,15 +564,38 @@ Dependencies live in [`invapp2/requirements.txt`](invapp2/requirements.txt) (Tex
 - **Services:** Status of NetworkManager, systemd-resolved, internet-watchdog, and an optional app service (set `HYPERION_APP_SERVICE`).
 - **Backups:** Last backup run details and restore status from the app database (if `DB_URL` is configured).
 - **Host Info:** Hostname, primary IP, kernel version, OS, and user.
-- **Live Logs:** Tail `/var/log/hyperion/terminal_monitor.log` by default, with quick cycling to watchdog and backup logs.
+- **Live Logs:** Tail `$HOME/.local/state/hyperion/logs/terminal_monitor.log` by default (or `HYPERION_LOG_DIR`), with quick cycling to watchdog and backup logs.
 
 ### Troubleshooting
 - **Monitor not visible:** Run `./scripts/monitor_doctor.sh` to inspect tmux/GUI/TTY availability.
-- **No GUI terminal available:** Use `tmux attach -t hyperion` after running `./scripts/monitor_launch.sh`.
-- **Monitor closes immediately:** Check `/var/log/hyperion/terminal_monitor.log` for a traceback.
-- **Launcher decisions:** Check `/var/log/hyperion/terminal_monitor_launcher.log`.
+- **No GUI terminal available:** Use `tmux attach -t hyperion-monitor` after running `./scripts/monitor_launch.sh`.
+- **Monitor closes immediately:** Check `$HOME/.local/state/hyperion/logs/terminal_monitor.log` for a traceback.
+- **Launcher decisions:** Check `$HOME/.local/state/hyperion/logs/terminal_monitor_launcher.log`.
 - **TERM/TTY issues:** Ensure `TERM` is set and you’re in a real TTY; the monitor switches to headless automatically when no TTY is detected.
 - **Systemd headless service:** Use the template in `deployment/systemd/hyperion-terminal-monitor.service`.
+
+### Logs & headless output
+- **Default log dir:** `$HOME/.local/state/hyperion/logs`
+- **Monitor log:** `terminal_monitor.log`
+- **Launcher log:** `terminal_monitor_launcher.log`
+- **Headless stdout/stderr:** `terminal_monitor_app.log`
+- **PID file:** `terminal_monitor.pid` (when headless)
+- **Fallback log dir:** `/tmp/hyperion` if the default log dir is not writable.
+
+To watch headless output:
+```bash
+tail -f "$HOME/.local/state/hyperion/logs/terminal_monitor_app.log"
+```
+
+### Verification (recommended)
+```bash
+./start_operations_console.sh --monitor-tmux
+./start_operations_console.sh --monitor-headless
+./start_operations_console.sh --no-monitor
+./scripts/monitor_launch.sh --headless
+./scripts/monitor_doctor.sh
+```
+Verify the monitor uses the venv python (`invapp2/.venv/bin/python`) and that logs appear under `$HOME/.local/state/hyperion/logs`.
 
 ### Systemd (headless template)
 ```bash

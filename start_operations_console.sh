@@ -4,10 +4,16 @@ set -euo pipefail
 SHOW_USAGE=0
 ENABLE_TERMINAL_MONITOR="${ENABLE_TERMINAL_MONITOR:-1}"
 TERMINAL_MONITOR_MODE="${TERMINAL_MONITOR_MODE:-tmux}"
+MONITOR_GUI=0
 while [ "${1:-}" != "" ]; do
     case "$1" in
         --start-monitor|--monitor)
             ENABLE_TERMINAL_MONITOR=1
+            shift
+            ;;
+        --monitor-gui)
+            ENABLE_TERMINAL_MONITOR=1
+            MONITOR_GUI=1
             shift
             ;;
         --no-monitor)
@@ -43,11 +49,13 @@ Usage: ./start_operations_console.sh [--start-monitor|--no-monitor|--monitor-hea
 --no-monitor       Disable the terminal monitor.
 --monitor-headless Run the monitor without a TTY (logs only).
 --monitor-tmux     Launch the monitor in a tmux session.
+--monitor-gui      Force GUI terminal launch (best effort).
 USAGE
     exit 0
 fi
 
 APT_UPDATED=0
+export ENABLE_OPS_MONITOR="$ENABLE_TERMINAL_MONITOR"
 
 run_as_root() {
     if [ "$(id -u)" -eq 0 ]; then
@@ -123,6 +131,9 @@ REQUIREMENTS_FILE="${REQUIREMENTS_FILE:-$APP_DIR/requirements.txt}"
 APP_MODULE="${APP_MODULE:-app:app}"
 WATCHDOG_SCRIPT_SOURCE="${WATCHDOG_SCRIPT_SOURCE:-$SCRIPT_DIR/support/internet_watchdog.sh}"
 WATCHDOG_SERVICE_SOURCE="${WATCHDOG_SERVICE_SOURCE:-$SCRIPT_DIR/support/systemd/internet-watchdog.service}"
+export HYPERION_LOG_DIR="${HYPERION_LOG_DIR:-$HOME/.local/state/hyperion/logs}"
+
+mkdir -p "$HYPERION_LOG_DIR" || true
 
 if [ ! -d "$APP_DIR" ]; then
     echo "❌ Unable to locate application directory: $APP_DIR" >&2
@@ -218,11 +229,17 @@ if [ "$ENABLE_TERMINAL_MONITOR" != "0" ]; then
             monitor_args+=(--headless)
         fi
     fi
+    if [ "$MONITOR_GUI" -eq 1 ]; then
+        monitor_args+=(--gui)
+    fi
     echo "🔹 Launching Hyperion terminal monitor (${TERMINAL_MONITOR_MODE})"
+    launcher_stdout="$HYPERION_LOG_DIR/terminal_monitor_launcher.out.log"
+    echo "   Launcher log: $HYPERION_LOG_DIR/terminal_monitor_launcher.log"
+    echo "   Launcher stdout/stderr: $launcher_stdout"
     if command -v setsid >/dev/null 2>&1; then
-        setsid "$SCRIPT_DIR/scripts/monitor_launch.sh" "${monitor_args[@]}" >/dev/null 2>&1 &
+        setsid "$SCRIPT_DIR/scripts/monitor_launch.sh" "${monitor_args[@]}" >> "$launcher_stdout" 2>&1 &
     else
-        nohup "$SCRIPT_DIR/scripts/monitor_launch.sh" "${monitor_args[@]}" >/dev/null 2>&1 &
+        nohup "$SCRIPT_DIR/scripts/monitor_launch.sh" "${monitor_args[@]}" >> "$launcher_stdout" 2>&1 &
     fi
 fi
 

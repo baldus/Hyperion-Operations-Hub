@@ -8,8 +8,13 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-DEFAULT_LOG_PATH = Path("/var/log/hyperion/terminal_monitor.log")
-FALLBACK_LOG_PATH = Path("/tmp/hyperion_terminal_monitor.log")
+DEFAULT_LOG_PATH = Path(
+    os.getenv(
+        "HYPERION_LOG_DIR",
+        Path.home() / ".local" / "state" / "hyperion" / "logs",
+    )
+) / "terminal_monitor.log"
+FALLBACK_LOG_PATH = Path("/tmp/hyperion/terminal_monitor.log")
 
 
 def setup_logging(log_path: Path | str | None = None) -> Path:

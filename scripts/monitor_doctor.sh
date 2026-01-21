@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LOG_DIR="/var/log/hyperion"
+LOG_DIR="${HYPERION_LOG_DIR:-$HOME/.local/state/hyperion/logs}"
 MONITOR_LOG="$LOG_DIR/terminal_monitor.log"
 LAUNCHER_LOG="$LOG_DIR/terminal_monitor_launcher.log"
 STATUS_FILE="/var/lib/hyperion/network_status.txt"
@@ -12,6 +12,7 @@ printf "isatty stdin: %s\n" "$( [ -t 0 ] && echo yes || echo no )"
 printf "isatty stdout: %s\n" "$( [ -t 1 ] && echo yes || echo no )"
 printf "TERM: %s\n" "${TERM:-}"
 printf "DISPLAY: %s\n" "${DISPLAY:-}"
+printf "log_dir: %s\n" "$LOG_DIR"
 
 printf "\nDependencies\n-----------\n"
 if command -v tmux >/dev/null 2>&1; then
