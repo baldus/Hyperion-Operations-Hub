@@ -2,24 +2,27 @@
 set -euo pipefail
 
 SHOW_USAGE=0
+ENABLE_TERMINAL_MONITOR="${ENABLE_TERMINAL_MONITOR:-1}"
+TERMINAL_MONITOR_MODE="${TERMINAL_MONITOR_MODE:-tmux}"
 while [ "${1:-}" != "" ]; do
     case "$1" in
-        --monitor)
-            export ENABLE_OPS_MONITOR=1
+        --start-monitor|--monitor)
+            ENABLE_TERMINAL_MONITOR=1
             shift
             ;;
         --no-monitor)
+            ENABLE_TERMINAL_MONITOR=0
             export ENABLE_OPS_MONITOR=0
             shift
             ;;
         --monitor-headless)
-            export ENABLE_OPS_MONITOR=1
-            export OPS_MONITOR_LAUNCH_MODE="headless"
+            ENABLE_TERMINAL_MONITOR=1
+            TERMINAL_MONITOR_MODE="headless"
             shift
             ;;
         --monitor-tmux)
-            export ENABLE_OPS_MONITOR=1
-            export OPS_MONITOR_LAUNCH_MODE="tmux"
+            ENABLE_TERMINAL_MONITOR=1
+            TERMINAL_MONITOR_MODE="tmux"
             shift
             ;;
         --help|-h)
@@ -34,12 +37,12 @@ done
 
 if [ "$SHOW_USAGE" -eq 1 ]; then
     cat <<'USAGE'
-Usage: ./start_operations_console.sh [--monitor|--no-monitor|--monitor-headless]
+Usage: ./start_operations_console.sh [--start-monitor|--no-monitor|--monitor-headless|--monitor-tmux]
 
---monitor           Enable the terminal ops monitor (default).
---no-monitor        Disable the terminal ops monitor.
---monitor-headless  Run the monitor without a TTY (logs only).
---monitor-tmux      Launch the monitor in a tmux session.
+--start-monitor    Enable the terminal monitor (default).
+--no-monitor       Disable the terminal monitor.
+--monitor-headless Run the monitor without a TTY (logs only).
+--monitor-tmux     Launch the monitor in a tmux session.
 USAGE
     exit 0
 fi
@@ -118,7 +121,6 @@ APP_DIR="${APP_DIR:-$SCRIPT_DIR/invapp2}"
 VENV_DIR="${VENV_DIR:-$APP_DIR/.venv}"
 REQUIREMENTS_FILE="${REQUIREMENTS_FILE:-$APP_DIR/requirements.txt}"
 APP_MODULE="${APP_MODULE:-app:app}"
-MONITOR_LOG_FILE="${MONITOR_LOG_FILE:-$SCRIPT_DIR/support/operations.log}"
 WATCHDOG_SCRIPT_SOURCE="${WATCHDOG_SCRIPT_SOURCE:-$SCRIPT_DIR/support/internet_watchdog.sh}"
 WATCHDOG_SERVICE_SOURCE="${WATCHDOG_SERVICE_SOURCE:-$SCRIPT_DIR/support/systemd/internet-watchdog.service}"
 
@@ -206,15 +208,18 @@ PORT="${PORT:-8000}"
 WORKERS="${GUNICORN_WORKERS:-2}"
 TIMEOUT="${GUNICORN_TIMEOUT:-600}"
 
-if [ "${ENABLE_OPS_MONITOR:-1}" != "0" ]; then
-    echo "🔹 Launching Operations Console against PID $$"
-    PYTHONPATH="${PYTHONPATH:-$SCRIPT_DIR}" \
-        python -m ops_monitor.launcher \
-        --target-pid "$$" \
-        --app-port "$PORT" \
-        --log-file "$MONITOR_LOG_FILE" \
-        --restart-cmd "${RESTART_CMD_OVERRIDE:-$SCRIPT_DIR/start_operations_console.sh}" \
-        --service-name "Hyperion Operations Hub"
+if [ "$ENABLE_TERMINAL_MONITOR" != "0" ]; then
+    monitor_args=()
+    if [ "$TERMINAL_MONITOR_MODE" = "headless" ]; then
+        monitor_args+=(--no-tmux --headless)
+    elif [ "$TERMINAL_MONITOR_MODE" = "tmux" ]; then
+        if ! command -v tmux >/dev/null 2>&1; then
+            echo "⚠️ tmux not found; falling back to headless terminal monitor logging"
+            monitor_args+=(--no-tmux --headless)
+        fi
+    fi
+    echo "🔹 Launching Hyperion terminal monitor (${TERMINAL_MONITOR_MODE})"
+    "$SCRIPT_DIR/scripts/run_terminal_monitor.sh" "${monitor_args[@]}" &
 fi
 
 if [ -z "${GUNICORN_TIMEOUT:-}" ]; then

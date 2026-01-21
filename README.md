@@ -17,8 +17,9 @@ Hyperion Operations Hub is a Flask-based operations console for manufacturing te
 12. [Testing](#testing)
 13. [Deployment Notes](#deployment-notes)
 14. [Network Stability & Self-Healing (Linux Host)](#network-stability--self-healing-linux-host)
-15. [Contributing / Development Conventions](#contributing--development-conventions)
-16. [How to Make Common Changes](#how-to-make-common-changes)
+15. [Server/System Terminal Monitor](#serversystem-terminal-monitor)
+16. [Contributing / Development Conventions](#contributing--development-conventions)
+17. [How to Make Common Changes](#how-to-make-common-changes)
 
 ---
 
@@ -35,7 +36,7 @@ Hyperion Operations Hub is a Flask-based operations console for manufacturing te
 - **Workstation tools**: the `work` blueprint serves workstation-specific views and tools. See [`invapp2/invapp/routes/work.py`](invapp2/invapp/routes/work.py).
 - **MDI (KPI Board) module**: dashboards, meeting deck, reporting UI, and API endpoints for KPI entries live in the MDI blueprint and its models. See [`invapp2/invapp/mdi`](invapp2/invapp/mdi) and [`invapp2/invapp/mdi/models.py`](invapp2/invapp/mdi/models.py).
 - **Automated backups with scheduling**: APScheduler-driven backups run in the Flask process, with storage and reporting in the backup service. See [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
-- **Operations monitor (terminal UI)**: a separate monitor process surfaces health, logs, and backup status, launched by the startup scripts. See [`ops_monitor`](ops_monitor) and [`start_operations_console.sh`](start_operations_console.sh).
+- **Operations monitor (terminal UI)**: a separate monitor process surfaces host health, logs, and backup status, launched by the startup scripts. See [`terminal_monitor`](terminal_monitor) and [`scripts/run_terminal_monitor.sh`](scripts/run_terminal_monitor.sh).
 
 ---
 
@@ -105,9 +106,9 @@ This script creates a venv, installs dependencies, runs a health check, starts t
    ▼
 [PostgreSQL DB]
    │
-   └─ Background: APScheduler for backups + ops_monitor (separate process)
+   └─ Background: APScheduler for backups + terminal_monitor (separate process)
 ```
-Blueprint registration and startup flow are in [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py). The ops monitor is a separate process in [`ops_monitor`](ops_monitor).
+Blueprint registration and startup flow are in [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py). The terminal monitor is a separate process in [`terminal_monitor`](terminal_monitor).
 
 ### Repository structure
 ```
@@ -120,7 +121,7 @@ Hyperion-Operations-Hub/
 │   ├── scripts/               # Helper CLI wrappers
 │   ├── tests/                 # Pytest suite
 │   └── invapp/                # Application package (blueprints, models, services)
-├── ops_monitor/               # Terminal-based operations monitor
+├── terminal_monitor/          # Terminal-based operations monitor
 ├── docs/                      # Additional documentation and guides
 ├── support/                   # Diagnostics and log support scripts
 ├── start_operations_console.sh# Production-like launcher (Gunicorn + monitor)
@@ -130,11 +131,11 @@ Important directories and what belongs there:
 - **`invapp2/invapp/`**: Flask app code (blueprints, models, services, templates, static). This is where most feature work happens. See [`invapp2/invapp`](invapp2/invapp).
 - **`invapp2/migrations/`**: Alembic migrations for schema changes. See [`invapp2/migrations`](invapp2/migrations).
 - **`invapp2/tests/`**: pytest tests. See [`invapp2/tests`](invapp2/tests).
-- **`ops_monitor/`**: the terminal UI monitor launched by startup scripts. See [`ops_monitor`](ops_monitor).
+- **`terminal_monitor/`**: the terminal UI monitor launched by startup scripts. See [`terminal_monitor`](terminal_monitor).
 - **`docs/`**: deployment and hardware guidance. See [`docs`](docs).
 
 ### Execution flow (startup)
-1. **Entry point**: `invapp2/app.py` creates the Flask app and optionally launches the ops monitor when run directly. See [`invapp2/app.py`](invapp2/app.py).
+1. **Entry point**: `invapp2/app.py` creates the Flask app and optionally launches the terminal monitor when run directly. See [`invapp2/app.py`](invapp2/app.py).
 2. **App factory**: `create_app()` loads configuration, sets up logging, initializes Flask-Login and SQLAlchemy, and ensures schema and seed data. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
 3. **Blueprint registration**: All feature routes are registered, including the MDI blueprint. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py) and [`invapp2/invapp/mdi/__init__.py`](invapp2/invapp/mdi/__init__.py).
 4. **Backup scheduler**: APScheduler jobs are started in non-test environments. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py) and [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
@@ -167,16 +168,14 @@ These are pulled directly from environment variables or startup scripts:
 | `PORT` | App port (dev server + Gunicorn + monitor). | `5000` (dev) / `8000` (scripts) | [`invapp2/app.py`](invapp2/app.py), [`start_operations_console.sh`](start_operations_console.sh) |
 | `GUNICORN_WORKERS` | Gunicorn worker count. | `2` | [`start_operations_console.sh`](start_operations_console.sh) |
 | `GUNICORN_TIMEOUT` | Gunicorn worker timeout seconds. | `600` | [`start_operations_console.sh`](start_operations_console.sh) |
-| `ENABLE_OPS_MONITOR` | Enable the terminal ops monitor. | `1` | [`start_operations_console.sh`](start_operations_console.sh), [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
-| `OPS_MONITOR_DB_URL` | DB URL to show in ops monitor (masked). | falls back to `DB_URL` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
-| `OPS_MONITOR_LAUNCH_MODE` | Monitor launch mode (`window`, `background`, `headless`, `tmux`). | `window` | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
-| `OPS_MONITOR_TERMINAL` | Force a specific terminal app. | (none) | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
-| `OPS_MONITOR_REFRESH_INTERVAL` | Terminal refresh interval (seconds). | `0.5` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
-| `OPS_MONITOR_LOG_MAX_LINES` | Max log lines kept for scrollback. | `200` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
-| `OPS_MONITOR_LOG_WINDOW` | Visible log window height (lines). | `18` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
-| `OPS_MONITOR_DEBUG` | Log terminal key events for diagnostics. | `0` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
-| `PYTHON` | Python executable used for the ops monitor. | current interpreter | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
-| `APP_DIR`, `VENV_DIR`, `REQUIREMENTS_FILE`, `APP_MODULE`, `MONITOR_LOG_FILE` | Startup script overrides for the launcher. | (script defaults) | [`start_operations_console.sh`](start_operations_console.sh) |
+| `ENABLE_TERMINAL_MONITOR` | Enable the terminal monitor. | `1` | [`start_operations_console.sh`](start_operations_console.sh), [`invapp2/app.py`](invapp2/app.py) |
+| `ENABLE_OPS_MONITOR` | Legacy alias for enabling the terminal monitor. | `1` | [`invapp2/app.py`](invapp2/app.py) |
+| `TERMINAL_MONITOR_MODE` | Monitor launch mode (`tmux`, `headless`). | `tmux` | [`start_operations_console.sh`](start_operations_console.sh) |
+| `TERMINAL_MONITOR_DB_URL` | DB URL for backup panel (falls back to `DB_URL`). | (none) | [`terminal_monitor/app.py`](terminal_monitor/app.py) |
+| `OPS_MONITOR_DB_URL` | Legacy alias for the backup DB URL. | falls back to `DB_URL` | [`terminal_monitor/app.py`](terminal_monitor/app.py) |
+| `HYPERION_APP_SERVICE` | Optional systemd service name for the Services panel. | (none) | [`terminal_monitor/panels/services.py`](terminal_monitor/panels/services.py) |
+| `PYTHON` | Python executable used by scripts and systemd units. | current interpreter | [`start_operations_console.sh`](start_operations_console.sh) |
+| `APP_DIR`, `VENV_DIR`, `REQUIREMENTS_FILE`, `APP_MODULE` | Startup script overrides for the launcher. | (script defaults) | [`start_operations_console.sh`](start_operations_console.sh) |
 | `HEALTHCHECK_FATAL`, `HEALTHCHECK_DRY_RUN` | Startup healthcheck behavior. | `0` | [`start_operations_console.sh`](start_operations_console.sh), [`invapp2/invapp/healthcheck.py`](invapp2/invapp/healthcheck.py) |
 
 ### Config files and loading
@@ -184,8 +183,8 @@ These are pulled directly from environment variables or startup scripts:
 - **Alembic config**: `alembic.ini` points to the migrations folder and defaults to SQLite unless overridden by `DB_URL`. See [`invapp2/alembic.ini`](invapp2/alembic.ini) and [`invapp2/migrations/env.py`](invapp2/migrations/env.py).
 
 ### Dev vs prod differences
-- **Dev**: `python invapp2/app.py` runs the Flask dev server on port 5000 and launches the ops monitor in a separate process. See [`invapp2/app.py`](invapp2/app.py).
-- **Prod-like**: `./start_operations_console.sh` runs a health check and launches Gunicorn on port 8000 by default. See [`start_operations_console.sh`](start_operations_console.sh).
+- **Dev**: `python invapp2/app.py` runs the Flask dev server on port 5000 and launches the terminal monitor in headless mode. See [`invapp2/app.py`](invapp2/app.py).
+- **Prod-like**: `./start_operations_console.sh` runs a health check, launches the terminal monitor, and starts Gunicorn on port 8000 by default. See [`start_operations_console.sh`](start_operations_console.sh).
 
 ---
 
@@ -343,7 +342,7 @@ If the database is offline at startup, the app uses an `OfflineAdminUser` that g
 
 - **Automated backups** use APScheduler inside the Flask process. Jobs run on a configurable interval and log to the backup directory. See [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
 - The scheduler is started in `create_app()` when not in testing mode. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
-- **Ops monitor** is a separate Python process launched by the startup scripts (not a Flask background task). See [`ops_monitor`](ops_monitor) and [`start_operations_console.sh`](start_operations_console.sh).
+- **Terminal monitor** is a separate Python process launched by the startup scripts (not a Flask background task). See [`terminal_monitor`](terminal_monitor) and [`scripts/run_terminal_monitor.sh`](scripts/run_terminal_monitor.sh).
 
 To disable automated backups in dev, set `BACKUP_SCHEDULER_ENABLED` to `False` in config overrides when calling `create_app()` (it defaults to `True`). See scheduler checks in [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
 
@@ -382,9 +381,9 @@ See configuration defaults in [`invapp2/config.py`](invapp2/config.py) and backu
 - **Backup listing/download**: admin or superuser per the admin routes.
 See access enforcement in [`invapp2/invapp/superuser.py`](invapp2/invapp/superuser.py) and [`invapp2/invapp/routes/admin.py`](invapp2/invapp/routes/admin.py).
 
-### Viewing restore/backup status (ops monitor)
-- The popout status terminal shows **backup status** in the “Backup Status” panel and recent **restore events** in the Events panel.
-- Restore progress events (start/reset/apply/complete) and sanitized stdout/stderr are published to the status bus (`ops_event_log`), so they appear in the terminal UI. See [`invapp2/invapp/services/status_bus.py`](invapp2/invapp/services/status_bus.py), [`ops_monitor/metrics.py`](ops_monitor/metrics.py), and [`ops_monitor/monitor.py`](ops_monitor/monitor.py).
+### Viewing restore/backup status (terminal monitor)
+- The terminal monitor shows **backup status** in the Backups panel, including last run and last restore details when `DB_URL` is available. See [`terminal_monitor/panels/backups.py`](terminal_monitor/panels/backups.py) and [`terminal_monitor/app.py`](terminal_monitor/app.py).
+- Restore progress events are still published to the status bus (`ops_event_log`) for auditing. See [`invapp2/invapp/services/status_bus.py`](invapp2/invapp/services/status_bus.py).
 
 ### Troubleshooting restore failures
 - **`DB_URL` incorrect**: `psql` will fail to connect. Verify `DB_URL` and that the database exists. See config defaults in [`invapp2/config.py`](invapp2/config.py).
@@ -398,12 +397,12 @@ See access enforcement in [`invapp2/invapp/superuser.py`](invapp2/invapp/superus
 
 - **App logs**: `create_app()` configures a rotating log file (default `support/operations.log`) and also sends warnings to the status bus. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
 - **Backup logs**: stored in `backup.log` within the backup directory. See [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
-- **Status bus**: logs events to memory and the `ops_event_log` table for the ops monitor. See [`invapp2/invapp/services/status_bus.py`](invapp2/invapp/services/status_bus.py).
+- **Status bus**: logs events to memory and the `ops_event_log` table for the terminal monitor and auditing. See [`invapp2/invapp/services/status_bus.py`](invapp2/invapp/services/status_bus.py).
 - **Diagnostics script**: `support/run_diagnostics.sh` collects system status for troubleshooting. See [`support/run_diagnostics.sh`](support/run_diagnostics.sh).
 
 Common debugging steps:
 - Run the health check before startup: `python -m invapp.healthcheck --fatal`. See [`invapp2/invapp/healthcheck.py`](invapp2/invapp/healthcheck.py).
-- Watch `support/operations.log` and the ops monitor UI for database errors and backup status. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py) and [`ops_monitor/monitor.py`](ops_monitor/monitor.py).
+- Watch `support/operations.log` and the terminal monitor UI for database errors and backup status. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py) and [`terminal_monitor/app.py`](terminal_monitor/app.py).
 
 ---
 
@@ -506,88 +505,59 @@ The `support/network_stability.sh` script still applies additional host protecti
 sudo support/network_stability.sh
 ```
 
-### Server/System Terminal Monitor
-The Ops Monitor terminal display exists for host-level health visibility even when the web UI is unreachable (for example, during a network outage). It runs alongside the web server and provides live status, logs, and interactive controls.
+## Server/System Terminal Monitor
+The server/system terminal monitor is a TUI designed for host-level visibility when the web UI is down or the network is unstable. It is built with Textual and runs locally on the host console or over SSH, with a headless logging mode when no TTY is available.
 
-**How it runs**
-- `start_operations_console.sh` launches the ops monitor by default (`ENABLE_OPS_MONITOR=1`). See [`start_operations_console.sh`](start_operations_console.sh).
-- The monitor implementation is `ops_monitor/monitor.py`, launched via `ops_monitor/launcher.py`.
-- A diagnostic log is written to `/var/log/hyperion/terminal_monitor.log` (fallbacks to `support/hyperion_terminal_monitor.log` if permissions prevent writing to `/var/log`).
-- You can run the monitor headless (no TTY required) with `OPS_MONITOR_LAUNCH_MODE=headless` or `./start_operations_console.sh --monitor-headless`.
-- Prefer tmux for a durable interactive session: `./start_operations_console.sh --monitor-tmux` (attach with `tmux attach -t hyperion-monitor`).
-
-**Manual run**
+### How to run
+Interactive (preferred, via tmux):
 ```bash
-python -m ops_monitor.monitor --target-pid <PID> --app-port 8000 --service-name "Hyperion Operations Hub"
+./scripts/run_terminal_monitor.sh
+tmux attach -t hyperion
 ```
 
-**Doctor mode**
+Headless (logs only, suitable for systemd):
 ```bash
-python -m ops_monitor.monitor --doctor
+./scripts/run_terminal_monitor.sh --no-tmux --headless
 ```
 
-**Key bindings (cheat sheet)**
-- Navigation: `Tab` / `Shift+Tab`, arrow keys, or `j/k`
-- Select/activate: `Enter`
-- Quit/back: `q` or `Esc`
-- Log panel: `PageUp/PageDown`, `Home/End`, `f` to toggle follow mode
+Doctor mode:
+```bash
+python -m terminal_monitor.app --doctor
+```
 
-**Refresh & layout tuning**
-- Set `OPS_MONITOR_REFRESH_INTERVAL` for update cadence (seconds).
-- Set `OPS_MONITOR_LOG_MAX_LINES` and `OPS_MONITOR_LOG_WINDOW` to adjust scrollback and viewport size.
+Dependencies live in [`invapp2/requirements.txt`](invapp2/requirements.txt) (Textual + Rich are required).
 
-**Systemd (headless)**
-- Unit template: `deployment/systemd/hyperion-terminal-monitor.service`
-- Install (update paths to match your host):
-  ```bash
-  sudo install -m 0644 deployment/systemd/hyperion-terminal-monitor.service /etc/systemd/system/hyperion-terminal-monitor.service
-  sudo systemctl daemon-reload
-  sudo systemctl enable --now hyperion-terminal-monitor.service
-  ```
+### Keybindings (cheat sheet)
+- **Quit:** `q`
+- **Focus/Navigation:** `Tab`, arrow keys
+- **Activate:** `Enter`
+- **Log panel:** `f` follow toggle · `/` search · `PageUp/PageDown` scroll
 
-### Network Status Display (Server Terminal)
-Network status is intentionally **not** shown in the web UI; if connectivity is down, the site may be unreachable. Instead, the Ops Monitor terminal display reads the watchdog status file and renders it directly on the server console.
+### Panels & what they show
+- **Network Status:** Reads `/var/lib/hyperion/network_status.txt` every second. `OFFLINE` is highlighted prominently; missing file renders `UNKNOWN | network watchdog not running`.
+- **System Health:** Load average, memory usage, disk usage (`/` + `/var`), uptime, and CPU temperature (if available).
+- **Services:** Status of NetworkManager, systemd-resolved, internet-watchdog, and an optional app service (set `HYPERION_APP_SERVICE`).
+- **Backups:** Last backup run details and restore status from the app database (if `DB_URL` is configured).
+- **Host Info:** Hostname, primary IP, kernel version, OS, and user.
+- **Live Logs:** Tail `/var/log/hyperion/terminal_monitor.log` by default, with quick cycling to watchdog and backup logs.
 
-**Where the status comes from**
-- Watchdog output: `/var/lib/hyperion/network_status.txt`
-- Ops Monitor display logic: `ops_monitor/monitor.py` reads the file and highlights OFFLINE lines in red.
+### Troubleshooting
+- **Monitor closes immediately:** Check `/var/log/hyperion/terminal_monitor.log` for a traceback.
+- **TERM/TTY issues:** Ensure `TERM` is set and you’re in a real TTY. Run `python -m terminal_monitor.app --doctor` for diagnostics.
+- **Headless behavior:** If no TTY is detected, the monitor automatically switches to headless logging unless `--headless` is provided.
+- **Systemd headless service:** Use the template in `deployment/systemd/hyperion-terminal-monitor.service`.
 
-**What to look for**
-- In the Ops Monitor terminal window, find the **Network** row in the System Health metrics table.
-- If the line begins with `OFFLINE`, it is shown in red with a loud prefix (`!!!`) to draw attention.
-- If the file is missing or empty, the display shows `UNKNOWN | network watchdog not running`.
+### Systemd (headless template)
+```bash
+sudo install -m 0644 deployment/systemd/hyperion-terminal-monitor.service /etc/systemd/system/hyperion-terminal-monitor.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now hyperion-terminal-monitor.service
+```
 
-**Quick verification**
-- Read the file directly:
-  ```bash
-  cat /var/lib/hyperion/network_status.txt
-  ```
-- Simulate offline:
-  ```bash
-  sudo iptables -I OUTPUT -p icmp --icmp-type echo-request -j DROP
-  ```
-  Confirm the status line flips to `OFFLINE` and the terminal display turns red.
-- Restore:
-  ```bash
-  sudo iptables -D OUTPUT -p icmp --icmp-type echo-request -j DROP
-  ```
-
-**Troubleshooting**
-- **Network status not showing**:
-  - Confirm the watchdog service is running: `systemctl status internet-watchdog.service`.
-  - Check file permissions: `ls -l /var/lib/hyperion/network_status.txt`.
-  - Verify the log: `sudo tail -f /var/log/internet_watchdog.log`.
-- **Monitor opens then closes**:
-  - Check `/var/log/hyperion/terminal_monitor.log` for a traceback.
-  - Confirm you launched it in a real TTY (or use `--monitor-headless`).
-  - Confirm `TERM` is valid (non-empty and not `dumb`).
-  - Run `python -m ops_monitor.monitor --doctor`.
-- **Terminal too small**:
-  - Resize the window to at least 80x24; the monitor will display a warning until the terminal is large enough.
-- **Controls not responding**:
-  - Confirm the terminal has focus (click inside the terminal window).
-  - If running inside tmux/screen, check that keybindings are not overridden.
-  - Set `OPS_MONITOR_DEBUG=1` and inspect `/var/log/hyperion/terminal_monitor.log`.
+### Adding new panels
+1. Create a new widget/data module in `terminal_monitor/panels/`.
+2. Add it to `terminal_monitor/app.py` layout and refresh loop.
+3. Update this README to document the new panel and any required paths.
 
 ---
 

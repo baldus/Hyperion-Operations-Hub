@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -10,20 +11,19 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from invapp import create_app
-from ops_monitor.launcher import launch_monitor_process
-
 app = create_app()
 
 if __name__ == "__main__":
     # Development fallback: the production entry point now uses Gunicorn.
     port = int(os.getenv("PORT", 5000))
-    log_file = PROJECT_ROOT / "support" / "operations.log"
-    restart_cmd = f"{sys.executable} {Path(__file__).name}"
-    launch_monitor_process(
-        target_pid=os.getpid(),
-        app_port=port,
-        log_file=log_file,
-        restart_cmd=restart_cmd,
-        service_name="Hyperion Operations Hub",
-    )
+    if os.getenv("ENABLE_TERMINAL_MONITOR", os.getenv("ENABLE_OPS_MONITOR", "1")) != "0":
+        monitor_script = PROJECT_ROOT / "scripts" / "run_terminal_monitor.sh"
+        if monitor_script.exists():
+            subprocess.Popen(
+                [str(monitor_script), "--no-tmux", "--headless"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                env={**os.environ, "PYTHONPATH": str(PROJECT_ROOT)},
+            )
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
