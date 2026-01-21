@@ -13,12 +13,13 @@ Hyperion Operations Hub is a Flask-based operations console for manufacturing te
 8. [Permissions / Roles](#permissions--roles)
 9. [Background Tasks / Schedules](#background-tasks--schedules)
 10. [Backups & Restore](#backups--restore)
-11. [Logging, Errors, and Debugging](#logging-errors-and-debugging)
-12. [Testing](#testing)
-13. [Deployment Notes](#deployment-notes)
-14. [Network Stability & Self-Healing (Linux Host)](#network-stability--self-healing-linux-host)
-15. [Contributing / Development Conventions](#contributing--development-conventions)
-16. [How to Make Common Changes](#how-to-make-common-changes)
+11. [Status Monitor (Web UI)](#status-monitor-web-ui)
+12. [Logging, Errors, and Debugging](#logging-errors-and-debugging)
+13. [Testing](#testing)
+14. [Deployment Notes](#deployment-notes)
+15. [Network Stability & Self-Healing (Linux Host)](#network-stability--self-healing-linux-host)
+16. [Contributing / Development Conventions](#contributing--development-conventions)
+17. [How to Make Common Changes](#how-to-make-common-changes)
 
 ---
 
@@ -106,6 +107,9 @@ This script creates a venv, installs dependencies, runs a health check, starts t
 [PostgreSQL DB]
    │
    └─ Background: APScheduler for backups + ops_monitor (separate process)
+
+[Status Monitor (hyperion_status_monitor)]
+   └─ Local-only Flask UI + snapshot collectors + SQLite persistence
 ```
 Blueprint registration and startup flow are in [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py). The ops monitor is a separate process in [`ops_monitor`](ops_monitor).
 
@@ -131,6 +135,7 @@ Important directories and what belongs there:
 - **`invapp2/migrations/`**: Alembic migrations for schema changes. See [`invapp2/migrations`](invapp2/migrations).
 - **`invapp2/tests/`**: pytest tests. See [`invapp2/tests`](invapp2/tests).
 - **`ops_monitor/`**: the terminal UI monitor launched by startup scripts. See [`ops_monitor`](ops_monitor).
+- **`hyperion_status_monitor/`**: local-only web status monitor service (Flask + collectors + SQLite). See [`hyperion_status_monitor`](hyperion_status_monitor).
 - **`docs/`**: deployment and hardware guidance. See [`docs`](docs).
 
 ### Execution flow (startup)
@@ -155,6 +160,7 @@ These are pulled directly from environment variables or startup scripts:
 | `ADMIN_SESSION_TIMEOUT` | Session timeout in seconds. | `300` | [`invapp2/config.py`](invapp2/config.py) |
 | `BACKUP_DIR` | Preferred backup directory used by the backup service. | (none) | [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py) |
 | `BACKUP_DIR_AUTO` | Directory for auto-imported backups. | (none) | [`invapp2/config.py`](invapp2/config.py) |
+| `BACKUP_STATUS_PATH` | Path to write last backup JSON status (for status monitor). | `/var/lib/hyperion/backups/last_backup.json` | [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py) |
 | `MDI_DEFAULT_RECIPIENTS` | Default recipient list for MDI emails. | empty | [`invapp2/config.py`](invapp2/config.py) |
 | `MDI_DEFAULT_SENDER` | Default sender (empty so mail client can choose). | empty | [`invapp2/config.py`](invapp2/config.py) |
 | `FRAMING_PANEL_OFFSET` | Offset for framing panel UI. | `0` | [`invapp2/config.py`](invapp2/config.py) |
@@ -178,6 +184,14 @@ These are pulled directly from environment variables or startup scripts:
 | `PYTHON` | Python executable used for the ops monitor. | current interpreter | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
 | `APP_DIR`, `VENV_DIR`, `REQUIREMENTS_FILE`, `APP_MODULE`, `MONITOR_LOG_FILE` | Startup script overrides for the launcher. | (script defaults) | [`start_operations_console.sh`](start_operations_console.sh) |
 | `HEALTHCHECK_FATAL`, `HEALTHCHECK_DRY_RUN` | Startup healthcheck behavior. | `0` | [`start_operations_console.sh`](start_operations_console.sh), [`invapp2/invapp/healthcheck.py`](invapp2/invapp/healthcheck.py) |
+| `STATUS_MONITOR_PORT` | Status monitor bind port (local-only). | `5055` | [`hyperion_status_monitor/config.py`](hyperion_status_monitor/config.py) |
+| `STATUS_MONITOR_INTERVAL_SEC` | Snapshot interval seconds. | `10` | [`hyperion_status_monitor/config.py`](hyperion_status_monitor/config.py) |
+| `STATUS_MONITOR_DB_PATH` | SQLite snapshot database path. | `/var/lib/hyperion-status-monitor/status.db` | [`hyperion_status_monitor/config.py`](hyperion_status_monitor/config.py) |
+| `STATUS_MONITOR_LOG_PATH` | Rotating log file path. | `/var/log/hyperion-status-monitor/monitor.log` | [`hyperion_status_monitor/config.py`](hyperion_status_monitor/config.py) |
+| `STATUS_MONITOR_BACKUP_STATUS_PATH` | Backup status JSON path to read. | `/var/lib/hyperion/backups/last_backup.json` | [`hyperion_status_monitor/config.py`](hyperion_status_monitor/config.py) |
+| `STATUS_MONITOR_BACKUP_DIR` | Backup directory fallback for inferred status. | `/var/lib/hyperion/backups` | [`hyperion_status_monitor/config.py`](hyperion_status_monitor/config.py) |
+| `MAIN_APP_HEALTH_URL` | Optional health endpoint to ping. | empty | [`hyperion_status_monitor/config.py`](hyperion_status_monitor/config.py) |
+| `DATABASE_URL` | Optional DB URL for status monitor DB checks. | empty | [`hyperion_status_monitor/config.py`](hyperion_status_monitor/config.py) |
 
 ### Config files and loading
 - **`invapp2/config.py`**: `Config` is loaded in `create_app()` via `app.config.from_object(Config)`. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py) and [`invapp2/config.py`](invapp2/config.py).
@@ -391,6 +405,48 @@ See access enforcement in [`invapp2/invapp/superuser.py`](invapp2/invapp/superus
 - **`psql` not installed**: install PostgreSQL client tools on the host (`psql` must be on `PATH`).
 - **Permission errors**: ensure the database user has rights to drop/create schema and restore objects.
 - **Locked sessions**: if active sessions block schema drops, ensure the DB user can terminate connections or stop the app briefly before retrying.
+
+---
+
+## Status Monitor (Web UI)
+
+The status monitor is a standalone Flask service that runs locally on the host and surfaces a lightweight dashboard plus JSON APIs for health and diagnostics. It is designed to run independently of the main app, collect snapshots with strict timeouts, and persist the last good snapshot in SQLite. The service lives in [`hyperion_status_monitor`](hyperion_status_monitor) and is deployed via systemd. See [`hyperion_status_monitor/app.py`](hyperion_status_monitor/app.py), [`hyperion_status_monitor/snapshot.py`](hyperion_status_monitor/snapshot.py), and [`hyperion_status_monitor/store.py`](hyperion_status_monitor/store.py).
+
+### Architecture
+- **Collectors**: Each health domain lives in a dedicated collector module with strict timeouts (DB ping, disk, backup status, main app health). See [`hyperion_status_monitor/collectors`](hyperion_status_monitor/collectors).
+- **Snapshot aggregation**: Collectors feed a unified snapshot schema (`generated_at`, `app`, `db`, `disk`, `backups`, `jobs`, `main_app`, `errors`). See [`hyperion_status_monitor/snapshot.py`](hyperion_status_monitor/snapshot.py).
+- **Persistence**: Snapshots/events are stored in SQLite for warm starts and last-known-good UI. See [`hyperion_status_monitor/store.py`](hyperion_status_monitor/store.py).
+- **UI**: A minimal single-page dashboard polls `/api/status/snapshot` on a fixed cadence. See [`hyperion_status_monitor/templates/index.html`](hyperion_status_monitor/templates/index.html) and [`hyperion_status_monitor/static/status.js`](hyperion_status_monitor/static/status.js).
+
+### Run locally (developer workflow)
+From the repository root:
+```bash
+python -m hyperion_status_monitor.app
+```
+Then open `http://127.0.0.1:5055`. The service binds only to localhost; change the port with `STATUS_MONITOR_PORT`. See [`hyperion_status_monitor/app.py`](hyperion_status_monitor/app.py) and [`hyperion_status_monitor/config.py`](hyperion_status_monitor/config.py).
+
+### Deploy with systemd
+1. Review the unit template in [`hyperion_status_monitor/systemd/hyperion-status-monitor.service`](hyperion_status_monitor/systemd/hyperion-status-monitor.service).
+2. Run the install script (creates directories, installs the unit, enables + starts the service):
+   ```bash
+   ./hyperion_status_monitor/scripts/install_systemd.sh
+   ```
+3. Tail logs:
+   ```bash
+   journalctl -u hyperion-status-monitor -f
+   ```
+The script also creates `/etc/hyperion-status-monitor.env` for configuration. See [`hyperion_status_monitor/scripts/install_systemd.sh`](hyperion_status_monitor/scripts/install_systemd.sh).
+
+### Diagnostics endpoint
+The `/api/status/diagnostics` endpoint returns a single text blob with version/uptime, configuration paths, last snapshot JSON, and recent events. Use it for support tickets or copy/paste troubleshooting. See [`hyperion_status_monitor/app.py`](hyperion_status_monitor/app.py).
+
+### Backup status integration
+The status monitor reads `/var/lib/hyperion/backups/last_backup.json`. The backup service writes this file on each automated or manual backup run. See [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py) and [`invapp2/invapp/services/backup_exporter.py`](invapp2/invapp/services/backup_exporter.py).
+
+### Add a new collector safely
+1. Create a new collector module in `hyperion_status_monitor/collectors/` that returns `{ok, status, details, metrics}`.
+2. Wire it into `build_snapshot()` in [`hyperion_status_monitor/snapshot.py`](hyperion_status_monitor/snapshot.py).
+3. Ensure it has a timeout and never raises uncaught exceptions (errors should degrade to `ERROR` and be recorded as events).
 
 ---
 

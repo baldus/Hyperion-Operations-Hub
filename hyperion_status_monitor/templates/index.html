@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hyperion Status Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <header class="header">
+      <div>
+        <h1>Hyperion Status Monitor</h1>
+        <p class="muted">Local-only dashboard</p>
+      </div>
+      <div class="header-actions">
+        <button id="copy-diagnostics" class="button">Copy diagnostics</button>
+      </div>
+    </header>
+
+    <section id="stale-banner" class="banner hidden">
+      Snapshot stale — data is older than expected.
+    </section>
+
+    <section class="meta">
+      <span id="last-updated">Last updated: --</span>
+    </section>
+
+    <main class="grid">
+      <div class="tile" data-section="main_app">
+        <h2>Main App</h2>
+        <p class="status">--</p>
+        <p class="details">Waiting for data.</p>
+      </div>
+      <div class="tile" data-section="db">
+        <h2>Database</h2>
+        <p class="status">--</p>
+        <p class="details">Waiting for data.</p>
+      </div>
+      <div class="tile" data-section="disk">
+        <h2>Disk</h2>
+        <p class="status">--</p>
+        <p class="details">Waiting for data.</p>
+      </div>
+      <div class="tile" data-section="backups">
+        <h2>Backups</h2>
+        <p class="status">--</p>
+        <p class="details">Waiting for data.</p>
+      </div>
+      <div class="tile" data-section="app">
+        <h2>Uptime</h2>
+        <p class="status">--</p>
+        <p class="details">Waiting for data.</p>
+      </div>
+      <div class="tile" data-section="errors">
+        <h2>Errors</h2>
+        <p class="status">--</p>
+        <p class="details">Waiting for data.</p>
+      </div>
+    </main>
+
+    <script>
+      window.STATUS_MONITOR_INTERVAL = {{ interval | int }};
+    </script>
+    <script src="{{ url_for('static', filename='status.js') }}"></script>
+  </body>
+</html>

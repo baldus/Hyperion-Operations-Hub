@@ -27,6 +27,7 @@ def create_database_backup_archive(app, logger: logging.Logger | None = None) ->
     """
 
     logger = logger or logging.getLogger("invapp.backup.export")
+    started_at = datetime.utcnow()
     backup_dir = backup_service.get_backup_dir(app, logger=logger)
     staging_dir = Path(tempfile.mkdtemp(prefix="manual_backup_", dir=backup_dir / "tmp"))
 
@@ -92,6 +93,7 @@ def create_database_backup_archive(app, logger: logging.Logger | None = None) ->
             filepath=str(archive_path),
             bytes=archive_path.stat().st_size,
             message="Manual backup export completed.",
+            started_at=started_at,
         )
 
         status_bus.log_event(
@@ -101,7 +103,7 @@ def create_database_backup_archive(app, logger: logging.Logger | None = None) ->
             source=EXPORT_SOURCE,
         )
     except Exception as exc:
-        _record_backup_run(status="failed", message=str(exc))
+        _record_backup_run(status="failed", message=str(exc), started_at=started_at)
         status_bus.log_event(
             "error",
             f"Backup failed: {exc}",
@@ -146,6 +148,7 @@ def _record_backup_run(
     filepath: str | None = None,
     bytes: int | None = None,
     message: str | None = None,
+    started_at: datetime | None = None,
 ) -> None:
     try:
         record = BackupRun(
@@ -154,10 +157,12 @@ def _record_backup_run(
             filepath=filepath,
             bytes=bytes,
             message=message,
+            started_at=started_at or datetime.utcnow(),
             finished_at=datetime.utcnow(),
         )
         db.session.add(record)
         db.session.commit()
+        backup_service.write_backup_status_file(record)
     except Exception:
         db.session.rollback()
 

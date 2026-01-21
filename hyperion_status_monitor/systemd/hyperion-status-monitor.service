@@ -1,0 +1,16 @@
+[Unit]
+Description=Hyperion Status Monitor
+After=network.target
+
+[Service]
+Type=simple
+User=hyperion
+Group=hyperion
+WorkingDirectory={{INSTALL_DIR}}
+EnvironmentFile=-/etc/hyperion-status-monitor.env
+ExecStart={{VENV_PYTHON}} -m hyperion_status_monitor.app
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

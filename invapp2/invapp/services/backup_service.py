@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -35,6 +36,9 @@ BACKUP_REFRESH_JOB_ID = "automated-backup-refresh"
 BACKUP_REFRESH_MINUTES = 5
 BACKUP_SUBDIRS = ("db", "files", "tmp")
 AUTO_BACKUP_ALLOWED_EXTENSIONS = (".zip", ".tar.gz", ".sql", ".dump")
+BACKUP_STATUS_PATH = Path(
+    os.getenv("BACKUP_STATUS_PATH", "/var/lib/hyperion/backups/last_backup.json")
+)
 RESTORE_TIMEOUT_SECONDS = 900
 _WARNED_KEYS: set[str] = set()
 _APP_SETTING_REPAIR_ATTEMPTED = False
@@ -821,5 +825,37 @@ def _finalize_backup_run(
         record.finished_at = datetime.utcnow()
         db.session.add(record)
         db.session.commit()
+        _write_backup_status_file(record)
     except SQLAlchemyError:
         db.session.rollback()
+
+
+def _write_backup_status_file(record: BackupRun) -> None:
+    try:
+        path = BACKUP_STATUS_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        started_at = record.started_at.isoformat() if record.started_at else None
+        finished_at = record.finished_at.isoformat() if record.finished_at else None
+        duration_sec = None
+        if record.started_at and record.finished_at:
+            duration_sec = (record.finished_at - record.started_at).total_seconds()
+        payload = {
+            "ok": record.status == "succeeded",
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "filename": record.filename,
+            "size_bytes": record.bytes,
+            "duration_sec": duration_sec,
+            "error": record.message if record.status != "succeeded" else None,
+        }
+        tmp_path = path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        tmp_path.replace(path)
+    except Exception:
+        logging.getLogger("invapp.backup").exception(
+            "Failed to write backup status file."
+        )
+
+
+def write_backup_status_file(record: BackupRun) -> None:
+    _write_backup_status_file(record)
