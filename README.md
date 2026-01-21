@@ -171,6 +171,10 @@ These are pulled directly from environment variables or startup scripts:
 | `OPS_MONITOR_DB_URL` | DB URL to show in ops monitor (masked). | falls back to `DB_URL` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
 | `OPS_MONITOR_LAUNCH_MODE` | Monitor launch mode (`window`, `background`, `headless`). | `window` | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
 | `OPS_MONITOR_TERMINAL` | Force a specific terminal app. | (none) | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
+| `OPS_MONITOR_REFRESH_INTERVAL` | Terminal refresh interval (seconds). | `0.5` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
+| `OPS_MONITOR_LOG_MAX_LINES` | Max log lines kept for scrollback. | `200` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
+| `OPS_MONITOR_LOG_WINDOW` | Visible log window height (lines). | `18` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
+| `OPS_MONITOR_DEBUG` | Log terminal key events for diagnostics. | `0` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
 | `PYTHON` | Python executable used for the ops monitor. | current interpreter | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
 | `APP_DIR`, `VENV_DIR`, `REQUIREMENTS_FILE`, `APP_MODULE`, `MONITOR_LOG_FILE` | Startup script overrides for the launcher. | (script defaults) | [`start_operations_console.sh`](start_operations_console.sh) |
 | `HEALTHCHECK_FATAL`, `HEALTHCHECK_DRY_RUN` | Startup healthcheck behavior. | `0` | [`start_operations_console.sh`](start_operations_console.sh), [`invapp2/invapp/healthcheck.py`](invapp2/invapp/healthcheck.py) |
@@ -502,6 +506,24 @@ The `support/network_stability.sh` script still applies additional host protecti
 sudo support/network_stability.sh
 ```
 
+### Server/System Terminal Display
+The Ops Monitor terminal display exists for host-level health visibility even when the web UI is unreachable (for example, during a network outage). It runs alongside the web server and provides live status, logs, and interactive controls.
+
+**How it runs**
+- `start_operations_console.sh` launches the ops monitor by default (`ENABLE_OPS_MONITOR=1`). See [`start_operations_console.sh`](start_operations_console.sh).
+- The monitor implementation is `ops_monitor/monitor.py`, launched via `ops_monitor/launcher.py`.
+- A diagnostic log is written to `/var/log/hyperion_terminal_display.log` (fallbacks to `support/hyperion_terminal_display.log` if permissions prevent writing to `/var/log`).
+
+**Key bindings (cheat sheet)**
+- Navigation: `Tab` / `Shift+Tab`, arrow keys, or `j/k`
+- Select/activate: `Enter`
+- Quit/back: `q` or `Esc`
+- Log panel: `PageUp/PageDown`, `Home/End`, `f` to toggle follow mode
+
+**Refresh & layout tuning**
+- Set `OPS_MONITOR_REFRESH_INTERVAL` for update cadence (seconds).
+- Set `OPS_MONITOR_LOG_MAX_LINES` and `OPS_MONITOR_LOG_WINDOW` to adjust scrollback and viewport size.
+
 ### Network Status Display (Server Terminal)
 Network status is intentionally **not** shown in the web UI; if connectivity is down, the site may be unreachable. Instead, the Ops Monitor terminal display reads the watchdog status file and renders it directly on the server console.
 
@@ -528,6 +550,16 @@ Network status is intentionally **not** shown in the web UI; if connectivity is 
   ```bash
   sudo iptables -D OUTPUT -p icmp --icmp-type echo-request -j DROP
   ```
+
+**Troubleshooting**
+- **Network status not showing**:
+  - Confirm the watchdog service is running: `systemctl status internet-watchdog.service`.
+  - Check file permissions: `ls -l /var/lib/hyperion/network_status.txt`.
+  - Verify the log: `sudo tail -f /var/log/internet_watchdog.log`.
+- **Controls not responding**:
+  - Confirm the terminal has focus (click inside the terminal window).
+  - If running inside tmux/screen, check that keybindings are not overridden.
+  - Set `OPS_MONITOR_DEBUG=1` and inspect `/var/log/hyperion_terminal_display.log`.
 
 ---
 

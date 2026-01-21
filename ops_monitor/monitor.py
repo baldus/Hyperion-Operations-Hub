@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
+import logging
 import os
-import queue
 import shlex
+import signal
 import sys
+import termios
 import threading
 import time
+import tty
 from pathlib import Path
 from typing import Optional
 
@@ -28,6 +32,7 @@ from .metrics import (
     format_uptime,
     mask_db_url,
     read_backup_status,
+    read_log_lines,
     read_network_status,
     read_ops_events,
     read_process_metrics,
@@ -36,22 +41,120 @@ from .metrics import (
     read_boot_status,
     read_sequence_repair_summary,
     summarize_connections,
-    tail_log,
 )
 
 
 console = Console()
 
 
-def _input_listener(command_queue: "queue.Queue[str]", stop_event: threading.Event) -> None:
-    while not stop_event.is_set():
-        try:
-            ch = console.input("[bold cyan]ops> ").strip().lower()
-            if ch:
-                command_queue.put(ch[0])
-        except (EOFError, KeyboardInterrupt):
-            stop_event.set()
-            break
+class TerminalInput:
+    def __init__(self) -> None:
+        self._fd = sys.stdin.fileno()
+        self._original_attrs = termios.tcgetattr(self._fd)
+        self._original_flags = fcntl.fcntl(self._fd, fcntl.F_GETFL)
+        self._buffer = ""
+
+    def __enter__(self) -> "TerminalInput":
+        tty.setcbreak(self._fd)
+        fcntl.fcntl(self._fd, fcntl.F_SETFL, self._original_flags | os.O_NONBLOCK)
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        termios.tcsetattr(self._fd, termios.TCSADRAIN, self._original_attrs)
+        fcntl.fcntl(self._fd, fcntl.F_SETFL, self._original_flags)
+
+    def _parse_buffer(self) -> list[str]:
+        keys: list[str] = []
+        while self._buffer:
+            if self._buffer[0] != "\x1b":
+                ch = self._buffer[0]
+                self._buffer = self._buffer[1:]
+                if ch in ("\r", "\n"):
+                    keys.append("enter")
+                elif ch == "\t":
+                    keys.append("tab")
+                elif ch == "q":
+                    keys.append("q")
+                elif ch == "f":
+                    keys.append("f")
+                elif ch == "j":
+                    keys.append("down")
+                elif ch == "k":
+                    keys.append("up")
+                elif ch in {"r", "s", "u", "c", "v"}:
+                    keys.append(ch)
+                continue
+
+            sequences = {
+                "\x1b[A": "up",
+                "\x1b[B": "down",
+                "\x1b[C": "right",
+                "\x1b[D": "left",
+                "\x1b[5~": "pgup",
+                "\x1b[6~": "pgdn",
+                "\x1b[H": "home",
+                "\x1b[F": "end",
+                "\x1b[1~": "home",
+                "\x1b[4~": "end",
+                "\x1b[7~": "home",
+                "\x1b[8~": "end",
+                "\x1b[Z": "backtab",
+            }
+
+            matched = False
+            for seq, name in sequences.items():
+                if self._buffer.startswith(seq):
+                    keys.append(name)
+                    self._buffer = self._buffer[len(seq) :]
+                    matched = True
+                    break
+
+            if matched:
+                continue
+
+            if self._buffer == "\x1b":
+                keys.append("esc")
+                self._buffer = ""
+                break
+
+            if self._buffer.startswith("\x1b") and len(self._buffer) < 3:
+                break
+
+            self._buffer = self._buffer[1:]
+        return keys
+
+    def read_keys(self) -> list[str]:
+        keys: list[str] = []
+        while True:
+            try:
+                chunk = os.read(self._fd, 64)
+            except BlockingIOError:
+                break
+            if not chunk:
+                break
+            self._buffer += chunk.decode(errors="ignore")
+        if self._buffer:
+            keys.extend(self._parse_buffer())
+        return keys
+
+
+def configure_terminal_logger() -> logging.Logger:
+    logger = logging.getLogger("ops_monitor")
+    if logger.handlers:
+        return logger
+    logger.setLevel(logging.INFO)
+    log_path = Path("/var/log/hyperion_terminal_display.log")
+    try:
+        handler = logging.FileHandler(log_path)
+    except OSError:
+        log_path = Path("support/hyperion_terminal_display.log")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.FileHandler(log_path)
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.info("terminal display started")
+    return logger
 
 
 def build_header(service_name: str, status_text: str) -> Panel:
@@ -88,12 +191,46 @@ def build_metrics_table(state: dict) -> Table:
     return table
 
 
-def build_log_panel(log_lines: list[str], path: Path) -> Panel:
-    rendered = "\n".join(log_lines) if log_lines else "(no log entries yet)"
-    return Panel(rendered, title=f"Log tail — {path}", box=box.ROUNDED, padding=(1, 1))
+def build_metrics_panel(state: dict, focused: bool) -> Panel:
+    title_style = "bold yellow" if focused else None
+    return Panel(
+        build_metrics_table(state),
+        title="System Health",
+        title_align="left",
+        title_style=title_style,
+        box=box.ROUNDED,
+        padding=(1, 1),
+    )
 
 
-def build_access_panel(access_snapshot: AccessSnapshot) -> Panel:
+def build_log_panel(
+    log_lines: list[str],
+    path: Path,
+    *,
+    follow: bool,
+    scroll_index: int,
+    window_size: int,
+    focused: bool,
+) -> Panel:
+    total = len(log_lines)
+    if total > window_size:
+        start = max(total - window_size, 0) if follow else min(scroll_index, total - window_size)
+    else:
+        start = 0
+    windowed = log_lines[start : start + window_size]
+    rendered = "\n".join(windowed) if windowed else "(no log entries yet)"
+    title = f"Log tail — {path}"
+    if total > window_size:
+        if follow:
+            title = f"{title} (follow)"
+        else:
+            end_index = min(start + window_size, total)
+            title = f"{title} (paused {start + 1}-{end_index}/{total})"
+    title_style = "bold yellow" if focused else None
+    return Panel(rendered, title=title, title_style=title_style, box=box.ROUNDED, padding=(1, 1))
+
+
+def build_access_panel(access_snapshot: AccessSnapshot, focused: bool) -> Panel:
     users = access_snapshot.users or ["(no recent users)"]
     pages = access_snapshot.pages or ["(no recent page activity)"]
     rendered = "\n".join(
@@ -105,11 +242,15 @@ def build_access_panel(access_snapshot: AccessSnapshot) -> Panel:
             *[f"- {page}" for page in pages],
         ]
     )
-    return Panel(rendered, title=access_snapshot.status, box=box.ROUNDED, padding=(1, 1))
+    title_style = "bold yellow" if focused else None
+    return Panel(rendered, title=access_snapshot.status, title_style=title_style, box=box.ROUNDED, padding=(1, 1))
 
 
 def build_controls_panel(verbose: bool) -> Panel:
     lines = [
+        "[b]tab[/b] Next panel  [b]shift+tab[/b] Previous panel",
+        "[b]↑/↓[/b] or [b]j/k[/b] Move focus  [b]enter[/b] Select  [b]f[/b] Follow log",
+        "[b]pgup/pgdn[/b] Scroll log  [b]home/end[/b] Jump",
         "[b]r[/b] Restart application",
         "[b]s[/b] Graceful shutdown",
         "[b]k[/b] Force kill",
@@ -123,7 +264,7 @@ def build_controls_panel(verbose: bool) -> Panel:
     return Panel("\n".join(lines), title="Controls", box=box.ROUNDED, padding=(1, 1))
 
 
-def build_backup_panel(status: BackupStatus) -> Panel:
+def build_backup_panel(status: BackupStatus, focused: bool) -> Panel:
     restore_state = "n/a"
     if status.restore_last_status:
         restore_state = "running" if status.restore_last_status == "started" else status.restore_last_status
@@ -142,22 +283,25 @@ def build_backup_panel(status: BackupStatus) -> Panel:
         f"[b]Restore by[/b]: {status.restore_last_username or 'n/a'}",
         f"[b]Restore message[/b]: {status.restore_last_message or 'n/a'}",
     ]
-    return Panel("\n".join(lines), title="Backup Status", box=box.ROUNDED, padding=(1, 1))
+    title_style = "bold yellow" if focused else None
+    return Panel("\n".join(lines), title="Backup Status", title_style=title_style, box=box.ROUNDED, padding=(1, 1))
 
 
-def build_events_panel(events: list) -> Panel:
+def build_events_panel(events: list, focused: bool) -> Panel:
     if not events:
-        return Panel("(no recent warnings/errors)", title="Events", box=box.ROUNDED, padding=(1, 1))
+        title_style = "bold yellow" if focused else None
+        return Panel("(no recent warnings/errors)", title="Events", title_style=title_style, box=box.ROUNDED, padding=(1, 1))
     lines = []
     for event in events:
         timestamp = event.created_at.strftime("%H:%M:%S") if event.created_at else "--:--:--"
         level = event.level
         message = event.message
         lines.append(f"[{level}] {timestamp} {message}")
-    return Panel("\n".join(lines), title="Recent Events", box=box.ROUNDED, padding=(1, 1))
+    title_style = "bold yellow" if focused else None
+    return Panel("\n".join(lines), title="Recent Events", title_style=title_style, box=box.ROUNDED, padding=(1, 1))
 
 
-def build_health_panel(state: dict) -> Panel:
+def build_health_panel(state: dict, focused: bool) -> Panel:
     lines = [
         f"[b]DB_URL[/b]: {state.get('db_url_masked', 'n/a')}",
         f"[b]Gunicorn bind[/b]: {state.get('gunicorn_bind', 'n/a')}",
@@ -174,12 +318,14 @@ def build_health_panel(state: dict) -> Panel:
             f"{summary.get('skipped', 0)} skipped, "
             f"{summary.get('failed', 0)} failed"
         )
-    return Panel("\n".join(lines), title="Health", box=box.ROUNDED, padding=(1, 1))
+    title_style = "bold yellow" if focused else None
+    return Panel("\n".join(lines), title="Health", title_style=title_style, box=box.ROUNDED, padding=(1, 1))
 
 
-def build_errors_panel(error_snapshot) -> Panel:
+def build_errors_panel(error_snapshot, focused: bool) -> Panel:
     lines = error_snapshot.entries or ["(no recent exceptions)"]
-    return Panel("\n".join(lines), title=error_snapshot.status, box=box.ROUNDED, padding=(1, 1))
+    title_style = "bold yellow" if focused else None
+    return Panel("\n".join(lines), title=error_snapshot.status, title_style=title_style, box=box.ROUNDED, padding=(1, 1))
 
 
 def render_layout(state: dict) -> Layout:
@@ -199,13 +345,25 @@ def render_layout(state: dict) -> Layout:
     layout["right"].split_column(Layout(name="logs"), Layout(name="events"), Layout(name="errors", size=8))
 
     layout["header"].update(build_header(state.get("service_name", "Operations"), state.get("status", "Unknown")))
-    layout["metrics"].update(build_metrics_table(state))
-    layout["backup"].update(build_backup_panel(state.get("backup_status")))
-    layout["health"].update(build_health_panel(state))
-    layout["access"].update(build_access_panel(state.get("access_snapshot", AccessSnapshot([], [], "Access"))))
-    layout["logs"].update(build_log_panel(state.get("log_lines", []), state.get("log_path", Path("log"))))
-    layout["events"].update(build_events_panel(state.get("events", [])))
-    layout["errors"].update(build_errors_panel(state.get("error_snapshot")))
+    focused_panel = state.get("focused_panel")
+    layout["metrics"].update(build_metrics_panel(state, focused_panel == "metrics"))
+    layout["backup"].update(build_backup_panel(state.get("backup_status"), focused_panel == "backup"))
+    layout["health"].update(build_health_panel(state, focused_panel == "health"))
+    layout["access"].update(
+        build_access_panel(state.get("access_snapshot", AccessSnapshot([], [], "Access")), focused_panel == "access")
+    )
+    layout["logs"].update(
+        build_log_panel(
+            state.get("log_lines", []),
+            state.get("log_path", Path("log")),
+            follow=state.get("log_follow", True),
+            scroll_index=state.get("log_scroll", 0),
+            window_size=state.get("log_window", 18),
+            focused=focused_panel == "logs",
+        )
+    )
+    layout["events"].update(build_events_panel(state.get("events", []), focused_panel == "events"))
+    layout["errors"].update(build_errors_panel(state.get("error_snapshot"), focused_panel == "errors"))
     layout["footer"].update(build_controls_panel(state.get("verbose", False)))
     return layout
 
@@ -217,13 +375,23 @@ def monitor_loop(
     app_port: int,
     service_name: str,
 ) -> None:
-    command_queue: "queue.Queue[str]" = queue.Queue()
     stop_event = threading.Event()
+    logger = configure_terminal_logger()
+    debug_input = os.getenv("OPS_MONITOR_DEBUG", "0") == "1"
+    refresh_interval = float(os.getenv("OPS_MONITOR_REFRESH_INTERVAL", "0.5"))
+    log_max_lines = int(os.getenv("OPS_MONITOR_LOG_MAX_LINES", "200"))
+    log_window = int(os.getenv("OPS_MONITOR_LOG_WINDOW", "18"))
+    log_follow = True
+    log_scroll = 0
+    focused_panels = ["metrics", "logs", "events", "errors", "backup", "health", "access"]
+    focus_index = 0
+    resize_pending = False
 
-    input_thread = threading.Thread(target=_input_listener, args=(command_queue, stop_event), daemon=True)
-    input_thread.start()
+    def handle_resize(signum, frame):
+        nonlocal resize_pending
+        resize_pending = True
 
-    log_cursor: dict[str, int] = {}
+    signal.signal(signal.SIGWINCH, handle_resize)
     status_message = "System Online"
     verbose = False
     tracked_pid = target_pid
@@ -270,13 +438,24 @@ def monitor_loop(
         "boot_status": "Unknown",
         "sequence_summary": None,
         "network_status": read_network_status(),
+        "log_follow": log_follow,
+        "log_scroll": log_scroll,
+        "log_window": log_window,
+        "focused_panel": focused_panels[focus_index],
     }
 
-    with Live(render_layout(live_state), console=console, screen=True, refresh_per_second=4) as live:
+    with TerminalInput() as terminal_input, Live(
+        render_layout(live_state),
+        console=console,
+        screen=True,
+        refresh_per_second=4,
+        auto_refresh=False,
+    ) as live:
+        last_render = 0.0
         while not stop_event.is_set():
             metrics = read_process_metrics(tracked_pid)
             port_status = check_port(app_port)
-            log_snapshot = tail_log(log_file, state=log_cursor)
+            log_snapshot = read_log_lines(log_file, max_lines=log_max_lines)
             access_snapshot = read_recent_access(db_url)
             backup_status = read_backup_status(db_url)
             events = read_ops_events(db_url)
@@ -284,6 +463,13 @@ def monitor_loop(
             sequence_summary = read_sequence_repair_summary(db_url)
             boot_status = read_boot_status(db_url)
             network_status = read_network_status()
+            log_lines = log_snapshot.lines
+            total_lines = len(log_lines)
+            max_scroll = max(total_lines - log_window, 0)
+            if log_follow:
+                log_scroll = max_scroll
+            else:
+                log_scroll = max(0, min(log_scroll, max_scroll))
 
             if metrics is None:
                 status = "Stopped"
@@ -303,6 +489,45 @@ def monitor_loop(
                     connections = summarize_connections(psutil.net_connections(), app_port)
                 except Exception:
                     connections = metrics.connections
+            for key in terminal_input.read_keys():
+                if debug_input:
+                    logger.info("key pressed: %s", key)
+                if key in {"q", "esc"}:
+                    stop_event.set()
+                    status_message = "Exiting monitor"
+                elif key in {"tab", "right", "down"}:
+                    focus_index = (focus_index + 1) % len(focused_panels)
+                elif key in {"backtab", "left", "up"}:
+                    focus_index = (focus_index - 1) % len(focused_panels)
+                elif key == "enter" and focused_panels[focus_index] == "logs":
+                    log_follow = not log_follow
+                elif key == "f" and focused_panels[focus_index] == "logs":
+                    log_follow = not log_follow
+                elif key in {"pgup", "pgdn", "home", "end"} and focused_panels[focus_index] == "logs":
+                    log_follow = False
+                    if key == "pgup":
+                        log_scroll = max(log_scroll - log_window, 0)
+                    elif key == "pgdn":
+                        log_scroll = min(log_scroll + log_window, max_scroll)
+                    elif key == "home":
+                        log_scroll = 0
+                    elif key == "end":
+                        log_scroll = max_scroll
+                elif key == "r":
+                    status_message, new_pid = controls.restart_process(tracked_pid, restart_cmd)
+                    if new_pid:
+                        tracked_pid = new_pid
+                elif key == "s":
+                    status_message = controls.graceful_shutdown(tracked_pid)
+                elif key == "k":
+                    status_message = controls.force_kill(tracked_pid)
+                elif key == "u":
+                    status_message = controls.reload_config(tracked_pid)
+                elif key == "c":
+                    status_message = controls.clear_logs(log_file)
+                elif key == "v":
+                    verbose = not verbose
+                    status_message = controls.toggle_verbose(tracked_pid, verbose)
 
             live_state = {
                 "service_name": service_name,
@@ -313,7 +538,7 @@ def monitor_loop(
                 "threads": threads,
                 "port_status": "online" if port_status.reachable else "offline",
                 "connections": connections,
-                "log_lines": log_snapshot.lines,
+                "log_lines": log_lines,
                 "log_path": log_snapshot.path,
                 "verbose": verbose,
                 "access_snapshot": access_snapshot,
@@ -327,42 +552,24 @@ def monitor_loop(
                 "boot_status": boot_status or status_message,
                 "sequence_summary": sequence_summary,
                 "network_status": network_status,
+                "log_follow": log_follow,
+                "log_scroll": log_scroll,
+                "log_window": log_window,
+                "focused_panel": focused_panels[focus_index],
             }
-
-            live.update(render_layout(live_state))
-
-            try:
-                command = command_queue.get_nowait()
-            except queue.Empty:
-                command = None
-
-            if command:
-                if command == "q":
-                    stop_event.set()
-                    status_message = "Exiting monitor"
-                elif command == "r":
-                    status_message, new_pid = controls.restart_process(tracked_pid, restart_cmd)
-                    if new_pid:
-                        tracked_pid = new_pid
-                elif command == "s":
-                    status_message = controls.graceful_shutdown(tracked_pid)
-                elif command == "k":
-                    status_message = controls.force_kill(tracked_pid)
-                elif command == "u":
-                    status_message = controls.reload_config(tracked_pid)
-                elif command == "c":
-                    status_message = controls.clear_logs(log_file)
-                elif command == "v":
-                    verbose = not verbose
-                    status_message = controls.toggle_verbose(tracked_pid, verbose)
 
             if metrics is None and not restart_cmd:
                 stop_event.set()
+            now = time.monotonic()
+            if now - last_render >= refresh_interval or resize_pending:
+                live.update(render_layout(live_state))
+                live.refresh()
+                last_render = now
+                resize_pending = False
 
-            time.sleep(0.5)
+            time.sleep(0.05)
 
     stop_event.set()
-    input_thread.join(timeout=1)
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:

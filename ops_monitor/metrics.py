@@ -163,6 +163,19 @@ def tail_log(path: Path, max_lines: int = 18, state: dict[str, int] | None = Non
     return LogSnapshot(lines=lines, path=path)
 
 
+def read_log_lines(path: Path, max_lines: int = 200) -> LogSnapshot:
+    if not path.exists():
+        return LogSnapshot(lines=["Log file not found: " + str(path)], path=path)
+
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as fh:
+            lines = fh.read().splitlines()[-max_lines:]
+    except OSError as exc:
+        lines = [f"Unable to read log: {exc}"]
+
+    return LogSnapshot(lines=lines, path=path)
+
+
 def read_recent_access(
     db_url: str | None,
     *,
