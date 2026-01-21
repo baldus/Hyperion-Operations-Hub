@@ -169,7 +169,7 @@ These are pulled directly from environment variables or startup scripts:
 | `GUNICORN_TIMEOUT` | Gunicorn worker timeout seconds. | `600` | [`start_operations_console.sh`](start_operations_console.sh) |
 | `ENABLE_OPS_MONITOR` | Enable the terminal ops monitor. | `1` | [`start_operations_console.sh`](start_operations_console.sh), [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
 | `OPS_MONITOR_DB_URL` | DB URL to show in ops monitor (masked). | falls back to `DB_URL` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
-| `OPS_MONITOR_LAUNCH_MODE` | Monitor launch mode (`window`, `background`, `headless`). | `window` | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
+| `OPS_MONITOR_LAUNCH_MODE` | Monitor launch mode (`window`, `background`, `headless`, `tmux`). | `window` | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
 | `OPS_MONITOR_TERMINAL` | Force a specific terminal app. | (none) | [`ops_monitor/launcher.py`](ops_monitor/launcher.py) |
 | `OPS_MONITOR_REFRESH_INTERVAL` | Terminal refresh interval (seconds). | `0.5` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
 | `OPS_MONITOR_LOG_MAX_LINES` | Max log lines kept for scrollback. | `200` | [`ops_monitor/monitor.py`](ops_monitor/monitor.py) |
@@ -514,6 +514,7 @@ The Ops Monitor terminal display exists for host-level health visibility even wh
 - The monitor implementation is `ops_monitor/monitor.py`, launched via `ops_monitor/launcher.py`.
 - A diagnostic log is written to `/var/log/hyperion/terminal_monitor.log` (fallbacks to `support/hyperion_terminal_monitor.log` if permissions prevent writing to `/var/log`).
 - You can run the monitor headless (no TTY required) with `OPS_MONITOR_LAUNCH_MODE=headless` or `./start_operations_console.sh --monitor-headless`.
+- Prefer tmux for a durable interactive session: `./start_operations_console.sh --monitor-tmux` (attach with `tmux attach -t hyperion-monitor`).
 
 **Manual run**
 ```bash
@@ -581,6 +582,8 @@ Network status is intentionally **not** shown in the web UI; if connectivity is 
   - Confirm you launched it in a real TTY (or use `--monitor-headless`).
   - Confirm `TERM` is valid (non-empty and not `dumb`).
   - Run `python -m ops_monitor.monitor --doctor`.
+- **Terminal too small**:
+  - Resize the window to at least 80x24; the monitor will display a warning until the terminal is large enough.
 - **Controls not responding**:
   - Confirm the terminal has focus (click inside the terminal window).
   - If running inside tmux/screen, check that keybindings are not overridden.

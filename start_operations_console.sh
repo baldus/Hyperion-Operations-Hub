@@ -17,6 +17,11 @@ while [ "${1:-}" != "" ]; do
             export OPS_MONITOR_LAUNCH_MODE="headless"
             shift
             ;;
+        --monitor-tmux)
+            export ENABLE_OPS_MONITOR=1
+            export OPS_MONITOR_LAUNCH_MODE="tmux"
+            shift
+            ;;
         --help|-h)
             SHOW_USAGE=1
             shift
@@ -34,6 +39,7 @@ Usage: ./start_operations_console.sh [--monitor|--no-monitor|--monitor-headless]
 --monitor           Enable the terminal ops monitor (default).
 --no-monitor        Disable the terminal ops monitor.
 --monitor-headless  Run the monitor without a TTY (logs only).
+--monitor-tmux      Launch the monitor in a tmux session.
 USAGE
     exit 0
 fi
