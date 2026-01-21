@@ -6,6 +6,11 @@
 
 <section class="card-section">
     <h3>System Health</h3>
+    <div id="networkStatusBanner" class="network-status-banner network-status-banner--unknown" role="status" aria-live="polite">
+        <strong>Network</strong>
+        <span class="network-status-banner__state">Loading…</span>
+        <span class="network-status-banner__detail"></span>
+    </div>
     <div class="status-grid">
         {% for card in system_health %}
         <article class="status-card status-{{ card.level }}">
@@ -120,6 +125,45 @@
 </div>
 
 <script>
+const networkBanner = document.getElementById("networkStatusBanner");
+const networkState = networkBanner ? networkBanner.querySelector(".network-status-banner__state") : null;
+const networkDetail = networkBanner ? networkBanner.querySelector(".network-status-banner__detail") : null;
+
+function applyNetworkState(status, detail) {
+    if (!networkBanner || !networkState || !networkDetail) {
+        return;
+    }
+    networkBanner.classList.remove("network-status-banner--ok", "network-status-banner--alert", "network-status-banner--unknown");
+    if (status === "ONLINE") {
+        networkBanner.classList.add("network-status-banner--ok");
+        networkState.textContent = "Online";
+    } else if (status === "OFFLINE") {
+        networkBanner.classList.add("network-status-banner--alert");
+        networkState.textContent = "Offline";
+    } else {
+        networkBanner.classList.add("network-status-banner--unknown");
+        networkState.textContent = "Unknown";
+    }
+    networkDetail.textContent = detail ? `• ${detail}` : "";
+}
+
+async function refreshNetworkStatus() {
+    if (!networkBanner) {
+        return;
+    }
+    try {
+        const response = await fetch("/health/network", { cache: "no-store" });
+        const payload = await response.json();
+        const detail = payload.error || payload.raw || "";
+        applyNetworkState(payload.status, detail);
+    } catch (error) {
+        applyNetworkState("UNKNOWN", "Unable to load network status");
+    }
+}
+
+refreshNetworkStatus();
+setInterval(refreshNetworkStatus, 15000);
+
 const modal = document.getElementById('clearInventoryModal');
 const openButton = document.getElementById('openClearInventoryModal');
 const cancelButton = document.getElementById('cancelClearInventory');

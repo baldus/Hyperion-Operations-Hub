@@ -431,32 +431,81 @@ To add a test:
 
 ---
 
-## Network Stability & Self-Healing (Linux Host)
+## Network Stability & Internet Watchdog
 
-Field deployments can look “connected” while DNS or routing has degraded over time. The host-level safeguards below disable Ethernet power saving, harden DNS resolution, and ensure NetworkManager is always restarted on failure.
+Field deployments can look “connected” while DNS or routing has degraded overnight. The Internet Watchdog is a host-level systemd service that continuously checks true reachability and performs self-healing actions when connectivity drops.
 
-### Apply host protections (Ubuntu)
-Run the helper script on the Linux host:
+### What it does
+- **Runs continuously as a systemd service** so it survives reboots and long runtimes.
+- **Writes a single-line status file** that the Ops Console UI reads for its network banner.
+- **Logs outage/recovery events** for troubleshooting.
+- **Attempts recovery actions** (systemd-resolved + NetworkManager restarts, nmcli toggles) when connectivity is lost.
+
+### Components & paths
+- **Watchdog script (source)**: `support/internet_watchdog.sh`
+- **Installed script**: `/usr/local/bin/internet_watchdog.sh`
+- **systemd unit (source)**: `support/systemd/internet-watchdog.service`
+- **Installed unit**: `/etc/systemd/system/internet-watchdog.service`
+- **Status file**: `/var/lib/hyperion/network_status.txt`
+- **Log file**: `/var/log/internet_watchdog.log`
+- **Ops Console API**: `GET /health/network` (returns JSON status used by the admin tools banner)
+
+### Install / update the watchdog (Ubuntu)
+Manual install (recommended for first-time setup):
 ```bash
-sudo support/network_stability.sh
+sudo install -m 0755 support/internet_watchdog.sh /usr/local/bin/internet_watchdog.sh
+sudo install -m 0644 support/systemd/internet-watchdog.service /etc/systemd/system/internet-watchdog.service
+sudo install -d -m 0755 /var/lib/hyperion
+sudo systemctl daemon-reload
+sudo systemctl enable --now internet-watchdog.service
 ```
 
-This script:
-- Writes `/etc/NetworkManager/conf.d/ethernet-powersave.conf` with `ethernet.powersave = 2`.
-- Updates `/etc/systemd/resolved.conf` to explicitly set `DNS=1.1.1.1 8.8.8.8`, `FallbackDNS=9.9.9.9`, and `DNSStubListener=yes`.
-- Adds a systemd drop-in to restart NetworkManager automatically (`/etc/systemd/system/NetworkManager.service.d/override.conf`).
-- Enables and restarts NetworkManager and systemd-resolved, and prints `resolvectl status` for verification.
-
-### Ops monitor connectivity watchdog
-The ops monitor now runs a lightweight connectivity watchdog that pings a reliable external host on a repeating interval. When internet access is lost, the terminal displays a red warning (“WARNING: INTERNET DISCONNECTED”), logs an outage event with timestamp, and attempts to restart NetworkManager. The current connectivity status (online/offline and last successful check) is also kept in memory for future UI indicators. See the watchdog implementation in [`ops_monitor/monitor.py`](ops_monitor/monitor.py).
-
-#### Configure watchdog behavior
-Use environment variables to tune the watchdog:
+Optional: refresh watchdog files via the startup helper (idempotent):
 ```bash
-export OPS_MONITOR_CONNECTIVITY_HOST="1.1.1.1"
-export OPS_MONITOR_CONNECTIVITY_INTERVAL="10"
-export OPS_MONITOR_CONNECTIVITY_TIMEOUT="1"
-export OPS_MONITOR_CONNECTIVITY_RESTART_COOLDOWN="60"
+INSTALL_WATCHDOG=1 sudo ./start_operations_console.sh
+```
+
+### Configure check host & interval
+Defaults are `CHECK_HOST=1.1.1.1` and `INTERVAL=10` (seconds). You can override them with a systemd drop-in:
+```bash
+sudo systemctl edit internet-watchdog.service
+```
+Add:
+```
+[Service]
+Environment=CHECK_HOST=8.8.8.8
+Environment=INTERVAL=5
+```
+Then reload:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart internet-watchdog.service
+```
+
+### Troubleshooting
+- **Service status**: `sudo systemctl status internet-watchdog.service`
+- **Recent logs**: `sudo journalctl -u internet-watchdog.service -n 200 --no-pager`
+- **Watchdog log file**: `sudo tail -f /var/log/internet_watchdog.log`
+- **Status file**: `cat /var/lib/hyperion/network_status.txt`
+- **UI banner**: Admin Tools → System Health → Network banner (green = online, red = offline, yellow = unknown)
+
+### Verification checklist
+- **Simulate offline**: unplug the ethernet cable *or* block ping temporarily:
+  ```bash
+  sudo iptables -I OUTPUT -p icmp --icmp-type echo-request -j DROP
+  ```
+  Watch `/var/lib/hyperion/network_status.txt` for `OFFLINE` and confirm the red warning banner in the Ops Console.
+- **Restore connectivity**:
+  ```bash
+  sudo iptables -D OUTPUT -p icmp --icmp-type echo-request -j DROP
+  ```
+  Confirm the status line returns to `ONLINE` and the banner turns green.
+- **Confirm service after reboot**: `systemctl is-enabled internet-watchdog.service` and `systemctl status internet-watchdog.service`.
+
+### Optional: host hardening helpers
+The `support/network_stability.sh` script still applies additional host protections (Ethernet power-saving disablement, DNS hardening, NetworkManager restart policy). Run it once if needed:
+```bash
+sudo support/network_stability.sh
 ```
 
 ---
