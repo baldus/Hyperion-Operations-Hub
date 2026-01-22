@@ -64,6 +64,9 @@ class Config:
         os.getenv("PURCHASING_ATTACHMENT_MAX_SIZE_MB", 25)
     )
 
+    ENABLE_USAGE_TRACING = os.getenv("ENABLE_USAGE_TRACING")
+    USAGE_TRACE_LOG_PATH = os.getenv("USAGE_TRACE_LOG_PATH")
+
     INVENTORY_REMOVE_REASONS = os.getenv(
         "INVENTORY_REMOVE_REASONS",
         "Damage,Expired,Quality Hold,Scrap,Adjustment,Other",

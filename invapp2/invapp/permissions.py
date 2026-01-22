@@ -10,7 +10,7 @@ from flask import abort, current_app, request
 
 from invapp.extensions import login_manager
 from invapp.login import current_user
-from invapp.models import PageAccessRule, Role, User, db
+from invapp.models import PageAccessRule, Role, db
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 

@@ -15,10 +15,11 @@ Hyperion Operations Hub is a Flask-based operations console for manufacturing te
 10. [Backups & Restore](#backups--restore)
 11. [Logging, Errors, and Debugging](#logging-errors-and-debugging)
 12. [Testing](#testing)
-13. [Deployment Notes](#deployment-notes)
-14. [Network Stability & Self-Healing (Linux Host)](#network-stability--self-healing-linux-host)
-15. [Contributing / Development Conventions](#contributing--development-conventions)
-16. [How to Make Common Changes](#how-to-make-common-changes)
+13. [Usage Analysis & Pruning](#usage-analysis--pruning)
+14. [Deployment Notes](#deployment-notes)
+15. [Network Stability & Self-Healing (Linux Host)](#network-stability--self-healing-linux-host)
+16. [Contributing / Development Conventions](#contributing--development-conventions)
+17. [How to Make Common Changes](#how-to-make-common-changes)
 
 ---
 
@@ -419,6 +420,58 @@ Common debugging steps:
 To add a test:
 1. Create a new `test_*.py` file in `invapp2/tests/`.
 2. Use existing tests as references for expected fixtures and patterns. See [`invapp2/tests`](invapp2/tests).
+
+---
+
+## Usage Analysis & Pruning
+
+This repo uses a conservative workflow for trimming unused code and assets without breaking the app. The workflow combines static tooling (candidates only), runtime usage tracing, and manual verification. The prune report captures evidence and decisions. See [`reports/prune_report.md`](reports/prune_report.md).
+
+### What was removed (and why)
+- **Unused imports** flagged by Ruff were removed as safe wins (no behavior change).
+
+### Tooling used (candidates only)
+Run the analyzer script to regenerate the prune report:
+```bash
+python invapp2/scripts/analyze_usage.py
+```
+The script runs:
+- **Ruff** for unused imports / unused local variables (`F401`, `F841`)
+- **Vulture** for dead-code candidates (if installed)
+- **pip-missing-reqs / pip-check-reqs** for dependency vs. import checks (if installed)
+
+The report is written to `reports/prune_report.md`. This is a *candidate list only*; confirm candidates with tracing before removal.
+
+### Enable/disable runtime usage tracing
+Runtime tracing is off by default. To enable:
+```bash
+export ENABLE_USAGE_TRACING=1
+python invapp2/app.py
+```
+Tracing logs to `instance/usage_tracing.log` by default (rotated). You can override the location:
+```bash
+export USAGE_TRACE_LOG_PATH=/path/to/usage_tracing.log
+```
+To disable, unset the env var or set it to `0`.
+
+The tracing captures:
+- Request endpoint name, URL rule, blueprint, method, and path
+- Rendered templates (via Flask signals)
+- Static requests (`/static/...` or `static` endpoint)
+
+### Validation checklist (post-prune)
+After each pruning batch:
+- [ ] Run targeted tests (smoke + affected areas)
+- [ ] Run `flask routes` to ensure URL map builds
+- [ ] Exercise key flows manually while tracing is enabled
+- [ ] Review `reports/prune_report.md` and update with evidence
+
+Suggested commands:
+```bash
+pytest invapp2/tests/test_smoke.py
+cd invapp2
+flask routes
+```
 
 ---
 

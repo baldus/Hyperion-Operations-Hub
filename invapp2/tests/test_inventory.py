@@ -1,4 +1,3 @@
-import base64
 import csv
 import io
 import json

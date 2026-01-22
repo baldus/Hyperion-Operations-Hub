@@ -18,7 +18,6 @@ from .login import current_user, login_required
 from .permissions import (
     current_principal_roles,
     ensure_page_access,
-    lookup_page_label,
     principal_has_any_role,
     resolve_edit_roles,
     resolve_view_roles,
@@ -56,6 +55,7 @@ from .home_layout import (
 from .superuser import is_superuser
 from .services import backup_service, status_bus
 from .services.db_schema import ensure_app_setting_schema
+from .usage_tracing import init_usage_tracing
 
 
 NAVIGATION_PAGES: tuple[tuple[str, str, str], ...] = (
@@ -866,6 +866,8 @@ def create_app(config_override=None):
             source="startup",
             dedupe_key="app_boot",
         )
+
+    init_usage_tracing(app)
 
     @app.context_processor
     def inject_permission_helpers():
