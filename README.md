@@ -307,6 +307,13 @@ GASKET-9,10.5,ea,Gasket 9,Counted weekly
 - Duplicate `item_code` values are rejected.
 See CSV validation logic in [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py).
 
+**Header aliases (accepted alternatives)**
+- `item_code`: `item`, `item sku`, `sku`, `part`, `part_number`
+- `system_total_qty`: `system_total`, `system_qty`, `total_qty`, `total`, `qty`, `quantity`, `erp_qty`, `erp_total`
+- `uom`: `unit`, `unit_of_measure`
+- `description`: `item_description`, `desc`
+- `notes`: `note`, `comment`, `comments`
+
 ### How known item-location pairs are determined
 The count sheet is built by combining **distinct item-location relationships** already known to Hyperion:
 - **Movement history** (`movement.item_id`, `movement.location_id`)

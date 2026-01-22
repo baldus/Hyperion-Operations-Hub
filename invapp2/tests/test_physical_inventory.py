@@ -80,6 +80,7 @@ def _upload_snapshot(client, csv_text, **fields):
 def test_snapshot_csv_missing_headers(client):
     response = _upload_snapshot(client, "item_code\nITEM-1\n")
     assert b"Missing required headers" in response.data
+    assert b"Accepted headers" in response.data
 
 
 def test_snapshot_csv_unknown_item(client):
@@ -115,8 +116,14 @@ def test_snapshot_creation_and_count_lines(client, app, sample_item, sample_loca
         assert snapshot.name == "Q1 Snapshot"
         assert snapshot.lines[0].system_total_qty == Decimal("10")
         count_line = InventoryCountLine.query.first()
-        assert count_line is not None
-        assert count_line.location_id == sample_location.id
+    assert count_line is not None
+    assert count_line.location_id == sample_location.id
+
+
+def test_snapshot_csv_header_aliases(client, sample_item):
+    csv_text = "sku,qty\nITEM-1,8\n"
+    response = _upload_snapshot(client, csv_text, name="Alias Snapshot")
+    assert b"Snapshot created" in response.data
 
 
 def test_reconciliation_math(client, app, sample_item, sample_location):

@@ -21,6 +21,23 @@ from invapp.models import (
 
 REQUIRED_SNAPSHOT_HEADERS = ("item_code", "system_total_qty")
 OPTIONAL_SNAPSHOT_HEADERS = ("uom", "description", "notes")
+SNAPSHOT_HEADER_ALIASES = {
+    "item_code": ("item_code", "item", "item sku", "sku", "part", "part_number"),
+    "system_total_qty": (
+        "system_total_qty",
+        "system_total",
+        "system_qty",
+        "total_qty",
+        "total",
+        "qty",
+        "quantity",
+        "erp_qty",
+        "erp_total",
+    ),
+    "uom": ("uom", "unit", "unit_of_measure"),
+    "description": ("description", "item_description", "desc"),
+    "notes": ("notes", "note", "comment", "comments"),
+}
 
 
 @dataclass(frozen=True)
@@ -57,20 +74,44 @@ def _combine_notes(description: str | None, notes: str | None) -> str | None:
     return " | ".join(parts) if parts else None
 
 
+def _resolve_header_map(headers: list[str]) -> tuple[dict[str, str], list[str]]:
+    normalized_headers = [_normalize_header(header) for header in headers]
+    header_map: dict[str, str] = {}
+    missing_required: list[str] = []
+
+    for canonical, aliases in SNAPSHOT_HEADER_ALIASES.items():
+        matches = [
+            headers[idx]
+            for idx, normalized in enumerate(normalized_headers)
+            if normalized in {alias.lower() for alias in aliases}
+        ]
+        if matches:
+            header_map[canonical] = matches[0]
+        elif canonical in REQUIRED_SNAPSHOT_HEADERS:
+            missing_required.append(canonical)
+
+    return header_map, missing_required
+
+
 def parse_snapshot_csv(raw_csv: str) -> tuple[list[SnapshotLineInput], list[str]]:
     errors: list[str] = []
     reader = csv.DictReader(StringIO(raw_csv))
     if not reader.fieldnames:
         return [], ["The uploaded CSV does not include headers."]
 
-    normalized_headers = [_normalize_header(header) for header in reader.fieldnames]
-    header_map = {key: raw for key, raw in zip(normalized_headers, reader.fieldnames)}
-    missing_headers = [
-        header for header in REQUIRED_SNAPSHOT_HEADERS if header not in header_map
-    ]
+    header_map, missing_headers = _resolve_header_map(reader.fieldnames)
     if missing_headers:
+        accepted = {
+            header: ", ".join(SNAPSHOT_HEADER_ALIASES[header])
+            for header in missing_headers
+        }
         return [], [
-            "Missing required headers: " + ", ".join(sorted(missing_headers))
+            "Missing required headers: "
+            + ", ".join(sorted(missing_headers))
+            + ". Accepted headers: "
+            + "; ".join(
+                f"{header}: {aliases}" for header, aliases in accepted.items()
+            )
         ]
 
     rows: list[tuple[int, dict[str, str]]] = []
@@ -81,9 +122,9 @@ def parse_snapshot_csv(raw_csv: str) -> tuple[list[SnapshotLineInput], list[str]
         return [], ["The uploaded CSV does not include any data rows."]
 
     item_codes = [
-        (row.get(header_map["item_code"]) or "").strip()
+        (row.get(header_map.get("item_code", "")) or "").strip()
         for _, row in rows
-        if (row.get(header_map["item_code"]) or "").strip()
+        if (row.get(header_map.get("item_code", "")) or "").strip()
     ]
     item_map = {
         item.sku: item
@@ -94,7 +135,7 @@ def parse_snapshot_csv(raw_csv: str) -> tuple[list[SnapshotLineInput], list[str]
     parsed_rows: list[SnapshotLineInput] = []
 
     for idx, row in rows:
-        raw_code = (row.get(header_map["item_code"]) or "").strip()
+        raw_code = (row.get(header_map.get("item_code", "")) or "").strip()
         if not raw_code:
             errors.append(f"Row {idx}: item_code is required.")
             continue
@@ -108,7 +149,7 @@ def parse_snapshot_csv(raw_csv: str) -> tuple[list[SnapshotLineInput], list[str]
             errors.append(f"Row {idx}: unknown item_code '{raw_code}'.")
             continue
 
-        raw_qty = (row.get(header_map["system_total_qty"]) or "").strip()
+        raw_qty = (row.get(header_map.get("system_total_qty", "")) or "").strip()
         if not raw_qty:
             errors.append(f"Row {idx}: system_total_qty is required.")
             continue
@@ -122,13 +163,13 @@ def parse_snapshot_csv(raw_csv: str) -> tuple[list[SnapshotLineInput], list[str]
 
         uom = None
         if "uom" in header_map:
-            uom = (row.get(header_map["uom"]) or "").strip() or None
+            uom = (row.get(header_map.get("uom", "")) or "").strip() or None
         description = None
         if "description" in header_map:
-            description = (row.get(header_map["description"]) or "").strip() or None
+            description = (row.get(header_map.get("description", "")) or "").strip() or None
         notes = None
         if "notes" in header_map:
-            notes = (row.get(header_map["notes"]) or "").strip() or None
+            notes = (row.get(header_map.get("notes", "")) or "").strip() or None
         combined_notes = _combine_notes(description, notes)
 
         parsed_rows.append(
