@@ -1,4 +1,3 @@
-import base64
 import csv
 import io
 import json
@@ -66,10 +65,8 @@ from invapp.services.item_locations import apply_smart_item_locations
 from invapp.utils.csv_export import export_rows_to_csv
 from invapp.utils.csv_schema import (
     ITEMS_CSV_COLUMNS,
-    ITEMS_CSV_HEADERS,
     ITEMS_HEADER_ALIASES,
     STOCK_CSV_COLUMNS,
-    STOCK_CSV_HEADERS,
     STOCK_HEADER_ALIASES,
     expected_headers,
     resolve_import_mappings,

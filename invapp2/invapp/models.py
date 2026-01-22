@@ -1,12 +1,12 @@
 import logging
 import secrets
 from decimal import Decimal
-from datetime import date, datetime
+from datetime import datetime
 from typing import ClassVar
 
 from flask import current_app
 from flask_sqlalchemy import BaseQuery
-from sqlalchemy import func, inspect, select, text
+from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.orm import synonym
