@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
@@ -79,13 +81,25 @@ def create_snapshot():
                 required_headers=REQUIRED_SNAPSHOT_HEADERS,
             )
 
-        parsed_rows, parse_errors = parse_snapshot_csv(csv_text)
+        header_overrides = {
+            "item_code": (request.form.get("item_code_column") or "").strip(),
+            "system_total_qty": (request.form.get("system_total_qty_column") or "").strip(),
+            "uom": (request.form.get("uom_column") or "").strip(),
+            "description": (request.form.get("description_column") or "").strip(),
+            "notes": (request.form.get("notes_column") or "").strip(),
+        }
+        parsed_rows, parse_errors = parse_snapshot_csv(
+            csv_text,
+            header_overrides=header_overrides,
+        )
         if parse_errors:
             for message in parse_errors:
                 flash(message, "error")
             return render_template(
                 "physical_inventory/snapshot_new.html",
                 required_headers=REQUIRED_SNAPSHOT_HEADERS,
+                uploaded_headers=list(csv.DictReader(io.StringIO(csv_text)).fieldnames or []),
+                column_mapping=header_overrides,
             )
 
         snapshot = InventorySnapshot(
@@ -120,6 +134,8 @@ def create_snapshot():
     return render_template(
         "physical_inventory/snapshot_new.html",
         required_headers=REQUIRED_SNAPSHOT_HEADERS,
+        uploaded_headers=[],
+        column_mapping={},
     )
 
 

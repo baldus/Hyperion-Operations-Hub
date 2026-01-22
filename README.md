@@ -314,6 +314,9 @@ See CSV validation logic in [`invapp2/invapp/physical_inventory/services.py`](in
 - `description`: `item_description`, `desc`
 - `notes`: `note`, `comment`, `comments`
 
+**Manual column mapping**
+If your CSV headers are unique or custom, use the **“Map CSV columns manually”** section on the upload form to type the exact header names for each required field. This bypasses the alias matching and uses the specified column names directly. See the upload form in [`invapp2/invapp/templates/physical_inventory/snapshot_new.html`](invapp2/invapp/templates/physical_inventory/snapshot_new.html) and the mapping logic in [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py).
+
 ### How known item-location pairs are determined
 The count sheet is built by combining **distinct item-location relationships** already known to Hyperion:
 - **Movement history** (`movement.item_id`, `movement.location_id`)

@@ -126,6 +126,18 @@ def test_snapshot_csv_header_aliases(client, sample_item):
     assert b"Snapshot created" in response.data
 
 
+def test_snapshot_csv_manual_mapping(client, sample_item):
+    csv_text = "Part Number,ERP Total\nITEM-1,12\n"
+    response = _upload_snapshot(
+        client,
+        csv_text,
+        name="Mapped Snapshot",
+        item_code_column="Part Number",
+        system_total_qty_column="ERP Total",
+    )
+    assert b"Snapshot created" in response.data
+
+
 def test_reconciliation_math(client, app, sample_item, sample_location):
     with app.app_context():
         snapshot = InventorySnapshot(

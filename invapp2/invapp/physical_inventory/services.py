@@ -74,12 +74,26 @@ def _combine_notes(description: str | None, notes: str | None) -> str | None:
     return " | ".join(parts) if parts else None
 
 
-def _resolve_header_map(headers: list[str]) -> tuple[dict[str, str], list[str]]:
+def _resolve_header_map(
+    headers: list[str],
+    overrides: dict[str, str] | None = None,
+) -> tuple[dict[str, str], list[str], list[str]]:
     normalized_headers = [_normalize_header(header) for header in headers]
     header_map: dict[str, str] = {}
     missing_required: list[str] = []
+    invalid_overrides: list[str] = []
+
+    overrides = {key: value.strip() for key, value in (overrides or {}).items() if value}
 
     for canonical, aliases in SNAPSHOT_HEADER_ALIASES.items():
+        override_value = overrides.get(canonical)
+        if override_value:
+            if override_value in headers:
+                header_map[canonical] = override_value
+            else:
+                invalid_overrides.append(canonical)
+            continue
+
         matches = [
             headers[idx]
             for idx, normalized in enumerate(normalized_headers)
@@ -90,29 +104,43 @@ def _resolve_header_map(headers: list[str]) -> tuple[dict[str, str], list[str]]:
         elif canonical in REQUIRED_SNAPSHOT_HEADERS:
             missing_required.append(canonical)
 
-    return header_map, missing_required
+    return header_map, missing_required, invalid_overrides
 
 
-def parse_snapshot_csv(raw_csv: str) -> tuple[list[SnapshotLineInput], list[str]]:
+def parse_snapshot_csv(
+    raw_csv: str,
+    header_overrides: dict[str, str] | None = None,
+) -> tuple[list[SnapshotLineInput], list[str]]:
     errors: list[str] = []
     reader = csv.DictReader(StringIO(raw_csv))
     if not reader.fieldnames:
         return [], ["The uploaded CSV does not include headers."]
 
-    header_map, missing_headers = _resolve_header_map(reader.fieldnames)
+    header_map, missing_headers, invalid_overrides = _resolve_header_map(
+        reader.fieldnames,
+        header_overrides,
+    )
+    if invalid_overrides:
+        errors.append(
+            "Column mapping failed for: "
+            + ", ".join(sorted(invalid_overrides))
+            + ". Please confirm the column names match the CSV headers."
+        )
     if missing_headers:
         accepted = {
             header: ", ".join(SNAPSHOT_HEADER_ALIASES[header])
             for header in missing_headers
         }
-        return [], [
+        errors.append(
             "Missing required headers: "
             + ", ".join(sorted(missing_headers))
             + ". Accepted headers: "
             + "; ".join(
                 f"{header}: {aliases}" for header, aliases in accepted.items()
             )
-        ]
+        )
+    if errors:
+        return [], errors
 
     rows: list[tuple[int, dict[str, str]]] = []
     for idx, row in enumerate(reader, start=2):
