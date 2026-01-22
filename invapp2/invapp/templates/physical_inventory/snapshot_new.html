@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Create Physical Inventory Snapshot</h2>
+
+<p class="field-note">Upload ERP system totals (no locations). The snapshot will generate count lines for known item-location pairs.</p>
+
+<form method="post" enctype="multipart/form-data" class="stacked-form">
+  <label for="name">Snapshot Name (optional)
+    <input id="name" name="name" type="text" placeholder="Q1 2025 Cycle Count">
+  </label>
+  <label for="snapshot_date">Snapshot Date (optional)
+    <input id="snapshot_date" name="snapshot_date" type="date">
+  </label>
+  <label for="source">Source (optional)
+    <input id="source" name="source" type="text" placeholder="CSV / Sage">
+  </label>
+  <label for="snapshot_csv">Snapshot CSV
+    <input id="snapshot_csv" name="snapshot_csv" type="file" accept=".csv" required>
+  </label>
+  <div class="form-row">
+    <button type="submit" class="action-btn">Upload Snapshot</button>
+  </div>
+</form>
+
+<div class="dashboard-section">
+  <h3>Required CSV Headers</h3>
+  <ul>
+    {% for header in required_headers %}
+    <li><code>{{ header }}</code></li>
+    {% endfor %}
+  </ul>
+  <p class="field-note">Optional headers: <code>uom</code>, <code>description</code>, <code>notes</code>.</p>
+</div>
+{% endblock %}

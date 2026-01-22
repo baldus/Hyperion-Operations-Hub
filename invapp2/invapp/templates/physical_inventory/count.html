@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Count Entry: {{ snapshot.name or "Untitled" }}</h2>
+
+<div class="dashboard-section">
+  <form method="get" class="form-row">
+    <label for="location_id">Location</label>
+    <select id="location_id" name="location_id">
+      <option value="">Select a location</option>
+      {% for location in locations %}
+      <option value="{{ location.id }}" {% if location.id == selected_location_id %}selected{% endif %}>
+        {{ location.code }}{% if location.description %} - {{ location.description }}{% endif %}
+      </option>
+      {% endfor %}
+    </select>
+    <label>
+      <input type="checkbox" name="uncounted" value="1" {% if uncounted_only %}checked{% endif %}>
+      Show uncounted only
+    </label>
+    <button type="submit" class="bubble-btn">Filter</button>
+  </form>
+</div>
+
+{% if snapshot.is_locked %}
+<p class="field-note">This snapshot is locked. Counts are read-only.</p>
+{% endif %}
+
+{% if count_lines %}
+<form method="post">
+  <div class="table-container">
+    <table class="inventory-table">
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>System Total</th>
+          <th>Counted Qty</th>
+          <th>Notes</th>
+          <th>Last Counted</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for line in count_lines %}
+        {% set snapshot_line = snapshot_lines.get(line.item_id) %}
+        <tr>
+          <td>
+            <strong>{{ line.item.sku }}</strong><br>
+            <small>{{ line.item.name }}</small>
+          </td>
+          <td>{{ snapshot_line.system_total_qty if snapshot_line else "" }}</td>
+          <td>
+            <input type="hidden" name="line_id" value="{{ line.id }}">
+            <input
+              type="text"
+              name="counted_qty_{{ line.id }}"
+              value="{{ line.counted_qty if line.counted_qty is not none else '' }}"
+              {% if snapshot.is_locked %}readonly{% endif %}
+            >
+          </td>
+          <td>
+            <input
+              type="text"
+              name="notes_{{ line.id }}"
+              value="{{ line.notes or '' }}"
+              {% if snapshot.is_locked %}readonly{% endif %}
+            >
+          </td>
+          <td>
+            {% if line.counted_at %}
+              {{ line.counted_at.strftime('%Y-%m-%d %H:%M') }}
+            {% else %}
+              <span class="field-note">Not counted</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if not snapshot.is_locked %}
+  <button type="submit" class="action-btn">Save Counts</button>
+  {% endif %}
+</form>
+{% else %}
+<p>No count lines match the current filters.</p>
+{% endif %}
+
+<a href="{{ url_for('physical_inventory.view_snapshot', snapshot_id=snapshot.id) }}" class="link-btn">Back to snapshot</a>
+{% endblock %}

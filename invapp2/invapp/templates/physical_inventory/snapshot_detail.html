@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Snapshot: {{ snapshot.name or "Untitled" }}</h2>
+
+<div class="dashboard-section">
+  <div class="status-summary-grid">
+    <div>
+      <strong>Date:</strong> {{ snapshot.snapshot_date.strftime('%Y-%m-%d') }}
+    </div>
+    <div>
+      <strong>Source:</strong> {{ snapshot.source or "CSV" }}
+    </div>
+    <div>
+      <strong>Lines:</strong> {{ summary.snapshot_lines }}
+    </div>
+    <div>
+      <strong>Count Lines:</strong> {{ summary.count_lines }}
+    </div>
+    <div>
+      <strong>Status:</strong>
+      {% if snapshot.is_locked %}
+      <span class="status-pill status-closed">Locked</span>
+      {% else %}
+      <span class="status-pill status-open">Open</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="menu-grid">
+  <a href="{{ url_for('physical_inventory.count_snapshot', snapshot_id=snapshot.id) }}" class="action-btn">Enter Counts</a>
+  <a href="{{ url_for('physical_inventory.reconciliation', snapshot_id=snapshot.id) }}" class="action-btn">View Reconciliation</a>
+  <a href="{{ url_for('physical_inventory.export_location_sheet', snapshot_id=snapshot.id) }}" class="action-btn">Export Location Sheet (CSV)</a>
+  <a href="{{ url_for('physical_inventory.export_reconciliation', snapshot_id=snapshot.id) }}" class="action-btn">Export Reconciliation (CSV)</a>
+</div>
+
+<div class="dashboard-section">
+  <h3>Admin Actions</h3>
+  <div class="form-row">
+    <form method="post" action="{{ url_for('physical_inventory.refresh_count_lines', snapshot_id=snapshot.id) }}" class="inline-form">
+      <button type="submit" class="bubble-btn">Refresh Count Lines</button>
+    </form>
+    <form method="post" action="{{ url_for('physical_inventory.lock_snapshot', snapshot_id=snapshot.id) }}" class="inline-form">
+      <button type="submit" class="bubble-btn" {% if snapshot.is_locked %}disabled{% endif %}>Lock Snapshot</button>
+    </form>
+  </div>
+  <p class="field-note">Locking prevents further count edits. Refresh count lines adds missing item-location rows without deleting existing counts.</p>
+</div>
+
+<a href="{{ url_for('physical_inventory.list_snapshots') }}" class="link-btn">Back to snapshots</a>
+{% endblock %}

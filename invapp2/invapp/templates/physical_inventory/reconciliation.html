@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Reconciliation: {{ snapshot.name or "Untitled" }}</h2>
+
+<div class="table-container">
+  <table class="inventory-table">
+    <thead>
+      <tr>
+        <th>Item</th>
+        <th>System Total</th>
+        <th>Counted Total</th>
+        <th>Variance</th>
+        <th>Status</th>
+        <th>Details</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>
+          <strong>{{ row.item_code }}</strong><br>
+          <small>{{ row.item_description }}</small>
+        </td>
+        <td>{{ row.system_total_qty }}</td>
+        <td>{{ row.counted_total_qty if row.counted_total_qty is not none else '' }}</td>
+        <td>{{ row.variance if row.variance is not none else '' }}</td>
+        <td>
+          <span class="status-pill status-{{ row.status|lower }}">{{ row.status }}</span>
+        </td>
+        <td>
+          <a href="{{ url_for('physical_inventory.reconciliation', snapshot_id=snapshot.id, item_id=row.item_id) }}" class="link-btn">View locations</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if item_id %}
+<div class="dashboard-section">
+  <h3>Location Breakdown</h3>
+  {% if drilldown_lines %}
+  <div class="table-container">
+    <table class="inventory-table">
+      <thead>
+        <tr>
+          <th>Location</th>
+          <th>Counted Qty</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for line in drilldown_lines %}
+        <tr>
+          <td>{{ line.location.code }}{% if line.location.description %} - {{ line.location.description }}{% endif %}</td>
+          <td>{{ line.counted_qty if line.counted_qty is not none else '' }}</td>
+          <td>{{ line.notes or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>No count lines for this item.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+<a href="{{ url_for('physical_inventory.view_snapshot', snapshot_id=snapshot.id) }}" class="link-btn">Back to snapshot</a>
+{% endblock %}
