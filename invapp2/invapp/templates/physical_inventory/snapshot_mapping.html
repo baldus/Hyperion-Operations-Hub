@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Map Snapshot Columns</h2>
+
+<p class="field-note">Confirm which columns represent Part Number and Quantity. Hyperion will preview matches before you commit.</p>
+
+<form method="post" class="stacked-form">
+  <input type="hidden" name="step" value="mapping">
+  <input type="hidden" name="import_token" value="{{ import_token }}">
+  <input type="hidden" name="snapshot_name" value="{{ snapshot_name }}">
+  <input type="hidden" name="snapshot_date" value="{{ snapshot_date }}">
+  <input type="hidden" name="snapshot_source" value="{{ snapshot_source }}">
+
+  <label for="part_number_column">Part Number column *</label>
+  <select id="part_number_column" name="part_number_column" class="form-select" required>
+    <option value="">Select column</option>
+    {% for header in headers %}
+    <option value="{{ header }}" {% if selected_mapping.part_number == header %}selected{% endif %}>{{ header }}</option>
+    {% endfor %}
+  </select>
+
+  <label for="quantity_column">Quantity column *</label>
+  <select id="quantity_column" name="quantity_column" class="form-select" required>
+    <option value="">Select column</option>
+    {% for header in headers %}
+    <option value="{{ header }}" {% if selected_mapping.quantity == header %}selected{% endif %}>{{ header }}</option>
+    {% endfor %}
+  </select>
+
+  <label for="description_column">Description column (recommended)</label>
+  <select id="description_column" name="description_column" class="form-select">
+    <option value="">None</option>
+    {% for header in headers %}
+    <option value="{{ header }}" {% if selected_mapping.description == header %}selected{% endif %}>{{ header }}</option>
+    {% endfor %}
+  </select>
+
+  <label for="uom_column">UOM column (optional)</label>
+  <select id="uom_column" name="uom_column" class="form-select">
+    <option value="">None</option>
+    {% for header in headers %}
+    <option value="{{ header }}" {% if selected_mapping.uom == header %}selected{% endif %}>{{ header }}</option>
+    {% endfor %}
+  </select>
+
+  <label for="notes_column">Notes column (optional)</label>
+  <select id="notes_column" name="notes_column" class="form-select">
+    <option value="">None</option>
+    {% for header in headers %}
+    <option value="{{ header }}" {% if selected_mapping.notes == header %}selected{% endif %}>{{ header }}</option>
+    {% endfor %}
+  </select>
+
+  <label for="duplicate_strategy">Duplicate part numbers</label>
+  <select id="duplicate_strategy" name="duplicate_strategy" class="form-select">
+    <option value="sum" {% if duplicate_strategy == 'sum' %}selected{% endif %}>Sum quantities (default)</option>
+    <option value="take_last" {% if duplicate_strategy == 'take_last' %}selected{% endif %}>Take last row</option>
+    <option value="take_first" {% if duplicate_strategy == 'take_first' %}selected{% endif %}>Take first row</option>
+  </select>
+
+  <div class="form-row">
+    <button type="submit" class="action-btn">Preview Matches</button>
+  </div>
+</form>
+
+<div class="dashboard-section">
+  <h3>Preview (first 50 rows)</h3>
+  {% if preview_rows %}
+  <div class="table-container">
+    <table class="inventory-table">
+      <thead>
+        <tr>
+          {% for header in headers %}
+          <th>{{ header }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in preview_rows %}
+        <tr>
+          {% for header in headers %}
+          <td>{{ row.get(header, '') }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>No preview rows available.</p>
+  {% endif %}
+</div>
+
+<a href="{{ url_for('physical_inventory.create_snapshot') }}" class="link-btn">Start over</a>
+{% endblock %}

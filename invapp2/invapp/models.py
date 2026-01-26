@@ -600,6 +600,8 @@ class InventorySnapshotLine(db.Model):
     item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
     system_total_qty = db.Column(db.Numeric(12, 3), nullable=False)
     uom = db.Column(db.String(32), nullable=True)
+    source_part_number_text = db.Column(db.String(255), nullable=True)
+    source_description_text = db.Column(db.String(255), nullable=True)
     notes = db.Column(db.Text, nullable=True)
 
     snapshot = db.relationship("InventorySnapshot", back_populates="lines")

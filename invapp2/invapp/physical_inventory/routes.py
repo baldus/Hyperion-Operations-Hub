@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 import io
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -33,10 +32,22 @@ from .forms import parse_count_updates, parse_snapshot_upload_form
 from .services import (
     REQUIRED_SNAPSHOT_HEADERS,
     build_count_sheet_rows,
+    build_preview_rows,
     build_reconciliation_rows,
+    delete_import_payload,
     ensure_count_lines_for_snapshot,
-    parse_snapshot_csv,
+    get_item_field_candidates,
+    group_duplicate_rows,
+    load_import_payload,
+    match_items,
+    parse_import_file,
+    store_import_payload,
+    suggest_description_column,
+    suggest_part_number_column,
+    suggest_quantity_column,
     summarize_snapshot,
+    resolve_item_description,
+    resolve_item_part_number,
 )
 
 bp = Blueprint("physical_inventory", __name__, url_prefix="/physical-inventory")
@@ -61,81 +72,266 @@ def list_snapshots():
 @bp.route("/snapshots/new", methods=["GET", "POST"])
 @superuser_required
 def create_snapshot():
+    candidates = get_item_field_candidates()
     if request.method == "POST":
-        payload, errors = parse_snapshot_upload_form(request.form, request.files)
-        if errors:
-            for message in errors:
-                flash(message, "error")
+        step = request.form.get("step", "upload")
+        if step == "upload":
+            payload, errors = parse_snapshot_upload_form(request.form, request.files)
+            if errors:
+                for message in errors:
+                    flash(message, "error")
+                return render_template(
+                    "physical_inventory/snapshot_upload.html",
+                    required_headers=REQUIRED_SNAPSHOT_HEADERS,
+                    candidates=candidates,
+                )
+
+            if not candidates.part_number_fields:
+                flash(
+                    "No part number fields are configured for Item matching. "
+                    "Set PHYS_INV_ITEM_ID_FIELDS in config.",
+                    "error",
+                )
+                return render_template(
+                    "physical_inventory/snapshot_upload.html",
+                    required_headers=REQUIRED_SNAPSHOT_HEADERS,
+                    candidates=candidates,
+                )
+
+            try:
+                parsed = parse_import_file(payload.file.filename, io.BytesIO(payload.file.read()))
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return render_template(
+                    "physical_inventory/snapshot_upload.html",
+                    required_headers=REQUIRED_SNAPSHOT_HEADERS,
+                    candidates=candidates,
+                )
+
+            import_token = store_import_payload(
+                "physical_inventory",
+                {
+                    "headers": parsed.headers,
+                    "normalized_headers": parsed.normalized_headers,
+                    "rows": parsed.rows,
+                },
+            )
+
+            quantity_suggestion = suggest_quantity_column(
+                parsed.normalized_headers, parsed.rows
+            )
+            part_suggestion = suggest_part_number_column(
+                parsed.normalized_headers, parsed.rows, candidates
+            )
+            desc_suggestion = suggest_description_column(
+                parsed.normalized_headers, parsed.rows
+            )
+
             return render_template(
-                "physical_inventory/snapshot_new.html",
+                "physical_inventory/snapshot_mapping.html",
+                import_token=import_token,
+                headers=parsed.normalized_headers,
+                preview_rows=parsed.rows[:50],
                 required_headers=REQUIRED_SNAPSHOT_HEADERS,
+                candidates=candidates,
+                snapshot_name=payload.name,
+                snapshot_date=(payload.snapshot_date or datetime.utcnow()).strftime("%Y-%m-%d"),
+                snapshot_source=payload.source or payload.file.filename,
+                selected_mapping={
+                    "part_number": part_suggestion,
+                    "quantity": quantity_suggestion,
+                    "description": desc_suggestion,
+                },
+                duplicate_strategy="sum",
             )
 
-        csv_bytes = payload.file.read()
-        try:
-            csv_text = csv_bytes.decode("utf-8-sig")
-        except UnicodeDecodeError:
-            flash("CSV must be encoded as UTF-8.", "error")
+        if step == "mapping":
+            import_token = request.form.get("import_token", "")
+            payload = load_import_payload("physical_inventory", import_token)
+            if not payload:
+                flash("Import session expired. Please upload the file again.", "error")
+                return redirect(url_for("physical_inventory.create_snapshot"))
+
+            headers = payload.get("normalized_headers", [])
+            rows = payload.get("rows", [])
+            part_col = (request.form.get("part_number_column") or "").strip()
+            quantity_col = (request.form.get("quantity_column") or "").strip()
+            desc_col = (request.form.get("description_column") or "").strip() or None
+            uom_col = (request.form.get("uom_column") or "").strip() or None
+            notes_col = (request.form.get("notes_column") or "").strip() or None
+            duplicate_strategy = request.form.get("duplicate_strategy", "sum")
+
+            mapping_errors = []
+            if not part_col or part_col not in headers:
+                mapping_errors.append("Select a valid Part Number column.")
+            if not quantity_col or quantity_col not in headers:
+                mapping_errors.append("Select a valid Quantity column.")
+            for optional_col in (desc_col, uom_col, notes_col):
+                if optional_col and optional_col not in headers:
+                    mapping_errors.append(
+                        f"Column '{optional_col}' does not exist in the uploaded file."
+                    )
+
+            if mapping_errors:
+                for message in mapping_errors:
+                    flash(message, "error")
+                return render_template(
+                    "physical_inventory/snapshot_mapping.html",
+                    import_token=import_token,
+                    headers=headers,
+                    preview_rows=rows[:50],
+                    required_headers=REQUIRED_SNAPSHOT_HEADERS,
+                    candidates=candidates,
+                    snapshot_name=request.form.get("snapshot_name"),
+                    snapshot_date=request.form.get("snapshot_date"),
+                    snapshot_source=request.form.get("snapshot_source"),
+                    selected_mapping={
+                        "part_number": part_col,
+                        "quantity": quantity_col,
+                        "description": desc_col,
+                        "uom": uom_col,
+                        "notes": notes_col,
+                    },
+                    duplicate_strategy=duplicate_strategy,
+                )
+
+            grouped_rows, duplicate_summary = group_duplicate_rows(
+                rows,
+                part_col=part_col,
+                desc_col=desc_col,
+                quantity_col=quantity_col,
+                strategy=duplicate_strategy,
+            )
+            match_context = match_items(grouped_rows, part_col, desc_col, candidates)
+            preview_rows = build_preview_rows(
+                grouped_rows,
+                match_context.matches,
+                part_col,
+                desc_col,
+                quantity_col,
+            )
+            unmatched_preview = [
+                row for row in preview_rows if row.match_reason == "unmatched"
+            ][:50]
+
             return render_template(
-                "physical_inventory/snapshot_new.html",
-                required_headers=REQUIRED_SNAPSHOT_HEADERS,
+                "physical_inventory/snapshot_review.html",
+                import_token=import_token,
+                stats={
+                    "total_rows": len(grouped_rows),
+                    "matched_rows": match_context.summary.matched_rows,
+                    "unmatched_rows": match_context.summary.unmatched_rows,
+                    "collisions_resolved": match_context.summary.part_desc_matches,
+                    "duplicate_groups": duplicate_summary.duplicate_groups,
+                },
+                unmatched_rows=unmatched_preview,
+                snapshot_name=request.form.get("snapshot_name"),
+                snapshot_date=request.form.get("snapshot_date"),
+                snapshot_source=request.form.get("snapshot_source"),
+                mapping={
+                    "part_number": part_col,
+                    "quantity": quantity_col,
+                    "description": desc_col,
+                    "uom": uom_col,
+                    "notes": notes_col,
+                },
+                duplicate_strategy=duplicate_strategy,
             )
 
-        header_overrides = {
-            "item_code": (request.form.get("item_code_column") or "").strip(),
-            "system_total_qty": (request.form.get("system_total_qty_column") or "").strip(),
-            "uom": (request.form.get("uom_column") or "").strip(),
-            "description": (request.form.get("description_column") or "").strip(),
-            "notes": (request.form.get("notes_column") or "").strip(),
-        }
-        parsed_rows, parse_errors = parse_snapshot_csv(
-            csv_text,
-            header_overrides=header_overrides,
-        )
-        if parse_errors:
-            for message in parse_errors:
-                flash(message, "error")
-            return render_template(
-                "physical_inventory/snapshot_new.html",
-                required_headers=REQUIRED_SNAPSHOT_HEADERS,
-                uploaded_headers=list(csv.DictReader(io.StringIO(csv_text)).fieldnames or []),
-                column_mapping=header_overrides,
+        if step == "commit":
+            import_token = request.form.get("import_token", "")
+            payload = load_import_payload("physical_inventory", import_token)
+            if not payload:
+                flash("Import session expired. Please upload the file again.", "error")
+                return redirect(url_for("physical_inventory.create_snapshot"))
+
+            headers = payload.get("normalized_headers", [])
+            rows = payload.get("rows", [])
+            part_col = request.form.get("part_number_column")
+            quantity_col = request.form.get("quantity_column")
+            desc_col = request.form.get("description_column") or None
+            uom_col = request.form.get("uom_column") or None
+            notes_col = request.form.get("notes_column") or None
+            duplicate_strategy = request.form.get("duplicate_strategy", "sum")
+
+            if not part_col or part_col not in headers or not quantity_col or quantity_col not in headers:
+                flash("Mapping information is incomplete. Please retry the upload.", "error")
+                return redirect(url_for("physical_inventory.create_snapshot"))
+
+            grouped_rows, _ = group_duplicate_rows(
+                rows,
+                part_col=part_col,
+                desc_col=desc_col,
+                quantity_col=quantity_col,
+                strategy=duplicate_strategy,
             )
+            match_context = match_items(grouped_rows, part_col, desc_col, candidates)
 
-        snapshot = InventorySnapshot(
-            name=payload.name,
-            snapshot_date=payload.snapshot_date or datetime.utcnow(),
-            source=payload.source or "CSV",
-            created_by_user_id=current_user.id,
-        )
-        db.session.add(snapshot)
-        db.session.flush()
+            if match_context.summary.matched_rows == 0:
+                flash("No rows matched existing items. Review your mapping.", "error")
+                return redirect(url_for("physical_inventory.create_snapshot"))
 
-        lines = [
-            InventorySnapshotLine(
-                snapshot_id=snapshot.id,
-                item_id=row.item_id,
-                system_total_qty=row.system_total_qty,
-                uom=row.uom,
-                notes=row.notes,
+            snapshot_date = request.form.get("snapshot_date") or ""
+            parsed_date = None
+            if snapshot_date:
+                try:
+                    parsed_date = datetime.strptime(snapshot_date, "%Y-%m-%d")
+                except ValueError:
+                    parsed_date = datetime.utcnow()
+
+            snapshot = InventorySnapshot(
+                name=request.form.get("snapshot_name") or None,
+                snapshot_date=parsed_date or datetime.utcnow(),
+                source=request.form.get("snapshot_source") or "Import",
+                created_by_user_id=current_user.id,
             )
-            for row in parsed_rows
-        ]
-        db.session.add_all(lines)
-        created_count_lines = ensure_count_lines_for_snapshot(snapshot)
-        db.session.commit()
+            db.session.add(snapshot)
+            db.session.flush()
 
-        flash(
-            f"Snapshot created with {len(lines)} item totals and {created_count_lines} count lines.",
-            "success",
-        )
-        return redirect(url_for("physical_inventory.view_snapshot", snapshot_id=snapshot.id))
+            lines = []
+            for row, match in zip(grouped_rows, match_context.matches):
+                if not match.item_id:
+                    continue
+                raw_qty = row.get(quantity_col, "")
+                try:
+                    qty = Decimal(str(raw_qty).strip())
+                except InvalidOperation:
+                    flash(
+                        f"Invalid quantity '{raw_qty}' in import file. Fix and retry.",
+                        "error",
+                    )
+                    db.session.rollback()
+                    return redirect(url_for("physical_inventory.create_snapshot"))
+
+                lines.append(
+                    InventorySnapshotLine(
+                        snapshot_id=snapshot.id,
+                        item_id=match.item_id,
+                        system_total_qty=qty,
+                        uom=row.get(uom_col) if uom_col else None,
+                        notes=row.get(notes_col) if notes_col else None,
+                        source_part_number_text=row.get(part_col),
+                        source_description_text=row.get(desc_col) if desc_col else None,
+                    )
+                )
+
+            db.session.add_all(lines)
+            created_count_lines = ensure_count_lines_for_snapshot(snapshot)
+            db.session.commit()
+            delete_import_payload("physical_inventory", import_token)
+
+            flash(
+                f"Snapshot created with {len(lines)} item totals and {created_count_lines} count lines.",
+                "success",
+            )
+            return redirect(
+                url_for("physical_inventory.view_snapshot", snapshot_id=snapshot.id)
+            )
 
     return render_template(
-        "physical_inventory/snapshot_new.html",
+        "physical_inventory/snapshot_upload.html",
         required_headers=REQUIRED_SNAPSHOT_HEADERS,
-        uploaded_headers=[],
-        column_mapping={},
+        candidates=candidates,
     )
 
 
@@ -178,6 +374,7 @@ def refresh_count_lines(snapshot_id: int):
 @superuser_required
 def count_snapshot(snapshot_id: int):
     snapshot = InventorySnapshot.query.get_or_404(snapshot_id)
+    candidates = get_item_field_candidates()
     if snapshot.is_locked and request.method == "POST":
         flash("Snapshot is locked; counts cannot be edited.", "error")
         return redirect(
@@ -271,6 +468,14 @@ def count_snapshot(snapshot_id: int):
         line.item_id: line
         for line in InventorySnapshotLine.query.filter_by(snapshot_id=snapshot.id).all()
     }
+    part_number_map = {
+        line.item_id: resolve_item_part_number(line.item, candidates)
+        for line in count_lines
+    }
+    description_map = {
+        line.item_id: resolve_item_description(line.item, candidates)
+        for line in count_lines
+    }
 
     return render_template(
         "physical_inventory/count.html",
@@ -280,6 +485,8 @@ def count_snapshot(snapshot_id: int):
         uncounted_only=uncounted_only,
         count_lines=count_lines,
         snapshot_lines=snapshot_lines,
+        part_number_map=part_number_map,
+        description_map=description_map,
     )
 
 
@@ -314,8 +521,8 @@ def export_location_sheet(snapshot_id: int):
     columns = (
         ("location_code", "location_code"),
         ("location_description", "location_description"),
-        ("item_code", "item_code"),
-        ("item_description", "item_description"),
+        ("part_number", "part_number"),
+        ("description", "description"),
         ("uom", "uom"),
         ("system_total_qty", "system_total_qty"),
         ("counted_qty", "counted_qty"),
@@ -331,8 +538,8 @@ def export_reconciliation(snapshot_id: int):
     snapshot = InventorySnapshot.query.get_or_404(snapshot_id)
     rows = [row.__dict__ for row in build_reconciliation_rows(snapshot.id)]
     columns = (
-        ("item_code", "item_code"),
-        ("item_description", "item_description"),
+        ("part_number", "part_number"),
+        ("description", "description"),
         ("uom", "uom"),
         ("system_total_qty", "system_total_qty"),
         ("counted_total_qty", "counted_total_qty"),

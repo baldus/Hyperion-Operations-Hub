@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Review Snapshot Import</h2>
+
+<div class="dashboard-section">
+  <h3>Summary</h3>
+  <ul>
+    <li>Total rows: {{ stats.total_rows }}</li>
+    <li>Matched rows: {{ stats.matched_rows }}</li>
+    <li>Unmatched rows: {{ stats.unmatched_rows }}</li>
+    <li>Collisions resolved: {{ stats.collisions_resolved }}</li>
+    <li>Duplicate groups: {{ stats.duplicate_groups }}</li>
+  </ul>
+</div>
+
+<div class="dashboard-section">
+  <h3>Unmatched Rows (first 50)</h3>
+  {% if unmatched_rows %}
+  <div class="table-container">
+    <table class="inventory-table">
+      <thead>
+        <tr>
+          <th>Part Number</th>
+          <th>Description</th>
+          <th>Quantity</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in unmatched_rows %}
+        <tr>
+          <td>{{ row.part_number }}</td>
+          <td>{{ row.description or '' }}</td>
+          <td>{{ row.quantity or '' }}</td>
+          <td>{{ row.match_reason }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>All preview rows matched existing items.</p>
+  {% endif %}
+</div>
+
+<form method="post" class="form-row">
+  <input type="hidden" name="step" value="commit">
+  <input type="hidden" name="import_token" value="{{ import_token }}">
+  <input type="hidden" name="snapshot_name" value="{{ snapshot_name }}">
+  <input type="hidden" name="snapshot_date" value="{{ snapshot_date }}">
+  <input type="hidden" name="snapshot_source" value="{{ snapshot_source }}">
+  <input type="hidden" name="part_number_column" value="{{ mapping.part_number }}">
+  <input type="hidden" name="quantity_column" value="{{ mapping.quantity }}">
+  <input type="hidden" name="description_column" value="{{ mapping.description }}">
+  <input type="hidden" name="uom_column" value="{{ mapping.uom }}">
+  <input type="hidden" name="notes_column" value="{{ mapping.notes }}">
+  <input type="hidden" name="duplicate_strategy" value="{{ duplicate_strategy }}">
+  <button type="submit" class="action-btn">Proceed</button>
+  <a href="{{ url_for('physical_inventory.create_snapshot') }}" class="link-btn">Cancel</a>
+</form>
+{% endblock %}

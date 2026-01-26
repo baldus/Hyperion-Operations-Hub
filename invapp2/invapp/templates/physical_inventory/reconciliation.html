@@ -18,8 +18,8 @@
       {% for row in rows %}
       <tr>
         <td>
-          <strong>{{ row.item_code }}</strong><br>
-          <small>{{ row.item_description }}</small>
+          <strong>{{ row.part_number }}</strong><br>
+          <small>{{ row.description }}</small>
         </td>
         <td>{{ row.system_total_qty }}</td>
         <td>{{ row.counted_total_qty if row.counted_total_qty is not none else '' }}</td>

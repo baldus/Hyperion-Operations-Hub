@@ -43,8 +43,8 @@
         {% set snapshot_line = snapshot_lines.get(line.item_id) %}
         <tr>
           <td>
-            <strong>{{ line.item.sku }}</strong><br>
-            <small>{{ line.item.name }}</small>
+            <strong>{{ part_number_map.get(line.item_id, '') }}</strong><br>
+            <small>{{ description_map.get(line.item_id, '') }}</small>
           </td>
           <td>{{ snapshot_line.system_total_qty if snapshot_line else "" }}</td>
           <td>

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Create Physical Inventory Snapshot</h2>
+
+<p class="field-note">Upload an ERP snapshot (.csv, .tsv, or .xlsx). You will map columns and preview matches before the snapshot is created.</p>
+
+<form method="post" enctype="multipart/form-data" class="stacked-form">
+  <input type="hidden" name="step" value="upload">
+  <label for="name">Snapshot Name (optional)
+    <input id="name" name="name" type="text" placeholder="Q1 2025 Cycle Count">
+  </label>
+  <label for="snapshot_date">Snapshot Date (optional)
+    <input id="snapshot_date" name="snapshot_date" type="date">
+  </label>
+  <label for="source">Source (optional)
+    <input id="source" name="source" type="text" placeholder="ERP Export">
+  </label>
+  <label for="snapshot_file">Snapshot File
+    <input id="snapshot_file" name="snapshot_csv" type="file" accept=".csv,.tsv,.xlsx" required>
+  </label>
+  <div class="form-row">
+    <button type="submit" class="action-btn">Continue</button>
+  </div>
+</form>
+
+<div class="dashboard-section">
+  <h3>Matching Requirements</h3>
+  <p class="field-note">Required mappings: <code>Part Number</code> and <code>Quantity</code>. Optional mappings: <code>Description</code>, <code>UOM</code>, <code>Notes</code>.</p>
+  <p class="field-note">Detected item part-number fields: {{ candidates.part_number_fields | join(', ') if candidates.part_number_fields else 'None configured' }}</p>
+  <p class="field-note">Detected description fields: {{ candidates.description_fields | join(', ') if candidates.description_fields else 'None configured' }}</p>
+</div>
+{% endblock %}
