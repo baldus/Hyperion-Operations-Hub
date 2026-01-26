@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Create Physical Inventory Snapshot</h2>
+<p class="field-note">Upload an ERP snapshot file. Supported formats: CSV, TSV, or XLSX.</p>
+
+<form method="post" enctype="multipart/form-data" class="stacked-form">
+  <input type="hidden" name="step" value="upload">
+  <label for="snapshot_csv">Snapshot File
+    <input id="snapshot_csv" name="snapshot_csv" type="file" accept=".csv,.tsv,.xlsx" required>
+  </label>
+  <div class="form-row">
+    <button type="submit" class="action-btn">Continue</button>
+  </div>
+</form>
+
+<div class="dashboard-section">
+  <h3>Workflow</h3>
+  <ol>
+    <li>Upload snapshot file</li>
+    <li>Map columns + preview</li>
+    <li>Review match results and commit</li>
+  </ol>
+</div>
+{% endblock %}

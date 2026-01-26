@@ -561,6 +561,80 @@ class Movement(PrimaryKeySequenceMixin, db.Model):
     location = db.relationship("Location", backref="movements")
 
 
+class InventorySnapshot(db.Model):
+    __tablename__ = "inventory_snapshot"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=True)
+    snapshot_date = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    source = db.Column(db.String(120), nullable=True)
+    created_by_user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    is_locked = db.Column(db.Boolean, default=False, nullable=False)
+
+    created_by = db.relationship("User")
+    lines = db.relationship(
+        "InventorySnapshotLine",
+        back_populates="snapshot",
+        cascade="all, delete-orphan",
+    )
+    count_lines = db.relationship(
+        "InventoryCountLine",
+        back_populates="snapshot",
+        cascade="all, delete-orphan",
+    )
+
+
+class InventorySnapshotLine(db.Model):
+    __tablename__ = "inventory_snapshot_line"
+    __table_args__ = (
+        db.UniqueConstraint("snapshot_id", "item_id", name="uq_snapshot_item"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    snapshot_id = db.Column(
+        db.Integer, db.ForeignKey("inventory_snapshot.id", ondelete="CASCADE"), nullable=False
+    )
+    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    system_total_qty = db.Column(db.Numeric(12, 3), nullable=False)
+    uom = db.Column(db.String(32), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+    source_part_number_text = db.Column(db.String(255), nullable=True)
+    source_description_text = db.Column(db.Text, nullable=True)
+
+    snapshot = db.relationship("InventorySnapshot", back_populates="lines")
+    item = db.relationship("Item")
+
+
+class InventoryCountLine(db.Model):
+    __tablename__ = "inventory_count_line"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "snapshot_id", "item_id", "location_id", name="uq_snapshot_item_location"
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    snapshot_id = db.Column(
+        db.Integer, db.ForeignKey("inventory_snapshot.id", ondelete="CASCADE"), nullable=False
+    )
+    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    location_id = db.Column(db.Integer, db.ForeignKey("location.id"), nullable=False)
+    counted_qty = db.Column(db.Numeric(12, 3), nullable=True)
+    counted_by_user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    counted_at = db.Column(db.DateTime, nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+
+    snapshot = db.relationship("InventorySnapshot", back_populates="count_lines")
+    item = db.relationship("Item")
+    location = db.relationship("Location")
+    counted_by = db.relationship("User")
+
+
 class PurchaseRequest(PrimaryKeySequenceMixin, db.Model):
     __tablename__ = "purchase_request"
 

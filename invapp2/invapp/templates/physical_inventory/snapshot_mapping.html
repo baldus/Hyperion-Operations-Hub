@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Map Snapshot Columns</h2>
+<p>Select which columns map to the required fields. Required fields are marked with an asterisk (*).</p>
+
+<form method="post">
+  <input type="hidden" name="step" value="preview">
+  <input type="hidden" name="import_token" value="{{ import_token|e }}">
+
+  <div class="dashboard-section">
+    <h3>Snapshot Details</h3>
+    <label for="name">Snapshot Name (optional)
+      <input id="name" name="name" type="text" value="{{ snapshot_meta.name or '' }}" placeholder="Q1 2025 Cycle Count">
+    </label>
+    <label for="snapshot_date">Snapshot Date (optional)
+      <input id="snapshot_date" name="snapshot_date" type="date" value="{{ snapshot_meta.snapshot_date.strftime('%Y-%m-%d') if snapshot_meta.snapshot_date }}">
+    </label>
+    <label for="source">Source (optional)
+      <input id="source" name="source" type="text" value="{{ snapshot_meta.source or '' }}" placeholder="ERP Export">
+    </label>
+  </div>
+
+  <div class="table-container">
+    <table class="inventory-table">
+      <thead>
+        <tr>
+          <th>Field</th>
+          <th>Import Column</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for field in mapping_fields %}
+        <tr>
+          <td>{{ field.label }}{% if field.required %} *{% endif %}</td>
+          <td>
+            <select name="{{ field.field }}_column" {% if field.required %}required{% endif %}>
+              <option value="">{% if field.required %}Select column{% else %}Ignore{% endif %}</option>
+              {% for header in headers %}
+              {% set selected_value = selected_mappings.get(field.field) or suggestions.get(field.field) %}
+              <option value="{{ header }}" {% if selected_value == header %}selected{% endif %}>{{ header }}</option>
+              {% endfor %}
+            </select>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="dashboard-section">
+    <h3>Duplicate Handling</h3>
+    <label for="duplicate_strategy">When duplicate part numbers appear:</label>
+    <select id="duplicate_strategy" name="duplicate_strategy">
+      <option value="sum" {% if duplicate_strategy == 'sum' %}selected{% endif %}>Sum quantities (default)</option>
+      <option value="first" {% if duplicate_strategy == 'first' %}selected{% endif %}>Take first</option>
+      <option value="last" {% if duplicate_strategy == 'last' %}selected{% endif %}>Take last</option>
+    </select>
+  </div>
+
+  <h3>Preview</h3>
+  <div class="table-container">
+    <table class="inventory-table">
+      <thead>
+        <tr>
+          {% for header in headers %}
+          <th>{{ header }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% if sample_rows %}
+          {% for row in sample_rows %}
+          <tr>
+            {% for cell in row %}
+            <td>{{ cell }}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="{{ headers|length or 1 }}" class="field-note">No sample data found in the uploaded file.</td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <button type="submit" class="action-btn">Preview Results</button>
+  <a href="{{ url_for('physical_inventory.create_snapshot') }}" class="link-btn">Start Over</a>
+</form>
+{% endblock %}
