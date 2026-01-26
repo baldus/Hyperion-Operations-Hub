@@ -585,6 +585,11 @@ class InventorySnapshot(db.Model):
         back_populates="snapshot",
         cascade="all, delete-orphan",
     )
+    import_issues = db.relationship(
+        "InventorySnapshotImportIssue",
+        back_populates="snapshot",
+        cascade="all, delete-orphan",
+    )
 
 
 class InventorySnapshotLine(db.Model):
@@ -602,10 +607,28 @@ class InventorySnapshotLine(db.Model):
     uom = db.Column(db.String(32), nullable=True)
     notes = db.Column(db.Text, nullable=True)
     source_part_number_text = db.Column(db.String(255), nullable=True)
+    source_secondary_match_text = db.Column(db.String(255), nullable=True)
     source_description_text = db.Column(db.Text, nullable=True)
 
     snapshot = db.relationship("InventorySnapshot", back_populates="lines")
     item = db.relationship("Item")
+
+
+class InventorySnapshotImportIssue(db.Model):
+    __tablename__ = "inventory_snapshot_import_issue"
+
+    id = db.Column(db.Integer, primary_key=True)
+    snapshot_id = db.Column(
+        db.Integer, db.ForeignKey("inventory_snapshot.id", ondelete="CASCADE"), nullable=False
+    )
+    row_index = db.Column(db.Integer, nullable=False)
+    reason = db.Column(db.String(64), nullable=False)
+    primary_value = db.Column(db.String(255), nullable=True)
+    secondary_value = db.Column(db.String(255), nullable=True)
+    row_data = db.Column(db.JSON, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    snapshot = db.relationship("InventorySnapshot", back_populates="import_issues")
 
 
 class InventoryCountLine(db.Model):

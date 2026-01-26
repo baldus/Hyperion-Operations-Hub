@@ -289,49 +289,60 @@ All Physical Inventory pages currently require **superuser access** (snapshot cr
 **Supported file types:** `.csv`, `.tsv`, `.xlsx` (Excel).
 
 **Two-step wizard**
-1. **Upload file** (CSV/TSV/XLSX). The app parses the file, normalizes headers (trim, lowercase, replace spaces with underscores), and shows a preview (first 50 rows). See [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py) and [`invapp2/invapp/templates/physical_inventory/snapshot_upload.html`](invapp2/invapp/templates/physical_inventory/snapshot_upload.html).
-2. **Map columns + preview**. Required mappings: **Part Number column** and **Quantity column**. Optional mappings: Description, UOM, Notes. Auto-suggestions are provided and you can adjust them before previewing matches. See [`invapp2/invapp/physical_inventory/routes.py`](invapp2/invapp/physical_inventory/routes.py) and [`invapp2/invapp/templates/physical_inventory/snapshot_mapping.html`](invapp2/invapp/templates/physical_inventory/snapshot_mapping.html).
+1. **Upload file** (CSV/TSV/XLSX). The app parses the file, normalizes headers (trim, lowercase, replace spaces with underscores), and shows a preview (first 50 rows). Both original and normalized header names are shown. See [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py) and [`invapp2/invapp/templates/physical_inventory/snapshot_upload.html`](invapp2/invapp/templates/physical_inventory/snapshot_upload.html).
+2. **Map columns + configure matching**. Required mappings: **Primary upload column** (identifier), **Item DB field**, and **Quantity column**. Optional mappings: secondary match key, Description, UOM, Notes. Auto-suggestions are provided for quantity + optional fields. See [`invapp2/invapp/physical_inventory/routes.py`](invapp2/invapp/physical_inventory/routes.py) and [`invapp2/invapp/templates/physical_inventory/snapshot_mapping.html`](invapp2/invapp/templates/physical_inventory/snapshot_mapping.html).
 
 **Auto-suggestion logic**
 - **Quantity**: column with the highest numeric coverage (non-empty numeric values).
-- **Part Number**: column with the highest exact/normalized match rate against item part-number fields.
 - **Description**: prefers columns whose header matches description fields; otherwise highest text density.
 
-**Validation & preview**
-Before committing, the preview screen shows:
-- total rows
+**Validation & live preview**
+Use **Test Mapping** to run a live preview (no DB writes). The preview shows:
+- match rate (% matched / eligible non-empty rows)
 - matched vs unmatched counts
-- duplicate group count
-- collisions resolved by part+description
-Unmatched rows (first 50) are shown to help fix mapping issues. See [`invapp2/invapp/templates/physical_inventory/snapshot_preview.html`](invapp2/invapp/templates/physical_inventory/snapshot_preview.html).
+- ambiguous vs empty values
+- collisions detected in the selected Item fields
+- top 10 unmatched examples with reasons (no match, ambiguous, empty)
+- matched via primary vs secondary (when enabled)
+
+Unmatched rows are excluded from the snapshot and stored for export. See [`invapp2/invapp/physical_inventory/routes.py`](invapp2/invapp/physical_inventory/routes.py).
 
 ### Item matching logic (no SKU)
-Hyperion never uses `Item.sku` for snapshot uploads, matching, or exports. Instead, it discovers part-number and description fields from the `Item` model using heuristics or configuration overrides:
+Hyperion never uses `Item.sku` for snapshot uploads, matching, or exports. Instead, the user explicitly selects which **Item DB field** to match against. The Item field dropdown is populated dynamically from the `Item` SQLAlchemy model; only string-like fields are shown by default, with an advanced toggle to show all fields. Fields containing `sku` are always excluded. See [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py) and [`invapp2/invapp/templates/physical_inventory/snapshot_mapping.html`](invapp2/invapp/templates/physical_inventory/snapshot_mapping.html).
 
-- **Part number candidate fields**: column names containing any of `part`, `number`, `num`, `item`, `code`, `pn`, `mpn` (excluding `sku`).
-- **Description candidate fields**: column names containing any of `desc`, `description`, `name`, `title`.
+**Recommended matching configuration**
+- Use **Item.name** when your ERP export has an “Item Name” column.
+- If you have both an item name and part number, use the part number as a **secondary match key** to disambiguate collisions.
+- Avoid free-text fields with inconsistent formatting unless you enable normalization toggles.
 
-If you have custom fields, you can override these lists in config:
-```bash
-export PHYS_INV_ITEM_ID_FIELDS="part_number,item_code"
-export PHYS_INV_DESC_FIELDS="description"
-```
-See [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py) for the lookup logic.
+**Normalization toggles**
+- **Trim whitespace** (default)
+- **Case-insensitive** (default)
+- **Remove spaces** (optional)
+- **Remove dashes/underscores** (optional)
+These toggles apply to *both* uploaded values and Item DB values. Start with the defaults (trim + case-insensitive) and only add aggressive options if the preview shows poor match rates.
 
 **Matching precedence**
-1. **Part Number exact match** (raw value).
-2. **Part Number normalized match** (uppercased, whitespace removed, and a strict mode that also removes dashes/underscores).
-3. **Part Number + Description** to resolve collisions when multiple items share a part number.
+1. Try **primary field** (exact match after normalization).
+2. If no match and secondary is enabled, try **secondary field**.
+3. If multiple items share the same key, the row is **ambiguous** and excluded unless the secondary key uniquely identifies the same item.
 
-If a row cannot be matched, it is excluded from the snapshot and reported in the preview.
+If a row cannot be matched, it is excluded from the snapshot and stored in `inventory_snapshot_import_issue` for review/export.
+
+**Troubleshooting tips**
+- **Low match rate**: verify you selected the correct upload column and Item field. Try **Item.name** for “Item Name” exports.
+- **Ambiguous matches**: enable the secondary match key (e.g., Part Number → `Item.part_number`) to disambiguate.
+- **Formatting mismatches**: toggle normalization options (trim/case-insensitive first; remove spaces/dashes only if needed).
+- **Unexpected exclusions**: export unmatched rows to CSV and compare the uploaded values against the Item fields.
+- **SKU confusion**: SKU fields are always excluded from matching, even with advanced fields enabled.
 
 ### Duplicate handling in import files
-If the same part number appears multiple times, the import wizard groups duplicates **before** matching. You can choose:
+If the same identifier appears multiple times, the import wizard groups duplicates **before** matching. You can choose:
 - **Sum quantities** (default)
 - **Take first**
 - **Take last**
 
-When a description column is mapped, the grouping key is **Part Number + Description**. See [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py).
+When a secondary match key is mapped, the grouping key becomes **Primary + Secondary** (after normalization). See [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py).
 
 ### How known item-location pairs are determined
 The count sheet is built by combining **distinct item-location relationships** already known to Hyperion:
@@ -374,15 +385,17 @@ The reconciliation page also supports per-item drilldown to location rows. See [
 | `/physical-inventory/snapshots` | GET | List snapshots | `templates/physical_inventory/snapshots.html` |
 | `/physical-inventory/snapshots/new` | GET/POST | Upload snapshot file + mapping wizard | `templates/physical_inventory/snapshot_upload.html` |
 | `/physical-inventory/snapshots/<id>` | GET | Snapshot overview | `templates/physical_inventory/snapshot_detail.html` |
+| `/physical-inventory/snapshots/<id>/import-results` | GET | Import results + export links | `templates/physical_inventory/snapshot_import_results.html` |
 | `/physical-inventory/snapshots/<id>/lock` | POST | Lock snapshot | (redirect) |
 | `/physical-inventory/snapshots/<id>/refresh-count-lines` | POST | Add missing count lines | (redirect) |
 | `/physical-inventory/snapshots/<id>/count` | GET/POST | Count entry UI | `templates/physical_inventory/count.html` |
 | `/physical-inventory/snapshots/<id>/reconciliation` | GET | Reconciliation summary + drilldown | `templates/physical_inventory/reconciliation.html` |
 | `/physical-inventory/snapshots/<id>/export/location-sheet.csv` | GET | Location count sheet export | CSV |
 | `/physical-inventory/snapshots/<id>/export/reconciliation.csv` | GET | Reconciliation export | CSV |
+| `/physical-inventory/snapshots/<id>/export/import-issues.csv` | GET | Export unmatched rows | CSV |
 
 See the blueprint registration in [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py) and route handlers in [`invapp2/invapp/physical_inventory/routes.py`](invapp2/invapp/physical_inventory/routes.py).
-The upload wizard renders mapping and preview steps with [`snapshot_mapping.html`](invapp2/invapp/templates/physical_inventory/snapshot_mapping.html) and [`snapshot_preview.html`](invapp2/invapp/templates/physical_inventory/snapshot_preview.html).
+The upload wizard renders the mapping + match preview step with [`snapshot_mapping.html`](invapp2/invapp/templates/physical_inventory/snapshot_mapping.html).
 
 ### Database tables and fields
 All new models are in [`invapp2/invapp/models.py`](invapp2/invapp/models.py) and migration `20250318_add_physical_inventory_tables`. See [`invapp2/migrations/versions/20250318_add_physical_inventory_tables.py`](invapp2/migrations/versions/20250318_add_physical_inventory_tables.py).
@@ -404,8 +417,19 @@ All new models are in [`invapp2/invapp/models.py`](invapp2/invapp/models.py) and
 - `uom` (string, nullable)
 - `notes` (text, nullable)
 - `source_part_number_text` (string, nullable)
+- `source_secondary_match_text` (string, nullable)
 - `source_description_text` (text, nullable)
 - UNIQUE (`snapshot_id`, `item_id`)
+
+**`inventory_snapshot_import_issue`**
+- `id` (PK)
+- `snapshot_id` (FK inventory_snapshot, cascade delete)
+- `row_index` (int)
+- `reason` (string)
+- `primary_value` (string, nullable)
+- `secondary_value` (string, nullable)
+- `row_data` (JSON, nullable)
+- `created_at` (datetime)
 
 **`inventory_count_line`**
 - `id` (PK)
@@ -419,12 +443,15 @@ All new models are in [`invapp2/invapp/models.py`](invapp2/invapp/models.py) and
 - UNIQUE (`snapshot_id`, `item_id`, `location_id`)
 
 ### Troubleshooting
-- **Unmatched rows in preview**: verify the selected Part Number column aligns with the configured item identifier fields and that the descriptions match when collisions occur. Adjust the mapping or configure `PHYS_INV_ITEM_ID_FIELDS` / `PHYS_INV_DESC_FIELDS`. See matching logic in [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py).
+- **Unmatched rows in preview**: verify the chosen upload column and Item field. Try `Item.name` when your ERP export uses “Item Name,” then use the secondary key for disambiguation.
+- **Ambiguous rows**: enable a secondary match key (e.g., part number → `Item.part_number`) so collisions resolve to a single item.
+- **Format mismatches**: toggle normalization options (trim/case-insensitive first, then remove spaces/dashes if needed).
+- **Review unmatched rows**: export `import-issues.csv` to compare ERP values to Item fields.
 - **No count lines generated**: check whether Hyperion knows any item-location pairs for those items (movement history or default locations). See `get_known_item_location_pairs()` in [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py).
 - **Counts cannot be edited**: the snapshot is locked. Use the snapshot overview to verify lock status. See [`invapp2/invapp/physical_inventory/routes.py`](invapp2/invapp/physical_inventory/routes.py).
 
 ### Example workflow checklist
-1. Export ERP totals to CSV/TSV/XLSX with Part Number + Quantity columns.
+1. Export ERP totals to CSV/TSV/XLSX with an identifier column (Item Name or Part Number) + Quantity.
 2. Upload the file in **Inventory → Physical Inventory**.
 3. Download the location count sheet (CSV) if you want to print or distribute.
 4. Enter counts per location in the count entry page.

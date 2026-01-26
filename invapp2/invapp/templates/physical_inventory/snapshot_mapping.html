@@ -1,10 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Map Snapshot Columns</h2>
-<p>Select which columns map to the required fields. Required fields are marked with an asterisk (*).</p>
+<p>Select matching and quantity columns. Required fields are marked with an asterisk (*).</p>
 
 <form method="post">
-  <input type="hidden" name="step" value="preview">
   <input type="hidden" name="import_token" value="{{ import_token|e }}">
 
   <div class="dashboard-section">
@@ -20,36 +19,124 @@
     </label>
   </div>
 
-  <div class="table-container">
-    <table class="inventory-table">
-      <thead>
-        <tr>
-          <th>Field</th>
-          <th>Import Column</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for field in mapping_fields %}
-        <tr>
-          <td>{{ field.label }}{% if field.required %} *{% endif %}</td>
-          <td>
-            <select name="{{ field.field }}_column" {% if field.required %}required{% endif %}>
-              <option value="">{% if field.required %}Select column{% else %}Ignore{% endif %}</option>
-              {% for header in headers %}
-              {% set selected_value = selected_mappings.get(field.field) or suggestions.get(field.field) %}
-              <option value="{{ header }}" {% if selected_value == header %}selected{% endif %}>{{ header }}</option>
-              {% endfor %}
-            </select>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <div class="dashboard-section">
+    <h3>Matching Configuration</h3>
+    <div class="form-grid">
+      <label for="primary_upload_column">Upload column for matching *
+        <select id="primary_upload_column" name="primary_upload_column" required>
+          <option value="">Select column</option>
+          {% for header in header_options %}
+          <option value="{{ header.original }}" {% if primary_upload_column == header.original %}selected{% endif %}>
+            {{ header.original }} ({{ header.normalized }})
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label for="primary_item_field">Item DB field to match against *
+        <select id="primary_item_field" name="primary_item_field" required>
+          <option value="">Select field</option>
+          {% for option in item_field_options %}
+          <option value="{{ option.name }}"
+                  data-is-string="{{ '1' if option.is_string else '0' }}"
+                  {% if primary_item_field == option.name %}selected{% endif %}>
+            {{ option.name }} ({{ option.type_label }})
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <label class="checkbox-row">
+      <input type="checkbox" name="use_secondary" value="1" {% if use_secondary %}checked{% endif %}>
+      Use a secondary match key
+    </label>
+
+    <div id="secondary_match_fields" class="form-grid" {% if not use_secondary %}style="display:none;"{% endif %}>
+      <label for="secondary_upload_column">Secondary upload column
+        <select id="secondary_upload_column" name="secondary_upload_column">
+          <option value="">Select column</option>
+          {% for header in header_options %}
+          <option value="{{ header.original }}" {% if secondary_upload_column == header.original %}selected{% endif %}>
+            {{ header.original }} ({{ header.normalized }})
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label for="secondary_item_field">Secondary Item DB field
+        <select id="secondary_item_field" name="secondary_item_field">
+          <option value="">Select field</option>
+          {% for option in item_field_options %}
+          <option value="{{ option.name }}"
+                  data-is-string="{{ '1' if option.is_string else '0' }}"
+                  {% if secondary_item_field == option.name %}selected{% endif %}>
+            {{ option.name }} ({{ option.type_label }})
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <label class="checkbox-row">
+      <input type="checkbox" name="show_all_fields" value="1" id="show_all_fields" {% if show_all_fields %}checked{% endif %}>
+      Show non-text Item fields (advanced)
+    </label>
+  </div>
+
+  <div class="dashboard-section">
+    <h3>Quantity + Optional Fields</h3>
+    <div class="table-container">
+      <table class="inventory-table">
+        <thead>
+          <tr>
+            <th>Field</th>
+            <th>Import Column</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for field in mapping_fields %}
+          <tr>
+            <td>{{ field.label }}{% if field.required %} *{% endif %}</td>
+            <td>
+              <select name="{{ field.field }}_column" {% if field.required %}required{% endif %}>
+                <option value="">{% if field.required %}Select column{% else %}Ignore{% endif %}</option>
+                {% for header in header_options %}
+                {% set selected_value = selected_mappings.get(field.field) or suggestions.get(field.field) %}
+                <option value="{{ header.original }}" {% if selected_value == header.original %}selected{% endif %}>
+                  {{ header.original }} ({{ header.normalized }})
+                </option>
+                {% endfor %}
+              </select>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="dashboard-section">
+    <h3>Normalization</h3>
+    <label class="checkbox-row">
+      <input type="checkbox" name="normalize_trim" value="1" {% if normalization_options.trim %}checked{% endif %}>
+      Trim whitespace
+    </label>
+    <label class="checkbox-row">
+      <input type="checkbox" name="normalize_case" value="1" {% if normalization_options.case_insensitive %}checked{% endif %}>
+      Case-insensitive
+    </label>
+    <label class="checkbox-row">
+      <input type="checkbox" name="normalize_spaces" value="1" {% if normalization_options.remove_spaces %}checked{% endif %}>
+      Remove spaces
+    </label>
+    <label class="checkbox-row">
+      <input type="checkbox" name="normalize_dashes" value="1" {% if normalization_options.remove_dashes %}checked{% endif %}>
+      Remove dashes/underscores
+    </label>
   </div>
 
   <div class="dashboard-section">
     <h3>Duplicate Handling</h3>
-    <label for="duplicate_strategy">When duplicate part numbers appear:</label>
+    <label for="duplicate_strategy">When duplicate identifiers appear:</label>
     <select id="duplicate_strategy" name="duplicate_strategy">
       <option value="sum" {% if duplicate_strategy == 'sum' %}selected{% endif %}>Sum quantities (default)</option>
       <option value="first" {% if duplicate_strategy == 'first' %}selected{% endif %}>Take first</option>
@@ -57,7 +144,53 @@
     </select>
   </div>
 
-  <h3>Preview</h3>
+  <div class="dashboard-section">
+    <h3>Live Match Preview</h3>
+    {% if match_preview.total_rows %}
+      <div class="status-summary-grid">
+        <div><strong>Total rows:</strong> {{ match_preview.total_rows }}</div>
+        <div><strong>Eligible rows:</strong> {{ match_preview.eligible_rows }}</div>
+        <div><strong>Matched rows:</strong> {{ match_preview.matched_rows }}</div>
+        <div><strong>Match rate:</strong> {{ "%.1f"|format(match_preview.match_rate) }}%</div>
+        <div><strong>Unmatched rows:</strong> {{ match_preview.unmatched_rows }}</div>
+        <div><strong>Ambiguous rows:</strong> {{ match_preview.ambiguous_rows }}</div>
+        <div><strong>Empty rows:</strong> {{ match_preview.empty_rows }}</div>
+        <div><strong>Duplicate groups:</strong> {{ duplicate_groups }}</div>
+        {% if use_secondary %}
+        <div><strong>Matched via primary:</strong> {{ match_preview.matched_primary }}</div>
+        <div><strong>Matched via secondary:</strong> {{ match_preview.matched_secondary }}</div>
+        {% endif %}
+      </div>
+
+      {% if match_preview.collision_count %}
+      <p class="field-note">Detected {{ match_preview.collision_count }} collisions on Item fields.</p>
+      <ul>
+        {% for collision in match_preview.collision_examples %}
+        <li>{{ collision.field }} → "{{ collision.value }}" ({{ collision.count }} items)</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+
+      {% if match_preview.unmatched_examples %}
+      <h4>Top 10 Unmatched Examples</h4>
+      <ul>
+        {% for row in match_preview.unmatched_examples %}
+        <li>
+          <strong>{{ row.primary_value }}</strong>
+          {% if use_secondary and row.secondary_value %}
+          (secondary: {{ row.secondary_value }})
+          {% endif %}
+          — {{ row.reason }}
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    {% else %}
+      <p class="field-note">Run “Test mapping” to calculate the match preview.</p>
+    {% endif %}
+  </div>
+
+  <h3>File Preview</h3>
   <div class="table-container">
     <table class="inventory-table">
       <thead>
@@ -85,7 +218,53 @@
     </table>
   </div>
 
-  <button type="submit" class="action-btn">Preview Results</button>
-  <a href="{{ url_for('physical_inventory.create_snapshot') }}" class="link-btn">Start Over</a>
+  <div class="form-row">
+    <button type="submit" class="action-btn" name="step" value="preview">Test Mapping</button>
+    <button type="submit" class="action-btn" name="step" value="commit">Create Snapshot</button>
+    <a href="{{ url_for('physical_inventory.create_snapshot') }}" class="link-btn">Start Over</a>
+  </div>
 </form>
+
+<script>
+  const showAllFieldsToggle = document.getElementById("show_all_fields");
+  const fieldSelects = [
+    document.getElementById("primary_item_field"),
+    document.getElementById("secondary_item_field"),
+  ];
+  const secondaryToggle = document.querySelector("input[name='use_secondary']");
+  const secondaryFields = document.getElementById("secondary_match_fields");
+
+  const toggleFieldOptions = () => {
+    const showAll = showAllFieldsToggle && showAllFieldsToggle.checked;
+    fieldSelects.forEach((select) => {
+      if (!select) {
+        return;
+      }
+      Array.from(select.options).forEach((option) => {
+        const isString = option.dataset.isString === "1";
+        if (option.value === "") {
+          option.hidden = false;
+          return;
+        }
+        option.hidden = !showAll && !isString;
+      });
+    });
+  };
+
+  const toggleSecondary = () => {
+    if (!secondaryToggle || !secondaryFields) {
+      return;
+    }
+    secondaryFields.style.display = secondaryToggle.checked ? "grid" : "none";
+  };
+
+  if (showAllFieldsToggle) {
+    showAllFieldsToggle.addEventListener("change", toggleFieldOptions);
+    toggleFieldOptions();
+  }
+  if (secondaryToggle) {
+    secondaryToggle.addEventListener("change", toggleSecondary);
+    toggleSecondary();
+  }
+</script>
 {% endblock %}

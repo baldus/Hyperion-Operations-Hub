@@ -11,7 +11,7 @@ from typing import Iterable
 from flask import current_app
 from openpyxl import load_workbook
 
-from sqlalchemy import func
+from sqlalchemy import String, Text, func
 
 from invapp.extensions import db
 from invapp.models import (
@@ -27,7 +27,8 @@ from invapp.models import (
 @dataclass(frozen=True)
 class SnapshotLineInput:
     item_id: int
-    item_code: str
+    primary_match_text: str
+    secondary_match_text: str | None
     system_total_qty: Decimal
     uom: str | None
     notes: str | None
@@ -55,10 +56,44 @@ class ImportData:
 
 
 @dataclass(frozen=True)
-class MatchResult:
+class NormalizationOptions:
+    trim: bool = True
+    case_insensitive: bool = True
+    remove_spaces: bool = False
+    remove_dashes: bool = False
+
+
+@dataclass(frozen=True)
+class ItemFieldOption:
+    name: str
+    type_label: str
+    is_string: bool
+
+
+@dataclass(frozen=True)
+class MatchOutcome:
     item_id: int | None
-    match_reason: str
-    confidence: str
+    status: str
+    matched_on: str | None
+    reason: str
+    primary_value: str
+    secondary_value: str | None
+
+
+@dataclass(frozen=True)
+class MatchPreview:
+    total_rows: int
+    eligible_rows: int
+    matched_rows: int
+    matched_primary: int
+    matched_secondary: int
+    unmatched_rows: int
+    ambiguous_rows: int
+    empty_rows: int
+    match_rate: float
+    unmatched_examples: list[dict[str, str]]
+    collision_count: int
+    collision_examples: list[dict[str, object]]
 
 
 def _normalize_header(header: str) -> str:
@@ -79,6 +114,37 @@ def _normalize_part_number(value: str) -> str:
 
 def _normalize_part_number_strict(value: str) -> str:
     return _normalize_part_number(value).replace("-", "").replace("_", "")
+
+
+def normalize_match_value(value: str, options: NormalizationOptions) -> str:
+    normalized = value
+    if options.trim:
+        normalized = normalized.strip()
+    if options.case_insensitive:
+        normalized = normalized.lower()
+    if options.remove_spaces:
+        normalized = normalized.replace(" ", "")
+    if options.remove_dashes:
+        normalized = normalized.replace("-", "").replace("_", "")
+    return normalized
+
+
+def get_item_match_field_options() -> list[ItemFieldOption]:
+    options: list[ItemFieldOption] = []
+    for column in Item.__table__.columns:
+        name = column.name
+        if "sku" in name.lower():
+            continue
+        column_type = type(column.type).__name__
+        is_string = isinstance(column.type, (String, Text))
+        options.append(
+            ItemFieldOption(
+                name=name,
+                type_label=column_type,
+                is_string=is_string,
+            )
+        )
+    return options
 
 
 def _safe_decimal(value: str) -> Decimal | None:
@@ -348,118 +414,277 @@ def suggest_column_mappings(
     return suggestions
 
 
-def match_items(
+def build_item_field_lookup(
+    items: Iterable[Item],
+    field: str,
+    options: NormalizationOptions,
+) -> dict[str, list[int]]:
+    lookup: dict[str, list[int]] = {}
+    for item in items:
+        value = getattr(item, field, None)
+        if value is None:
+            continue
+        normalized = normalize_match_value(str(value), options)
+        if not normalized:
+            continue
+        lookup.setdefault(normalized, [])
+        if item.id not in lookup[normalized]:
+            lookup[normalized].append(item.id)
+    return lookup
+
+
+def _find_collision_examples(
+    lookup: dict[str, list[int]],
+    field: str,
+    limit: int = 5,
+) -> tuple[int, list[dict[str, object]]]:
+    collisions = [
+        {"field": field, "value": key, "count": len(ids)}
+        for key, ids in lookup.items()
+        if len(ids) > 1
+    ]
+    return len(collisions), collisions[:limit]
+
+
+def match_rows(
     rows: list[dict[str, str]],
-    part_col: str,
-    desc_col: str | None,
-    raw_lookup: dict[str, list[int]],
-    normalized_lookup: dict[str, list[int]],
-    strict_lookup: dict[str, list[int]],
-    descriptions: dict[int, list[str]],
-) -> tuple[list[MatchResult], int]:
-    results: list[MatchResult] = []
-    collisions_resolved = 0
+    primary_upload_col: str,
+    primary_item_field: str,
+    secondary_upload_col: str | None,
+    secondary_item_field: str | None,
+    options: NormalizationOptions,
+    items: Iterable[Item],
+) -> tuple[list[MatchOutcome], int, list[dict[str, object]]]:
+    results: list[MatchOutcome] = []
+    primary_lookup = build_item_field_lookup(items, primary_item_field, options)
+    primary_collision_count, primary_examples = _find_collision_examples(
+        primary_lookup, primary_item_field
+    )
+    collision_examples = list(primary_examples)
+    collision_count = primary_collision_count
+
+    secondary_lookup: dict[str, list[int]] = {}
+    if secondary_upload_col and secondary_item_field:
+        secondary_lookup = build_item_field_lookup(items, secondary_item_field, options)
+        secondary_collision_count, secondary_examples = _find_collision_examples(
+            secondary_lookup, secondary_item_field
+        )
+        collision_count += secondary_collision_count
+        collision_examples.extend(secondary_examples)
 
     for row in rows:
-        raw_value = row.get(part_col, "").strip()
-        if not raw_value:
-            results.append(MatchResult(None, "unmatched", "low"))
-            continue
+        primary_raw = (row.get(primary_upload_col) or "").strip()
+        primary_normalized = normalize_match_value(primary_raw, options)
+        secondary_raw = (row.get(secondary_upload_col) or "").strip() if secondary_upload_col else ""
+        secondary_normalized = (
+            normalize_match_value(secondary_raw, options)
+            if secondary_upload_col and secondary_item_field
+            else ""
+        )
 
-        candidates = raw_lookup.get(raw_value)
-        match_reason = "part_number_exact"
-        if not candidates:
-            normalized = _normalize_part_number(raw_value)
-            candidates = normalized_lookup.get(normalized)
-            match_reason = "part_number_normalized"
-        if not candidates:
-            strict_value = _normalize_part_number_strict(raw_value)
-            candidates = strict_lookup.get(strict_value)
-            match_reason = "part_number_normalized"
-
-        if candidates and len(candidates) == 1:
-            results.append(MatchResult(candidates[0], match_reason, "high"))
-            continue
-
-        if desc_col and candidates:
-            desc_value = row.get(desc_col, "")
-            matched_id = _disambiguate_by_description(
-                candidates,
-                desc_value,
-                descriptions,
+        if not primary_normalized and not secondary_normalized:
+            results.append(
+                MatchOutcome(
+                    item_id=None,
+                    status="empty",
+                    matched_on=None,
+                    reason="empty value",
+                    primary_value=primary_raw,
+                    secondary_value=secondary_raw or None,
+                )
             )
+            continue
+
+        primary_candidates = primary_lookup.get(primary_normalized, []) if primary_normalized else []
+        if len(primary_candidates) == 1:
+            results.append(
+                MatchOutcome(
+                    item_id=primary_candidates[0],
+                    status="matched",
+                    matched_on="primary",
+                    reason="matched primary",
+                    primary_value=primary_raw,
+                    secondary_value=secondary_raw or None,
+                )
+            )
+            continue
+
+        if len(primary_candidates) > 1:
+            matched_id = None
+            if secondary_normalized:
+                secondary_candidates = secondary_lookup.get(secondary_normalized, [])
+                if len(secondary_candidates) == 1 and secondary_candidates[0] in primary_candidates:
+                    matched_id = secondary_candidates[0]
             if matched_id is not None:
-                collisions_resolved += 1
-                results.append(MatchResult(matched_id, "part+desc", "medium"))
-                continue
+                results.append(
+                    MatchOutcome(
+                        item_id=matched_id,
+                        status="matched",
+                        matched_on="secondary",
+                        reason="matched secondary",
+                        primary_value=primary_raw,
+                        secondary_value=secondary_raw or None,
+                    )
+                )
+            else:
+                results.append(
+                    MatchOutcome(
+                        item_id=None,
+                        status="ambiguous",
+                        matched_on=None,
+                        reason="ambiguous",
+                        primary_value=primary_raw,
+                        secondary_value=secondary_raw or None,
+                    )
+                )
+            continue
 
-        results.append(MatchResult(None, "unmatched", "low"))
+        if secondary_normalized:
+            secondary_candidates = secondary_lookup.get(secondary_normalized, [])
+            if len(secondary_candidates) == 1:
+                results.append(
+                    MatchOutcome(
+                        item_id=secondary_candidates[0],
+                        status="matched",
+                        matched_on="secondary",
+                        reason="matched secondary",
+                        primary_value=primary_raw,
+                        secondary_value=secondary_raw or None,
+                    )
+                )
+            elif len(secondary_candidates) > 1:
+                results.append(
+                    MatchOutcome(
+                        item_id=None,
+                        status="ambiguous",
+                        matched_on=None,
+                        reason="ambiguous",
+                        primary_value=primary_raw,
+                        secondary_value=secondary_raw or None,
+                    )
+                )
+            else:
+                results.append(
+                    MatchOutcome(
+                        item_id=None,
+                        status="unmatched",
+                        matched_on=None,
+                        reason="no match",
+                        primary_value=primary_raw,
+                        secondary_value=secondary_raw or None,
+                    )
+                )
+        else:
+            results.append(
+                MatchOutcome(
+                    item_id=None,
+                    status="unmatched",
+                    matched_on=None,
+                    reason="no match",
+                    primary_value=primary_raw,
+                    secondary_value=secondary_raw or None,
+                )
+            )
 
-    return results, collisions_resolved
+    return results, collision_count, collision_examples
 
 
-def _disambiguate_by_description(
-    candidates: list[int],
-    desc_value: str,
-    descriptions: dict[int, list[str]],
-) -> int | None:
-    normalized_desc = _normalize_description(desc_value)
-    if not normalized_desc:
-        return None
+def summarize_match_preview(
+    rows: list[dict[str, str]],
+    matches: list[MatchOutcome],
+    secondary_enabled: bool,
+    collision_count: int,
+    collision_examples: list[dict[str, object]],
+) -> MatchPreview:
+    matched_rows = sum(1 for match in matches if match.status == "matched")
+    matched_primary = sum(
+        1 for match in matches if match.status == "matched" and match.matched_on == "primary"
+    )
+    matched_secondary = sum(
+        1 for match in matches if match.status == "matched" and match.matched_on == "secondary"
+    )
+    unmatched_rows = sum(1 for match in matches if match.status == "unmatched")
+    ambiguous_rows = sum(1 for match in matches if match.status == "ambiguous")
+    empty_rows = sum(1 for match in matches if match.status == "empty")
+    eligible_rows = sum(
+        1
+        for match in matches
+        if match.primary_value.strip()
+        or (secondary_enabled and (match.secondary_value or "").strip())
+    )
+    match_rate = (matched_rows / eligible_rows * 100.0) if eligible_rows else 0.0
 
-    exact_matches = [
-        item_id
-        for item_id in candidates
-        if any(normalized_desc == entry for entry in descriptions.get(item_id, []))
-    ]
-    if len(exact_matches) == 1:
-        return exact_matches[0]
-    if len(exact_matches) > 1:
-        return None
+    unmatched_examples: list[dict[str, str]] = []
+    for match in matches:
+        if match.status == "matched":
+            continue
+        if len(unmatched_examples) >= 10:
+            break
+        unmatched_examples.append(
+            {
+                "primary_value": match.primary_value,
+                "secondary_value": match.secondary_value or "",
+                "reason": match.reason,
+            }
+        )
 
-    contains_matches = [
-        item_id
-        for item_id in candidates
-        if any(normalized_desc in entry or entry in normalized_desc for entry in descriptions.get(item_id, []))
-    ]
-    if len(contains_matches) == 1:
-        return contains_matches[0]
-    if len(contains_matches) > 1:
-        return None
+    return MatchPreview(
+        total_rows=len(rows),
+        eligible_rows=eligible_rows,
+        matched_rows=matched_rows,
+        matched_primary=matched_primary,
+        matched_secondary=matched_secondary,
+        unmatched_rows=unmatched_rows,
+        ambiguous_rows=ambiguous_rows,
+        empty_rows=empty_rows,
+        match_rate=match_rate,
+        unmatched_examples=unmatched_examples,
+        collision_count=collision_count,
+        collision_examples=collision_examples,
+    )
 
-    try:
-        from rapidfuzz import fuzz  # type: ignore
-    except Exception:
-        return None
 
-    best_score = 0
-    best_match = None
-    for item_id in candidates:
-        for entry in descriptions.get(item_id, []):
-            score = fuzz.ratio(normalized_desc, entry)
-            if score > best_score:
-                best_score = score
-                best_match = item_id
-    if best_score >= 90:
-        return best_match
-    return None
+def suggest_matching_upload_column(
+    import_data: ImportData,
+    items: Iterable[Item],
+    item_field: str,
+    options: NormalizationOptions,
+) -> str | None:
+    lookup = build_item_field_lookup(items, item_field, options)
+    best_header = None
+    best_score = 0.0
+    for header in import_data.headers:
+        values = [row.get(header, "") for row in import_data.rows]
+        non_empty = [value for value in values if value.strip()]
+        if not non_empty:
+            continue
+        matches = sum(
+            1 for value in non_empty if normalize_match_value(value, options) in lookup
+        )
+        score = matches / len(non_empty)
+        if score > best_score:
+            best_score = score
+            best_header = header
+    return best_header
 
 
 def apply_duplicate_strategy(
     rows: list[dict[str, str]],
-    part_col: str,
-    desc_col: str | None,
+    primary_col: str,
+    secondary_col: str | None,
     qty_col: str,
     strategy: str,
+    options: NormalizationOptions,
 ) -> tuple[list[dict[str, str]], int]:
     grouped: dict[str, list[dict[str, str]]] = {}
     for row in rows:
-        part_value = row.get(part_col, "").strip()
-        if desc_col:
-            desc_value = row.get(desc_col, "").strip()
-        else:
-            desc_value = ""
-        key = f"{_normalize_part_number_strict(part_value)}::{_normalize_description(desc_value)}"
+        primary_value = normalize_match_value(row.get(primary_col, "") or "", options)
+        secondary_value = (
+            normalize_match_value(row.get(secondary_col, "") or "", options)
+            if secondary_col
+            else ""
+        )
+        key = f"{primary_value}::{secondary_value}"
         grouped.setdefault(key, []).append(row)
 
     duplicate_groups = sum(1 for group in grouped.values() if len(group) > 1)
@@ -488,8 +713,9 @@ def apply_duplicate_strategy(
 
 def build_snapshot_lines(
     rows: list[dict[str, str]],
-    matches: list[MatchResult],
-    part_col: str,
+    matches: list[MatchOutcome],
+    primary_col: str,
+    secondary_col: str | None,
     desc_col: str | None,
     qty_col: str,
     uom_col: str | None,
@@ -509,10 +735,12 @@ def build_snapshot_lines(
         desc_value = (row.get(desc_col, "") if desc_col else "").strip() or None
         notes_value = (row.get(notes_col, "") if notes_col else "").strip() or None
         combined_notes = _combine_notes(desc_value, notes_value)
+        secondary_value = (row.get(secondary_col, "") if secondary_col else "").strip() or None
         snapshot_lines.append(
             SnapshotLineInput(
                 item_id=match.item_id,
-                item_code=row.get(part_col, "").strip(),
+                primary_match_text=row.get(primary_col, "").strip(),
+                secondary_match_text=secondary_value,
                 system_total_qty=qty,
                 uom=uom,
                 notes=combined_notes,

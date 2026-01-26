@@ -13,6 +13,48 @@
   </div>
 </form>
 
+{% if headers %}
+<div class="dashboard-section">
+  <h3>Preview (first 50 rows)</h3>
+  <p class="field-note">Headers are normalized internally (lowercase, spaces to underscores), but the original headers are displayed below.</p>
+  <div class="table-container">
+    <table class="inventory-table">
+      <thead>
+        <tr>
+          {% for header in headers %}
+          <th>
+            {{ header }}
+            {% if normalized_headers %}
+            <div class="field-note">Normalized: {{ normalized_headers[loop.index0] }}</div>
+            {% endif %}
+          </th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% if sample_rows %}
+          {% for row in sample_rows %}
+          <tr>
+            {% for cell in row %}
+            <td>{{ cell }}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="{{ headers|length or 1 }}" class="field-note">No sample data found in the uploaded file.</td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+  <div class="form-row">
+    <a href="{{ url_for('physical_inventory.create_snapshot', step='map', import_token=import_token) }}" class="action-btn">Continue to Mapping</a>
+    <a href="{{ url_for('physical_inventory.create_snapshot') }}" class="link-btn">Upload Another File</a>
+  </div>
+</div>
+{% endif %}
+
 <div class="dashboard-section">
   <h3>Workflow</h3>
   <ol>

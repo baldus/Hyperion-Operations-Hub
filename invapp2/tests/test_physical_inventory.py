@@ -23,9 +23,12 @@ from invapp.physical_inventory.services import (
     build_item_lookup,
     build_reconciliation_rows,
     get_item_field_candidates,
-    match_items,
+    get_item_match_field_options,
+    match_rows,
+    NormalizationOptions,
     parse_import_bytes,
     suggest_column_mappings,
+    summarize_match_preview,
 )
 
 
@@ -116,46 +119,48 @@ def test_suggest_quantity_column(sample_items, app):
 
 
 def test_match_items_exact_and_normalized(sample_items, app):
-    csv_text = "Part Number,Qty\nPN-100,5\nPN 200,3\n"
+    csv_text = "Item Name,Qty\n  pn-100  ,5\nPN-200,3\n"
     data, errors = parse_import_bytes("snapshot.csv", csv_text.encode("utf-8"))
     assert errors == []
     with app.app_context():
-        raw_lookup, normalized_lookup, strict_lookup, descriptions, _, _ = build_item_lookup()
-    matches, _ = match_items(
+        items = Item.query.order_by(Item.id).all()
+    options = NormalizationOptions(trim=True, case_insensitive=True)
+    matches, _, _ = match_rows(
         data.rows,
-        "Part Number",
+        "Item Name",
+        "name",
         None,
-        raw_lookup,
-        normalized_lookup,
-        strict_lookup,
-        descriptions,
+        None,
+        options,
+        items,
     )
-    assert matches[0].match_reason == "part_number_exact"
-    assert matches[1].match_reason == "part_number_normalized"
+    assert matches[0].item_id == items[0].id
+    assert matches[1].item_id == items[1].id
 
 
-def test_match_items_part_plus_desc(app):
+def test_secondary_matching_resolves_unmatched(app):
     with app.app_context():
-        item_a = Item(sku="SKU-1", name="PN-999", description="Widget A")
-        item_b = Item(sku="SKU-2", name="PN-999", description="Widget B")
+        item_a = Item(sku="SKU-1", name="Widget A", description="PN-999")
+        item_b = Item(sku="SKU-2", name="Widget B", description="PN-888")
         db.session.add_all([item_a, item_b])
         db.session.commit()
-        raw_lookup, normalized_lookup, strict_lookup, descriptions, _, _ = build_item_lookup()
+        items = Item.query.order_by(Item.id).all()
 
-    csv_text = "Part Number,Description,Qty\nPN-999,Widget B,4\n"
+    csv_text = "Name,Part,Qty\nUnknown,PN-999,4\n"
     data, errors = parse_import_bytes("snapshot.csv", csv_text.encode("utf-8"))
     assert errors == []
-    matches, collisions = match_items(
+    options = NormalizationOptions(trim=True, case_insensitive=True)
+    matches, _, _ = match_rows(
         data.rows,
-        "Part Number",
-        "Description",
-        raw_lookup,
-        normalized_lookup,
-        strict_lookup,
-        descriptions,
+        "Name",
+        "name",
+        "Part",
+        "description",
+        options,
+        items,
     )
-    assert matches[0].match_reason == "part+desc"
-    assert collisions == 1
+    assert matches[0].item_id == item_a.id
+    assert matches[0].matched_on == "secondary"
 
 
 def test_duplicate_grouping_sum():
@@ -163,7 +168,14 @@ def test_duplicate_grouping_sum():
         {"Part": "PN-100", "Qty": "2"},
         {"Part": "PN-100", "Qty": "3"},
     ]
-    merged, duplicate_groups = apply_duplicate_strategy(rows, "Part", None, "Qty", "sum")
+    merged, duplicate_groups = apply_duplicate_strategy(
+        rows,
+        "Part",
+        None,
+        "Qty",
+        "sum",
+        NormalizationOptions(trim=True, case_insensitive=True),
+    )
     assert duplicate_groups == 1
     assert merged[0]["Qty"] == "5"
 
@@ -172,6 +184,72 @@ def test_sku_excluded_from_candidates(app):
     with app.app_context():
         part_fields, _ = get_item_field_candidates()
     assert "sku" not in part_fields
+
+
+def test_match_field_options_exclude_sku_and_non_string(app):
+    with app.app_context():
+        options = get_item_match_field_options()
+    option_names = {opt.name for opt in options}
+    assert "sku" not in option_names
+    string_names = {opt.name for opt in options if opt.is_string}
+    assert "min_stock" not in string_names
+
+
+def test_ambiguous_matches_are_reported(app):
+    with app.app_context():
+        item_a = Item(sku="SKU-1", name="Widget", description="Alpha")
+        item_b = Item(sku="SKU-2", name="Widget", description="Beta")
+        db.session.add_all([item_a, item_b])
+        db.session.commit()
+        items = Item.query.order_by(Item.id).all()
+
+    csv_text = "Item Name,Qty\nWidget,1\n"
+    data, errors = parse_import_bytes("snapshot.csv", csv_text.encode("utf-8"))
+    assert errors == []
+    options = NormalizationOptions(trim=True, case_insensitive=True)
+    matches, _, _ = match_rows(
+        data.rows,
+        "Item Name",
+        "name",
+        None,
+        None,
+        options,
+        items,
+    )
+    assert matches[0].status == "ambiguous"
+
+
+def test_match_preview_stats(app):
+    with app.app_context():
+        item_a = Item(sku="SKU-1", name="Widget A", description="Alpha")
+        item_b = Item(sku="SKU-2", name="Widget B", description="Beta")
+        db.session.add_all([item_a, item_b])
+        db.session.commit()
+        items = Item.query.order_by(Item.id).all()
+
+    csv_text = "Name,Part,Qty\nWidget A,Alpha,1\nUnknown,Beta,2\n,,3\n"
+    data, errors = parse_import_bytes("snapshot.csv", csv_text.encode("utf-8"))
+    assert errors == []
+    options = NormalizationOptions(trim=True, case_insensitive=True)
+    matches, collision_count, collision_examples = match_rows(
+        data.rows,
+        "Name",
+        "name",
+        "Part",
+        "description",
+        options,
+        items,
+    )
+    preview = summarize_match_preview(
+        data.rows,
+        matches,
+        True,
+        collision_count,
+        collision_examples,
+    )
+    assert preview.matched_rows == 2
+    assert preview.unmatched_rows == 0
+    assert preview.empty_rows == 1
 
 
 def test_reconciliation_uses_part_number(app, sample_items, sample_location):
