@@ -13,6 +13,8 @@ from sqlalchemy.orm import synonym
 from sqlalchemy.orm.exc import DetachedInstanceError
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from sqlalchemy.dialects.postgresql import JSONB
+
 from invapp.extensions import db
 from invapp.login import UserMixin
 from invapp.db_maintenance import repair_primary_key_sequences
@@ -623,9 +625,9 @@ class InventorySnapshotImportIssue(db.Model):
     )
     row_index = db.Column(db.Integer, nullable=False)
     reason = db.Column(db.String(64), nullable=False)
-    primary_value = db.Column(db.String(255), nullable=True)
-    secondary_value = db.Column(db.String(255), nullable=True)
-    row_data = db.Column(db.JSON, nullable=True)
+    primary_value = db.Column(db.Text, nullable=True)
+    secondary_value = db.Column(db.Text, nullable=True)
+    row_data = db.Column(JSONB().with_variant(db.JSON, "sqlite"), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     snapshot = db.relationship("InventorySnapshot", back_populates="import_issues")

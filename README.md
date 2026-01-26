@@ -307,6 +307,12 @@ Use **Test Mapping** to run a live preview (no DB writes). The preview shows:
 
 Unmatched rows are excluded from the snapshot and stored for export. See [`invapp2/invapp/physical_inventory/routes.py`](invapp2/invapp/physical_inventory/routes.py).
 
+**Import issue storage (schema note)**
+Large ERP exports can include long descriptions or extra columns. Earlier versions stored import issue values in `VARCHAR(255)`, which caused `psycopg2.errors.StringDataRightTruncation` during snapshot creation. The import-issue schema now uses:
+- `row_data` as **JSONB** (or JSON on SQLite) to store the full row payload safely.
+- `primary_value` / `secondary_value` as **TEXT** to avoid truncation.
+See the migration `20250320_update_snapshot_import_issue_columns.py` for details.
+
 ### Item matching logic (no SKU)
 Hyperion never uses `Item.sku` for snapshot uploads, matching, or exports. Instead, the user explicitly selects which **Item DB field** to match against. The Item field dropdown is populated dynamically from the `Item` SQLAlchemy model; only string-like fields are shown by default, with an advanced toggle to show all fields. Fields containing `sku` are always excluded. See [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py) and [`invapp2/invapp/templates/physical_inventory/snapshot_mapping.html`](invapp2/invapp/templates/physical_inventory/snapshot_mapping.html).
 
@@ -343,6 +349,9 @@ If the same identifier appears multiple times, the import wizard groups duplicat
 - **Take last**
 
 When a secondary match key is mapped, the grouping key becomes **Primary + Secondary** (after normalization). See [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py).
+
+**Autoflush guardrail**
+`ensure_count_lines_for_snapshot()` wraps snapshot line access in `db.session.no_autoflush` to avoid premature flushes while import issues are pending. This prevents autoflush surprises during snapshot creation when many issue rows are staged.
 
 ### How known item-location pairs are determined
 The count sheet is built by combining **distinct item-location relationships** already known to Hyperion:
@@ -494,6 +503,12 @@ alembic -c alembic.ini upgrade head
   alembic -c alembic.ini downgrade -1
   ```
 Alembic reads `DB_URL` at runtime. See [`invapp2/migrations/env.py`](invapp2/migrations/env.py).
+
+**Physical inventory import issues**
+After pulling changes, apply the latest migration to update `inventory_snapshot_import_issue` column types:
+```bash
+alembic -c alembic.ini upgrade head
+```
 
 ### Startup schema/seed behavior
 `create_app()` will `db.create_all()`, apply legacy schema backfills, ensure MDI tables, seed MDI demo data, and create a default admin user/roles. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py) and [`invapp2/invapp/mdi/models.py`](invapp2/invapp/mdi/models.py).

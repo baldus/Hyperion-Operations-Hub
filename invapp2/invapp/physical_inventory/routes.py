@@ -190,6 +190,32 @@ def _default_match_preview() -> MatchPreview:
     )
 
 
+def _log_issue_payload_stats(
+    snapshot_id: int,
+    row_index: int,
+    reason: str,
+    primary_value: str | None,
+    secondary_value: str | None,
+    row_data: dict[str, object],
+) -> None:
+    primary_length = len(primary_value or "")
+    secondary_length = len(secondary_value or "")
+    row_data_length = len(json.dumps(row_data, default=str))
+    if max(primary_length, secondary_length, row_data_length) <= 255:
+        return
+    current_app.logger.warning(
+        "Snapshot import issue payload size warning: snapshot_id=%s row_index=%s "
+        "reason=%s primary_length=%s secondary_length=%s row_data_length=%s row_data_keys=%s",
+        snapshot_id,
+        row_index,
+        reason,
+        primary_length,
+        secondary_length,
+        row_data_length,
+        sorted(row_data.keys()),
+    )
+
+
 @bp.route("/snapshots")
 @superuser_required
 def list_snapshots():
@@ -510,18 +536,29 @@ def create_snapshot():
                 for row in snapshot_lines
             ]
             db.session.add_all(lines)
-            issues = [
-                InventorySnapshotImportIssue(
-                    snapshot_id=snapshot.id,
-                    row_index=index,
-                    reason=match.reason,
-                    primary_value=match.primary_value,
-                    secondary_value=match.secondary_value,
-                    row_data=row,
+            issues: list[InventorySnapshotImportIssue] = []
+            for index, (row, match) in enumerate(zip(merged_rows, matches), start=1):
+                if match.item_id is not None:
+                    continue
+                row_data = row if isinstance(row, dict) else {"raw": row}
+                _log_issue_payload_stats(
+                    snapshot.id,
+                    index,
+                    match.reason,
+                    match.primary_value,
+                    match.secondary_value,
+                    row_data,
                 )
-                for index, (row, match) in enumerate(zip(merged_rows, matches), start=1)
-                if match.item_id is None
-            ]
+                issues.append(
+                    InventorySnapshotImportIssue(
+                        snapshot_id=snapshot.id,
+                        row_index=index,
+                        reason=match.reason,
+                        primary_value=match.primary_value,
+                        secondary_value=match.secondary_value,
+                        row_data=row_data,
+                    )
+                )
             db.session.add_all(issues)
             created_count_lines = ensure_count_lines_for_snapshot(snapshot)
             db.session.commit()

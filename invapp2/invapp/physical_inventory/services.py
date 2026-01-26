@@ -799,7 +799,8 @@ def get_known_item_location_pairs() -> list[tuple[int, int]]:
 
 
 def ensure_count_lines_for_snapshot(snapshot: InventorySnapshot) -> int:
-    item_ids = [line.item_id for line in snapshot.lines]
+    with db.session.no_autoflush:
+        item_ids = [line.item_id for line in snapshot.lines]
     if not item_ids:
         return 0
 

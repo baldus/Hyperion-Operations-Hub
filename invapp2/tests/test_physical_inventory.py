@@ -13,6 +13,7 @@ from invapp.extensions import db
 from invapp.models import (
     InventoryCountLine,
     InventorySnapshot,
+    InventorySnapshotImportIssue,
     InventorySnapshotLine,
     Item,
     Location,
@@ -22,6 +23,7 @@ from invapp.physical_inventory.services import (
     apply_duplicate_strategy,
     build_item_lookup,
     build_reconciliation_rows,
+    ensure_count_lines_for_snapshot,
     get_item_field_candidates,
     get_item_match_field_options,
     match_rows,
@@ -315,3 +317,64 @@ def test_export_endpoints_use_part_number(client, app, sample_items, sample_loca
     assert reconciliation_response.status_code == 200
     assert b"PN-100" in reconciliation_response.data
     assert b"SKU-1" not in reconciliation_response.data
+
+
+def test_import_issue_allows_large_payload(app, sample_items):
+    item_a, _ = sample_items
+    large_value = "X" * 600
+    row_data = {"Item Name": large_value, "Extra Notes": large_value}
+    with app.app_context():
+        snapshot = InventorySnapshot(name="Large", created_by_user_id=1)
+        db.session.add(snapshot)
+        db.session.flush()
+        issue = InventorySnapshotImportIssue(
+            snapshot_id=snapshot.id,
+            row_index=1,
+            reason="no match",
+            primary_value=large_value,
+            secondary_value=large_value,
+            row_data=row_data,
+        )
+        db.session.add(issue)
+        db.session.add(
+            InventorySnapshotLine(
+                snapshot_id=snapshot.id,
+                item_id=item_a.id,
+                system_total_qty=Decimal("1"),
+            )
+        )
+        db.session.commit()
+
+        stored = InventorySnapshotImportIssue.query.filter_by(snapshot_id=snapshot.id).one()
+        assert stored.primary_value == large_value
+        assert stored.row_data["Item Name"] == large_value
+
+
+def test_ensure_count_lines_no_autoflush(app):
+    with app.app_context():
+        location = Location(code="B2", description="Overflow")
+        item = Item(sku="SKU-9", name="Widget Z", description="Large")
+        db.session.add_all([location, item])
+        db.session.flush()
+        item.default_location_id = location.id
+        snapshot = InventorySnapshot(name="AutoFlush", created_by_user_id=1)
+        db.session.add(snapshot)
+        db.session.flush()
+        line = InventorySnapshotLine(
+            snapshot_id=snapshot.id,
+            item_id=item.id,
+            system_total_qty=Decimal("2"),
+        )
+        issue = InventorySnapshotImportIssue(
+            snapshot_id=snapshot.id,
+            row_index=1,
+            reason="ambiguous",
+            primary_value="W" * 600,
+            secondary_value="Z" * 600,
+            row_data={"Item Name": "W" * 600},
+        )
+        db.session.add_all([line, issue])
+
+        created = ensure_count_lines_for_snapshot(snapshot)
+        assert issue in db.session.new
+        assert created >= 0
