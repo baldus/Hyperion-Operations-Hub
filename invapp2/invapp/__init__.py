@@ -39,6 +39,7 @@ from .routes import (
     users,
     work,
 )
+from .physical_inventory import bp as physical_inventory_bp
 from .mdi import init_blueprint, mdi_bp
 from .mdi import models as mdi_models
 from config import Config
@@ -937,6 +938,7 @@ def create_app(config_override=None):
     app.register_blueprint(purchasing.bp)
     app.register_blueprint(quality.bp)
     app.register_blueprint(work.bp)
+    app.register_blueprint(physical_inventory_bp)
     init_blueprint()
     app.register_blueprint(mdi_bp)
     app.register_blueprint(settings.bp)

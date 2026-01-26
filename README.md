@@ -9,17 +9,18 @@ Hyperion Operations Hub is a Flask-based operations console for manufacturing te
 4. [Configuration](#configuration)
 5. [Web / UI Layer (Templates, Frontend, Static)](#web--ui-layer-templates-frontend-static)
 6. [API / Routes](#api--routes)
-7. [Database](#database)
-8. [Permissions / Roles](#permissions--roles)
-9. [Background Tasks / Schedules](#background-tasks--schedules)
-10. [Backups & Restore](#backups--restore)
-11. [Logging, Errors, and Debugging](#logging-errors-and-debugging)
-12. [Testing](#testing)
-13. [Usage Analysis & Pruning](#usage-analysis--pruning)
-14. [Deployment Notes](#deployment-notes)
-15. [Network Stability & Self-Healing (Linux Host)](#network-stability--self-healing-linux-host)
-16. [Contributing / Development Conventions](#contributing--development-conventions)
-17. [How to Make Common Changes](#how-to-make-common-changes)
+7. [Physical Inventory (Snapshot + Reconciliation)](#physical-inventory-snapshot--reconciliation)
+8. [Database](#database)
+9. [Permissions / Roles](#permissions--roles)
+10. [Background Tasks / Schedules](#background-tasks--schedules)
+11. [Backups & Restore](#backups--restore)
+12. [Logging, Errors, and Debugging](#logging-errors-and-debugging)
+13. [Testing](#testing)
+14. [Usage Analysis & Pruning](#usage-analysis--pruning)
+15. [Deployment Notes](#deployment-notes)
+16. [Network Stability & Self-Healing (Linux Host)](#network-stability--self-healing-linux-host)
+17. [Contributing / Development Conventions](#contributing--development-conventions)
+18. [How to Make Common Changes](#how-to-make-common-changes)
 
 ---
 
@@ -259,6 +260,189 @@ This app uses standard Flask form handling with `request.form` and manual valida
 - **MDI create entry**: `POST /mdi/api/mdi_entries` with JSON payload creates a new entry. See [`invapp2/invapp/mdi/routes/api.py`](invapp2/invapp/mdi/routes/api.py).
 
 Auth requirements are enforced by blueprint guards and permission checks in each route. See [`invapp2/invapp/auth.py`](invapp2/invapp/auth.py) and [`invapp2/invapp/permissions.py`](invapp2/invapp/permissions.py).
+
+---
+
+## Physical Inventory (Snapshot + Reconciliation)
+
+### Purpose and design
+The Physical Inventory module lets Hyperion reconcile physical counts against an **external system-of-record** (ERP) total. Hyperion does **not** store the authoritative system totals. Instead, operators upload a **snapshot** of ERP totals and then enter physical counts per location inside Hyperion. The module then compares the **counted totals** to the **system totals** and reports variance. The implementation lives in a dedicated blueprint under `invapp2/invapp/physical_inventory/` with routes, services, and form parsers. See [`invapp2/invapp/physical_inventory`](invapp2/invapp/physical_inventory).
+
+### Workflow (step-by-step)
+1. **Upload ERP totals (snapshot)**  
+   Superuser uploads an import file (`.csv`, `.tsv`, or `.xlsx`) with part number and quantity. Hyperion parses the file, normalizes headers, and prepares a 50-row preview. See [`invapp2/invapp/physical_inventory/routes.py`](invapp2/invapp/physical_inventory/routes.py) and [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py).
+2. **Map columns + preview**  
+   Step 2 is a mapping wizard. Operators choose the Part Number and Quantity columns (Description/UOM/Notes optional) and pick a duplicate-handling strategy. Hyperion auto-suggests likely columns based on numeric coverage and part-number matching. See [`invapp2/invapp/templates/physical_inventory/snapshot_mapping.html`](invapp2/invapp/templates/physical_inventory/snapshot_mapping.html).
+3. **Review match results**  
+   The review screen summarizes matched/unmatched rows, collisions resolved via description, and duplicate groups before creating a snapshot. See [`invapp2/invapp/templates/physical_inventory/snapshot_review.html`](invapp2/invapp/templates/physical_inventory/snapshot_review.html).
+4. **Generate count sheet (auto)**  
+   After commit, the app generates count lines for every **known item-location pair** that exists in Hyperion. These become the count sheet rows. See [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py).
+5. **Enter counts per location**  
+   Navigate to the count entry view, filter by location, and enter counted quantities + notes. Each save stores `counted_by` and `counted_at`. See [`invapp2/invapp/physical_inventory/routes.py`](invapp2/invapp/physical_inventory/routes.py) and [`invapp2/invapp/templates/physical_inventory/count.html`](invapp2/invapp/templates/physical_inventory/count.html).
+6. **Reconciliation summary**  
+   The reconciliation page aggregates the counted totals per item, compares against system totals, and labels variance. Items with **no known locations** are flagged as **UNLOCATED**. See [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py) and [`invapp2/invapp/templates/physical_inventory/reconciliation.html`](invapp2/invapp/templates/physical_inventory/reconciliation.html).
+7. **Export reports**  
+   Superusers can export the location count sheet or reconciliation summary to CSV. Exports use **part number + description** (never SKU). See [`invapp2/invapp/physical_inventory/routes.py`](invapp2/invapp/physical_inventory/routes.py) and [`invapp2/invapp/utils/csv_export.py`](invapp2/invapp/utils/csv_export.py).
+
+### Permissions
+All Physical Inventory pages currently require **superuser access** (snapshot creation, refresh, lock, count entry, and exports). This is enforced via `superuser_required` on every route in the blueprint. See [`invapp2/invapp/physical_inventory/routes.py`](invapp2/invapp/physical_inventory/routes.py) and [`invapp2/invapp/superuser.py`](invapp2/invapp/superuser.py).
+
+### Supported import formats
+- **CSV** (`.csv`)
+- **TSV** (`.tsv`)
+- **Excel** (`.xlsx`)
+
+### Mapping wizard (column selection)
+**Step 1: Upload**  
+Hyperion parses the file and normalizes headers: trims whitespace, lowercases, and replaces spaces with underscores. Preview shows the first 50 rows.
+
+**Step 2: Map columns**  
+Required:
+- **Part Number column**
+- **Quantity column**
+
+Optional:
+- **Description column** (recommended for disambiguation)
+- **UOM column**
+- **Notes column**
+
+**Auto-suggestions**
+- **Quantity**: highest non-negative numeric coverage.
+- **Part Number**: highest match rate against existing Items using detected part-number fields.
+- **Description**: highest text density / average length.
+
+See the mapping UI in [`invapp2/invapp/templates/physical_inventory/snapshot_mapping.html`](invapp2/invapp/templates/physical_inventory/snapshot_mapping.html) and the suggestion logic in [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py).
+
+### Item field detection (part number + description)
+Hyperion inspects the SQLAlchemy `Item` model to find likely fields.
+
+**Part number field heuristics**
+- Column name contains: `part`, `number`, `num`, `item`, `code`, `pn`, `mpn`
+- **SKU is explicitly excluded** by default
+
+**Description field heuristics**
+- Column name contains: `desc`, `description`, `name`, `title`
+
+**Override configuration**
+Set these environment variables to explicitly control which Item columns are used:
+- `PHYS_INV_ITEM_ID_FIELDS` (comma-separated)
+- `PHYS_INV_DESC_FIELDS` (comma-separated)
+
+See `Config` defaults in [`invapp2/config.py`](invapp2/config.py) and field detection logic in [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py).
+
+### Matching precedence
+Matching uses the uploaded **Part Number** and falls back to Description when collisions occur:
+1. **Part Number exact**
+2. **Part Number normalized** (strip, uppercase, remove spaces/dashes/underscores)
+3. **Part Number + Description** (exact/contains; fuzzy when available)
+4. **Unmatched**
+
+See `match_items()` in [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py).
+
+### Duplicate handling
+If the same Part Number appears multiple times in the import:
+- **Sum quantities** (default)
+- **Take last**
+- **Take first**
+
+Grouping uses Part Number + Description (if provided). See `group_duplicate_rows()` in [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py).
+
+### How known item-location pairs are determined
+The count sheet is built by combining **distinct item-location relationships** already known to Hyperion:
+- **Movement history** (`movement.item_id`, `movement.location_id`)
+- **Item defaults** (`item.default_location_id`, `item.secondary_location_id`, `item.point_of_use_location_id`)
+The query logic is implemented in `get_known_item_location_pairs()`. See [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py).
+
+### Reports and reconciliation logic
+**Location Count Sheet (Location x Item)**  
+Includes one row per `inventory_count_line` for the snapshot, ordered by location and item. Columns:
+- `location_code`, `location_description`
+- `part_number`, `description`, `uom`
+- `system_total_qty`
+- `counted_qty`
+- `notes`
+Rendered as HTML in the count entry page and exported in CSV via `/export/location-sheet.csv`. See [`invapp2/invapp/physical_inventory/routes.py`](invapp2/invapp/physical_inventory/routes.py).
+
+**Reconciliation Summary (Item)**  
+For each item in the snapshot:
+- `system_total_qty`
+- `counted_total_qty` = sum of counted quantities across locations
+- `variance` = `counted_total_qty - system_total_qty`
+- `status`:
+  - **UNLOCATED**: no count lines exist for the item
+  - **UNCOUNTED**: count lines exist but no counted quantities entered
+  - **MATCH**: variance is 0 and all lines are counted
+  - **OVER**: variance > 0
+  - **SHORT**: variance < 0
+  - **PARTIAL**: counted quantities exist but some locations are still uncounted
+
+The reconciliation page also supports per-item drilldown to location rows. See [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py) and [`invapp2/invapp/templates/physical_inventory/reconciliation.html`](invapp2/invapp/templates/physical_inventory/reconciliation.html).
+
+### Routes and templates
+**Blueprint**: `/physical-inventory/*` (superuser only)
+
+| Route | Method | Purpose | Template |
+| --- | --- | --- | --- |
+| `/physical-inventory/snapshots` | GET | List snapshots | `templates/physical_inventory/snapshots.html` |
+| `/physical-inventory/snapshots/new` | GET/POST | Upload + map + review import | `templates/physical_inventory/snapshot_upload.html` |
+| `/physical-inventory/snapshots/<id>` | GET | Snapshot overview | `templates/physical_inventory/snapshot_detail.html` |
+| `/physical-inventory/snapshots/<id>/lock` | POST | Lock snapshot | (redirect) |
+| `/physical-inventory/snapshots/<id>/refresh-count-lines` | POST | Add missing count lines | (redirect) |
+| `/physical-inventory/snapshots/<id>/count` | GET/POST | Count entry UI | `templates/physical_inventory/count.html` |
+| `/physical-inventory/snapshots/<id>/reconciliation` | GET | Reconciliation summary + drilldown | `templates/physical_inventory/reconciliation.html` |
+| `/physical-inventory/snapshots/<id>/export/location-sheet.csv` | GET | Location count sheet export | CSV |
+| `/physical-inventory/snapshots/<id>/export/reconciliation.csv` | GET | Reconciliation export | CSV |
+
+See the blueprint registration in [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py) and route handlers in [`invapp2/invapp/physical_inventory/routes.py`](invapp2/invapp/physical_inventory/routes.py).
+
+The snapshot upload route is a wizard that renders multiple templates depending on the step (`snapshot_upload.html`, `snapshot_mapping.html`, `snapshot_review.html`). See the templates under [`invapp2/invapp/templates/physical_inventory`](invapp2/invapp/templates/physical_inventory).
+
+### Database tables and fields
+All new models are in [`invapp2/invapp/models.py`](invapp2/invapp/models.py) and migrations `20250318_add_physical_inventory_tables` + `20250320_add_snapshot_source_fields`. See [`invapp2/migrations/versions/20250318_add_physical_inventory_tables.py`](invapp2/migrations/versions/20250318_add_physical_inventory_tables.py) and [`invapp2/migrations/versions/20250320_add_snapshot_source_fields.py`](invapp2/migrations/versions/20250320_add_snapshot_source_fields.py).
+
+**`inventory_snapshot`**
+- `id` (PK)
+- `name` (nullable)
+- `snapshot_date` (datetime)
+- `source` (string)
+- `created_by_user_id` (FK user, nullable)
+- `created_at` (datetime)
+- `is_locked` (bool)
+
+**`inventory_snapshot_line`**
+- `id` (PK)
+- `snapshot_id` (FK inventory_snapshot, cascade delete)
+- `item_id` (FK item)
+- `system_total_qty` (numeric/decimal)
+- `uom` (string, nullable)
+- `source_part_number_text` (string, nullable)
+- `source_description_text` (string, nullable)
+- `notes` (text, nullable)
+- UNIQUE (`snapshot_id`, `item_id`)
+
+**`inventory_count_line`**
+- `id` (PK)
+- `snapshot_id` (FK inventory_snapshot, cascade delete)
+- `item_id` (FK item)
+- `location_id` (FK location)
+- `counted_qty` (numeric/decimal, nullable)
+- `counted_by_user_id` (FK user, nullable)
+- `counted_at` (datetime, nullable)
+- `notes` (text, nullable)
+- UNIQUE (`snapshot_id`, `item_id`, `location_id`)
+
+### Troubleshooting
+- **“Unsupported file type”**: only `.csv`, `.tsv`, and `.xlsx` are supported. See `parse_import_file()` in [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py).
+- **Unmatched rows**: confirm the Part Number column and, when available, provide Description to disambiguate. Check detected Item fields or configure `PHYS_INV_ITEM_ID_FIELDS` and `PHYS_INV_DESC_FIELDS`. See `match_items()` and `get_item_field_candidates()` in [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py).
+- **No count lines generated**: check whether Hyperion knows any item-location pairs for those items (movement history or default locations). See `get_known_item_location_pairs()` in [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py).
+- **Counts cannot be edited**: the snapshot is locked. Use the snapshot overview to verify lock status. See [`invapp2/invapp/physical_inventory/routes.py`](invapp2/invapp/physical_inventory/routes.py).
+
+### Example workflow checklist
+1. Export ERP totals to CSV with `item_code` and `system_total_qty`.
+2. Upload the CSV in **Inventory → Physical Inventory**.
+3. Download the location count sheet (CSV) if you want to print or distribute.
+4. Enter counts per location in the count entry page.
+5. Review reconciliation and export the summary for variance review.
 
 ---
 

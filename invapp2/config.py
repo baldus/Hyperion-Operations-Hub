@@ -72,5 +72,8 @@ class Config:
         "Damage,Expired,Quality Hold,Scrap,Adjustment,Other",
     )
 
+    PHYS_INV_ITEM_ID_FIELDS = os.getenv("PHYS_INV_ITEM_ID_FIELDS")
+    PHYS_INV_DESC_FIELDS = os.getenv("PHYS_INV_DESC_FIELDS")
+
     ZEBRA_PRINTER_HOST = os.getenv("ZEBRA_PRINTER_HOST", "localhost")
     ZEBRA_PRINTER_PORT = int(os.getenv("ZEBRA_PRINTER_PORT", 9100))

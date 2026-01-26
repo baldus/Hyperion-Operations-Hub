@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Physical Inventory Snapshots</h2>
+
+<div class="menu-grid">
+  <a href="{{ url_for('physical_inventory.create_snapshot') }}" class="action-btn">Create Snapshot</a>
+</div>
+
+{% if snapshots %}
+<div class="table-container">
+  <table class="inventory-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Snapshot Date</th>
+        <th>Source</th>
+        <th>Lines</th>
+        <th>Count Lines</th>
+        <th>Status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for snapshot in snapshots %}
+      <tr>
+        <td>
+          <strong>{{ snapshot.name or "Untitled" }}</strong><br>
+          <small>Created {{ snapshot.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+        </td>
+        <td>{{ snapshot.snapshot_date.strftime('%Y-%m-%d') }}</td>
+        <td>{{ snapshot.source or "CSV" }}</td>
+        <td>{{ summary[snapshot.id].snapshot_lines }}</td>
+        <td>{{ summary[snapshot.id].count_lines }}</td>
+        <td>
+          {% if snapshot.is_locked %}
+          <span class="status-pill status-closed">Locked</span>
+          {% else %}
+          <span class="status-pill status-open">Open</span>
+          {% endif %}
+        </td>
+        <td>
+          <a href="{{ url_for('physical_inventory.view_snapshot', snapshot_id=snapshot.id) }}" class="link-btn">View</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p>No snapshots yet. Upload ERP totals to create the first snapshot.</p>
+{% endif %}
+{% endblock %}
