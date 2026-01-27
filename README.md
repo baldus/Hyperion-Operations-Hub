@@ -311,7 +311,14 @@ Unmatched rows are excluded from the snapshot and stored for export. See [`invap
 Large ERP exports can include long descriptions or extra columns. Earlier versions stored import issue values in `VARCHAR(255)`, which caused `psycopg2.errors.StringDataRightTruncation` during snapshot creation. The import-issue schema now uses:
 - `row_data` as **JSONB** (or JSON on SQLite) to store the full row payload safely.
 - `primary_value` / `secondary_value` as **TEXT** to avoid truncation.
-See the migration `20250320_update_snapshot_import_issue_columns.py` for details.
+See the migrations `20250320_update_snapshot_import_issue_columns.py` and `20250321_safe_row_data_jsonb.py` for details.
+
+**Row data normalization**
+Import issue rows are normalized via `normalize_row_data()` before persistence:
+- If the input is already a dict, it is returned with stringified keys.
+- If it is a JSON string, the string is parsed; non-dict payloads are wrapped in `{"raw": ...}`.
+- If parsing fails, the raw string is wrapped in `{"raw": ...}`.
+This ensures `row_data` always stores valid JSONB, even when upstream values are malformed.
 
 ### Item matching logic (no SKU)
 Hyperion never uses `Item.sku` for snapshot uploads, matching, or exports. Instead, the user explicitly selects which **Item DB field** to match against. The Item field dropdown is populated dynamically from the `Item` SQLAlchemy model; only string-like fields are shown by default, with an advanced toggle to show all fields. Fields containing `sku` are always excluded. See [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py) and [`invapp2/invapp/templates/physical_inventory/snapshot_mapping.html`](invapp2/invapp/templates/physical_inventory/snapshot_mapping.html).
@@ -508,6 +515,12 @@ Alembic reads `DB_URL` at runtime. See [`invapp2/migrations/env.py`](invapp2/mig
 After pulling changes, apply the latest migration to update `inventory_snapshot_import_issue` column types:
 ```bash
 alembic -c alembic.ini upgrade head
+```
+The safe migration (`20250321_safe_row_data_jsonb.py`) backfills JSONB using a fallback `{"raw": ...}` wrapper when existing values are not valid JSON.
+
+**Testing the fix**
+```bash
+pytest invapp2/tests/test_physical_inventory.py
 ```
 
 ### Startup schema/seed behavior

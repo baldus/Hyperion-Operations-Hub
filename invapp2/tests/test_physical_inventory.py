@@ -4,7 +4,6 @@ import sys
 from decimal import Decimal
 
 import pytest
-from openpyxl import Workbook
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -28,10 +27,13 @@ from invapp.physical_inventory.services import (
     get_item_match_field_options,
     match_rows,
     NormalizationOptions,
+    normalize_row_data,
     parse_import_bytes,
     suggest_column_mappings,
     summarize_match_preview,
 )
+
+from invapp.physical_inventory.routes import _store_import_payload
 
 
 @pytest.fixture
@@ -69,7 +71,7 @@ def sample_items(app):
         item_b = Item(sku="SKU-2", name="PN-200", description="Widget B")
         db.session.add_all([item_a, item_b])
         db.session.commit()
-        return item_a, item_b
+        return item_a.id, item_b.id
 
 
 @pytest.fixture
@@ -78,7 +80,7 @@ def sample_location(app):
         location = Location(code="A1", description="Main Rack")
         db.session.add(location)
         db.session.commit()
-        return location
+        return location.id
 
 
 def test_parse_import_csv():
@@ -91,6 +93,7 @@ def test_parse_import_csv():
 
 
 def test_parse_import_xlsx():
+    Workbook = pytest.importorskip("openpyxl").Workbook
     workbook = Workbook()
     sheet = workbook.active
     sheet.append(["Part Number", "Qty"])
@@ -255,7 +258,7 @@ def test_match_preview_stats(app):
 
 
 def test_reconciliation_uses_part_number(app, sample_items, sample_location):
-    item_a, _ = sample_items
+    item_a_id, _ = sample_items
     with app.app_context():
         snapshot = InventorySnapshot(name="Math", created_by_user_id=1)
         db.session.add(snapshot)
@@ -263,15 +266,15 @@ def test_reconciliation_uses_part_number(app, sample_items, sample_location):
         db.session.add(
             InventorySnapshotLine(
                 snapshot_id=snapshot.id,
-                item_id=item_a.id,
+                item_id=item_a_id,
                 system_total_qty=Decimal("5"),
             )
         )
         db.session.add(
             InventoryCountLine(
                 snapshot_id=snapshot.id,
-                item_id=item_a.id,
-                location_id=sample_location.id,
+                item_id=item_a_id,
+                location_id=sample_location,
                 counted_qty=Decimal("5"),
             )
         )
@@ -282,7 +285,7 @@ def test_reconciliation_uses_part_number(app, sample_items, sample_location):
 
 
 def test_export_endpoints_use_part_number(client, app, sample_items, sample_location):
-    item_a, _ = sample_items
+    item_a_id, _ = sample_items
     with app.app_context():
         snapshot = InventorySnapshot(name="Export", created_by_user_id=1)
         db.session.add(snapshot)
@@ -290,29 +293,30 @@ def test_export_endpoints_use_part_number(client, app, sample_items, sample_loca
         db.session.add(
             InventorySnapshotLine(
                 snapshot_id=snapshot.id,
-                item_id=item_a.id,
+                item_id=item_a_id,
                 system_total_qty=Decimal("3"),
             )
         )
         db.session.add(
             InventoryCountLine(
                 snapshot_id=snapshot.id,
-                item_id=item_a.id,
-                location_id=sample_location.id,
+                item_id=item_a_id,
+                location_id=sample_location,
                 counted_qty=Decimal("3"),
             )
         )
         db.session.commit()
+        snapshot_id = snapshot.id
 
     location_response = client.get(
-        f"/physical-inventory/snapshots/{snapshot.id}/export/location-sheet.csv"
+        f"/physical-inventory/snapshots/{snapshot_id}/export/location-sheet.csv"
     )
     assert location_response.status_code == 200
     assert b"PN-100" in location_response.data
     assert b"SKU-1" not in location_response.data
 
     reconciliation_response = client.get(
-        f"/physical-inventory/snapshots/{snapshot.id}/export/reconciliation.csv"
+        f"/physical-inventory/snapshots/{snapshot_id}/export/reconciliation.csv"
     )
     assert reconciliation_response.status_code == 200
     assert b"PN-100" in reconciliation_response.data
@@ -320,7 +324,7 @@ def test_export_endpoints_use_part_number(client, app, sample_items, sample_loca
 
 
 def test_import_issue_allows_large_payload(app, sample_items):
-    item_a, _ = sample_items
+    item_a_id, _ = sample_items
     large_value = "X" * 600
     row_data = {"Item Name": large_value, "Extra Notes": large_value}
     with app.app_context():
@@ -333,13 +337,13 @@ def test_import_issue_allows_large_payload(app, sample_items):
             reason="no match",
             primary_value=large_value,
             secondary_value=large_value,
-            row_data=row_data,
+            row_data=normalize_row_data(row_data),
         )
         db.session.add(issue)
         db.session.add(
             InventorySnapshotLine(
                 snapshot_id=snapshot.id,
-                item_id=item_a.id,
+                item_id=item_a_id,
                 system_total_qty=Decimal("1"),
             )
         )
@@ -348,6 +352,11 @@ def test_import_issue_allows_large_payload(app, sample_items):
         stored = InventorySnapshotImportIssue.query.filter_by(snapshot_id=snapshot.id).one()
         assert stored.primary_value == large_value
         assert stored.row_data["Item Name"] == large_value
+
+
+def test_normalize_row_data_invalid_json():
+    result = normalize_row_data("not json")
+    assert result == {"raw": "not json"}
 
 
 def test_ensure_count_lines_no_autoflush(app):
@@ -371,10 +380,43 @@ def test_ensure_count_lines_no_autoflush(app):
             reason="ambiguous",
             primary_value="W" * 600,
             secondary_value="Z" * 600,
-            row_data={"Item Name": "W" * 600},
+            row_data=normalize_row_data({"Item Name": "W" * 600}),
         )
         db.session.add_all([line, issue])
 
         created = ensure_count_lines_for_snapshot(snapshot)
         assert issue in db.session.new
         assert created >= 0
+
+
+def test_create_snapshot_large_issue_payload(client, app):
+    long_name = "NAME-" + ("X" * 600)
+    payload = {
+        "headers": ["Item Name", "Qty"],
+        "rows": [{"Item Name": long_name, "Qty": "5"}],
+        "normalized_headers": ["item_name", "qty"],
+    }
+    with app.app_context():
+        import_token = _store_import_payload(payload)
+
+    response = client.post(
+        "/physical-inventory/snapshots/new",
+        data={
+            "step": "commit",
+            "import_token": import_token,
+            "primary_upload_column": "Item Name",
+            "primary_item_field": "name",
+            "quantity_column": "Qty",
+            "duplicate_strategy": "sum",
+            "normalize_trim": "1",
+            "normalize_case": "1",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        snapshot = InventorySnapshot.query.order_by(InventorySnapshot.id.desc()).first()
+        assert snapshot is not None
+        issues = InventorySnapshotImportIssue.query.filter_by(snapshot_id=snapshot.id).all()
+        assert len(issues) == 1
+        assert len(issues[0].primary_value or "") > 255

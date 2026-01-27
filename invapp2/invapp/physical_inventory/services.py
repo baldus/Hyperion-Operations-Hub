@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import csv
+import json
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from io import BytesIO, StringIO
 from typing import Iterable
 
 from flask import current_app
-from openpyxl import load_workbook
-
 from sqlalchemy import String, Text, func
 
 from invapp.extensions import db
@@ -19,6 +18,7 @@ from invapp.models import (
     InventorySnapshot,
     InventorySnapshotLine,
     Item,
+    Location,
     Movement,
 )
 
@@ -129,6 +129,26 @@ def normalize_match_value(value: str, options: NormalizationOptions) -> str:
     return normalized
 
 
+def normalize_row_data(row_data: object) -> dict[str, object]:
+    if isinstance(row_data, dict):
+        normalized = {str(key): value for key, value in row_data.items()}
+    elif isinstance(row_data, str):
+        try:
+            parsed = json.loads(row_data)
+        except json.JSONDecodeError:
+            normalized = {"raw": row_data}
+        else:
+            if isinstance(parsed, dict):
+                normalized = {str(key): value for key, value in parsed.items()}
+            else:
+                normalized = {"raw": parsed}
+    else:
+        normalized = {"raw": row_data}
+
+    serialized = json.dumps(normalized, default=str)
+    return json.loads(serialized)
+
+
 def get_item_match_field_options() -> list[ItemFieldOption]:
     options: list[ItemFieldOption] = []
     for column in Item.__table__.columns:
@@ -220,6 +240,8 @@ def _parse_delimited(
 
 
 def _parse_xlsx(payload: bytes) -> tuple[ImportData | None, list[str]]:
+    from openpyxl import load_workbook
+
     try:
         workbook = load_workbook(filename=BytesIO(payload), read_only=True, data_only=True)
     except Exception:
@@ -910,7 +932,7 @@ def build_count_sheet_rows(snapshot_id: int) -> Iterable[dict[str, object]]:
     lines = (
         InventoryCountLine.query.filter_by(snapshot_id=snapshot_id)
         .join(Item)
-        .join(Location)
+        .join(InventoryCountLine.location)
         .order_by(Location.code, Item.id)
         .all()
     )

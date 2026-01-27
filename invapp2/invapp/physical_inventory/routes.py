@@ -31,6 +31,8 @@ from invapp.models import (
     Item,
     Location,
 )
+from sqlalchemy.exc import SQLAlchemyError
+
 from invapp.superuser import superuser_required
 from invapp.utils.csv_export import export_rows_to_csv
 
@@ -49,6 +51,7 @@ from .services import (
     get_item_match_field_options,
     get_item_display_values,
     match_rows,
+    normalize_row_data,
     parse_import_bytes,
     suggest_column_mappings,
     suggest_matching_upload_column,
@@ -213,6 +216,25 @@ def _log_issue_payload_stats(
         secondary_length,
         row_data_length,
         sorted(row_data.keys()),
+    )
+
+
+def _log_issue_batch_stats(snapshot_id: int, issues: list[dict[str, object]]) -> None:
+    if not issues:
+        return
+    max_primary = max(len(str(issue.get("primary_value") or "")) for issue in issues)
+    max_secondary = max(len(str(issue.get("secondary_value") or "")) for issue in issues)
+    max_row_data = max(
+        len(json.dumps(issue.get("row_data") or {}, default=str)) for issue in issues
+    )
+    current_app.logger.info(
+        "Snapshot import issues batch: snapshot_id=%s count=%s max_primary_length=%s "
+        "max_secondary_length=%s max_row_data_length=%s",
+        snapshot_id,
+        len(issues),
+        max_primary,
+        max_secondary,
+        max_row_data,
     )
 
 
@@ -536,11 +558,11 @@ def create_snapshot():
                 for row in snapshot_lines
             ]
             db.session.add_all(lines)
-            issues: list[InventorySnapshotImportIssue] = []
+            issues_payload: list[dict[str, object]] = []
             for index, (row, match) in enumerate(zip(merged_rows, matches), start=1):
                 if match.item_id is not None:
                     continue
-                row_data = row if isinstance(row, dict) else {"raw": row}
+                row_data = normalize_row_data(row)
                 _log_issue_payload_stats(
                     snapshot.id,
                     index,
@@ -549,20 +571,39 @@ def create_snapshot():
                     match.secondary_value,
                     row_data,
                 )
-                issues.append(
-                    InventorySnapshotImportIssue(
-                        snapshot_id=snapshot.id,
-                        row_index=index,
-                        reason=match.reason,
-                        primary_value=match.primary_value,
-                        secondary_value=match.secondary_value,
-                        row_data=row_data,
-                    )
+                issues_payload.append(
+                    {
+                        "row_index": index,
+                        "reason": match.reason,
+                        "primary_value": match.primary_value,
+                        "secondary_value": match.secondary_value,
+                        "row_data": row_data,
+                    }
                 )
-            db.session.add_all(issues)
             created_count_lines = ensure_count_lines_for_snapshot(snapshot)
             db.session.commit()
             _remove_import_payload(import_token)
+
+            if issues_payload:
+                try:
+                    _log_issue_batch_stats(snapshot.id, issues_payload)
+                    issue_rows = [
+                        InventorySnapshotImportIssue(snapshot_id=snapshot.id, **payload)
+                        for payload in issues_payload
+                    ]
+                    db.session.add_all(issue_rows)
+                    db.session.commit()
+                except SQLAlchemyError:
+                    db.session.rollback()
+                    current_app.logger.exception(
+                        "Failed to persist snapshot import issues: snapshot_id=%s",
+                        snapshot.id,
+                    )
+                    flash(
+                        "Snapshot created, but some import issues could not be saved. "
+                        "Please contact an administrator.",
+                        "warning",
+                    )
 
             flash(
                 f"Snapshot created with {len(lines)} item totals and {created_count_lines} count lines.",
