@@ -21,6 +21,7 @@ const PLACEHOLDER_LABELS = [
     dataFields: [
       { key: 'lot_number', label: 'Lot Number' },
       { key: 'product_name', label: 'Product Name' },
+      { key: 'product_description', label: 'Product Description' },
       { key: 'sku', label: 'SKU' },
       { key: 'quantity', label: 'Quantity' },
       { key: 'unit', label: 'Unit' },
@@ -35,6 +36,7 @@ const PLACEHOLDER_LABELS = [
     sampleData: {
       lot_number: 'LOT-00977-A',
       product_name: 'Widget Prime - Stainless',
+      product_description: 'Stainless steel widget with reinforced housing',
       sku: 'SKU-12345',
       quantity: '120',
       unit: 'ea',
