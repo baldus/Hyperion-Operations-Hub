@@ -4739,3 +4739,64 @@ body.light .email-modal-hint {
     width: 100px;
     padding: 0.35rem 0.5rem;
 }
+
+.location-picker {
+    position: relative;
+    max-width: 420px;
+}
+
+.location-picker-input {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.location-picker-text {
+    flex: 1;
+}
+
+.location-picker-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: #fff;
+    border: 1px solid #d0d0d0;
+    border-radius: 6px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+    max-height: 240px;
+    overflow-y: auto;
+    z-index: 50;
+    display: none;
+}
+
+.location-picker-dropdown.open {
+    display: block;
+}
+
+.location-picker-option {
+    padding: 8px 10px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.location-picker-option.active,
+.location-picker-option:hover {
+    background: #f2f4f7;
+}
+
+.location-picker-code {
+    font-weight: 600;
+}
+
+.location-picker-desc {
+    font-size: 0.85rem;
+    color: #666;
+}
+
+.location-picker-status {
+    padding: 8px 10px;
+    color: #666;
+}
