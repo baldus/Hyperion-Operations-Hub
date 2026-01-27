@@ -26,7 +26,7 @@ from flask import (
     session,
     url_for,
 )
-from sqlalchemy import asc, desc, func, inspect, or_, select
+from sqlalchemy import asc, case, desc, func, inspect, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import aliased, joinedload, lazyload, load_only
 from sqlalchemy.orm.exc import DetachedInstanceError
@@ -82,6 +82,7 @@ bp.before_request(blueprint_page_guard("inventory"))
 UNASSIGNED_LOCATION_CODE = "UNASSIGNED"
 PLACEHOLDER_CREATION_MAX_RETRIES = 5
 PLACEHOLDER_CREATION_INITIAL_BACKOFF = 0.05
+LOCATION_SEARCH_LIMIT = 25
 
 
 def _ensure_placeholder_location(loc_map: dict[str, "Location"]) -> "Location":
@@ -127,6 +128,34 @@ def _ensure_placeholder_location(loc_map: dict[str, "Location"]) -> "Location":
 
         loc_map[UNASSIGNED_LOCATION_CODE] = placeholder
         return placeholder
+
+
+def _format_location_label(location: Location) -> str:
+    description = (location.description or "").strip()
+    if description:
+        return f"{location.code} — {description}"
+    return location.code
+
+
+def _resolve_location_from_form(value: str | None) -> Location | None:
+    if not value:
+        return None
+
+    raw_value = value.strip()
+    if not raw_value:
+        return None
+
+    try:
+        location_id = int(raw_value)
+    except (TypeError, ValueError):
+        location_id = None
+
+    if location_id is not None:
+        location = db.session.get(Location, location_id)
+        if location:
+            return location
+
+    return Location.query.filter(func.lower(Location.code) == raw_value.lower()).first()
 
 
 AUTO_SKU_START = 100000
@@ -937,6 +966,74 @@ def search_items_api():
                 for item in matches
             ]
         }
+    )
+
+
+@bp.get("/api/locations/search")
+def search_locations_api():
+    """Search locations for typeahead dropdowns."""
+
+    query = (request.args.get("q") or "").strip()
+    base_query = Location.query.options(load_only(Location.id, Location.code, Location.description))
+    unassigned = Location.query.filter_by(code=UNASSIGNED_LOCATION_CODE).one_or_none()
+
+    if not query:
+        results = []
+        if unassigned:
+            results.append(unassigned)
+        remaining_limit = LOCATION_SEARCH_LIMIT - len(results)
+        if remaining_limit > 0:
+            matches = base_query
+            if unassigned:
+                matches = matches.filter(Location.id != unassigned.id)
+            matches = (
+                matches.order_by(func.lower(Location.code))
+                .limit(remaining_limit)
+                .all()
+            )
+            results.extend(matches)
+        return jsonify(
+            [
+                {
+                    "id": location.id,
+                    "code": location.code,
+                    "description": location.description or "",
+                    "label": _format_location_label(location),
+                }
+                for location in results
+            ]
+        )
+
+    lowered = query.lower()
+    contains_pattern = f"%{lowered}%"
+    prefix_pattern = f"{lowered}%"
+    ranking = case(
+        (func.lower(Location.code).like(prefix_pattern), 0),
+        else_=1,
+    )
+
+    matches = (
+        base_query.filter(
+            or_(
+                func.lower(Location.code).like(contains_pattern),
+                func.lower(Location.description).like(contains_pattern),
+            )
+        )
+        .order_by(ranking, func.lower(Location.code))
+        .limit(LOCATION_SEARCH_LIMIT)
+        .all()
+    )
+
+    return jsonify(
+        [
+            {
+                "id": location.id,
+                "code": location.code,
+                "description": location.description or "",
+                "label": _format_location_label(location),
+            }
+            for location in matches
+        ]
     )
 
 
@@ -3946,7 +4043,9 @@ def export_stock():
 ############################
 @bp.route("/receiving", methods=["GET", "POST"])
 def receiving():
-    locations = Location.query.all()
+    placeholder_location = Location.query.filter_by(code=UNASSIGNED_LOCATION_CODE).one_or_none()
+    if not placeholder_location:
+        placeholder_location = _ensure_placeholder_location({})
     form_defaults = {
         "sku": request.args.get("sku", "").strip(),
         "qty": request.args.get("qty", "").strip(),
@@ -3967,6 +4066,19 @@ def receiving():
             }
         if not form_defaults["location_id"] and default_location:
             form_defaults["location_id"] = str(default_location.id)
+    if not form_defaults["location_id"] and placeholder_location:
+        form_defaults["location_id"] = str(placeholder_location.id)
+
+    selected_location = None
+    if form_defaults["location_id"]:
+        try:
+            selected_location = db.session.get(Location, int(form_defaults["location_id"]))
+        except (TypeError, ValueError):
+            selected_location = Location.query.filter(
+                func.lower(Location.code) == form_defaults["location_id"].lower()
+            ).first()
+    if selected_location is None:
+        selected_location = placeholder_location
 
     if request.method == "POST":
         sku = request.form["sku"].strip()
@@ -3977,7 +4089,11 @@ def receiving():
         qty_raw = request.form.get("qty", "").strip()
         person = request.form["person"].strip()
         po_number = request.form.get("po_number", "").strip() or None
-        location_id = int(request.form["location_id"])
+        location = _resolve_location_from_form(request.form.get("location_id"))
+        if location is None:
+            flash("Select a valid location before submitting the receipt.", "danger")
+            return redirect(url_for("inventory.receiving"))
+        location_id = location.id
 
         qty_missing = not qty_raw
 
@@ -4077,7 +4193,6 @@ def receiving():
             return redirect(url_for("inventory.receiving"))
 
         try:
-            location = Location.query.get(location_id)
             if not _print_batch_receipt_label(
                 batch,
                 item,
@@ -4110,11 +4225,22 @@ def receiving():
     return render_template(
         "inventory/receiving.html",
         records=records,
-        locations=locations,
         form_defaults=form_defaults,
         default_location=default_location,
         item_details=item_details,
         can_defer_without_qty=can_defer_without_qty,
+        selected_location=selected_location,
+        selected_location_label=(
+            _format_location_label(selected_location)
+            if selected_location
+            else UNASSIGNED_LOCATION_CODE
+        ),
+        unassigned_location=placeholder_location,
+        unassigned_location_label=(
+            _format_location_label(placeholder_location)
+            if placeholder_location
+            else UNASSIGNED_LOCATION_CODE
+        ),
     )
 
 

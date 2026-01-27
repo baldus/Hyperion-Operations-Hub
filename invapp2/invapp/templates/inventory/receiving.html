@@ -31,13 +31,44 @@
   <br>
   {% endif %}
 
-  <label>Location:</label><br>
-  <select name="location_id" required>
-    {% for loc in locations %}
-      {% set selected = 'selected' if defaults.get('location_id') == loc.id|string else '' %}
-      <option value="{{ loc.id }}" {{ selected }}>{{ loc.code }}</option>
-    {% endfor %}
-  </select><br><br>
+  <label for="location-search-input">Location:</label><br>
+  <div
+    class="location-picker"
+    data-search-url="{{ url_for('inventory.search_locations_api') }}"
+    data-selected-id="{{ selected_location.id if selected_location else '' }}"
+    data-selected-label="{{ selected_location_label }}"
+    data-unassigned-id="{{ unassigned_location.id if unassigned_location else '' }}"
+    data-unassigned-label="{{ unassigned_location_label }}"
+  >
+    <div class="location-picker-input">
+      <input
+        type="text"
+        id="location-search-input"
+        class="location-picker-text"
+        placeholder="Search locations..."
+        value="{{ selected_location_label }}"
+        autocomplete="off"
+        aria-expanded="false"
+        aria-haspopup="listbox"
+      >
+      <button type="button" class="bubble-btn location-picker-clear">Clear</button>
+    </div>
+    <input
+      type="hidden"
+      name="location_id"
+      id="location-id-input"
+      value="{{ selected_location.id if selected_location else '' }}"
+      required
+    >
+    <div class="location-picker-dropdown" role="listbox" aria-label="Location results"></div>
+  </div>
+  <p class="form-hint">Type a location code or description to search. Results update as you type.</p>
+  <noscript>
+    <label>Location (code):</label><br>
+    <input type="text" name="location_id" value="{{ selected_location.code if selected_location else '' }}" required><br>
+    <p class="form-hint">JavaScript is disabled. Enter a location code (for example, 1-A-1 or UNASSIGNED).</p>
+  </noscript>
+  <br>
 
   {% if item_details %}
     <p id="item-details-display" class="form-hint">Item: {{ item_details.name or 'Unnamed' }}{% if item_details.description %} — {{ item_details.description }}{% endif %}</p>
@@ -104,6 +135,7 @@
 {% endblock %}
 
 {% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/receiving-location-picker.js') }}"></script>
 <script>
   document.addEventListener('DOMContentLoaded', function () {
     const skuInput = document.querySelector('input[name="sku"]');
@@ -114,7 +146,8 @@
     const lookupResults = document.getElementById('item-lookup-results');
     const defaultLocationDisplay = document.getElementById('default-location-display');
     const itemDetailsDisplay = document.getElementById('item-details-display');
-    const locationSelect = document.querySelector('select[name="location_id"]');
+    const locationIdInput = document.getElementById('location-id-input');
+    const locationSearchInput = document.getElementById('location-search-input');
 
     if (qtyInput && deferCheckbox) {
       const syncQtyState = () => {
@@ -191,8 +224,12 @@
       if (location && location.code) {
         const extra = location.description ? ` (${location.description})` : '';
         defaultLocationDisplay.textContent = `Primary location: ${location.code}${extra}`;
-        if (locationSelect && location.id !== undefined && location.id !== null) {
-          locationSelect.value = String(location.id);
+        if (locationIdInput && location.id !== undefined && location.id !== null) {
+          locationIdInput.value = String(location.id);
+        }
+        if (locationSearchInput) {
+          const label = location.description ? `${location.code} — ${location.description}` : location.code;
+          locationSearchInput.value = label;
         }
       } else {
         setDefaultLocationMessage('No primary location set for this SKU.');

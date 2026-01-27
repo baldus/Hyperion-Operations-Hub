@@ -735,6 +735,35 @@ Screenshot placeholder (replace with a real screenshot when available):
 2. Return JSON via `jsonify` and enforce permissions using `blueprint_page_guard` or role checks. See [`invapp2/invapp/auth.py`](invapp2/invapp/auth.py) and [`invapp2/invapp/permissions.py`](invapp2/invapp/permissions.py).
 3. Add tests in `invapp2/tests/`.
 
+### UI Patterns: Searchable Dropdowns
+Use the following conventions when upgrading a `<select>` to a searchable dropdown:
+- **Debounce interval:** 200ms (keep within 150–250ms). See the location picker implementation in `invapp2/invapp/static/js/receiving-location-picker.js`.
+- **Max results:** 25 results returned per request.
+- **Ranking logic:** prioritize `startswith(code)` matches, then `contains(code/description)`, and use code alpha order as the tiebreaker.
+- **Keyboard controls:** `ArrowUp`/`ArrowDown` to move, `Enter` to select, `Esc` to close.
+- **Fallback behavior:** render a basic input (or select) for non-JS users, and ensure the server accepts the same form field name.
+- **JSON response shape:** return a list of objects:
+  ```json
+  [
+    { "id": 123, "code": "1-A-1", "description": "Rack A1", "label": "1-A-1 — Rack A1" }
+  ]
+  ```
+
+### Feature Contract: Receiving Location Picker
+The receiving location picker is a progressive enhancement on the inventory receiving form.
+- **Receiving routes:** `GET /inventory/receiving` renders the picker, and `POST /inventory/receiving` consumes the selected location.
+- **Form field name:** `location_id` is the submitted field name and must remain unchanged (the backend accepts an ID or a location code).
+- **UNASSIGNED meaning:** the placeholder is a `Location` row with code `UNASSIGNED` (description: “Unassigned staging location”).
+- **Search endpoint:** `GET /inventory/api/locations/search?q=<query>` returns up to 25 matches in ranked order.
+  Example response:
+  ```json
+  [
+    { "id": 7, "code": "UNASSIGNED", "description": "Unassigned staging location", "label": "UNASSIGNED — Unassigned staging location" }
+  ]
+  ```
+- **Tests:** `invapp2/tests/test_location_search_api.py`
+  - Run with: `cd invapp2 && pytest tests/test_location_search_api.py`
+
 ### Add a new navigation item
 1. Add the page to `NAVIGATION_PAGES` in `invapp2/invapp/__init__.py`. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
 2. Ensure there is a corresponding permission rule in `DEFAULT_PAGE_ACCESS`. See [`invapp2/invapp/permissions.py`](invapp2/invapp/permissions.py).
