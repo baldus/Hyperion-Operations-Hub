@@ -70,6 +70,7 @@ def _build_data_field_list(bindings: tuple[DesignerFieldBinding, ...]) -> list[d
 BATCH_SAMPLE_DATA = {
     "lot_number": "LOT-00977-A",
     "product_name": "Widget Prime - Stainless",
+    "product_description": "Stainless steel widget with reinforced housing",
     "sku": "SKU-12345",
     "quantity": "120",
     "unit": "ea",
@@ -86,6 +87,7 @@ BATCH_SAMPLE_DATA = {
 BATCH_FIELD_BINDINGS: tuple[DesignerFieldBinding, ...] = (
     DesignerFieldBinding("lot_number", "Lot Number", "{{Batch.LotNumber}}"),
     DesignerFieldBinding("product_name", "Product Name", "{{Item.Name}}"),
+    DesignerFieldBinding("product_description", "Product Description", "{{Item.Description}}"),
     DesignerFieldBinding("sku", "SKU", "{{Item.SKU}}"),
     DesignerFieldBinding("quantity", "Quantity", "{{Batch.Quantity}}"),
     DesignerFieldBinding("unit", "Unit", "{{Batch.Unit}}"),
@@ -114,7 +116,7 @@ BATCH_SAMPLE_CONTEXT = {
     "Item": {
         "Name": BATCH_SAMPLE_DATA["product_name"],
         "SKU": BATCH_SAMPLE_DATA["sku"],
-        "Description": BATCH_SAMPLE_DATA["product_name"],
+        "Description": BATCH_SAMPLE_DATA["product_description"],
     },
     "Location": {"Code": BATCH_SAMPLE_DATA["location"]},
 }

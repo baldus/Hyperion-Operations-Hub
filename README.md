@@ -717,6 +717,24 @@ Screenshot placeholder (replace with a real screenshot when available):
 - Row filtering only matches parsed rows; invalid codes are excluded when a row filter is active.
 - Filtering happens in SQL where possible (description), while row parsing/sorting relies on application logic.
 
+### Batch Label selectable fields
+Use this when adding or adjusting fields available in the Batch Label designer.
+
+**Where batch label fields are defined**
+- **Field bindings + sample data/context:** `BATCH_FIELD_BINDINGS`, `BATCH_SAMPLE_DATA`, and `BATCH_SAMPLE_CONTEXT` in [`invapp2/invapp/printing/labels.py`](invapp2/invapp/printing/labels.py).
+- **Default layout:** `BATCH_DEFAULT_LAYOUT` in [`invapp2/invapp/printing/labels.py`](invapp2/invapp/printing/labels.py).
+- **Designer label config:** `BATCH_LABEL_CONFIG` in [`invapp2/invapp/printing/labels.py`](invapp2/invapp/printing/labels.py).
+- **Designer fallback UI sample:** `PLACEHOLDER_LABELS` in [`invapp2/invapp/static/js/label-designer.js`](invapp2/invapp/static/js/label-designer.js) (used when no server-provided layout is available).
+
+**How selectable fields are sourced**
+- The label designer builds its dropdown from `DesignerLabelConfig.data_fields`, which is populated from `BATCH_FIELD_BINDINGS`. The bindings map a UI `key` to a rendering expression (e.g., `{{Item.Description}}`). See [`invapp2/invapp/printing/labels.py`](invapp2/invapp/printing/labels.py).
+- When the label layout is serialized, these bindings become a `fields` map that the rendering pipeline uses to resolve values from the label context (built by `build_batch_label_context`). See [`invapp2/invapp/printing/labels.py`](invapp2/invapp/printing/labels.py).
+- `build_batch_label_context` sources product details from the batch’s `item` relationship (or explicit `item` argument). See [`invapp2/invapp/printing/labels.py`](invapp2/invapp/printing/labels.py).
+
+**Constraints / assumptions (product description)**
+- Product description is treated as a plain string from the item model (`item.description`). There is no length enforcement or formatting normalization in the label pipeline. See [`invapp2/invapp/printing/labels.py`](invapp2/invapp/printing/labels.py).
+- Designer fields default to single-line text (`maxLines: 1`), so long descriptions may truncate or be clipped depending on font size and max width. Adjust layout settings in the designer if wrapping is needed. See [`invapp2/invapp/printing/labels.py`](invapp2/invapp/printing/labels.py).
+
 ### Add a new DB field + migration
 1. Update the SQLAlchemy model in `invapp2/invapp/models.py` (or `invapp2/invapp/mdi/models.py` for MDI tables).
 2. Generate an Alembic migration:
