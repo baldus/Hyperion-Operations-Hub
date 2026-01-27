@@ -16,6 +16,7 @@
   <ul>
     <li><a href="{{ url_for('physical_inventory.view_snapshot', snapshot_id=snapshot.id) }}">View snapshot overview</a></li>
     <li><a href="{{ url_for('physical_inventory.export_import_issues', snapshot_id=snapshot.id) }}">Export unmatched rows (CSV)</a></li>
+    <li><a href="{{ url_for('physical_inventory.snapshot_diagnostics', snapshot_id=snapshot.id) }}">View import diagnostics</a></li>
     <li><a href="{{ url_for('physical_inventory.list_snapshots') }}">Back to snapshots list</a></li>
   </ul>
   {% if not issue_count %}

@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import sys
 from decimal import Decimal
@@ -27,7 +28,9 @@ from invapp.physical_inventory.services import (
     get_item_match_field_options,
     match_rows,
     NormalizationOptions,
-    normalize_row_data,
+    normalize_import_row,
+    MAX_FIELD_LEN,
+    MAX_ROW_BYTES,
     parse_import_bytes,
     suggest_column_mappings,
     summarize_match_preview,
@@ -337,7 +340,7 @@ def test_import_issue_allows_large_payload(app, sample_items):
             reason="no match",
             primary_value=large_value,
             secondary_value=large_value,
-            row_data=normalize_row_data(row_data),
+            row_data=normalize_import_row(row_data),
         )
         db.session.add(issue)
         db.session.add(
@@ -355,8 +358,30 @@ def test_import_issue_allows_large_payload(app, sample_items):
 
 
 def test_normalize_row_data_invalid_json():
-    result = normalize_row_data("not json")
-    assert result == {"raw": "not json"}
+    result = normalize_import_row("not json")
+    assert result["_extras"]["raw"] == "not json"
+    assert result["_meta"]["invalid_json"] is True
+
+
+def test_normalize_import_row_extras_and_truncation():
+    long_value = "X" * (MAX_FIELD_LEN + 10)
+    row = {
+        "Item Name": "Widget",
+        "": "blank",
+        "Extra Field": long_value,
+    }
+    normalized = normalize_import_row(row)
+    assert normalized["Item Name"] == "Widget"
+    assert "_extras" in normalized
+    assert normalized["_extras"]["Extra Field"]["_truncated"] is True
+    assert normalized["_meta"]["blank_header_count"] == 1
+
+
+def test_normalize_import_row_json_string():
+    payload = {"Item Name": "Widget", "Extra": "X" * 400}
+    normalized = normalize_import_row(json.dumps(payload))
+    assert normalized["Item Name"] == "Widget"
+    assert "Extra" in normalized["_extras"]
 
 
 def test_ensure_count_lines_no_autoflush(app):
@@ -380,7 +405,7 @@ def test_ensure_count_lines_no_autoflush(app):
             reason="ambiguous",
             primary_value="W" * 600,
             secondary_value="Z" * 600,
-            row_data=normalize_row_data({"Item Name": "W" * 600}),
+            row_data=normalize_import_row({"Item Name": "W" * 600}),
         )
         db.session.add_all([line, issue])
 
@@ -420,3 +445,17 @@ def test_create_snapshot_large_issue_payload(client, app):
         issues = InventorySnapshotImportIssue.query.filter_by(snapshot_id=snapshot.id).all()
         assert len(issues) == 1
         assert len(issues[0].primary_value or "") > 255
+        diagnostics = snapshot.import_diagnostics[0]
+        assert diagnostics.issue_count_total == 1
+        assert diagnostics.schema_signature is not None
+
+
+def test_normalize_import_row_compacts_large_payload():
+    row = {"Item Name": "Widget"}
+    for idx in range(200):
+        row[f"Extra {idx}"] = "X" * 1000
+    normalized = normalize_import_row(row)
+    row_bytes = len(json.dumps(normalized, default=str))
+    assert row_bytes <= MAX_ROW_BYTES
+    assert normalized["_meta"]["row_data_compacted"] is True
+    assert len(normalized["_extras"]) <= 50

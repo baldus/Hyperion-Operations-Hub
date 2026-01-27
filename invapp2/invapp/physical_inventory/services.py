@@ -10,6 +10,7 @@ from io import BytesIO, StringIO
 from typing import Iterable
 
 from flask import current_app
+from sqlalchemy import inspect
 from sqlalchemy import String, Text, func
 
 from invapp.extensions import db
@@ -129,24 +130,174 @@ def normalize_match_value(value: str, options: NormalizationOptions) -> str:
     return normalized
 
 
-def normalize_row_data(row_data: object) -> dict[str, object]:
-    if isinstance(row_data, dict):
-        normalized = {str(key): value for key, value in row_data.items()}
-    elif isinstance(row_data, str):
-        try:
-            parsed = json.loads(row_data)
-        except json.JSONDecodeError:
-            normalized = {"raw": row_data}
-        else:
-            if isinstance(parsed, dict):
-                normalized = {str(key): value for key, value in parsed.items()}
-            else:
-                normalized = {"raw": parsed}
-    else:
-        normalized = {"raw": row_data}
+ALLOWED_IMPORT_KEYS = {
+    "Item ID",
+    "Item Name",
+    "Item Description",
+    "Item Class",
+    "Inactive",
+    "Description for Purchases",
+    "Item Note",
+    "Quantity On Hand",
+    "Quantity Needed",
+    "Is Taxable",
+    "Part Number",
+    "UOM",
+    "Notes",
+}
+MAX_FIELD_LEN = 2000
+MAX_ROW_BYTES = 50_000
+MAX_EXTRAS_KEYS = 50
+TRUNCATE_PREVIEW_LEN = 500
 
-    serialized = json.dumps(normalized, default=str)
+
+def _truncate_string(value: str) -> object:
+    if len(value) <= MAX_FIELD_LEN:
+        return value
+    return {
+        "_truncated": True,
+        "length": len(value),
+        "preview": value[:TRUNCATE_PREVIEW_LEN],
+    }
+
+
+def _sanitize_value(value: object) -> object:
+    if isinstance(value, str):
+        return _truncate_string(value)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    if isinstance(value, dict):
+        return {str(key): _sanitize_value(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_value(val) for val in value]
+    return _truncate_string(str(value))
+
+
+def normalize_import_row(raw_row: object) -> dict[str, object]:
+    invalid_json = False
+    if isinstance(raw_row, dict):
+        base = raw_row
+    elif isinstance(raw_row, str):
+        try:
+            parsed = json.loads(raw_row)
+        except json.JSONDecodeError:
+            invalid_json = True
+            base = {"raw": raw_row}
+        else:
+            base = parsed if isinstance(parsed, dict) else {"raw": parsed}
+    else:
+        base = {"raw": raw_row}
+
+    seen: set[str] = set()
+    duplicates: dict[str, object] = {}
+    blank_header_count = 0
+
+    normalized: dict[str, object] = {}
+    for key, value in dict(base).items():
+        key_text = "" if key is None else str(key).strip()
+        if not key_text:
+            blank_header_count += 1
+            continue
+        if key_text in seen:
+            suffix = 1
+            duplicate_key = f"{key_text}__dup{suffix}"
+            while duplicate_key in duplicates:
+                suffix += 1
+                duplicate_key = f"{key_text}__dup{suffix}"
+            duplicates[duplicate_key] = _sanitize_value(value)
+            continue
+        seen.add(key_text)
+        normalized[key_text] = _sanitize_value(value)
+
+    core = {key: val for key, val in normalized.items() if key in ALLOWED_IMPORT_KEYS}
+    extras = {
+        key: val
+        for key, val in normalized.items()
+        if key not in ALLOWED_IMPORT_KEYS
+    }
+    extras.update(duplicates)
+    unknown_header_count = len(extras)
+
+    row_data: dict[str, object] = {
+        **core,
+        "_extras": extras,
+        "_meta": {
+            "invalid_json": invalid_json,
+            "blank_header_count": blank_header_count,
+            "unknown_header_count": unknown_header_count,
+            "duplicate_header_count": len(duplicates),
+        },
+    }
+
+    row_size_bytes = len(json.dumps(row_data, default=str))
+    if row_size_bytes > MAX_ROW_BYTES:
+        trimmed_extras_keys = sorted(extras.keys())[:MAX_EXTRAS_KEYS]
+        trimmed_extras = {key: extras[key] for key in trimmed_extras_keys}
+        row_data["_extras"] = trimmed_extras
+        row_data["_meta"].update(
+            {
+                "row_data_compacted": True,
+                "original_size_bytes": row_size_bytes,
+                "extras_truncated_count": max(0, len(extras) - len(trimmed_extras)),
+            }
+        )
+        row_size_bytes = len(json.dumps(row_data, default=str))
+        if row_size_bytes > MAX_ROW_BYTES:
+            reduced_keys = sorted(trimmed_extras.keys())[:5]
+            row_data["_extras"] = {key: trimmed_extras[key] for key in reduced_keys}
+            row_data["_meta"]["extras_truncated_count"] = max(
+                0, len(trimmed_extras) - len(reduced_keys)
+            )
+            row_size_bytes = len(json.dumps(row_data, default=str))
+        if row_size_bytes > MAX_ROW_BYTES:
+            row_data["_extras"] = {}
+            row_data["_meta"]["extras_truncated_count"] = len(extras)
+
+    serialized = json.dumps(row_data, default=str)
     return json.loads(serialized)
+
+
+def normalize_row_data(row_data: object) -> dict[str, object]:
+    return normalize_import_row(row_data)
+
+
+def get_import_issue_schema_signature() -> dict[str, dict[str, object]]:
+    inspector = inspect(db.engine)
+    columns = inspector.get_columns("inventory_snapshot_import_issue")
+    signature: dict[str, dict[str, object]] = {}
+    for column in columns:
+        col_type = column["type"]
+        signature[column["name"]] = {
+            "type": str(col_type),
+            "nullable": column.get("nullable"),
+            "length": getattr(col_type, "length", None),
+        }
+    return signature
+
+
+def is_import_issue_schema_valid(signature: dict[str, dict[str, object]]) -> bool:
+    def _type_contains(column: str, needles: tuple[str, ...]) -> bool:
+        entry = signature.get(column)
+        if not entry:
+            return False
+        type_name = str(entry.get("type", "")).lower()
+        return any(needle in type_name for needle in needles)
+
+    row_data_ok = _type_contains("row_data", ("jsonb", "json", "text"))
+    primary_ok = _type_contains("primary_value", ("text",))
+    secondary_ok = _type_contains("secondary_value", ("text",))
+    return row_data_ok and primary_ok and secondary_ok
+
+
+def log_import_issue_schema_drift() -> bool:
+    signature = get_import_issue_schema_signature()
+    valid = is_import_issue_schema_valid(signature)
+    if not valid:
+        current_app.logger.error(
+            "Import issue schema drift detected: %s. Run: alembic -c alembic.ini upgrade head",
+            signature,
+        )
+    return valid
 
 
 def get_item_match_field_options() -> list[ItemFieldOption]:

@@ -314,11 +314,18 @@ Large ERP exports can include long descriptions or extra columns. Earlier versio
 See the migrations `20250320_update_snapshot_import_issue_columns.py` and `20250321_safe_row_data_jsonb.py` for details.
 
 **Row data normalization**
-Import issue rows are normalized via `normalize_row_data()` before persistence:
+Import issue rows are normalized via `normalize_import_row()` before persistence:
 - If the input is already a dict, it is returned with stringified keys.
 - If it is a JSON string, the string is parsed; non-dict payloads are wrapped in `{"raw": ...}`.
 - If parsing fails, the raw string is wrapped in `{"raw": ...}`.
-This ensures `row_data` always stores valid JSONB, even when upstream values are malformed.
+This ensures `row_data` always stores valid JSONB, even when upstream values are malformed. The normalized payload is stored as:
+- Core whitelist fields (see `ALLOWED_IMPORT_KEYS` in `services.py`)
+- `_extras` bucket for non-whitelisted headers
+- `_meta` with flags like `invalid_json`, `row_data_compacted`, `blank_header_count`, and `unknown_header_count`
+
+**Truncation + compaction rules**
+- Strings longer than 2,000 chars are replaced with a `_truncated` object containing `length` and a 500‑char preview.
+- If the JSON payload exceeds 50 KB, `_extras` is compacted to the first 50 keys and `_meta.row_data_compacted` is set.
 
 ### Item matching logic (no SKU)
 Hyperion never uses `Item.sku` for snapshot uploads, matching, or exports. Instead, the user explicitly selects which **Item DB field** to match against. The Item field dropdown is populated dynamically from the `Item` SQLAlchemy model; only string-like fields are shown by default, with an advanced toggle to show all fields. Fields containing `sku` are always excluded. See [`invapp2/invapp/physical_inventory/services.py`](invapp2/invapp/physical_inventory/services.py) and [`invapp2/invapp/templates/physical_inventory/snapshot_mapping.html`](invapp2/invapp/templates/physical_inventory/snapshot_mapping.html).
@@ -359,6 +366,17 @@ When a secondary match key is mapped, the grouping key becomes **Primary + Secon
 
 **Autoflush guardrail**
 `ensure_count_lines_for_snapshot()` wraps snapshot line access in `db.session.no_autoflush` to avoid premature flushes while import issues are pending. This prevents autoflush surprises during snapshot creation when many issue rows are staged.
+
+**Import diagnostics & observability**
+Each snapshot import writes an `inventory_snapshot_import_diagnostics` record with metrics like row counts, issue counts by reason, max payload sizes, compaction counts, and schema signatures. Diagnostics are available at **Snapshot → Import Diagnostics** and can be exported as JSON. A CLI schema check is available via:
+```bash
+flask diagnose-import-schema
+```
+The command exits non‑zero if `row_data`, `primary_value`, or `secondary_value` are not stored as JSONB/TEXT. Diagnostics do not log full row payloads (only sizes, keys, and counts).
+Redaction rules:
+- Never store raw row payloads in logs.
+- Diagnostics JSON exports include metrics only (counts, sizes, header names), not row contents.
+At startup (and during snapshot creation), the app logs an error if the DB schema for `inventory_snapshot_import_issue` drifts back to `VARCHAR(255)`.
 
 ### How known item-location pairs are determined
 The count sheet is built by combining **distinct item-location relationships** already known to Hyperion:
@@ -447,6 +465,18 @@ All new models are in [`invapp2/invapp/models.py`](invapp2/invapp/models.py) and
 - `row_data` (JSON, nullable)
 - `created_at` (datetime)
 
+**`inventory_snapshot_import_diagnostics`**
+- `snapshot_id` (FK inventory_snapshot)
+- `source_filename`, `file_hash`, `file_size_bytes`
+- `row_count_total`, `row_count_processed`, `issue_count_total`
+- `issue_counts_by_reason` (JSONB)
+- `max_primary_len`, `max_secondary_len`, `max_row_data_bytes`, `p95_row_data_bytes`
+- `row_data_compacted_count`, `invalid_json_row_count`
+- `blank_header_count`, `unknown_header_count`, `top_unknown_headers`
+- `schema_signature` (JSONB)
+- `parse_time_ms`, `match_time_ms`, `issue_insert_time_ms`, `total_time_ms`
+- `failure_samples` (JSONB; redacted)
+
 **`inventory_count_line`**
 - `id` (PK)
 - `snapshot_id` (FK inventory_snapshot, cascade delete)
@@ -517,6 +547,14 @@ After pulling changes, apply the latest migration to update `inventory_snapshot_
 alembic -c alembic.ini upgrade head
 ```
 The safe migration (`20250321_safe_row_data_jsonb.py`) backfills JSONB using a fallback `{"raw": ...}` wrapper when existing values are not valid JSON.
+You can verify the live schema in Postgres with:
+```sql
+SELECT column_name, data_type, character_maximum_length
+FROM information_schema.columns
+WHERE table_name = 'inventory_snapshot_import_issue'
+  AND column_name IN ('row_data', 'primary_value', 'secondary_value', 'reason');
+```
+`row_data` should be JSONB (or JSON), and `primary_value` / `secondary_value` should be TEXT.
 
 **Testing the fix**
 ```bash

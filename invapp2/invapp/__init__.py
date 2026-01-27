@@ -40,6 +40,8 @@ from .routes import (
     work,
 )
 from .physical_inventory import bp as physical_inventory_bp
+from .physical_inventory.cli import register_cli as register_physical_inventory_cli
+from .physical_inventory.services import log_import_issue_schema_drift
 from .mdi import init_blueprint, mdi_bp
 from .mdi import models as mdi_models
 from config import Config
@@ -1220,6 +1222,12 @@ def create_app(config_override=None):
         click.echo("Repairing RMA status event primary key sequence...")
         _repair_rma_status_event_sequence(db.engine)
         click.echo("Sequence repair completed.")
+
+    register_physical_inventory_cli(app)
+
+    if not app.config.get("TESTING", False):
+        with app.app_context():
+            log_import_issue_schema_drift()
 
     if not app.config.get("TESTING", False) and app.config.get("BACKUP_SCHEDULER_ENABLED", True):
         if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":

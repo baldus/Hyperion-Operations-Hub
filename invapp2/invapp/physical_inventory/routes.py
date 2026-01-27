@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import secrets
 import tempfile
 import time
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from collections import Counter
 
 from flask import (
     Blueprint,
@@ -26,6 +28,7 @@ from invapp.login import current_user
 from invapp.models import (
     InventoryCountLine,
     InventorySnapshot,
+    InventorySnapshotImportDiagnostics,
     InventorySnapshotImportIssue,
     InventorySnapshotLine,
     Item,
@@ -50,8 +53,10 @@ from .services import (
     get_item_field_candidates,
     get_item_match_field_options,
     get_item_display_values,
+    get_import_issue_schema_signature,
+    is_import_issue_schema_valid,
     match_rows,
-    normalize_row_data,
+    normalize_import_row,
     parse_import_bytes,
     suggest_column_mappings,
     suggest_matching_upload_column,
@@ -65,6 +70,9 @@ bp.before_request(blueprint_page_guard("inventory"))
 
 IMPORT_STORAGE_ROOT = os.path.join(tempfile.gettempdir(), "invapp_imports", "physical_inventory")
 IMPORT_FILE_TTL_SECONDS = 3600
+ISSUE_BATCH_SIZE = 1000
+ISSUE_LOG_THRESHOLD = 255
+MAX_ROW_DATA_BYTES = 50_000
 
 
 def _get_import_storage_dir() -> str:
@@ -238,6 +246,93 @@ def _log_issue_batch_stats(snapshot_id: int, issues: list[dict[str, object]]) ->
     )
 
 
+def _log_issue_size_event(
+    snapshot_id: int,
+    row_index: int,
+    reason: str,
+    primary_len: int,
+    secondary_len: int,
+    row_data_bytes: int,
+    compacted: bool,
+    invalid_json: bool,
+) -> None:
+    if (
+        primary_len <= ISSUE_LOG_THRESHOLD
+        and secondary_len <= ISSUE_LOG_THRESHOLD
+        and row_data_bytes <= MAX_ROW_DATA_BYTES
+    ):
+        return
+    current_app.logger.warning(
+        "Snapshot import issue size event: %s",
+        {
+            "snapshot_id": snapshot_id,
+            "row_index": row_index,
+            "reason": reason,
+            "primary_len": primary_len,
+            "secondary_len": secondary_len,
+            "row_data_bytes": row_data_bytes,
+            "compacted": compacted,
+            "invalid_json": invalid_json,
+        },
+    )
+
+
+def _insert_issue_batches(
+    snapshot_id: int,
+    issues_payload: list[dict[str, object]],
+) -> tuple[int, list[dict[str, object]]]:
+    if not issues_payload:
+        return 0, []
+
+    inserted = 0
+    failure_samples: list[dict[str, object]] = []
+
+    for start in range(0, len(issues_payload), ISSUE_BATCH_SIZE):
+        batch = issues_payload[start : start + ISSUE_BATCH_SIZE]
+        try:
+            db.session.add_all(
+                [
+                    InventorySnapshotImportIssue(snapshot_id=snapshot_id, **payload)
+                    for payload in batch
+                ]
+            )
+            db.session.commit()
+            inserted += len(batch)
+        except SQLAlchemyError:
+            db.session.rollback()
+            current_app.logger.exception(
+                "Failed to insert import issue batch: snapshot_id=%s range=%s-%s",
+                snapshot_id,
+                start + 1,
+                start + len(batch),
+            )
+            for payload in batch:
+                try:
+                    db.session.add(
+                        InventorySnapshotImportIssue(snapshot_id=snapshot_id, **payload)
+                    )
+                    db.session.commit()
+                    inserted += 1
+                except SQLAlchemyError:
+                    db.session.rollback()
+                    row_data = payload.get("row_data") or {}
+                    row_data_bytes = len(json.dumps(row_data, default=str))
+                    sample = {
+                        "row_index": payload.get("row_index"),
+                        "reason": payload.get("reason"),
+                        "primary_len": len(str(payload.get("primary_value") or "")),
+                        "secondary_len": len(str(payload.get("secondary_value") or "")),
+                        "row_data_bytes": row_data_bytes,
+                    }
+                    if len(failure_samples) < 3:
+                        failure_samples.append(sample)
+                    current_app.logger.error(
+                        "Failed to insert import issue row: %s",
+                        sample,
+                    )
+    return inserted, failure_samples
+
+
 @bp.route("/snapshots")
 @superuser_required
 def list_snapshots():
@@ -266,10 +361,12 @@ def create_snapshot():
                 return render_template("physical_inventory/snapshot_upload.html")
 
             file_bytes = payload.file.read()
+            parse_start = time.monotonic()
             import_data, parse_errors = parse_import_bytes(
                 payload.file.filename or "",
                 file_bytes,
             )
+            parse_time_ms = int((time.monotonic() - parse_start) * 1000)
             if parse_errors or import_data is None:
                 for message in parse_errors:
                     flash(message, "error")
@@ -279,6 +376,10 @@ def create_snapshot():
                 "headers": import_data.headers,
                 "rows": import_data.rows,
                 "normalized_headers": import_data.normalized_headers,
+                "source_filename": payload.file.filename or None,
+                "file_size_bytes": len(file_bytes),
+                "file_hash": hashlib.sha256(file_bytes).hexdigest(),
+                "parse_time_ms": parse_time_ms,
             }
             import_token = _store_import_payload(import_payload)
             if not import_token:
@@ -454,6 +555,7 @@ def create_snapshot():
             )
 
         if step == "commit":
+            total_start = time.monotonic()
             normalization_options = _parse_normalization_options(request.form)
             primary_upload_col = request.form.get("primary_upload_column") or ""
             primary_item_field = request.form.get("primary_item_field") or ""
@@ -500,6 +602,18 @@ def create_snapshot():
                     url_for("physical_inventory.create_snapshot", step="map", import_token=import_token)
                 )
 
+            schema_signature = get_import_issue_schema_signature()
+            schema_drift_detected = not is_import_issue_schema_valid(schema_signature)
+            if schema_drift_detected:
+                current_app.logger.error(
+                    "Import issue schema drift detected: %s",
+                    schema_signature,
+                )
+                flash(
+                    "Database schema is out of date for import issues. Please run migrations.",
+                    "warning",
+                )
+
             merged_rows, _ = apply_duplicate_strategy(
                 import_data.rows,
                 primary_upload_col,
@@ -509,6 +623,7 @@ def create_snapshot():
                 normalization_options,
             )
             items = Item.query.all()
+            match_start = time.monotonic()
             matches, _, _ = match_rows(
                 merged_rows,
                 primary_upload_col,
@@ -518,6 +633,7 @@ def create_snapshot():
                 normalization_options,
                 items,
             )
+            match_time_ms = int((time.monotonic() - match_start) * 1000)
             snapshot_lines, line_errors = build_snapshot_lines(
                 merged_rows,
                 matches,
@@ -559,10 +675,32 @@ def create_snapshot():
             ]
             db.session.add_all(lines)
             issues_payload: list[dict[str, object]] = []
+            issue_counts_by_reason: Counter[str] = Counter()
+            row_data_sizes: list[int] = []
+            row_data_compacted_count = 0
+            invalid_json_row_count = 0
+            blank_header_count = 0
+            unknown_header_count = 0
+            unknown_header_counter: Counter[str] = Counter()
             for index, (row, match) in enumerate(zip(merged_rows, matches), start=1):
                 if match.item_id is not None:
                     continue
-                row_data = normalize_row_data(row)
+                row_data = normalize_import_row(row)
+                meta = row_data.get("_meta", {})
+                invalid_json = bool(meta.get("invalid_json"))
+                compacted = bool(meta.get("row_data_compacted"))
+                if compacted:
+                    row_data_compacted_count += 1
+                if invalid_json:
+                    invalid_json_row_count += 1
+                blank_header_count += int(meta.get("blank_header_count") or 0)
+                unknown_header_count += int(meta.get("unknown_header_count") or 0)
+                extras = row_data.get("_extras") or {}
+                unknown_header_counter.update(extras.keys())
+                row_data_bytes = len(json.dumps(row_data, default=str))
+                row_data_sizes.append(row_data_bytes)
+                primary_len = len(str(match.primary_value or ""))
+                secondary_len = len(str(match.secondary_value or ""))
                 _log_issue_payload_stats(
                     snapshot.id,
                     index,
@@ -571,6 +709,17 @@ def create_snapshot():
                     match.secondary_value,
                     row_data,
                 )
+                _log_issue_size_event(
+                    snapshot.id,
+                    index,
+                    match.reason,
+                    primary_len,
+                    secondary_len,
+                    row_data_bytes,
+                    compacted,
+                    invalid_json,
+                )
+                issue_counts_by_reason.update([match.reason])
                 issues_payload.append(
                     {
                         "row_index": index,
@@ -587,12 +736,14 @@ def create_snapshot():
             if issues_payload:
                 try:
                     _log_issue_batch_stats(snapshot.id, issues_payload)
-                    issue_rows = [
-                        InventorySnapshotImportIssue(snapshot_id=snapshot.id, **payload)
-                        for payload in issues_payload
-                    ]
-                    db.session.add_all(issue_rows)
-                    db.session.commit()
+                    issue_insert_start = time.monotonic()
+                    inserted_count, failure_samples = _insert_issue_batches(
+                        snapshot.id,
+                        issues_payload,
+                    )
+                    issue_insert_time_ms = int(
+                        (time.monotonic() - issue_insert_start) * 1000
+                    )
                 except SQLAlchemyError:
                     db.session.rollback()
                     current_app.logger.exception(
@@ -604,6 +755,59 @@ def create_snapshot():
                         "Please contact an administrator.",
                         "warning",
                     )
+                    inserted_count = 0
+                    failure_samples = []
+                    issue_insert_time_ms = None
+            else:
+                inserted_count = 0
+                failure_samples = []
+                issue_insert_time_ms = None
+
+            if row_data_sizes:
+                sorted_sizes = sorted(row_data_sizes)
+                p95_index = max(0, int(len(sorted_sizes) * 0.95) - 1)
+                p95_row_data_bytes = sorted_sizes[p95_index]
+                max_row_data_bytes = max(sorted_sizes)
+            else:
+                p95_row_data_bytes = None
+                max_row_data_bytes = None
+
+            diagnostics = InventorySnapshotImportDiagnostics(
+                snapshot_id=snapshot.id,
+                source_filename=payload.get("source_filename"),
+                file_hash=payload.get("file_hash"),
+                file_size_bytes=payload.get("file_size_bytes"),
+                row_count_total=len(import_data.rows),
+                row_count_processed=len(merged_rows),
+                issue_count_total=len(issues_payload),
+                issue_counts_by_reason=dict(issue_counts_by_reason),
+                max_primary_len=max(
+                    (len(str(p.get("primary_value") or "")) for p in issues_payload),
+                    default=None,
+                ),
+                max_secondary_len=max(
+                    (len(str(p.get("secondary_value") or "")) for p in issues_payload),
+                    default=None,
+                ),
+                max_row_data_bytes=max_row_data_bytes,
+                p95_row_data_bytes=p95_row_data_bytes,
+                row_data_compacted_count=row_data_compacted_count,
+                invalid_json_row_count=invalid_json_row_count,
+                blank_header_count=blank_header_count,
+                unknown_header_count=unknown_header_count,
+                top_unknown_headers=dict(unknown_header_counter.most_common(10)),
+                schema_signature=schema_signature,
+                app_version=current_app.config.get("APP_VERSION") or None,
+                parse_time_ms=payload.get("parse_time_ms"),
+                match_time_ms=match_time_ms,
+                issue_insert_time_ms=issue_insert_time_ms,
+                total_time_ms=int((time.monotonic() - total_start) * 1000),
+                batch_size=ISSUE_BATCH_SIZE,
+                failure_samples=failure_samples,
+                schema_drift_detected=schema_drift_detected,
+            )
+            db.session.add(diagnostics)
+            db.session.commit()
 
             flash(
                 f"Snapshot created with {len(lines)} item totals and {created_count_lines} count lines.",
@@ -705,6 +909,69 @@ def view_snapshot(snapshot_id: int):
         snapshot=snapshot,
         summary=summary,
     )
+
+
+@bp.route("/snapshots/<int:snapshot_id>/diagnostics")
+@superuser_required
+def snapshot_diagnostics(snapshot_id: int):
+    snapshot = InventorySnapshot.query.get_or_404(snapshot_id)
+    diagnostics = (
+        InventorySnapshotImportDiagnostics.query.filter_by(snapshot_id=snapshot.id)
+        .order_by(InventorySnapshotImportDiagnostics.created_at.desc())
+        .first()
+    )
+    schema_signature = get_import_issue_schema_signature()
+    schema_valid = is_import_issue_schema_valid(schema_signature)
+    return render_template(
+        "physical_inventory/snapshot_diagnostics.html",
+        snapshot=snapshot,
+        diagnostics=diagnostics,
+        schema_signature=schema_signature,
+        schema_valid=schema_valid,
+    )
+
+
+@bp.route("/snapshots/<int:snapshot_id>/diagnostics.json")
+@superuser_required
+def snapshot_diagnostics_export(snapshot_id: int):
+    snapshot = InventorySnapshot.query.get_or_404(snapshot_id)
+    diagnostics = (
+        InventorySnapshotImportDiagnostics.query.filter_by(snapshot_id=snapshot.id)
+        .order_by(InventorySnapshotImportDiagnostics.created_at.desc())
+        .first()
+    )
+    if diagnostics is None:
+        return {"error": "No diagnostics found."}, 404
+    payload = {
+        "snapshot_id": snapshot.id,
+        "created_at": diagnostics.created_at.isoformat(),
+        "source_filename": diagnostics.source_filename,
+        "file_hash": diagnostics.file_hash,
+        "file_size_bytes": diagnostics.file_size_bytes,
+        "row_count_total": diagnostics.row_count_total,
+        "row_count_processed": diagnostics.row_count_processed,
+        "issue_count_total": diagnostics.issue_count_total,
+        "issue_counts_by_reason": diagnostics.issue_counts_by_reason,
+        "max_primary_len": diagnostics.max_primary_len,
+        "max_secondary_len": diagnostics.max_secondary_len,
+        "max_row_data_bytes": diagnostics.max_row_data_bytes,
+        "p95_row_data_bytes": diagnostics.p95_row_data_bytes,
+        "row_data_compacted_count": diagnostics.row_data_compacted_count,
+        "invalid_json_row_count": diagnostics.invalid_json_row_count,
+        "blank_header_count": diagnostics.blank_header_count,
+        "unknown_header_count": diagnostics.unknown_header_count,
+        "top_unknown_headers": diagnostics.top_unknown_headers,
+        "schema_signature": diagnostics.schema_signature,
+        "schema_drift_detected": diagnostics.schema_drift_detected,
+        "parse_time_ms": diagnostics.parse_time_ms,
+        "match_time_ms": diagnostics.match_time_ms,
+        "issue_insert_time_ms": diagnostics.issue_insert_time_ms,
+        "total_time_ms": diagnostics.total_time_ms,
+        "batch_size": diagnostics.batch_size,
+        "failure_samples": diagnostics.failure_samples,
+        "app_version": diagnostics.app_version,
+    }
+    return payload, 200
 
 
 @bp.route("/snapshots/<int:snapshot_id>/import-results")

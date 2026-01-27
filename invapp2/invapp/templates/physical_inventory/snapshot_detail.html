@@ -32,6 +32,7 @@
   <a href="{{ url_for('physical_inventory.reconciliation', snapshot_id=snapshot.id) }}" class="action-btn">View Reconciliation</a>
   <a href="{{ url_for('physical_inventory.export_location_sheet', snapshot_id=snapshot.id) }}" class="action-btn">Export Location Sheet (CSV)</a>
   <a href="{{ url_for('physical_inventory.export_reconciliation', snapshot_id=snapshot.id) }}" class="action-btn">Export Reconciliation (CSV)</a>
+  <a href="{{ url_for('physical_inventory.snapshot_diagnostics', snapshot_id=snapshot.id) }}" class="action-btn">Import Diagnostics</a>
 </div>
 
 <div class="dashboard-section">

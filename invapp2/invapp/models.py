@@ -592,6 +592,12 @@ class InventorySnapshot(db.Model):
         back_populates="snapshot",
         cascade="all, delete-orphan",
     )
+    import_diagnostics = db.relationship(
+        "InventorySnapshotImportDiagnostics",
+        back_populates="snapshot",
+        cascade="all, delete-orphan",
+        order_by="InventorySnapshotImportDiagnostics.created_at.desc()",
+    )
 
 
 class InventorySnapshotLine(db.Model):
@@ -631,6 +637,43 @@ class InventorySnapshotImportIssue(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     snapshot = db.relationship("InventorySnapshot", back_populates="import_issues")
+
+
+class InventorySnapshotImportDiagnostics(db.Model):
+    __tablename__ = "inventory_snapshot_import_diagnostics"
+
+    id = db.Column(db.Integer, primary_key=True)
+    snapshot_id = db.Column(
+        db.Integer, db.ForeignKey("inventory_snapshot.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    source_filename = db.Column(db.String(255), nullable=True)
+    file_hash = db.Column(db.String(64), nullable=True)
+    file_size_bytes = db.Column(db.Integer, nullable=True)
+    row_count_total = db.Column(db.Integer, nullable=True)
+    row_count_processed = db.Column(db.Integer, nullable=True)
+    issue_count_total = db.Column(db.Integer, nullable=True)
+    issue_counts_by_reason = db.Column(JSONB().with_variant(db.JSON, "sqlite"), nullable=True)
+    max_primary_len = db.Column(db.Integer, nullable=True)
+    max_secondary_len = db.Column(db.Integer, nullable=True)
+    max_row_data_bytes = db.Column(db.Integer, nullable=True)
+    p95_row_data_bytes = db.Column(db.Integer, nullable=True)
+    row_data_compacted_count = db.Column(db.Integer, nullable=True)
+    invalid_json_row_count = db.Column(db.Integer, nullable=True)
+    blank_header_count = db.Column(db.Integer, nullable=True)
+    unknown_header_count = db.Column(db.Integer, nullable=True)
+    top_unknown_headers = db.Column(JSONB().with_variant(db.JSON, "sqlite"), nullable=True)
+    schema_signature = db.Column(JSONB().with_variant(db.JSON, "sqlite"), nullable=True)
+    app_version = db.Column(db.String(64), nullable=True)
+    parse_time_ms = db.Column(db.Integer, nullable=True)
+    match_time_ms = db.Column(db.Integer, nullable=True)
+    issue_insert_time_ms = db.Column(db.Integer, nullable=True)
+    total_time_ms = db.Column(db.Integer, nullable=True)
+    batch_size = db.Column(db.Integer, nullable=True)
+    failure_samples = db.Column(JSONB().with_variant(db.JSON, "sqlite"), nullable=True)
+    schema_drift_detected = db.Column(db.Boolean, default=False, nullable=False)
+
+    snapshot = db.relationship("InventorySnapshot", back_populates="import_diagnostics")
 
 
 class InventoryCountLine(db.Model):

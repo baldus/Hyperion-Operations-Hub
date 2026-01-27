@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Snapshot Import Diagnostics</h2>
+
+<div class="dashboard-section">
+  <div class="status-summary-grid">
+    <div><strong>Snapshot:</strong> {{ snapshot.name or "Untitled" }}</div>
+    <div><strong>Date:</strong> {{ snapshot.snapshot_date.strftime('%Y-%m-%d') }}</div>
+    {% if diagnostics %}
+    <div><strong>Diagnostics captured:</strong> {{ diagnostics.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+    {% endif %}
+    <div><strong>Schema status:</strong>
+      {% if schema_valid %}
+      <span class="status-pill status-open">OK</span>
+      {% else %}
+      <span class="status-pill status-closed">Needs migration</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="dashboard-section">
+  <h3>Actions</h3>
+  <ul>
+    <li><a href="{{ url_for('physical_inventory.snapshot_diagnostics_export', snapshot_id=snapshot.id) }}">Download diagnostics JSON</a></li>
+    <li><a href="{{ url_for('physical_inventory.view_snapshot', snapshot_id=snapshot.id) }}">Back to snapshot overview</a></li>
+  </ul>
+</div>
+
+{% if diagnostics %}
+<div class="dashboard-section">
+  <h3>Import Summary</h3>
+  <div class="status-summary-grid">
+    <div><strong>Rows in file:</strong> {{ diagnostics.row_count_total }}</div>
+    <div><strong>Rows processed:</strong> {{ diagnostics.row_count_processed }}</div>
+    <div><strong>Issues recorded:</strong> {{ diagnostics.issue_count_total }}</div>
+    <div><strong>File size:</strong> {{ diagnostics.file_size_bytes }} bytes</div>
+  </div>
+</div>
+
+<div class="dashboard-section">
+  <h3>Issue Metrics</h3>
+  <div class="status-summary-grid">
+    <div><strong>Max primary length:</strong> {{ diagnostics.max_primary_len }}</div>
+    <div><strong>Max secondary length:</strong> {{ diagnostics.max_secondary_len }}</div>
+    <div><strong>Max row_data bytes:</strong> {{ diagnostics.max_row_data_bytes }}</div>
+    <div><strong>P95 row_data bytes:</strong> {{ diagnostics.p95_row_data_bytes }}</div>
+    <div><strong>Row data compacted:</strong> {{ diagnostics.row_data_compacted_count }}</div>
+    <div><strong>Invalid JSON rows:</strong> {{ diagnostics.invalid_json_row_count }}</div>
+    <div><strong>Blank headers:</strong> {{ diagnostics.blank_header_count }}</div>
+    <div><strong>Unknown headers:</strong> {{ diagnostics.unknown_header_count }}</div>
+  </div>
+</div>
+
+{% if diagnostics.issue_counts_by_reason %}
+<div class="dashboard-section">
+  <h3>Issues by Reason</h3>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Reason</th>
+        <th>Count</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for reason, count in diagnostics.issue_counts_by_reason.items() %}
+      <tr>
+        <td>{{ reason }}</td>
+        <td>{{ count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if diagnostics.top_unknown_headers %}
+<div class="dashboard-section">
+  <h3>Top Unknown Headers</h3>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Header</th>
+        <th>Count</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for header, count in diagnostics.top_unknown_headers.items() %}
+      <tr>
+        <td>{{ header }}</td>
+        <td>{{ count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if diagnostics.failure_samples %}
+<div class="dashboard-section">
+  <h3>Failure Samples (Redacted)</h3>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Row Index</th>
+        <th>Reason</th>
+        <th>Primary Length</th>
+        <th>Secondary Length</th>
+        <th>Row Data Bytes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for sample in diagnostics.failure_samples %}
+      <tr>
+        <td>{{ sample.row_index }}</td>
+        <td>{{ sample.reason }}</td>
+        <td>{{ sample.primary_len }}</td>
+        <td>{{ sample.secondary_len }}</td>
+        <td>{{ sample.row_data_bytes }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="dashboard-section">
+  <h3>Timing (ms)</h3>
+  <div class="status-summary-grid">
+    <div><strong>Parse:</strong> {{ diagnostics.parse_time_ms }}</div>
+    <div><strong>Match:</strong> {{ diagnostics.match_time_ms }}</div>
+    <div><strong>Issue insert:</strong> {{ diagnostics.issue_insert_time_ms }}</div>
+    <div><strong>Total:</strong> {{ diagnostics.total_time_ms }}</div>
+  </div>
+</div>
+{% else %}
+<div class="dashboard-section">
+  <p class="field-note">No diagnostics have been recorded for this snapshot.</p>
+</div>
+{% endif %}
+
+<div class="dashboard-section">
+  <h3>Current Schema Signature</h3>
+  <pre>{{ schema_signature | tojson }}</pre>
+</div>
+{% endblock %}
