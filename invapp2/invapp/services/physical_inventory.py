@@ -42,6 +42,15 @@ def normalize_match_value(value: object | None, options: NormalizationOptions) -
     return text
 
 
+def _clean_display_value(value: object | None, options: NormalizationOptions) -> str:
+    if value is None:
+        return ""
+    text = str(value)
+    if options.trim_whitespace:
+        text = text.strip()
+    return text
+
+
 def _is_excluded_item_field(field_name: str) -> bool:
     normalized = field_name.lower()
     if normalized in SKU_EXCLUSION_TOKENS:
@@ -81,6 +90,51 @@ def get_item_field_samples(field_name: str, limit: int = 20) -> list[str]:
         .all()
     )
     return [value for (value,) in results]
+
+
+def build_missing_item_candidates(
+    unmatched_rows: Iterable[dict[str, object]],
+    primary_upload_column: str,
+    secondary_upload_column: str | None,
+    secondary_item_field: str | None,
+    options: NormalizationOptions,
+) -> list[dict[str, object]]:
+    """Return de-duplicated candidate items for unmatched rows."""
+
+    candidates: list[dict[str, object]] = []
+    seen_keys: set[str] = set()
+    for entry in unmatched_rows:
+        if entry.get("reason") != "No match found":
+            continue
+        row = entry.get("row") or {}
+        raw_value = row.get(primary_upload_column)
+        normalized = normalize_match_value(raw_value, options)
+        if not normalized or normalized in seen_keys:
+            continue
+
+        name_value = _clean_display_value(raw_value, options)
+        if not name_value:
+            continue
+
+        fields: dict[str, str] = {}
+        if secondary_upload_column and secondary_item_field:
+            secondary_value = _clean_display_value(
+                row.get(secondary_upload_column), options
+            )
+            if secondary_value:
+                fields[secondary_item_field] = secondary_value
+
+        candidates.append(
+            {
+                "name": name_value,
+                "fields": fields,
+                "normalized": normalized,
+                "row_index": entry.get("row_index"),
+            }
+        )
+        seen_keys.add(normalized)
+
+    return candidates
 
 
 def _parse_quantity(value: object | None) -> Decimal:

@@ -71,6 +71,8 @@ class Config:
         "INVENTORY_REMOVE_REASONS",
         "Damage,Expired,Quality Hold,Scrap,Adjustment,Other",
     )
+    PHYS_INV_AISLE_MODE = os.getenv("PHYS_INV_AISLE_MODE", "row")
+    PHYS_INV_AISLE_REGEX = os.getenv("PHYS_INV_AISLE_REGEX")
 
     ZEBRA_PRINTER_HOST = os.getenv("ZEBRA_PRINTER_HOST", "localhost")
     ZEBRA_PRINTER_PORT = int(os.getenv("ZEBRA_PRINTER_PORT", 9100))

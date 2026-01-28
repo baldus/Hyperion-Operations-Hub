@@ -4,6 +4,9 @@
 <p class="field-note">Created {{ snapshot.created_at.strftime('%Y-%m-%d %H:%M') }}{% if snapshot.source_filename %} from {{ snapshot.source_filename }}{% endif %}.</p>
 <div class="mb-3">
   <a href="{{ url_for('inventory.physical_inventory_count_sheet', snapshot_id=snapshot.id) }}" class="btn btn-outline-primary">Location Count Sheet</a>
+  <a href="{{ url_for('inventory.physical_inventory_count_sheet_export', snapshot_id=snapshot.id) }}" class="btn btn-outline-secondary">Download Count Sheet CSV</a>
+  <a href="{{ url_for('inventory.physical_inventory_count_sheet_by_aisle', snapshot_id=snapshot.id) }}" class="btn btn-outline-primary">Count Sheets (By Aisle)</a>
+  <a href="{{ url_for('inventory.physical_inventory_count_sheet_export_by_aisle', snapshot_id=snapshot.id) }}" class="btn btn-outline-secondary">Export Count Sheets by Aisle</a>
   <a href="{{ url_for('inventory.physical_inventory_counts', snapshot_id=snapshot.id) }}" class="btn btn-outline-secondary">Enter Counts</a>
   <a href="{{ url_for('inventory.physical_inventory_reconciliation', snapshot_id=snapshot.id) }}" class="btn btn-outline-secondary">Reconciliation Summary</a>
   <a href="{{ url_for('inventory.physical_inventory_unmatched_export', snapshot_id=snapshot.id) }}" class="btn btn-outline-secondary">Download Unmatched</a>
@@ -16,6 +19,7 @@
       <li><strong>Matched:</strong> {{ snapshot.matched_rows }}</li>
       <li><strong>Unmatched:</strong> {{ snapshot.unmatched_rows }}</li>
       <li><strong>Ambiguous:</strong> {{ snapshot.ambiguous_rows }}</li>
+      <li><strong>Items Created:</strong> {{ snapshot.created_items or 0 }}</li>
       <li><strong>Primary Match:</strong> {{ snapshot.primary_upload_column }} → Item.{{ snapshot.primary_item_field }}</li>
       {% if snapshot.secondary_upload_column and snapshot.secondary_item_field %}
       <li><strong>Secondary Match:</strong> {{ snapshot.secondary_upload_column }} → Item.{{ snapshot.secondary_item_field }}</li>
