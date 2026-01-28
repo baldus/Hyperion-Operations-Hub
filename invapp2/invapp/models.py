@@ -7,6 +7,7 @@ from typing import ClassVar
 from flask import current_app
 from flask_sqlalchemy import BaseQuery
 from sqlalchemy import inspect
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.orm import synonym
@@ -507,8 +508,16 @@ class PhysicalInventorySnapshot(db.Model):
     unmatched_rows = db.Column(db.Integer, nullable=False, default=0)
     ambiguous_rows = db.Column(db.Integer, nullable=False, default=0)
     created_items_count = db.Column(db.Integer, nullable=False, default=0)
-    unmatched_details = db.Column(db.JSON, nullable=True)
-    ambiguous_details = db.Column(db.JSON, nullable=True)
+    unmatched_details = db.Column(
+        JSONB().with_variant(db.JSON, "sqlite"),
+        nullable=False,
+        default=list,
+    )
+    ambiguous_details = db.Column(
+        JSONB().with_variant(db.JSON, "sqlite"),
+        nullable=False,
+        default=list,
+    )
 
     created_by = db.relationship("User", backref="physical_inventory_snapshots")
     lines = db.relationship(

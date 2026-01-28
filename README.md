@@ -80,6 +80,8 @@ Hyperion is **not** the system of record for inventory totals. Physical inventor
 - Optional toggle lets superusers create Items for unmatched rows.
 - Item names come from the primary upload column; descriptions use the optional secondary column.
 - SKUs are auto-generated; matching is re-run after creation to avoid duplicates.
+- Snapshot diagnostics (created item counts + unmatched/ambiguous samples) require migrations; `db.create_all()` will not update existing tables.
+- Run: `cd invapp2 && alembic -c alembic.ini upgrade head`
 
 **Why Item Name is the primary key**
 ERP exports generally use human-readable Item names. Matching is exact and transparent by default, so the workflow relies on the Item name column from the ERP file instead of internal IDs.

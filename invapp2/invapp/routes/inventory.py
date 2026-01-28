@@ -554,6 +554,8 @@ PHYSICAL_INVENTORY_DUPLICATE_STRATEGIES = {
     "keep_last": "Keep the last quantity",
 }
 
+PHYSICAL_INVENTORY_DETAILS_SAMPLE_SIZE = 200
+
 COUNT_SHEET_HEADERS = [
     "Aisle",
     "Location Code",
@@ -627,6 +629,31 @@ def _aisle_sort_key(value: str) -> tuple[int, int, str]:
     if text.isdigit():
         return (0, int(text), text)
     return (1, 0, text)
+
+
+def _physical_inventory_snapshot_columns() -> set[str]:
+    try:
+        inspector = inspect(db.engine)
+        return {column["name"] for column in inspector.get_columns("physical_inventory_snapshot")}
+    except SQLAlchemyError:
+        return set()
+
+
+def _ensure_physical_inventory_snapshot_schema() -> bool:
+    required_columns = {
+        "created_items_count",
+        "unmatched_details",
+        "ambiguous_details",
+    }
+    columns = _physical_inventory_snapshot_columns()
+    missing = sorted(required_columns - columns)
+    if missing:
+        flash(
+            "Database schema is out of date. Run: cd invapp2 && alembic -c alembic.ini upgrade head",
+            "danger",
+        )
+        return False
+    return True
 
 
 ############################
@@ -984,6 +1011,9 @@ def physical_inventory_import():
                 options=options,
             )
 
+            if not _ensure_physical_inventory_snapshot_schema():
+                return redirect(url_for("inventory.physical_inventory_import"))
+
             created_items_count = 0
             if create_missing_items:
                 candidates = build_missing_item_candidates(
@@ -1042,6 +1072,12 @@ def physical_inventory_import():
             totals = aggregate_matched_rows(
                 match_results["matched_rows"], duplicate_strategy
             )
+            unmatched_sample = match_results["unmatched_rows"][
+                :PHYSICAL_INVENTORY_DETAILS_SAMPLE_SIZE
+            ]
+            ambiguous_sample = match_results["ambiguous_rows"][
+                :PHYSICAL_INVENTORY_DETAILS_SAMPLE_SIZE
+            ]
 
             snapshot = PhysicalInventorySnapshot(
                 created_by_user_id=current_user.id if current_user else None,
@@ -1058,8 +1094,8 @@ def physical_inventory_import():
                 unmatched_rows=match_results["unmatched_count"],
                 ambiguous_rows=match_results["ambiguous_count"],
                 created_items_count=created_items_count,
-                unmatched_details=match_results["unmatched_rows"],
-                ambiguous_details=match_results["ambiguous_rows"],
+                unmatched_details=unmatched_sample,
+                ambiguous_details=ambiguous_sample,
             )
             db.session.add(snapshot)
             db.session.flush()
