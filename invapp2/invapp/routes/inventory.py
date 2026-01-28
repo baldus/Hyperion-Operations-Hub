@@ -27,6 +27,7 @@ from flask import (
     session,
     url_for,
 )
+from markupsafe import Markup, escape
 from sqlalchemy import asc, case, desc, func, inspect, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import aliased, joinedload, lazyload, load_only
@@ -101,6 +102,9 @@ UNASSIGNED_LOCATION_CODE = "UNASSIGNED"
 PLACEHOLDER_CREATION_MAX_RETRIES = 5
 PLACEHOLDER_CREATION_INITIAL_BACKOFF = 0.05
 LOCATION_SEARCH_LIMIT = 25
+PHYSICAL_INVENTORY_SCHEMA_UPDATE_COMMAND = (
+    "cd invapp2 && alembic -c alembic.ini upgrade head"
+)
 
 
 def _ensure_placeholder_location(loc_map: dict[str, "Location"]) -> "Location":
@@ -649,7 +653,10 @@ def _ensure_physical_inventory_snapshot_schema() -> bool:
     missing = sorted(required_columns - columns)
     if missing:
         flash(
-            "Database schema is out of date. Run: cd invapp2 && alembic -c alembic.ini upgrade head",
+            Markup(
+                "Database schema is out of date. Run:"
+                f"<pre><code>{escape(PHYSICAL_INVENTORY_SCHEMA_UPDATE_COMMAND)}</code></pre>"
+            ),
             "danger",
         )
         return False
@@ -878,6 +885,8 @@ def inventory_home():
 @superuser_required
 def physical_inventory_import():
     if request.method == "POST":
+        if not _ensure_physical_inventory_snapshot_schema():
+            return redirect(url_for("inventory.physical_inventory_import"))
         step = request.form.get("step") or "upload"
         if step == "mapping":
             import_token = request.form.get("import_token", "")
@@ -1010,9 +1019,6 @@ def physical_inventory_import():
                 secondary_item_field=secondary_item_field,
                 options=options,
             )
-
-            if not _ensure_physical_inventory_snapshot_schema():
-                return redirect(url_for("inventory.physical_inventory_import"))
 
             created_items_count = 0
             if create_missing_items:
