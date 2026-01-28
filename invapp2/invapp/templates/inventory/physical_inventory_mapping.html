@@ -118,18 +118,51 @@
     <a href="{{ url_for('inventory.physical_inventory_import') }}" class="btn btn-secondary">Start Over</a>
   </div>
 
+  <div class="card mb-4">
+    <div class="card-body">
+      <h4>Create Missing Items</h4>
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" name="create_missing_items" id="create_missing_items" {% if create_missing_items %}checked{% endif %}>
+        <label class="form-check-label" for="create_missing_items">
+          Create missing items from unmatched rows (superuser only)
+        </label>
+      </div>
+      <p class="small text-muted mb-0">
+        When enabled, unmatched rows with missing Items will be created before importing ERP totals.
+      </p>
+    </div>
+  </div>
+
   <div class="card mb-4" id="matching-results" style="display:none;">
     <div class="card-body">
       <h4>Match Preview</h4>
       <p id="match-summary" class="mb-2"></p>
       <div class="row">
         <div class="col-md-6">
-          <h5>Unmatched Samples</h5>
-          <ul id="unmatched-samples" class="small text-muted"></ul>
+          <h5>Missing Item Samples</h5>
+          <ul id="missing-item-samples" class="small text-muted"></ul>
+          <h5 class="mt-3">Missing Value Samples</h5>
+          <ul id="missing-value-samples" class="small text-muted"></ul>
         </div>
         <div class="col-md-6">
           <h5>Ambiguous Samples</h5>
           <ul id="ambiguous-samples" class="small text-muted"></ul>
+        </div>
+      </div>
+      <div class="mt-3" id="create-items-preview" style="display:none;">
+        <h5>Items to Create</h5>
+        <p class="small text-muted" id="create-items-count"></p>
+        <div class="table-responsive">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>Item Name</th>
+                <th>Description</th>
+                <th id="secondary-field-header" style="display:none;"></th>
+              </tr>
+            </thead>
+            <tbody id="create-items-body"></tbody>
+          </table>
         </div>
       </div>
       <div class="mt-3">
@@ -184,12 +217,18 @@
     const testBtn = document.getElementById('test-matching');
     const resultsCard = document.getElementById('matching-results');
     const matchSummary = document.getElementById('match-summary');
-    const unmatchedList = document.getElementById('unmatched-samples');
+    const missingItemList = document.getElementById('missing-item-samples');
+    const missingValueList = document.getElementById('missing-value-samples');
     const ambiguousList = document.getElementById('ambiguous-samples');
     const fieldsUsed = document.getElementById('fields-used');
     const fieldSelect = document.getElementById('primary-item-field');
     const fieldSamplesCard = document.getElementById('field-samples');
     const fieldSampleList = document.getElementById('field-sample-list');
+    const createMissingItemsToggle = document.getElementById('create_missing_items');
+    const createItemsPreview = document.getElementById('create-items-preview');
+    const createItemsCount = document.getElementById('create-items-count');
+    const createItemsBody = document.getElementById('create-items-body');
+    const secondaryFieldHeader = document.getElementById('secondary-field-header');
 
     function clearList(el) {
       while (el.firstChild) {
@@ -210,6 +249,35 @@
         li.textContent = item;
         el.appendChild(li);
       });
+    }
+
+    function renderCreateItems(items, totalCount) {
+      clearList(createItemsBody);
+      if (!items || items.length === 0) {
+        createItemsPreview.style.display = 'none';
+        return;
+      }
+      items.forEach((item) => {
+        const tr = document.createElement('tr');
+        const nameCell = document.createElement('td');
+        nameCell.textContent = item.name || '';
+        const descCell = document.createElement('td');
+        descCell.textContent = item.description || '';
+        tr.appendChild(nameCell);
+        tr.appendChild(descCell);
+        if (item.secondary_field_label) {
+          secondaryFieldHeader.textContent = item.secondary_field_label;
+          secondaryFieldHeader.style.display = '';
+          const secondaryCell = document.createElement('td');
+          secondaryCell.textContent = item.secondary_field_value || '';
+          tr.appendChild(secondaryCell);
+        } else {
+          secondaryFieldHeader.style.display = 'none';
+        }
+        createItemsBody.appendChild(tr);
+      });
+      createItemsCount.textContent = `${totalCount} item${totalCount === 1 ? '' : 's'} will be created if enabled.`;
+      createItemsPreview.style.display = createMissingItemsToggle && createMissingItemsToggle.checked ? 'block' : 'none';
     }
 
     function fetchFieldSamples() {
@@ -266,13 +334,20 @@
         }
         matchSummary.textContent = `Match rate: ${data.match_rate.toFixed(1)}% | Matched: ${data.matched_count} | Unmatched: ${data.unmatched_count} | Ambiguous: ${data.ambiguous_count}`;
 
-        appendList(unmatchedList, (data.unmatched_rows || []).map((row) => {
+        appendList(missingItemList, (data.missing_item_rows || []).map((row) => {
+          return `Row ${row.row_index}: ${row.reason}`;
+        }));
+
+        appendList(missingValueList, (data.missing_value_rows || []).map((row) => {
           return `Row ${row.row_index}: ${row.reason}`;
         }));
 
         appendList(ambiguousList, (data.ambiguous_rows || []).map((row) => {
           return `Row ${row.row_index}: ${row.reason}`;
         }));
+
+        const createItems = data.missing_item_candidates || {};
+        renderCreateItems(createItems.preview || [], createItems.count || 0);
 
         const fields = data.fields_used || {};
         fieldsUsed.textContent = `Upload column: ${fields.primary_upload_column} → Item.${fields.primary_item_field}` + (fields.secondary_upload_column ? ` (secondary: ${fields.secondary_upload_column} → Item.${fields.secondary_item_field})` : '') + ` | Quantity: ${fields.quantity_column}`;
@@ -283,6 +358,16 @@
         resultsCard.style.display = 'block';
       });
     });
+
+    if (createMissingItemsToggle) {
+      createMissingItemsToggle.addEventListener('change', function () {
+        if (createMissingItemsToggle.checked && createItemsBody.childElementCount > 0) {
+          createItemsPreview.style.display = 'block';
+        } else {
+          createItemsPreview.style.display = 'none';
+        }
+      });
+    }
   })();
 </script>
 {% endblock %}

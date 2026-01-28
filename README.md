@@ -48,7 +48,7 @@ Hyperion is **not** the system of record for inventory totals. Physical inventor
 **Workflow**
 1. Upload ERP inventory totals (no locations).
 2. Explicitly map upload columns to Item DB fields for matching.
-3. Generate location-based count sheets.
+3. Generate location-based count sheets (single sheet or by aisle).
 4. Enter physical counts.
 5. Review reconciliation summary (ERP totals vs counted totals).
 
@@ -69,11 +69,29 @@ ERP exports generally use human-readable Item names. Matching is exact and trans
 **SKU is never used**
 SKU is internal-only and **must not** appear in matching dropdowns. Uploads do **not** require SKU and SKU is never used to match ERP totals.
 
+**Count sheets (by aisle)**
+- The snapshot page includes a **Count Sheets (By Aisle)** view plus an **Export Count Sheets by Aisle** ZIP option.
+- The ZIP export contains one CSV per aisle: `count_sheet_snapshot_<id>_aisle_<AISLE>.csv`.
+- Count sheet columns include: Aisle, Location code, Location description, Item name, Item description, SKU (display only), ERP total qty, Counted qty, Notes.
+
+**Aisle derivation (configurable)**
+- Default aisle key uses `Location.row` (computed from the `Level-Row-Bay` code like `1-A-1` → row `A`).
+- If you prefer a different convention, set:
+  - `PHYS_INV_AISLE_MODE=row|level|prefix`
+  - `PHYS_INV_AISLE_REGEX` (optional, used when `prefix` mode is selected; first match or `(?P<aisle>...)` group wins).
+
+**Create missing items from ERP totals**
+- The match preview now categorizes unmatched rows (missing item vs missing value vs ambiguous).
+- Superusers can enable **Create missing items** to create new Items before the snapshot is committed.
+- New Items use the primary upload column for `Item.name` and optional fields from the mapped secondary column (for example, `description` or `unit`).
+- Created items receive an auto-generated SKU and are recorded on the snapshot summary (`Items Created`).
+
 **Troubleshooting “0 matches”**
 - Confirm you mapped the correct ERP column to `Item.name`.
 - Verify the normalization settings (trim whitespace + case-insensitive are on by default).
 - Check for extra spaces/dashes in the ERP file or Item names that can be normalized.
 - If duplicates exist, configure the optional secondary match (e.g., `Item.description`).
+- If you expected aisle grouping, confirm `Location.code` follows the `Level-Row-Bay` format or set `PHYS_INV_AISLE_MODE` to `prefix` with a regex.
 
 ---
 
@@ -199,6 +217,8 @@ These are pulled directly from environment variables or startup scripts:
 | `PURCHASING_ATTACHMENT_UPLOAD_FOLDER` | Override attachment upload directory. | `<repo>/invapp2/invapp/static/purchase_request_attachments` | [`invapp2/config.py`](invapp2/config.py) |
 | `PURCHASING_ATTACHMENT_MAX_SIZE_MB` | Max attachment size (MB). | `25` | [`invapp2/config.py`](invapp2/config.py) |
 | `INVENTORY_REMOVE_REASONS` | CSV list of allowed inventory removal reasons. | `Damage,Expired,...` | [`invapp2/config.py`](invapp2/config.py) |
+| `PHYS_INV_AISLE_MODE` | Aisle derivation mode for count sheets (`row`, `level`, `prefix`). | `row` | [`invapp2/config.py`](invapp2/config.py) |
+| `PHYS_INV_AISLE_REGEX` | Optional regex for aisle derivation when using `prefix` mode. | (none) | [`invapp2/config.py`](invapp2/config.py) |
 | `ZEBRA_PRINTER_HOST` | Zebra printer host. | `localhost` | [`invapp2/config.py`](invapp2/config.py) |
 | `ZEBRA_PRINTER_PORT` | Zebra printer port. | `9100` | [`invapp2/config.py`](invapp2/config.py) |
 | `HOST` | Gunicorn bind host. | `0.0.0.0` | [`start_operations_console.sh`](start_operations_console.sh) |
