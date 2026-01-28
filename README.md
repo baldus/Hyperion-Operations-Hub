@@ -4,22 +4,23 @@ Hyperion Operations Hub is a Flask-based operations console for manufacturing te
 
 ## Table of Contents
 1. [Project Overview](#project-overview)
-2. [Quick Start](#quick-start)
-3. [Architecture & How It’s Organized](#architecture--how-its-organized)
-4. [Configuration](#configuration)
-5. [Web / UI Layer (Templates, Frontend, Static)](#web--ui-layer-templates-frontend-static)
-6. [API / Routes](#api--routes)
-7. [Database](#database)
-8. [Permissions / Roles](#permissions--roles)
-9. [Background Tasks / Schedules](#background-tasks--schedules)
-10. [Backups & Restore](#backups--restore)
-11. [Logging, Errors, and Debugging](#logging-errors-and-debugging)
-12. [Testing](#testing)
-13. [Usage Analysis & Pruning](#usage-analysis--pruning)
-14. [Deployment Notes](#deployment-notes)
-15. [Network Stability & Self-Healing (Linux Host)](#network-stability--self-healing-linux-host)
-16. [Contributing / Development Conventions](#contributing--development-conventions)
-17. [How to Make Common Changes](#how-to-make-common-changes)
+2. [Physical Inventory Snapshot & Reconciliation](#physical-inventory-snapshot--reconciliation)
+3. [Quick Start](#quick-start)
+4. [Architecture & How It’s Organized](#architecture--how-its-organized)
+5. [Configuration](#configuration)
+6. [Web / UI Layer (Templates, Frontend, Static)](#web--ui-layer-templates-frontend-static)
+7. [API / Routes](#api--routes)
+8. [Database](#database)
+9. [Permissions / Roles](#permissions--roles)
+10. [Background Tasks / Schedules](#background-tasks--schedules)
+11. [Backups & Restore](#backups--restore)
+12. [Logging, Errors, and Debugging](#logging-errors-and-debugging)
+13. [Testing](#testing)
+14. [Usage Analysis & Pruning](#usage-analysis--pruning)
+15. [Deployment Notes](#deployment-notes)
+16. [Network Stability & Self-Healing (Linux Host)](#network-stability--self-healing-linux-host)
+17. [Contributing / Development Conventions](#contributing--development-conventions)
+18. [How to Make Common Changes](#how-to-make-common-changes)
 
 ---
 
@@ -37,6 +38,42 @@ Hyperion Operations Hub is a Flask-based operations console for manufacturing te
 - **MDI (KPI Board) module**: dashboards, meeting deck, reporting UI, and API endpoints for KPI entries live in the MDI blueprint and its models. See [`invapp2/invapp/mdi`](invapp2/invapp/mdi) and [`invapp2/invapp/mdi/models.py`](invapp2/invapp/mdi/models.py).
 - **Automated backups with scheduling**: APScheduler-driven backups run in the Flask process, with storage and reporting in the backup service. See [`invapp2/invapp/services/backup_service.py`](invapp2/invapp/services/backup_service.py).
 - **Operations monitor (terminal UI)**: a separate monitor process surfaces health, logs, and backup status, launched by the startup scripts. See [`ops_monitor`](ops_monitor) and [`start_operations_console.sh`](start_operations_console.sh).
+
+---
+
+## Physical Inventory Snapshot & Reconciliation
+
+Hyperion is **not** the system of record for inventory totals. Physical inventory uses Hyperion as a reconciliation engine against ERP totals.
+
+**Workflow**
+1. Upload ERP inventory totals (no locations).
+2. Explicitly map upload columns to Item DB fields for matching.
+3. Generate location-based count sheets.
+4. Enter physical counts.
+5. Review reconciliation summary (ERP totals vs counted totals).
+
+**Upload formats**
+- `.csv`
+- `.tsv`
+- `.xlsx`
+
+**Explicit column-to-DB-field mapping**
+- **Primary match (required):** Upload column → `Item.name` (or another human-readable Item field).
+- **Secondary match (optional):** Upload column (e.g., Description) → `Item.description` to disambiguate duplicates.
+- **Quantity column (required):** identifies ERP totals in the upload.
+- **Normalization options:** trim whitespace, case-insensitive (default on), remove spaces, remove dashes/underscores.
+
+**Why Item Name is the primary key**
+ERP exports generally use human-readable Item names. Matching is exact and transparent by default, so the workflow relies on the Item name column from the ERP file instead of internal IDs.
+
+**SKU is never used**
+SKU is internal-only and **must not** appear in matching dropdowns. Uploads do **not** require SKU and SKU is never used to match ERP totals.
+
+**Troubleshooting “0 matches”**
+- Confirm you mapped the correct ERP column to `Item.name`.
+- Verify the normalization settings (trim whitespace + case-insensitive are on by default).
+- Check for extra spaces/dashes in the ERP file or Item names that can be normalized.
+- If duplicates exist, configure the optional secondary match (e.g., `Item.description`).
 
 ---
 

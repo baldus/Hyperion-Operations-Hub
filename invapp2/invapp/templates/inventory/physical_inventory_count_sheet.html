@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Location Count Sheet — Snapshot #{{ snapshot.id }}</h2>
+<p class="field-note">Print this sheet for floor counts. Counted Qty and Notes are intentionally blank.</p>
+<div class="table-responsive">
+  <table class="table table-sm">
+    <thead>
+      <tr>
+        <th>Location</th>
+        <th>Item Name</th>
+        <th>Description</th>
+        <th>ERP Total Qty</th>
+        <th>Counted Qty</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for line in lines %}
+      <tr>
+        <td>{{ line.item.default_location.code if line.item and line.item.default_location else 'UNLOCATED' }}</td>
+        <td>{{ line.item.name if line.item else 'Unknown Item' }}</td>
+        <td>{{ line.item.description if line.item else '' }}</td>
+        <td>{{ line.erp_quantity }}</td>
+        <td></td>
+        <td></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<a href="{{ url_for('inventory.physical_inventory_snapshot', snapshot_id=snapshot.id) }}" class="btn btn-secondary">Back to Snapshot</a>
+{% endblock %}

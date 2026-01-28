@@ -486,6 +486,53 @@ class ItemAttachment(db.Model):
     item = db.relationship("Item", back_populates="attachments")
 
 
+class PhysicalInventorySnapshot(db.Model):
+    __tablename__ = "physical_inventory_snapshot"
+
+    id = db.Column(db.Integer, primary_key=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_by_user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    source_filename = db.Column(db.String(255), nullable=True)
+    primary_upload_column = db.Column(db.String(255), nullable=False)
+    primary_item_field = db.Column(db.String(255), nullable=False)
+    secondary_upload_column = db.Column(db.String(255), nullable=True)
+    secondary_item_field = db.Column(db.String(255), nullable=True)
+    quantity_column = db.Column(db.String(255), nullable=False)
+    normalization_options = db.Column(db.JSON, nullable=False, default=dict)
+    duplicate_strategy = db.Column(db.String(32), nullable=False, default="sum")
+    total_rows = db.Column(db.Integer, nullable=False, default=0)
+    matched_rows = db.Column(db.Integer, nullable=False, default=0)
+    unmatched_rows = db.Column(db.Integer, nullable=False, default=0)
+    ambiguous_rows = db.Column(db.Integer, nullable=False, default=0)
+    unmatched_details = db.Column(db.JSON, nullable=True)
+    ambiguous_details = db.Column(db.JSON, nullable=True)
+
+    created_by = db.relationship("User", backref="physical_inventory_snapshots")
+    lines = db.relationship(
+        "PhysicalInventorySnapshotLine",
+        back_populates="snapshot",
+        cascade="all, delete-orphan",
+        order_by="PhysicalInventorySnapshotLine.id",
+    )
+
+
+class PhysicalInventorySnapshotLine(db.Model):
+    __tablename__ = "physical_inventory_snapshot_line"
+
+    id = db.Column(db.Integer, primary_key=True)
+    snapshot_id = db.Column(
+        db.Integer, db.ForeignKey("physical_inventory_snapshot.id"), nullable=False
+    )
+    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    erp_quantity = db.Column(db.Numeric(12, 3), nullable=False, default=0)
+    counted_quantity = db.Column(db.Numeric(12, 3), nullable=True)
+
+    snapshot = db.relationship("PhysicalInventorySnapshot", back_populates="lines")
+    item = db.relationship("Item")
+
+
 class Location(db.Model):
     __tablename__ = "location"
     id = db.Column(db.Integer, primary_key=True)

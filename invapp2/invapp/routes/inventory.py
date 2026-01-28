@@ -48,11 +48,20 @@ from invapp.models import (
     OrderComponent,
     OrderLine,
     OrderStatus,
+    PhysicalInventorySnapshot,
+    PhysicalInventorySnapshotLine,
     PurchaseRequest,
     Reservation,
     RoutingStepConsumption,
     User,
     db,
+)
+from invapp.services.physical_inventory import (
+    NormalizationOptions,
+    aggregate_matched_rows,
+    get_item_field_samples,
+    get_item_text_fields,
+    match_upload_rows,
 )
 from invapp.services.stock_transfer import (
     MoveLineRequest,
@@ -71,6 +80,7 @@ from invapp.utils.csv_schema import (
     expected_headers,
     resolve_import_mappings,
 )
+from invapp.utils.tabular_import import TabularImportError, parse_tabular_upload, preview_csv_text
 from invapp.utils.location_parser import parse_location_code
 from werkzeug.utils import secure_filename
 
@@ -524,6 +534,48 @@ def _prepare_stock_import_mapping_context(csv_text, selected_mappings=None, toke
     )
 
 
+PHYSICAL_INVENTORY_HEADER_ALIASES = {
+    "item_name": ["item name", "name", "item", "product", "item_name"],
+    "description": ["description", "item description", "item_desc"],
+    "quantity": ["quantity", "qty", "on_hand", "onhand", "total"],
+}
+
+PHYSICAL_INVENTORY_DUPLICATE_STRATEGIES = {
+    "sum": "Sum duplicate quantities",
+    "keep_first": "Keep the first quantity",
+    "keep_last": "Keep the last quantity",
+}
+
+
+def _auto_map_physical_inventory_headers(headers: list[str]) -> dict[str, str]:
+    normalized_headers = {header.strip().lower(): header for header in headers}
+    selections: dict[str, str] = {}
+    for key, aliases in PHYSICAL_INVENTORY_HEADER_ALIASES.items():
+        for alias in aliases:
+            header = normalized_headers.get(alias.lower())
+            if header:
+                selections[key] = header
+                break
+    return selections
+
+
+def _prepare_physical_inventory_mapping_context(
+    csv_text: str,
+    selected_mappings: dict[str, str] | None = None,
+    token: str | None = None,
+):
+    headers, sample_rows = preview_csv_text(csv_text)
+    import_token = _store_import_csv("physical_inventory", csv_text, token=token)
+    return {
+        "headers": headers,
+        "sample_rows": sample_rows,
+        "import_token": import_token,
+        "selected_mappings": selected_mappings or {},
+        "item_fields": get_item_text_fields(),
+        "duplicate_strategies": PHYSICAL_INVENTORY_DUPLICATE_STRATEGIES,
+    }
+
+
 ############################
 # HOME
 ############################
@@ -736,6 +788,462 @@ def inventory_home():
         near_stock_items=near_stock_items,
         inventory_chart_data=chart_datasets,
         inventory_chart_default=default_chart_key,
+    )
+
+
+############################
+# PHYSICAL INVENTORY
+############################
+@bp.route("/physical-inventory", methods=["GET", "POST"])
+@superuser_required
+def physical_inventory_import():
+    if request.method == "POST":
+        step = request.form.get("step") or "upload"
+        if step == "mapping":
+            import_token = request.form.get("import_token", "")
+            if not import_token:
+                flash("No import data found. Please upload the file again.", "danger")
+                return redirect(url_for("inventory.physical_inventory_import"))
+
+            csv_text = _load_import_csv("physical_inventory", import_token)
+            if csv_text is None:
+                flash(
+                    "Could not read the uploaded file data. Please upload the file again.",
+                    "danger",
+                )
+                return redirect(url_for("inventory.physical_inventory_import"))
+
+            reader = csv.DictReader(io.StringIO(csv_text))
+            if not reader.fieldnames:
+                flash("Uploaded file does not contain a header row.", "danger")
+                _remove_import_csv("physical_inventory", import_token)
+                return redirect(url_for("inventory.physical_inventory_import"))
+
+            rows = list(reader)
+            headers = reader.fieldnames
+
+            primary_upload_column = request.form.get("primary_upload_column", "")
+            primary_item_field = request.form.get("primary_item_field", "")
+            secondary_upload_column = request.form.get("secondary_upload_column") or None
+            secondary_item_field = request.form.get("secondary_item_field") or None
+            quantity_column = request.form.get("quantity_column", "")
+            duplicate_strategy = request.form.get("duplicate_strategy", "sum")
+
+            if secondary_upload_column and not secondary_item_field:
+                flash(
+                    "Select a secondary Item field to disambiguate duplicate matches.",
+                    "danger",
+                )
+                secondary_upload_column = None
+            if secondary_item_field and not secondary_upload_column:
+                flash(
+                    "Select an upload column for the secondary match field.",
+                    "danger",
+                )
+                secondary_item_field = None
+
+            missing_fields = []
+            if not primary_upload_column:
+                missing_fields.append("Upload column for Item Name")
+            if not primary_item_field:
+                missing_fields.append("Item DB field to match against")
+            if not quantity_column:
+                missing_fields.append("Quantity column")
+
+            if missing_fields:
+                flash(
+                    "Missing required fields: " + ", ".join(missing_fields) + ".",
+                    "danger",
+                )
+                selected_mappings = {
+                    "item_name": primary_upload_column,
+                    "description": secondary_upload_column or "",
+                    "quantity": quantity_column,
+                }
+                context = _prepare_physical_inventory_mapping_context(
+                    csv_text,
+                    selected_mappings=selected_mappings,
+                    token=import_token,
+                )
+                context.update(
+                    {
+                        "selected_primary_item_field": primary_item_field,
+                        "selected_secondary_item_field": secondary_item_field,
+                        "source_filename": request.form.get("source_filename", ""),
+                        "options": {
+                            "trim_whitespace": bool(
+                                request.form.get("trim_whitespace")
+                            ),
+                            "case_insensitive": bool(
+                                request.form.get("case_insensitive")
+                            ),
+                            "remove_spaces": bool(request.form.get("remove_spaces")),
+                            "remove_dashes_underscores": bool(
+                                request.form.get("remove_dashes_underscores")
+                            ),
+                        },
+                        "duplicate_strategy": duplicate_strategy,
+                    }
+                )
+                return render_template(
+                    "inventory/physical_inventory_mapping.html", **context
+                )
+
+            allowed_fields = {field["name"] for field in get_item_text_fields()}
+            if primary_item_field not in allowed_fields:
+                flash("Selected Item field is not available for matching.", "danger")
+                return redirect(url_for("inventory.physical_inventory_import"))
+            if secondary_item_field and secondary_item_field not in allowed_fields:
+                flash(
+                    "Selected secondary Item field is not available for matching.",
+                    "danger",
+                )
+                secondary_item_field = None
+
+            if primary_upload_column not in headers or quantity_column not in headers:
+                flash(
+                    "Selected columns were not found in the uploaded file. Please try again.",
+                    "danger",
+                )
+                return redirect(url_for("inventory.physical_inventory_import"))
+
+            options = NormalizationOptions(
+                trim_whitespace=bool(request.form.get("trim_whitespace", True)),
+                case_insensitive=bool(request.form.get("case_insensitive", True)),
+                remove_spaces=bool(request.form.get("remove_spaces")),
+                remove_dashes_underscores=bool(
+                    request.form.get("remove_dashes_underscores")
+                ),
+            )
+
+            match_results = match_upload_rows(
+                rows,
+                primary_upload_column=primary_upload_column,
+                primary_item_field=primary_item_field,
+                quantity_column=quantity_column,
+                secondary_upload_column=secondary_upload_column,
+                secondary_item_field=secondary_item_field,
+                options=options,
+            )
+
+            if duplicate_strategy not in PHYSICAL_INVENTORY_DUPLICATE_STRATEGIES:
+                duplicate_strategy = "sum"
+
+            totals = aggregate_matched_rows(
+                match_results["matched_rows"], duplicate_strategy
+            )
+
+            snapshot = PhysicalInventorySnapshot(
+                created_by_user_id=current_user.id if current_user else None,
+                source_filename=request.form.get("source_filename") or None,
+                primary_upload_column=primary_upload_column,
+                primary_item_field=primary_item_field,
+                secondary_upload_column=secondary_upload_column,
+                secondary_item_field=secondary_item_field,
+                quantity_column=quantity_column,
+                normalization_options=options.to_dict(),
+                duplicate_strategy=duplicate_strategy,
+                total_rows=match_results["total_rows"],
+                matched_rows=match_results["matched_count"],
+                unmatched_rows=match_results["unmatched_count"],
+                ambiguous_rows=match_results["ambiguous_count"],
+                unmatched_details=match_results["unmatched_rows"],
+                ambiguous_details=match_results["ambiguous_rows"],
+            )
+            db.session.add(snapshot)
+            db.session.flush()
+
+            for item_id, quantity in totals.items():
+                line = PhysicalInventorySnapshotLine(
+                    snapshot_id=snapshot.id,
+                    item_id=item_id,
+                    erp_quantity=quantity,
+                )
+                db.session.add(line)
+
+            db.session.commit()
+            _remove_import_csv("physical_inventory", import_token)
+
+            flash(
+                "Physical inventory snapshot created. "
+                f"Matched {match_results['matched_count']} rows.",
+                "success",
+            )
+            return redirect(
+                url_for("inventory.physical_inventory_snapshot", snapshot_id=snapshot.id)
+            )
+
+        file = request.files.get("file")
+        if not file or file.filename == "":
+            flash("No file uploaded.", "danger")
+            return redirect(request.url)
+
+        try:
+            csv_text = parse_tabular_upload(file)
+        except TabularImportError as exc:
+            flash(str(exc), "danger")
+            return redirect(request.url)
+
+        headers, _ = preview_csv_text(csv_text)
+        if not headers:
+            flash("Uploaded file does not contain a header row.", "danger")
+            return redirect(request.url)
+
+        auto_mappings = _auto_map_physical_inventory_headers(headers)
+        context = _prepare_physical_inventory_mapping_context(
+            csv_text, selected_mappings=auto_mappings
+        )
+        context.update(
+            {
+                "selected_primary_item_field": "name",
+                "selected_secondary_item_field": "description",
+                "source_filename": file.filename,
+                "options": {
+                    "trim_whitespace": True,
+                    "case_insensitive": True,
+                    "remove_spaces": False,
+                    "remove_dashes_underscores": False,
+                },
+                "duplicate_strategy": "sum",
+            }
+        )
+        if not context.get("import_token"):
+            flash(
+                "Could not prepare the uploaded data. Please try again.",
+                "danger",
+            )
+            return redirect(request.url)
+
+        return render_template("inventory/physical_inventory_mapping.html", **context)
+
+    return render_template("inventory/physical_inventory_upload.html")
+
+
+@bp.route("/physical-inventory/test-matching", methods=["POST"])
+@superuser_required
+def physical_inventory_test_matching():
+    payload = request.get_json(silent=True) or {}
+    import_token = payload.get("import_token") or ""
+    csv_text = _load_import_csv("physical_inventory", import_token)
+    if csv_text is None:
+        return jsonify({"error": "No import data found."}), 400
+
+    reader = csv.DictReader(io.StringIO(csv_text))
+    if not reader.fieldnames:
+        return jsonify({"error": "Uploaded file does not contain a header row."}), 400
+
+    rows = list(reader)
+
+    primary_upload_column = payload.get("primary_upload_column") or ""
+    primary_item_field = payload.get("primary_item_field") or ""
+    quantity_column = payload.get("quantity_column") or ""
+    secondary_upload_column = payload.get("secondary_upload_column") or None
+    secondary_item_field = payload.get("secondary_item_field") or None
+
+    if not primary_upload_column or not primary_item_field or not quantity_column:
+        return jsonify({"error": "Missing required mapping selections."}), 400
+
+    options = NormalizationOptions(
+        trim_whitespace=bool(payload.get("trim_whitespace", True)),
+        case_insensitive=bool(payload.get("case_insensitive", True)),
+        remove_spaces=bool(payload.get("remove_spaces")),
+        remove_dashes_underscores=bool(payload.get("remove_dashes_underscores")),
+    )
+
+    try:
+        match_results = match_upload_rows(
+            rows,
+            primary_upload_column=primary_upload_column,
+            primary_item_field=primary_item_field,
+            quantity_column=quantity_column,
+            secondary_upload_column=secondary_upload_column,
+            secondary_item_field=secondary_item_field,
+            options=options,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify(
+        {
+            "match_rate": match_results["match_rate"],
+            "matched_count": match_results["matched_count"],
+            "unmatched_count": match_results["unmatched_count"],
+            "ambiguous_count": match_results["ambiguous_count"],
+            "unmatched_rows": match_results["unmatched_rows"][:5],
+            "ambiguous_rows": match_results["ambiguous_rows"][:5],
+            "fields_used": {
+                "primary_upload_column": primary_upload_column,
+                "primary_item_field": primary_item_field,
+                "secondary_upload_column": secondary_upload_column,
+                "secondary_item_field": secondary_item_field,
+                "quantity_column": quantity_column,
+            },
+        }
+    )
+
+
+@bp.route("/physical-inventory/field-samples")
+@superuser_required
+def physical_inventory_field_samples():
+    field_name = request.args.get("field", "")
+    samples = get_item_field_samples(field_name)
+    return jsonify({"field": field_name, "samples": samples})
+
+
+@bp.route("/physical-inventory/snapshots")
+@superuser_required
+def physical_inventory_snapshots():
+    snapshots = (
+        PhysicalInventorySnapshot.query.order_by(PhysicalInventorySnapshot.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    return render_template(
+        "inventory/physical_inventory_snapshots.html", snapshots=snapshots
+    )
+
+
+@bp.route("/physical-inventory/<int:snapshot_id>")
+@superuser_required
+def physical_inventory_snapshot(snapshot_id: int):
+    snapshot = PhysicalInventorySnapshot.query.get_or_404(snapshot_id)
+    lines = (
+        PhysicalInventorySnapshotLine.query.options(joinedload(PhysicalInventorySnapshotLine.item))
+        .filter_by(snapshot_id=snapshot_id)
+        .all()
+    )
+    return render_template(
+        "inventory/physical_inventory_snapshot.html",
+        snapshot=snapshot,
+        lines=lines,
+    )
+
+
+@bp.route("/physical-inventory/<int:snapshot_id>/counts", methods=["GET", "POST"])
+@superuser_required
+def physical_inventory_counts(snapshot_id: int):
+    snapshot = PhysicalInventorySnapshot.query.get_or_404(snapshot_id)
+    lines = (
+        PhysicalInventorySnapshotLine.query.options(
+            joinedload(PhysicalInventorySnapshotLine.item).joinedload(Item.default_location)
+        )
+        .filter_by(snapshot_id=snapshot_id)
+        .all()
+    )
+
+    if request.method == "POST":
+        for line in lines:
+            value = request.form.get(f"counted_{line.id}")
+            if value is None or str(value).strip() == "":
+                line.counted_quantity = None
+                continue
+            parsed = _parse_decimal(value)
+            line.counted_quantity = parsed if parsed is not None else None
+        db.session.commit()
+        flash("Counted quantities updated.", "success")
+        return redirect(
+            url_for("inventory.physical_inventory_counts", snapshot_id=snapshot_id)
+        )
+
+    return render_template(
+        "inventory/physical_inventory_counts.html",
+        snapshot=snapshot,
+        lines=lines,
+    )
+
+
+@bp.route("/physical-inventory/<int:snapshot_id>/count-sheet")
+@superuser_required
+def physical_inventory_count_sheet(snapshot_id: int):
+    snapshot = PhysicalInventorySnapshot.query.get_or_404(snapshot_id)
+    lines = (
+        PhysicalInventorySnapshotLine.query.options(
+            joinedload(PhysicalInventorySnapshotLine.item).joinedload(Item.default_location)
+        )
+        .filter_by(snapshot_id=snapshot_id)
+        .all()
+    )
+    return render_template(
+        "inventory/physical_inventory_count_sheet.html",
+        snapshot=snapshot,
+        lines=lines,
+    )
+
+
+@bp.route("/physical-inventory/<int:snapshot_id>/reconciliation")
+@superuser_required
+def physical_inventory_reconciliation(snapshot_id: int):
+    snapshot = PhysicalInventorySnapshot.query.get_or_404(snapshot_id)
+    lines = (
+        PhysicalInventorySnapshotLine.query.options(
+            joinedload(PhysicalInventorySnapshotLine.item).joinedload(Item.default_location)
+        )
+        .filter_by(snapshot_id=snapshot_id)
+        .all()
+    )
+
+    reconciliation_rows = []
+    for line in lines:
+        counted = line.counted_quantity
+        erp = line.erp_quantity or Decimal(0)
+        variance = None
+        status = "UNCOUNTED"
+        if line.item and line.item.default_location is None:
+            status = "UNLOCATED"
+        if counted is not None:
+            variance = Decimal(counted) - Decimal(erp)
+            if variance == 0:
+                status = "MATCH"
+            elif variance > 0:
+                status = "OVER"
+            else:
+                status = "SHORT"
+        reconciliation_rows.append(
+            {
+                "item": line.item,
+                "erp": erp,
+                "counted": counted,
+                "variance": variance,
+                "status": status,
+            }
+        )
+
+    return render_template(
+        "inventory/physical_inventory_reconciliation.html",
+        snapshot=snapshot,
+        reconciliation_rows=reconciliation_rows,
+    )
+
+
+@bp.route("/physical-inventory/<int:snapshot_id>/unmatched.csv")
+@superuser_required
+def physical_inventory_unmatched_export(snapshot_id: int):
+    snapshot = PhysicalInventorySnapshot.query.get_or_404(snapshot_id)
+    rows = snapshot.unmatched_details or []
+    ambiguous_rows = snapshot.ambiguous_details or []
+    combined = rows + ambiguous_rows
+    if not combined:
+        return Response("", mimetype="text/csv")
+
+    headers = sorted(
+        {
+            key
+            for entry in combined
+            for key in (entry.get("row") or {}).keys()
+        }
+    )
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["reason", "row_index", *headers])
+    for entry in combined:
+        row = entry.get("row") or {}
+        writer.writerow(
+            [entry.get("reason", ""), entry.get("row_index", ""), *[row.get(h, "") for h in headers]]
+        )
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=unmatched_rows.csv"},
     )
 
 

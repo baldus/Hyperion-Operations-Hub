@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Physical Inventory Snapshot #{{ snapshot.id }}</h2>
+<p class="field-note">Created {{ snapshot.created_at.strftime('%Y-%m-%d %H:%M') }}{% if snapshot.source_filename %} from {{ snapshot.source_filename }}{% endif %}.</p>
+<div class="mb-3">
+  <a href="{{ url_for('inventory.physical_inventory_count_sheet', snapshot_id=snapshot.id) }}" class="btn btn-outline-primary">Location Count Sheet</a>
+  <a href="{{ url_for('inventory.physical_inventory_counts', snapshot_id=snapshot.id) }}" class="btn btn-outline-secondary">Enter Counts</a>
+  <a href="{{ url_for('inventory.physical_inventory_reconciliation', snapshot_id=snapshot.id) }}" class="btn btn-outline-secondary">Reconciliation Summary</a>
+  <a href="{{ url_for('inventory.physical_inventory_unmatched_export', snapshot_id=snapshot.id) }}" class="btn btn-outline-secondary">Download Unmatched</a>
+</div>
+<div class="card mb-4">
+  <div class="card-body">
+    <h4>Snapshot Summary</h4>
+    <ul class="list-unstyled">
+      <li><strong>Total Rows:</strong> {{ snapshot.total_rows }}</li>
+      <li><strong>Matched:</strong> {{ snapshot.matched_rows }}</li>
+      <li><strong>Unmatched:</strong> {{ snapshot.unmatched_rows }}</li>
+      <li><strong>Ambiguous:</strong> {{ snapshot.ambiguous_rows }}</li>
+      <li><strong>Primary Match:</strong> {{ snapshot.primary_upload_column }} → Item.{{ snapshot.primary_item_field }}</li>
+      {% if snapshot.secondary_upload_column and snapshot.secondary_item_field %}
+      <li><strong>Secondary Match:</strong> {{ snapshot.secondary_upload_column }} → Item.{{ snapshot.secondary_item_field }}</li>
+      {% endif %}
+      <li><strong>Quantity Column:</strong> {{ snapshot.quantity_column }}</li>
+      <li><strong>Duplicate Handling:</strong> {{ snapshot.duplicate_strategy }}</li>
+    </ul>
+  </div>
+</div>
+
+<h3>Matched Snapshot Lines</h3>
+{% if lines %}
+<div class="table-responsive">
+  <table class="table table-sm">
+    <thead>
+      <tr>
+        <th>Item</th>
+        <th>Description</th>
+        <th>ERP Total</th>
+        <th>Counted</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for line in lines %}
+      <tr>
+        <td>{{ line.item.name if line.item else 'Unknown Item' }}</td>
+        <td>{{ line.item.description if line.item else '' }}</td>
+        <td>{{ line.erp_quantity }}</td>
+        <td>{{ line.counted_quantity if line.counted_quantity is not none else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p>No matched lines were created for this snapshot.</p>
+{% endif %}
+{% endblock %}
