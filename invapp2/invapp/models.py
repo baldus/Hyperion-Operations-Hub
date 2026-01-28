@@ -506,6 +506,7 @@ class PhysicalInventorySnapshot(db.Model):
     matched_rows = db.Column(db.Integer, nullable=False, default=0)
     unmatched_rows = db.Column(db.Integer, nullable=False, default=0)
     ambiguous_rows = db.Column(db.Integer, nullable=False, default=0)
+    created_items_count = db.Column(db.Integer, nullable=False, default=0)
     unmatched_details = db.Column(db.JSON, nullable=True)
     ambiguous_details = db.Column(db.JSON, nullable=True)
 

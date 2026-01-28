@@ -63,6 +63,24 @@ Hyperion is **not** the system of record for inventory totals. Physical inventor
 - **Quantity column (required):** identifies ERP totals in the upload.
 - **Normalization options:** trim whitespace, case-insensitive (default on), remove spaces, remove dashes/underscores.
 
+**Count sheets by aisle**
+- Count sheets can be exported as a single CSV or grouped by aisle (ZIP of one CSV per aisle).
+- Aisle is derived from Location conventions:
+  - Default: `Location.row` (parsed from `Level-Row-Bay` like `1-A-1` → aisle `A`).
+  - If no row is available, fall back to parsing `Location.code` segments.
+- Override with config:
+  - `PHYS_INV_AISLE_MODE=row|level|prefix`
+  - `PHYS_INV_AISLE_REGEX=<regex>` (optional; named group `aisle` is preferred)
+
+**SKU display (count sheets only)**
+- SKU is shown on printed/exported count sheets for floor convenience.
+- SKU is **display-only** and never used for matching or import mappings.
+
+**Create missing items from upload**
+- Optional toggle lets superusers create Items for unmatched rows.
+- Item names come from the primary upload column; descriptions use the optional secondary column.
+- SKUs are auto-generated; matching is re-run after creation to avoid duplicates.
+
 **Why Item Name is the primary key**
 ERP exports generally use human-readable Item names. Matching is exact and transparent by default, so the workflow relies on the Item name column from the ERP file instead of internal IDs.
 
@@ -74,6 +92,7 @@ SKU is internal-only and **must not** appear in matching dropdowns. Uploads do *
 - Verify the normalization settings (trim whitespace + case-insensitive are on by default).
 - Check for extra spaces/dashes in the ERP file or Item names that can be normalized.
 - If duplicates exist, configure the optional secondary match (e.g., `Item.description`).
+- If items are genuinely missing, enable the create-missing-items option to add them safely.
 
 ---
 
@@ -199,6 +218,8 @@ These are pulled directly from environment variables or startup scripts:
 | `PURCHASING_ATTACHMENT_UPLOAD_FOLDER` | Override attachment upload directory. | `<repo>/invapp2/invapp/static/purchase_request_attachments` | [`invapp2/config.py`](invapp2/config.py) |
 | `PURCHASING_ATTACHMENT_MAX_SIZE_MB` | Max attachment size (MB). | `25` | [`invapp2/config.py`](invapp2/config.py) |
 | `INVENTORY_REMOVE_REASONS` | CSV list of allowed inventory removal reasons. | `Damage,Expired,...` | [`invapp2/config.py`](invapp2/config.py) |
+| `PHYS_INV_AISLE_MODE` | Aisle derivation mode (`row`, `level`, `prefix`). | `row` | [`invapp2/config.py`](invapp2/config.py) |
+| `PHYS_INV_AISLE_REGEX` | Optional regex for aisle derivation (named group `aisle` preferred). | (none) | [`invapp2/config.py`](invapp2/config.py) |
 | `ZEBRA_PRINTER_HOST` | Zebra printer host. | `localhost` | [`invapp2/config.py`](invapp2/config.py) |
 | `ZEBRA_PRINTER_PORT` | Zebra printer port. | `9100` | [`invapp2/config.py`](invapp2/config.py) |
 | `HOST` | Gunicorn bind host. | `0.0.0.0` | [`start_operations_console.sh`](start_operations_console.sh) |

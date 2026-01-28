@@ -7,6 +7,7 @@ import secrets
 import tempfile
 import time
 import uuid
+import zipfile
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -37,6 +38,7 @@ from invapp.permissions import resolve_edit_roles
 from invapp.security import require_admin_or_superuser, require_any_role, require_roles
 from invapp.superuser import is_superuser, superuser_required
 from invapp.models import (
+    AdminAuditLog,
     Batch,
     BillOfMaterial,
     BillOfMaterialComponent,
@@ -59,6 +61,7 @@ from invapp.models import (
 from invapp.services.physical_inventory import (
     NormalizationOptions,
     aggregate_matched_rows,
+    build_missing_item_candidates,
     get_item_field_samples,
     get_item_text_fields,
     match_upload_rows,
@@ -80,7 +83,12 @@ from invapp.utils.csv_schema import (
     expected_headers,
     resolve_import_mappings,
 )
-from invapp.utils.tabular_import import TabularImportError, parse_tabular_upload, preview_csv_text
+from invapp.utils.tabular_import import (
+    TabularImportError,
+    parse_tabular_upload,
+    preview_csv_text,
+)
+from invapp.utils.physical_inventory import get_location_aisle
 from invapp.utils.location_parser import parse_location_code
 from werkzeug.utils import secure_filename
 
@@ -546,6 +554,18 @@ PHYSICAL_INVENTORY_DUPLICATE_STRATEGIES = {
     "keep_last": "Keep the last quantity",
 }
 
+COUNT_SHEET_HEADERS = [
+    "Aisle",
+    "Location Code",
+    "Location Description",
+    "Item Name",
+    "Item Description",
+    "SKU",
+    "ERP Total Qty",
+    "Counted Qty",
+    "Notes",
+]
+
 
 def _auto_map_physical_inventory_headers(headers: list[str]) -> dict[str, str]:
     normalized_headers = {header.strip().lower(): header for header in headers}
@@ -574,6 +594,39 @@ def _prepare_physical_inventory_mapping_context(
         "item_fields": get_item_text_fields(),
         "duplicate_strategies": PHYSICAL_INVENTORY_DUPLICATE_STRATEGIES,
     }
+
+
+def _build_count_sheet_rows(
+    lines: list[PhysicalInventorySnapshotLine],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for line in lines:
+        item = line.item
+        location = item.default_location if item else None
+        rows.append(
+            {
+                "aisle": get_location_aisle(location),
+                "location_code": location.code if location else "UNLOCATED",
+                "location_description": (location.description or "").strip()
+                if location
+                else "",
+                "item_name": item.name if item else "Unknown Item",
+                "item_description": item.description if item else "",
+                "sku": (item.sku or "").strip() if item else "",
+                "erp_quantity": line.erp_quantity,
+                "counted_quantity": line.counted_quantity,
+            }
+        )
+    return rows
+
+
+def _aisle_sort_key(value: str) -> tuple[int, int, str]:
+    if value is None:
+        return (2, 0, "")
+    text = str(value)
+    if text.isdigit():
+        return (0, int(text), text)
+    return (1, 0, text)
 
 
 ############################
@@ -883,6 +936,9 @@ def physical_inventory_import():
                             ),
                         },
                         "duplicate_strategy": duplicate_strategy,
+                        "create_missing_items": bool(
+                            request.form.get("create_missing_items")
+                        ),
                     }
                 )
                 return render_template(
@@ -916,6 +972,8 @@ def physical_inventory_import():
                 ),
             )
 
+            create_missing_items = bool(request.form.get("create_missing_items"))
+
             match_results = match_upload_rows(
                 rows,
                 primary_upload_column=primary_upload_column,
@@ -925,6 +983,58 @@ def physical_inventory_import():
                 secondary_item_field=secondary_item_field,
                 options=options,
             )
+
+            created_items_count = 0
+            if create_missing_items:
+                candidates = build_missing_item_candidates(
+                    rows,
+                    primary_upload_column=primary_upload_column,
+                    secondary_upload_column=secondary_upload_column,
+                    options=options,
+                )
+                if candidates:
+                    try:
+                        next_sku = _next_auto_sku_value()
+                        for candidate in candidates:
+                            item = Item(
+                                sku=str(next_sku),
+                                name=candidate["name"],
+                                description=candidate["description"] or None,
+                            )
+                            db.session.add(item)
+                            next_sku += 1
+                        created_items_count = len(candidates)
+                        audit_log = AdminAuditLog(
+                            user_id=current_user.id if current_user else None,
+                            action="physical_inventory_create_items",
+                            note=(
+                                f"Created {created_items_count} item(s) from physical inventory import."
+                            ),
+                            request_ip=request.remote_addr,
+                        )
+                        db.session.add(audit_log)
+                        db.session.flush()
+                    except SQLAlchemyError as exc:
+                        db.session.rollback()
+                        current_app.logger.exception(
+                            "Failed to create missing items during physical inventory import: %s",
+                            exc,
+                        )
+                        flash(
+                            "Unable to create missing items. No changes were applied.",
+                            "danger",
+                        )
+                        return redirect(url_for("inventory.physical_inventory_import"))
+
+                    match_results = match_upload_rows(
+                        rows,
+                        primary_upload_column=primary_upload_column,
+                        primary_item_field=primary_item_field,
+                        quantity_column=quantity_column,
+                        secondary_upload_column=secondary_upload_column,
+                        secondary_item_field=secondary_item_field,
+                        options=options,
+                    )
 
             if duplicate_strategy not in PHYSICAL_INVENTORY_DUPLICATE_STRATEGIES:
                 duplicate_strategy = "sum"
@@ -947,6 +1057,7 @@ def physical_inventory_import():
                 matched_rows=match_results["matched_count"],
                 unmatched_rows=match_results["unmatched_count"],
                 ambiguous_rows=match_results["ambiguous_count"],
+                created_items_count=created_items_count,
                 unmatched_details=match_results["unmatched_rows"],
                 ambiguous_details=match_results["ambiguous_rows"],
             )
@@ -966,7 +1077,9 @@ def physical_inventory_import():
 
             flash(
                 "Physical inventory snapshot created. "
-                f"Matched {match_results['matched_count']} rows.",
+                f"{created_items_count} item(s) created, "
+                f"{len(totals)} snapshot line(s) created, "
+                f"{match_results['unmatched_count']} still unmatched.",
                 "success",
             )
             return redirect(
@@ -1005,6 +1118,7 @@ def physical_inventory_import():
                     "remove_dashes_underscores": False,
                 },
                 "duplicate_strategy": "sum",
+                "create_missing_items": False,
             }
         )
         if not context.get("import_token"):
@@ -1063,14 +1177,28 @@ def physical_inventory_test_matching():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
+    missing_item_candidates = build_missing_item_candidates(
+        rows,
+        primary_upload_column=primary_upload_column,
+        secondary_upload_column=secondary_upload_column,
+        options=options,
+    )
+
     return jsonify(
         {
             "match_rate": match_results["match_rate"],
             "matched_count": match_results["matched_count"],
             "unmatched_count": match_results["unmatched_count"],
             "ambiguous_count": match_results["ambiguous_count"],
+            "unmatched_missing_value_count": match_results[
+                "unmatched_missing_value_count"
+            ],
+            "unmatched_missing_item_count": match_results[
+                "unmatched_missing_item_count"
+            ],
             "unmatched_rows": match_results["unmatched_rows"][:5],
             "ambiguous_rows": match_results["ambiguous_rows"][:5],
+            "missing_item_candidates": missing_item_candidates,
             "fields_used": {
                 "primary_upload_column": primary_upload_column,
                 "primary_item_field": primary_item_field,
@@ -1163,10 +1291,133 @@ def physical_inventory_count_sheet(snapshot_id: int):
         .filter_by(snapshot_id=snapshot_id)
         .all()
     )
+    rows = _build_count_sheet_rows(lines)
+    rows.sort(key=lambda row: (_aisle_sort_key(row["aisle"]), row["location_code"], row["item_name"]))
     return render_template(
         "inventory/physical_inventory_count_sheet.html",
         snapshot=snapshot,
-        lines=lines,
+        rows=rows,
+    )
+
+
+@bp.route("/physical-inventory/<int:snapshot_id>/count-sheet.csv")
+@superuser_required
+def physical_inventory_count_sheet_csv(snapshot_id: int):
+    snapshot = PhysicalInventorySnapshot.query.get_or_404(snapshot_id)
+    lines = (
+        PhysicalInventorySnapshotLine.query.options(
+            joinedload(PhysicalInventorySnapshotLine.item).joinedload(Item.default_location)
+        )
+        .filter_by(snapshot_id=snapshot_id)
+        .all()
+    )
+    rows = _build_count_sheet_rows(lines)
+    rows.sort(key=lambda row: (_aisle_sort_key(row["aisle"]), row["location_code"], row["item_name"]))
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(COUNT_SHEET_HEADERS)
+    for row in rows:
+        counted_value = row["counted_quantity"]
+        writer.writerow(
+            [
+                row["aisle"],
+                row["location_code"],
+                row["location_description"],
+                row["item_name"],
+                row["item_description"],
+                row["sku"],
+                row["erp_quantity"],
+                "" if counted_value is None else counted_value,
+                "",
+            ]
+        )
+    filename = f"count_sheet_snapshot_{snapshot.id}.csv"
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@bp.route("/physical-inventory/<int:snapshot_id>/count-sheets-by-aisle")
+@superuser_required
+def physical_inventory_count_sheets_by_aisle(snapshot_id: int):
+    snapshot = PhysicalInventorySnapshot.query.get_or_404(snapshot_id)
+    lines = (
+        PhysicalInventorySnapshotLine.query.options(
+            joinedload(PhysicalInventorySnapshotLine.item).joinedload(Item.default_location)
+        )
+        .filter_by(snapshot_id=snapshot_id)
+        .all()
+    )
+    rows = _build_count_sheet_rows(lines)
+    aisles = sorted({row["aisle"] for row in rows}, key=_aisle_sort_key)
+    selected_aisle = request.args.get("aisle")
+    if aisles and selected_aisle not in aisles:
+        selected_aisle = aisles[0]
+    if not aisles:
+        selected_aisle = "UNLOCATED"
+    filtered_rows = [row for row in rows if row["aisle"] == selected_aisle]
+    filtered_rows.sort(key=lambda row: (row["location_code"], row["item_name"]))
+
+    return render_template(
+        "inventory/physical_inventory_count_sheets_by_aisle.html",
+        snapshot=snapshot,
+        aisles=aisles,
+        selected_aisle=selected_aisle,
+        rows=filtered_rows,
+    )
+
+
+@bp.route("/physical-inventory/<int:snapshot_id>/count-sheets-by-aisle.zip")
+@superuser_required
+def physical_inventory_count_sheets_by_aisle_zip(snapshot_id: int):
+    snapshot = PhysicalInventorySnapshot.query.get_or_404(snapshot_id)
+    lines = (
+        PhysicalInventorySnapshotLine.query.options(
+            joinedload(PhysicalInventorySnapshotLine.item).joinedload(Item.default_location)
+        )
+        .filter_by(snapshot_id=snapshot_id)
+        .all()
+    )
+    rows = _build_count_sheet_rows(lines)
+    aisles = sorted({row["aisle"] for row in rows}, key=_aisle_sort_key)
+
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
+        for aisle in aisles:
+            aisle_rows = [row for row in rows if row["aisle"] == aisle]
+            aisle_rows.sort(key=lambda row: (row["location_code"], row["item_name"]))
+            csv_buffer = io.StringIO()
+            writer = csv.writer(csv_buffer)
+            writer.writerow(COUNT_SHEET_HEADERS)
+            for row in aisle_rows:
+                counted_value = row["counted_quantity"]
+                writer.writerow(
+                    [
+                        row["aisle"],
+                        row["location_code"],
+                        row["location_description"],
+                        row["item_name"],
+                        row["item_description"],
+                        row["sku"],
+                        row["erp_quantity"],
+                        "" if counted_value is None else counted_value,
+                        "",
+                    ]
+                )
+            safe_aisle = str(aisle or "UNLOCATED").replace(" ", "_")
+            filename = f"count_sheet_snapshot_{snapshot.id}_aisle_{safe_aisle}.csv"
+            zip_file.writestr(filename, csv_buffer.getvalue())
+
+    output.seek(0)
+    return Response(
+        output.getvalue(),
+        mimetype="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename=count_sheets_snapshot_{snapshot.id}.zip"
+        },
     )
 
 

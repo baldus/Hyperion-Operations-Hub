@@ -83,6 +83,41 @@ def get_item_field_samples(field_name: str, limit: int = 20) -> list[str]:
     return [value for (value,) in results]
 
 
+def build_missing_item_candidates(
+    rows: Iterable[dict[str, object]],
+    primary_upload_column: str,
+    secondary_upload_column: str | None,
+    options: NormalizationOptions,
+) -> list[dict[str, str]]:
+    items = Item.query.options(load_only(Item.name)).all()
+    existing_keys = {
+        normalize_match_value(item.name, options)
+        for item in items
+        if normalize_match_value(item.name, options)
+    }
+
+    candidates: dict[str, dict[str, str]] = {}
+    for row in rows:
+        raw_name = row.get(primary_upload_column)
+        normalized = normalize_match_value(raw_name, options)
+        if not normalized or normalized in existing_keys or normalized in candidates:
+            continue
+
+        name_value = str(raw_name).strip()
+        description_value = ""
+        if secondary_upload_column:
+            raw_description = row.get(secondary_upload_column)
+            if raw_description is not None:
+                description_value = str(raw_description).strip()
+
+        candidates[normalized] = {
+            "name": name_value,
+            "description": description_value,
+        }
+
+    return list(candidates.values())
+
+
 def _parse_quantity(value: object | None) -> Decimal:
     if value is None:
         return Decimal(0)
@@ -130,6 +165,8 @@ def match_upload_rows(
     matched_rows: list[dict[str, object]] = []
     unmatched_rows: list[dict[str, object]] = []
     ambiguous_rows: list[dict[str, object]] = []
+    unmatched_missing_value_count = 0
+    unmatched_missing_item_count = 0
 
     for index, row in enumerate(rows_list, start=1):
         raw_value = row.get(primary_upload_column)
@@ -143,6 +180,7 @@ def match_upload_rows(
                     "row": row,
                 }
             )
+            unmatched_missing_value_count += 1
             continue
 
         matches = lookup.get(normalized, [])
@@ -169,6 +207,7 @@ def match_upload_rows(
                     "row": row,
                 }
             )
+            unmatched_missing_item_count += 1
             continue
 
         if secondary_upload_column and secondary_item_field:
@@ -233,6 +272,8 @@ def match_upload_rows(
         "matched_count": len(matched_rows),
         "unmatched_count": len(unmatched_rows),
         "ambiguous_count": len(ambiguous_rows),
+        "unmatched_missing_value_count": unmatched_missing_value_count,
+        "unmatched_missing_item_count": unmatched_missing_item_count,
     }
 
 

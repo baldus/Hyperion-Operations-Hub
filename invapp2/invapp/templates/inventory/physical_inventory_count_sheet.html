@@ -6,21 +6,27 @@
   <table class="table table-sm">
     <thead>
       <tr>
-        <th>Location</th>
+        <th>Aisle</th>
+        <th>Location Code</th>
+        <th>Location Description</th>
         <th>Item Name</th>
-        <th>Description</th>
+        <th>Item Description</th>
+        <th>SKU</th>
         <th>ERP Total Qty</th>
         <th>Counted Qty</th>
         <th>Notes</th>
       </tr>
     </thead>
     <tbody>
-      {% for line in lines %}
+      {% for row in rows %}
       <tr>
-        <td>{{ line.item.default_location.code if line.item and line.item.default_location else 'UNLOCATED' }}</td>
-        <td>{{ line.item.name if line.item else 'Unknown Item' }}</td>
-        <td>{{ line.item.description if line.item else '' }}</td>
-        <td>{{ line.erp_quantity }}</td>
+        <td>{{ row.aisle }}</td>
+        <td>{{ row.location_code }}</td>
+        <td>{{ row.location_description }}</td>
+        <td>{{ row.item_name }}</td>
+        <td>{{ row.item_description }}</td>
+        <td>{{ row.sku }}</td>
+        <td>{{ row.erp_quantity }}</td>
         <td></td>
         <td></td>
       </tr>
