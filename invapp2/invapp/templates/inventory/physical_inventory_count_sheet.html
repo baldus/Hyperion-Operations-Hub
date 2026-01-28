@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Location Count Sheet — Snapshot #{{ snapshot.id }}</h2>
+<p class="field-note">Print this sheet for floor counts. Counted Qty and Notes are intentionally blank.</p>
+<div class="table-responsive">
+  <table class="table table-sm">
+    <thead>
+      <tr>
+        <th>Aisle</th>
+        <th>Location Code</th>
+        <th>Location Description</th>
+        <th>Item Name</th>
+        <th>Item Description</th>
+        <th>SKU</th>
+        <th>ERP Total Qty</th>
+        <th>Counted Qty</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>{{ row.aisle }}</td>
+        <td>{{ row.location_code }}</td>
+        <td>{{ row.location_description }}</td>
+        <td>{{ row.item_name }}</td>
+        <td>{{ row.item_description }}</td>
+        <td>{{ row.sku }}</td>
+        <td>{{ row.erp_quantity }}</td>
+        <td></td>
+        <td></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<a href="{{ url_for('inventory.physical_inventory_snapshot', snapshot_id=snapshot.id) }}" class="btn btn-secondary">Back to Snapshot</a>
+{% endblock %}

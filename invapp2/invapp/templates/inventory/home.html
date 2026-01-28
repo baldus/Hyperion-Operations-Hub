@@ -17,6 +17,7 @@
   {% endif %}
   {% if is_superuser() %}
   <a href="{{ url_for('inventory.cycle_count_home') }}" class="action-btn">Cycle Count</a>
+  <a href="{{ url_for('inventory.physical_inventory_import') }}" class="action-btn">Physical Inventory</a>
   {% endif %}
 </div>
 

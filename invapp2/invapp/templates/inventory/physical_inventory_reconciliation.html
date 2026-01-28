@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Reconciliation Summary — Snapshot #{{ snapshot.id }}</h2>
+<div class="table-responsive">
+  <table class="table table-sm">
+    <thead>
+      <tr>
+        <th>Item Name</th>
+        <th>ERP Total</th>
+        <th>Counted Total</th>
+        <th>Variance</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in reconciliation_rows %}
+      <tr>
+        <td>{{ row.item.name if row.item else 'Unknown Item' }}</td>
+        <td>{{ row.erp }}</td>
+        <td>{{ row.counted if row.counted is not none else '—' }}</td>
+        <td>{{ row.variance if row.variance is not none else '—' }}</td>
+        <td>{{ row.status }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<a href="{{ url_for('inventory.physical_inventory_snapshot', snapshot_id=snapshot.id) }}" class="btn btn-secondary">Back to Snapshot</a>
+{% endblock %}
