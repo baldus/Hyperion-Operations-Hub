@@ -52,6 +52,19 @@ Hyperion is **not** the system of record for inventory totals. Physical inventor
 4. Enter physical counts.
 5. Review reconciliation summary (ERP totals vs counted totals).
 
+**Count sheet routes**
+- HTML (by location): `/inventory/physical-inventory/<snapshot_id>/count-sheet`
+- HTML (by aisle): `/inventory/physical-inventory/<snapshot_id>/count-sheets-by-aisle`
+- ZIP export (one CSV per aisle): `/inventory/physical-inventory/<snapshot_id>/export-count-sheets-by-aisle`
+
+**Aisle derivation modes (count sheets by aisle)**
+- `PHYS_INV_AISLE_MODE=row` (default): uses `Location.row` parsed from `Location.code` (e.g., `1-A-1` → `A`).
+- `PHYS_INV_AISLE_MODE=level`: uses `Location.level` parsed from `Location.code` (e.g., `1-A-1` → `1`).
+- `PHYS_INV_AISLE_MODE=prefix`: uses `PHYS_INV_AISLE_REGEX` to extract an aisle key from `Location.code`.
+  - First regex match wins. If your regex defines `(?P<aisle>...)`, that named group is used.
+
+**Note:** Count sheets by aisle are export/view-only and do not require or introduce any migrations.
+
 **Upload formats**
 - `.csv`
 - `.tsv`

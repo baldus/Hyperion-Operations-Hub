@@ -4,6 +4,8 @@
 <p class="field-note">Created {{ snapshot.created_at.strftime('%Y-%m-%d %H:%M') }}{% if snapshot.source_filename %} from {{ snapshot.source_filename }}{% endif %}.</p>
 <div class="mb-3">
   <a href="{{ url_for('inventory.physical_inventory_count_sheet', snapshot_id=snapshot.id) }}" class="btn btn-outline-primary">Location Count Sheet</a>
+  <a href="{{ url_for('inventory.physical_inventory_count_sheets_by_aisle', snapshot_id=snapshot.id) }}" class="btn btn-outline-primary">Count Sheets (By Aisle)</a>
+  <a href="{{ url_for('inventory.physical_inventory_export_count_sheets_by_aisle', snapshot_id=snapshot.id) }}" class="btn btn-outline-secondary">Export Count Sheets by Aisle (ZIP)</a>
   <a href="{{ url_for('inventory.physical_inventory_counts', snapshot_id=snapshot.id) }}" class="btn btn-outline-secondary">Enter Counts</a>
   <a href="{{ url_for('inventory.physical_inventory_reconciliation', snapshot_id=snapshot.id) }}" class="btn btn-outline-secondary">Reconciliation Summary</a>
   <a href="{{ url_for('inventory.physical_inventory_unmatched_export', snapshot_id=snapshot.id) }}" class="btn btn-outline-secondary">Download Unmatched</a>
