@@ -214,6 +214,8 @@ These are pulled directly from environment variables or startup scripts:
 | `INVENTORY_REMOVE_REASONS` | CSV list of allowed inventory removal reasons. | `Damage,Expired,...` | [`invapp2/config.py`](invapp2/config.py) |
 | `ZEBRA_PRINTER_HOST` | Zebra printer host. | `localhost` | [`invapp2/config.py`](invapp2/config.py) |
 | `ZEBRA_PRINTER_PORT` | Zebra printer port. | `9100` | [`invapp2/config.py`](invapp2/config.py) |
+| `PRINT_DRY_RUN` | Skip network printing while still generating ZPL output (useful for tests). | `0` | [`invapp2/config.py`](invapp2/config.py) |
+| `INVENTORY_MOVE_AUTO_PRINT_DEFAULT` | Default the move form's “Print label after move” checkbox to on. | `0` | [`invapp2/config.py`](invapp2/config.py) |
 | `HOST` | Gunicorn bind host. | `0.0.0.0` | [`start_operations_console.sh`](start_operations_console.sh) |
 | `PORT` | App port (dev server + Gunicorn + monitor). | `5000` (dev) / `8000` (scripts) | [`invapp2/app.py`](invapp2/app.py), [`start_operations_console.sh`](start_operations_console.sh) |
 | `GUNICORN_WORKERS` | Gunicorn worker count. | `2` | [`start_operations_console.sh`](start_operations_console.sh) |
@@ -785,6 +787,37 @@ Use this when adding or adjusting fields available in the Batch Label designer.
 - Product description is treated as a plain string from the item model (`item.description`). There is no length enforcement or formatting normalization in the label pipeline. See [`invapp2/invapp/printing/labels.py`](invapp2/invapp/printing/labels.py).
 - Designer fields default to single-line text (`maxLines: 1`), so long descriptions may truncate or be clipped depending on font size and max width. Adjust layout settings in the designer if wrapping is needed. See [`invapp2/invapp/printing/labels.py`](invapp2/invapp/printing/labels.py).
 
+### Inventory Label Printing (Items + Transfers)
+Use this section when working on inventory move/item label workflows.
+
+**Key routes**
+- **Auto-print toggle:** `POST /inventory/move` (checkbox on move form).
+- **Reprint transfer label:** `POST /inventory/move/<movement_id>/print-label`.
+- **Print item label:** `POST /inventory/item/<item_id>/print-label`.
+
+**Config + runtime behavior**
+- Printer connection uses `ZEBRA_PRINTER_HOST` / `ZEBRA_PRINTER_PORT`. If missing or unreachable, the UI shows a warning and the ops monitor logs an event.
+- `PRINT_DRY_RUN=1` skips the TCP connection but still generates ZPL (useful in tests).
+- `INVENTORY_MOVE_AUTO_PRINT_DEFAULT=1` defaults the move form checkbox to checked.
+
+**Feature Contract (Printing)**
+- **What gets printed**
+  - **Item labels:** SKU, name, description, unit, and a barcode (defaults in `ItemLabel` template).
+  - **Transfer labels:** SKU/name/lot, quantity + unit, from/to locations, reference, person, timestamp (defaults in `InventoryTransferLabel` template).
+- **When printing occurs**
+  - **Auto-print:** only after the transfer DB transaction is committed.
+  - **Reprint:** per movement row from Recent Transfers (best-effort matching to find from/to).
+  - **Item page:** on demand with optional copy count.
+- **Invariants**
+  - Transfers must never fail due to printing errors.
+  - Printing failures are user-visible (flash warning) and logged to the ops monitor.
+- **Error handling**
+  - Missing printer config or TCP failures return structured errors and never raise 500s.
+- **Tests**
+  - Transfer success despite printer failure.
+  - Reprint route success when `PRINT_DRY_RUN=1`.
+  - Item print permission + missing printer config message.
+
 ### Add a new DB field + migration
 1. Update the SQLAlchemy model in `invapp2/invapp/models.py` (or `invapp2/invapp/mdi/models.py` for MDI tables).
 2. Generate an Alembic migration:
@@ -796,6 +829,7 @@ Use this when adding or adjusting fields available in the Batch Label designer.
    ```bash
    alembic -c alembic.ini upgrade head
    ```
+   - Startup health checks will warn (or fail with `HEALTHCHECK_FATAL=1`) if the Alembic head is not applied.
 4. If the field is required by legacy schema checks, update `_ensure_*_schema` in `invapp2/invapp/__init__.py` accordingly. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
 
 ### Add a new API endpoint

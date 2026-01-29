@@ -77,3 +77,8 @@ class Config:
 
     ZEBRA_PRINTER_HOST = os.getenv("ZEBRA_PRINTER_HOST", "localhost")
     ZEBRA_PRINTER_PORT = int(os.getenv("ZEBRA_PRINTER_PORT", 9100))
+    PRINT_DRY_RUN = os.getenv("PRINT_DRY_RUN", "0").lower() in {"1", "true", "yes", "on"}
+    INVENTORY_MOVE_AUTO_PRINT_DEFAULT = (
+        os.getenv("INVENTORY_MOVE_AUTO_PRINT_DEFAULT", "0").lower()
+        in {"1", "true", "yes", "on"}
+    )
