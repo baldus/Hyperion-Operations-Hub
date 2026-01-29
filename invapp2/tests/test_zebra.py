@@ -54,6 +54,40 @@ def test_print_receiving_label_sends_zpl(monkeypatch):
         printing_pkg.__path__ = [str(module_path.parent)]
         sys.modules.setdefault("invapp", invapp_pkg)
         sys.modules.setdefault("invapp.printing", printing_pkg)
+        models_pkg = types.ModuleType("invapp.models")
+        services_pkg = types.ModuleType("invapp.services")
+
+        class DummyQuery:
+            def filter_by(self, **kwargs):
+                return self
+
+            def order_by(self, *args, **kwargs):
+                return self
+
+            def all(self):
+                return []
+
+            def get(self, _id):
+                return None
+
+        class Printer:
+            query = DummyQuery()
+
+        class User:
+            pass
+
+        models_pkg.Printer = Printer
+        models_pkg.User = User
+
+        class DummyStatusBus:
+            @staticmethod
+            def log_event(*args, **kwargs):
+                return None
+
+        services_pkg.status_bus = DummyStatusBus()
+
+        sys.modules.setdefault("invapp.models", models_pkg)
+        sys.modules.setdefault("invapp.services", services_pkg)
 
         labels_path = module_path.parent / "labels.py"
         labels_spec = importlib.util.spec_from_file_location(
@@ -91,5 +125,4 @@ def test_print_receiving_label_sends_zpl(monkeypatch):
     expected = zebra.build_receiving_label("ABC123", "Widget", 5)
     assert sent["addr"] == ("printer.local", 9101)
     assert sent["data"] == expected.encode("utf-8")
-    assert result is True
-
+    assert result.ok is True

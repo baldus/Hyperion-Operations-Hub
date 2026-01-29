@@ -818,6 +818,44 @@ Use this section when working on inventory move/item label workflows.
   - Reprint route success when `PRINT_DRY_RUN=1`.
   - Item print permission + missing printer config message.
 
+### Per-User Default Printers
+Use this section when working on user-specific printer routing and registry behavior.
+
+**Feature overview**
+- Each authenticated user can save a default printer in their profile. Print actions automatically route to that printer unless an explicit printer override is provided in the specific print flow. See [`invapp2/invapp/routes/users.py`](invapp2/invapp/routes/users.py) and [`invapp2/invapp/printing/printers.py`](invapp2/invapp/printing/printers.py).
+
+**Data model changes**
+- `Printer.enabled` (boolean) flags whether a device is selectable. See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+- `User.default_printer_id` stores the per-user default printer FK. See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+- Alembic migration: `20250926_add_user_default_printer`. See [`invapp2/migrations/versions/20250926_add_user_default_printer.py`](invapp2/migrations/versions/20250926_add_user_default_printer.py).
+
+**How to configure printers**
+- Register printers in the **Printer Settings** UI (`/settings/printers`) which writes to the `printer` table. See [`invapp2/invapp/routes/printers.py`](invapp2/invapp/routes/printers.py) and [`invapp2/invapp/templates/settings/printer_settings.html`](invapp2/invapp/templates/settings/printer_settings.html).
+- Only enabled printers appear in user dropdowns (disable a device by setting `printer.enabled = false` in the database).
+
+**Effective printer resolution (precedence rules)**
+1. **Override**: a printer explicitly chosen in the current print flow.
+2. **User default**: the logged-in user's saved default printer.
+3. **System default**: `ZEBRA_PRINTER_HOST`/`ZEBRA_PRINTER_PORT` configuration.
+Resolution is centralized in `resolve_effective_printer()`. See [`invapp2/invapp/printing/printers.py`](invapp2/invapp/printing/printers.py).
+
+**UI locations**
+- **User self-service:** `/users/profile` → “Printing” section. See [`invapp2/invapp/templates/users/profile.html`](invapp2/invapp/templates/users/profile.html).
+- **Admin user edit:** `/users/<id>/edit` → default printer dropdown. See [`invapp2/invapp/templates/users/form.html`](invapp2/invapp/templates/users/form.html).
+
+**Developer notes**
+- **Resolver helpers:** `invapp2/invapp/printing/printers.py` (`resolve_effective_printer`, `printer_configured`, `fallback_to_system_default`).
+- **Add a new printer type:** set `Printer.printer_type` when creating the printer in `/settings/printers`. The printer target always carries `{kind, host, port, name/id}` metadata for downstream printing.
+- **Invariants:** explicit overrides always win; missing/disabled defaults fall back to system defaults; print flows remain non-fatal on printer failures.
+
+**Permissions / guards**
+- User profile editing is guarded by `page_access_required("profile")`. See [`invapp2/invapp/routes/users.py`](invapp2/invapp/routes/users.py).
+- Admin user edits are guarded by `page_access_required("users")`; admins can update default printers for other users. See [`invapp2/invapp/routes/users.py`](invapp2/invapp/routes/users.py) and [`invapp2/invapp/permissions.py`](invapp2/invapp/permissions.py).
+
+**Testing**
+- Resolver behavior + route permissions: `invapp2/tests/test_printer_defaults.py`.
+- Zebra dispatch behavior: `invapp2/tests/test_zebra.py`.
+
 ### Add a new DB field + migration
 1. Update the SQLAlchemy model in `invapp2/invapp/models.py` (or `invapp2/invapp/mdi/models.py` for MDI tables).
 2. Generate an Alembic migration:

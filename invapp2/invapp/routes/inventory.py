@@ -3431,10 +3431,13 @@ def print_location_label(location_id: int):
     from invapp.printing.zebra import print_label_for_process
 
     context = build_location_label_context(location)
-    if print_label_for_process("LocationLabel", context):
+    result = print_label_for_process("LocationLabel", context, user=current_user)
+    for warning in result.warnings:
+        flash(warning, "warning")
+    if result.ok:
         flash(f"Label queued for location {location.code}.", "success")
     else:
-        flash("Failed to print location label.", "warning")
+        flash(result.error or "Failed to print location label.", "warning")
 
     return redirect(url_for("inventory.edit_location", location_id=location.id))
 
@@ -4995,17 +4998,17 @@ def receiving():
             )
             return redirect(url_for("inventory.receiving"))
 
-        try:
-            if not _print_batch_receipt_label(
-                batch,
-                item,
-                qty,
-                location,
-                po_number,
-            ):
-                flash("Failed to print receiving label.", "warning")
-        except Exception:
-            flash("Failed to print receiving label.", "warning")
+        result = _print_batch_receipt_label(
+            batch,
+            item,
+            qty,
+            location,
+            po_number,
+        )
+        for warning in result.warnings:
+            flash(warning, "warning")
+        if not result.ok:
+            flash(result.error or "Failed to print receiving label.", "warning")
 
         flash(f"Receiving recorded! Lot: {lot_number}", "success")
         return redirect(url_for("inventory.receiving"))
@@ -5065,19 +5068,19 @@ def reprint_receiving_label(receipt_id: int):
     batch = rec.batch
     location = rec.location
 
-    try:
-        if not _print_batch_receipt_label(
-            batch,
-            item,
-            qty,
-            location,
-            rec.po_number,
-        ):
-            flash("Failed to print receiving label.", "warning")
-        else:
-            flash("Label reprinted.", "success")
-    except Exception:
-        flash("Failed to print receiving label.", "warning")
+    result = _print_batch_receipt_label(
+        batch,
+        item,
+        qty,
+        location,
+        rec.po_number,
+    )
+    for warning in result.warnings:
+        flash(warning, "warning")
+    if result.ok:
+        flash("Label reprinted.", "success")
+    else:
+        flash(result.error or "Failed to print receiving label.", "warning")
 
     return redirect(url_for("inventory.receiving"))
 
@@ -5088,7 +5091,7 @@ def _print_batch_receipt_label(
     qty: int,
     location: Optional[Location],
     po_number: Optional[str],
-) -> bool:
+) -> "PrintResult":
     """Render and queue the Batch Label for a receiving transaction.
 
     Both the receiving workflow and the reprint action should emit the
@@ -5124,7 +5127,7 @@ def _print_batch_receipt_label(
         po_number=po_number,
     )
 
-    return print_label_for_process("BatchCreated", context)
+    return print_label_for_process("BatchCreated", context, user=current_user)
 
 ############################
 # MOVE / TRANSFER ROUTES
@@ -5203,13 +5206,15 @@ def move_home():
             "success",
         )
         if print_after_move:
-            print_errors = _print_transfer_labels_for_move(
+            print_errors, print_warnings = _print_transfer_labels_for_move(
                 lines=lines,
                 from_location_id=from_loc_id,
                 to_location_id=to_loc_id,
                 reference=reference,
                 person=_movement_person(),
             )
+            for warning in print_warnings:
+                flash(warning, "warning")
             if print_errors:
                 flash(
                     f"Transfer completed but printing failed: {'; '.join(print_errors)}",
@@ -5248,13 +5253,13 @@ def _print_transfer_labels_for_move(
     to_location_id: int | None,
     reference: str | None,
     person: str | None,
-) -> list[str]:
+) -> tuple[list[str], list[str]]:
     if not from_location_id or not to_location_id:
-        return ["missing location details"]
+        return ["missing location details"], []
     from_location = Location.query.get(from_location_id)
     to_location = Location.query.get(to_location_id)
     if from_location is None or to_location is None:
-        return ["unknown move locations"]
+        return ["unknown move locations"], []
 
     item_ids = {line.item_id for line in lines}
     batch_ids = {line.batch_id for line in lines if line.batch_id is not None}
@@ -5266,6 +5271,7 @@ def _print_transfer_labels_for_move(
     )
 
     errors: list[str] = []
+    warnings: list[str] = []
     for line in lines:
         item = items.get(line.item_id)
         if item is None:
@@ -5281,10 +5287,12 @@ def _print_transfer_labels_for_move(
             reference=reference,
             person=person,
             moved_at=datetime.utcnow(),
+            user=current_user,
         )
+        warnings.extend(result.warnings)
         if not result.ok:
             errors.append(result.error or result.message)
-    return errors
+    return errors, warnings
 
 
 def _find_matching_transfer_movement(movement: Movement) -> Movement | None:
@@ -5345,8 +5353,11 @@ def reprint_move_label(movement_id: int):
         reference=movement.reference,
         person=movement.person,
         moved_at=movement.date,
+        user=current_user,
     )
 
+    for warning in result.warnings:
+        flash(warning, "warning")
     if result.ok:
         flash("Transfer label reprinted.", "success")
     else:
@@ -5363,7 +5374,9 @@ def print_item_label_route(item_id: int):
         return redirect(url_for("inventory.list_items"))
 
     copies = request.form.get("copies", type=int) or 1
-    result = print_item_label(item, copies=copies)
+    result = print_item_label(item, copies=copies, user=current_user)
+    for warning in result.warnings:
+        flash(warning, "warning")
     if result.ok:
         flash("Item label sent to the printer.", "success")
     else:

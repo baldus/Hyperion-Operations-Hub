@@ -33,6 +33,7 @@ from invapp.models import (
     Role,
     User,
 )
+from invapp.printing.printers import PrintResult
 import invapp.routes.inventory as inventory
 from invapp.routes.inventory import (
     AUTO_SKU_START,
@@ -812,9 +813,9 @@ def test_receiving_prints_batch_label(client, app, monkeypatch):
 
     calls: list[tuple[str, dict]] = []
 
-    def fake_print_label(process, context):
+    def fake_print_label(process, context, **kwargs):
         calls.append((process, context))
-        return True
+        return PrintResult(True, process, "queued")
 
     monkeypatch.setattr(
         "invapp.printing.zebra.print_label_for_process", fake_print_label
@@ -904,9 +905,9 @@ def test_reprint_receiving_label_uses_batch_label(client, app, monkeypatch):
 
     calls: list[tuple[str, dict]] = []
 
-    def fake_print_label(process, context):
+    def fake_print_label(process, context, **kwargs):
         calls.append((process, context))
-        return True
+        return PrintResult(True, process, "queued")
 
     monkeypatch.setattr(
         "invapp.printing.zebra.print_label_for_process", fake_print_label
@@ -1018,9 +1019,9 @@ def test_print_location_label_uses_location_process(client, app, monkeypatch):
 
     calls: list[tuple[str, dict]] = []
 
-    def fake_print_label(process, context):
+    def fake_print_label(process, context, **kwargs):
         calls.append((process, context))
-        return True
+        return PrintResult(True, process, "queued")
 
     monkeypatch.setattr(
         "invapp.printing.zebra.print_label_for_process", fake_print_label

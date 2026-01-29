@@ -10,6 +10,7 @@ import pytest
 from invapp import create_app
 from invapp.extensions import db
 from invapp.models import LabelProcessAssignment, LabelTemplate, Printer, Role, User
+from invapp.printing.printers import PrintResult
 
 
 @pytest.fixture
@@ -154,10 +155,10 @@ def test_trial_print_succeeds_with_selected_printer(client, app, monkeypatch):
 
     printed = {}
 
-    def fake_print_label(process, context):
+    def fake_print_label(process, context, **kwargs):
         printed["process"] = process
         printed["context"] = context
-        return True
+        return PrintResult(True, process, "queued")
 
     monkeypatch.setattr("invapp.routes.printers.print_label_for_process", fake_print_label)
 
