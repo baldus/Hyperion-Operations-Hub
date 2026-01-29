@@ -253,6 +253,31 @@ These are pulled directly from environment variables or startup scripts:
 - Static files live in `invapp2/invapp/static/` (global) and `invapp2/invapp/static/mdi/` (MDI-specific CSS/JS). See [`invapp2/invapp/static`](invapp2/invapp/static) and [`invapp2/invapp/static/mdi`](invapp2/invapp/static/mdi).
 - Uploaded files (work instructions, item attachments, purchasing attachments, quality attachments) are configured to be stored under `invapp2/invapp/static/` subfolders by default. See [`invapp2/config.py`](invapp2/config.py).
 
+### Mobile / Responsive UI
+This app uses a single shared template layout with responsive CSS (no separate mobile templates or builds).
+
+**Files touched**
+- `invapp2/invapp/templates/base.html` adds the viewport meta tag and includes the responsive stylesheet globally.
+- `invapp2/invapp/static/css/responsive.css` contains the mobile-first overrides (max-width: 768px).
+
+**Breakpoints**
+- Adjust the breakpoint in `invapp2/invapp/static/css/responsive.css` (search for `@media (max-width: 768px)`).
+
+**Helper classes for templates**
+- Wrap wide tables in `<div class="table-scroll"> ... </div>` to enable horizontal scrolling on small screens.
+- Add `.hide-sm` on `<th>`/`<td>` to hide low-value columns at <= 768px.
+- Add `.filter-form` on filter/toolbars to stack inputs and buttons vertically on small screens.
+
+**Invariants / UI patterns**
+- Desktop layout remains unchanged or improved; responsive rules only apply at small widths.
+- No separate templates per page and no mobile user-agent detection.
+- Minimal JS: layout changes are CSS-only.
+
+**How to test locally**
+1. Run the app and open a page with tables (inventory, move, receiving).
+2. In Chrome DevTools, toggle Device Mode and set width <= 768px.
+3. Verify tables scroll horizontally, form controls stack, and nav wraps without overflow.
+
 ### How to add/edit a page safely
 1. **Add a route** in the relevant blueprint (e.g., `invapp2/invapp/routes/inventory.py` for inventory pages). See blueprint usage in [`invapp2/invapp/routes/inventory.py`](invapp2/invapp/routes/inventory.py).
 2. **Create a template** under the matching folder in `invapp2/invapp/templates/` and extend `base.html`. See [`invapp2/invapp/templates/base.html`](invapp2/invapp/templates/base.html).

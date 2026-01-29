@@ -63,7 +63,7 @@
     </div>
   </div>
 
-  <div class="table-container move-table">
+  <div class="table-container move-table table-scroll">
     <table class="inventory-table">
       <thead>
         <tr>
@@ -97,7 +97,7 @@
 <hr>
 
 <h3>Recent Transfers</h3>
-<div class="table-container">
+<div class="table-container table-scroll">
   <table class="inventory-table">
     <thead>
       <tr>
@@ -107,9 +107,9 @@
         <th>Lot / Batch</th>
         <th>Quantity</th>
         <th>Location</th>
-        <th>Person</th>
-        <th>Reference</th>
-        <th>Type</th>
+        <th class="hide-sm">Person</th>
+        <th class="hide-sm">Reference</th>
+        <th class="hide-sm">Type</th>
         <th>Actions</th>
       </tr>
     </thead>
@@ -122,9 +122,9 @@
         <td>{{ batches_map[rec.batch_id].lot_number if rec.batch_id in batches_map else "-" }}</td>
         <td>{{ rec.quantity }}</td>
         <td>{{ locations_map[rec.location_id].code if rec.location_id in locations_map else "-" }}</td>
-        <td>{{ rec.person or "-" }}</td>
-        <td>{{ rec.reference or "-" }}</td>
-        <td>{{ rec.movement_type }}</td>
+        <td class="hide-sm">{{ rec.person or "-" }}</td>
+        <td class="hide-sm">{{ rec.reference or "-" }}</td>
+        <td class="hide-sm">{{ rec.movement_type }}</td>
         <td>
           <form method="post" class="inline-form" action="{{ url_for('inventory.reprint_move_label', movement_id=rec.id) }}">
             <button type="submit" class="action-btn secondary">Reprint label</button>
