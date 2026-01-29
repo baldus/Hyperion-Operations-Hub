@@ -21,7 +21,7 @@
 </div>
 <br>
 
-<form method="get" class="inline-form">
+<form method="get" class="inline-form filter-form">
   <input type="hidden" name="size" value="{{ size }}">
   {% if search %}
     <input type="hidden" name="search" value="{{ search }}">
@@ -80,14 +80,14 @@
 <br>
 <br>
 
-<div class="table-container">
+<div class="table-container table-scroll">
   <table class="inventory-table">
     <thead>
       <tr>
         <th>Code</th>
-        <th>Level</th>
-        <th>Row</th>
-        <th>Bay</th>
+        <th class="hide-sm">Level</th>
+        <th class="hide-sm">Row</th>
+        <th class="hide-sm">Bay</th>
         <th>Description</th>
         <th>Stock</th>
         <th>Pending Qty</th>
@@ -100,9 +100,9 @@
       {% for loc in locations %}
       <tr>
         <td><a href="{{ url_for('inventory.edit_location', location_id=loc.id) }}">{{ loc.code }}</a></td>
-        <td>{{ loc.level if loc.level is not none else '-' }}</td>
-        <td>{{ loc.row if loc.row is not none else '-' }}</td>
-        <td>{{ loc.bay if loc.bay is not none else '-' }}</td>
+        <td class="hide-sm">{{ loc.level if loc.level is not none else '-' }}</td>
+        <td class="hide-sm">{{ loc.row if loc.row is not none else '-' }}</td>
+        <td class="hide-sm">{{ loc.bay if loc.bay is not none else '-' }}</td>
         <td>{{ loc.description }}</td>
         <td>
           {% set balances = balances_by_location.get(loc.id, []) %}
