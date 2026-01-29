@@ -45,6 +45,14 @@ def printer_settings():
     selected_printer_id = session.get("selected_printer_id")
     if selected_printer_id:
         selected_printer = Printer.query.get(selected_printer_id)
+        if selected_printer and not selected_printer.enabled:
+            flash("The selected printer is disabled. Choose another printer.", "warning")
+            selected_printer = None
+            session.pop("selected_printer_id", None)
+        if selected_printer and not selected_printer.enabled:
+            flash("The selected printer is disabled. Choose another printer.", "warning")
+            selected_printer = None
+            session.pop("selected_printer_id", None)
 
     if request.method == "POST":
         form_id = request.form.get("form_id")
@@ -59,6 +67,8 @@ def printer_settings():
                     printer = None
                 if printer is None:
                     flash("The selected printer could not be found.", "danger")
+                elif not printer.enabled:
+                    flash("The selected printer is disabled.", "warning")
                 else:
                     session["selected_printer_id"] = printer.id
                     _apply_printer_configuration(printer)
@@ -207,6 +217,11 @@ def label_designer_print_trial():
             jsonify({"message": "Select an active printer before sending a trial print."}),
             400,
         )
+    if not selected_printer.enabled:
+        return (
+            jsonify({"message": "The selected printer is disabled."}),
+            400,
+        )
 
     config = get_designer_label_config(label_id)
     if config is None:
@@ -220,7 +235,13 @@ def label_designer_print_trial():
         )
 
     context = get_designer_sample_context(label_id)
-    if not print_label_for_process(config.process, context):
+    result = print_label_for_process(
+        config.process,
+        context,
+        user=current_user,
+        override_printer=selected_printer,
+    )
+    if not result.ok:
         return (
             jsonify({"message": "Failed to queue the trial print with the active printer."}),
             500,

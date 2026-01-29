@@ -7,7 +7,19 @@
         <tbody>
             <tr>
                 <th scope="row"><label for="username">Username</label></th>
-                <td><input id="username" type="text" name="username" value="{{ username_value }}" required></td>
+                <td>
+                    <input
+                        id="username"
+                        type="text"
+                        name="username"
+                        value="{{ username_value }}"
+                        {% if can_manage_identity is defined and not can_manage_identity %}readonly{% endif %}
+                        required
+                    >
+                    {% if can_manage_identity is defined and not can_manage_identity %}
+                        <p class="field-note">Usernames can only be edited by the superuser.</p>
+                    {% endif %}
+                </td>
             </tr>
             {% if include_password %}
             <tr>
@@ -15,24 +27,45 @@
                 <td><input id="password" type="password" name="password" required></td>
             </tr>
             {% endif %}
+            {% if can_manage_identity is not defined or can_manage_identity %}
+                <tr>
+                    <th scope="row">Roles</th>
+                    <td>
+                        {% if roles %}
+                            <div class="role-checkboxes" style="display:flex; flex-direction:column; gap:6px;">
+                                {% for role in roles %}
+                                    {% if role.name != 'public' %}
+                                    <label>
+                                        <input type="checkbox" name="roles" value="{{ role.id }}" {% if role.id|string in selected_roles %}checked{% endif %}>
+                                        {{ role.name }}{% if role.description %} — {{ role.description }}{% endif %}
+                                    </label>
+                                    {% endif %}
+                                {% endfor %}
+                            </div>
+                            <p class="field-note">Leave all unchecked to assign the default "viewer" role.</p>
+                        {% else %}
+                            <p class="field-note">No roles defined yet. The default "viewer" role will be created automatically.</p>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% else %}
+                <tr>
+                    <th scope="row">Roles</th>
+                    <td><p class="field-note">Role assignments can only be edited by the superuser.</p></td>
+                </tr>
+            {% endif %}
             <tr>
-                <th scope="row">Roles</th>
+                <th scope="row"><label for="default_printer_id">Default printer</label></th>
                 <td>
-                    {% if roles %}
-                        <div class="role-checkboxes" style="display:flex; flex-direction:column; gap:6px;">
-                            {% for role in roles %}
-                                {% if role.name != 'public' %}
-                                <label>
-                                    <input type="checkbox" name="roles" value="{{ role.id }}" {% if role.id|string in selected_roles %}checked{% endif %}>
-                                    {{ role.name }}{% if role.description %} — {{ role.description }}{% endif %}
-                                </label>
-                                {% endif %}
-                            {% endfor %}
-                        </div>
-                        <p class="field-note">Leave all unchecked to assign the default "viewer" role.</p>
-                    {% else %}
-                        <p class="field-note">No roles defined yet. The default "viewer" role will be created automatically.</p>
-                    {% endif %}
+                    <select id="default_printer_id" name="default_printer_id">
+                        <option value="" {% if not selected_printer_id %}selected{% endif %}>None (use system default)</option>
+                        {% for printer in printers or [] %}
+                        <option value="{{ printer.id }}" {% if selected_printer_id == printer.id %}selected{% endif %}>
+                            {{ printer.name }}{% if printer.location %} — {{ printer.location }}{% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <p class="field-note">Choose the default printer for labels and receipts.</p>
                 </td>
             </tr>
         </tbody>

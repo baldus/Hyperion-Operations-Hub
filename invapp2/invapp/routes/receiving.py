@@ -11,10 +11,8 @@ from flask import (
 from invapp.extensions import db
 from invapp.models import Receiving, Item, Stock, Location
 from invapp.services.item_locations import apply_smart_item_locations
-from invapp.printing.zebra import (
-    print_receiving_label,
-    render_receiving_label_png,
-)
+from invapp.login import current_user
+from invapp.printing.zebra import print_receiving_label, render_receiving_label_png
 
 bp = Blueprint("receiving", __name__, url_prefix="/receiving")
 
@@ -117,7 +115,15 @@ def print_label():
     copies = int(data.get("copies", 1))
 
     success = True
+    warnings: list[str] = []
     for _ in range(copies):
-        success = print_receiving_label(sku, description, qty) and success
+        result = print_receiving_label(
+            sku,
+            description,
+            qty,
+            user=current_user,
+        )
+        success = result.ok and success
+        warnings.extend(result.warnings)
 
-    return jsonify({"printed": success})
+    return jsonify({"printed": success, "warnings": warnings})

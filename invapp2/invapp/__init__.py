@@ -466,6 +466,56 @@ def _ensure_home_layout_schema(engine) -> None:
         table.create(bind=engine)
 
 
+def _ensure_user_schema(engine) -> None:
+    """Align user/printer tables with the current model definitions."""
+
+    inspector = inspect(engine)
+    try:
+        user_columns = {column["name"] for column in inspector.get_columns("user")}
+    except (NoSuchTableError, OperationalError):
+        user_columns = set()
+
+    try:
+        printer_columns = {column["name"] for column in inspector.get_columns("printer")}
+    except (NoSuchTableError, OperationalError):
+        printer_columns = set()
+
+    with engine.begin() as conn:
+        if "enabled" not in printer_columns and printer_columns:
+            conn.execute(text("ALTER TABLE printer ADD COLUMN enabled BOOLEAN DEFAULT true"))
+            conn.execute(text("UPDATE printer SET enabled = true WHERE enabled IS NULL"))
+
+        if "default_printer_id" not in user_columns and user_columns:
+            conn.execute(text('ALTER TABLE "user" ADD COLUMN default_printer_id INTEGER'))
+
+    if not user_columns:
+        return
+
+    if engine.dialect.name == "sqlite":
+        return
+
+    try:
+        foreign_keys = inspector.get_foreign_keys("user")
+    except (NoSuchTableError, OperationalError):
+        foreign_keys = []
+
+    default_fk_exists = any(
+        set(fk.get("constrained_columns", []) or []) == {"default_printer_id"}
+        for fk in foreign_keys
+    )
+    if not default_fk_exists:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE \"user\" "
+                    "ADD CONSTRAINT fk_user_default_printer "
+                    "FOREIGN KEY (default_printer_id) "
+                    "REFERENCES printer (id) "
+                    "ON DELETE SET NULL"
+                )
+            )
+
+
 def _ensure_production_schema(engine):
     """Align legacy production tables with the current model definitions."""
 
@@ -810,6 +860,7 @@ def create_app(config_override=None):
                 _ensure_purchasing_schema(db.engine)
                 _ensure_order_schema(db.engine)
                 _ensure_home_layout_schema(db.engine)
+                _ensure_user_schema(db.engine)
                 _ensure_production_schema(db.engine)
                 mdi_models.ensure_schema()
                 mdi_models.seed_data()

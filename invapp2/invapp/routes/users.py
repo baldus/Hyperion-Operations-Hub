@@ -13,7 +13,9 @@ from flask import (
 )
 from sqlalchemy.exc import IntegrityError
 
+from invapp.auth import page_access_required
 from invapp.extensions import db
+from invapp.login import current_user
 from invapp.models import Role, User
 from invapp.permissions import (
     get_known_pages,
@@ -21,7 +23,8 @@ from invapp.permissions import (
     update_page_permissions,
 )
 from invapp.offline import is_emergency_mode_active
-from invapp.superuser import superuser_required
+from invapp.printing.printers import ensure_printer_enabled, list_available_printers
+from invapp.superuser import is_superuser, superuser_required
 
 bp = Blueprint("users", __name__, url_prefix="/users")
 
@@ -39,7 +42,7 @@ def _offline_user_admin_response():
 
 
 @bp.route("/")
-@superuser_required
+@page_access_required("users")
 def list_users():
     if not _database_available():
         return _offline_user_admin_response()
@@ -75,6 +78,13 @@ def _selected_roles(role_ids: list[int]) -> list[Role]:
     return list(Role.query.filter(Role.id.in_(role_ids)).order_by(Role.name))
 
 
+def _coerce_printer_id(raw_id: str) -> int | None:
+    try:
+        return int(raw_id)
+    except (TypeError, ValueError):
+        return None
+
+
 @bp.route("/create", methods=["GET", "POST"])
 @superuser_required
 def create():
@@ -82,6 +92,7 @@ def create():
         return _offline_user_admin_response()
 
     roles = Role.query.order_by(Role.name).all()
+    printers = list_available_printers()
     selected_roles = set(request.form.getlist("roles")) if request.method == "POST" else set()
     username_value = request.form.get("username", "").strip()
 
@@ -94,6 +105,9 @@ def create():
                 roles=roles,
                 selected_roles=selected_roles,
                 username_value=username_value,
+                printers=printers,
+                selected_printer_id=None,
+                can_manage_identity=True,
                 form_action=url_for("users.create"),
                 title="Create User",
                 submit_label="Create",
@@ -107,6 +121,9 @@ def create():
                 roles=roles,
                 selected_roles=selected_roles,
                 username_value=username_value,
+                printers=printers,
+                selected_printer_id=None,
+                can_manage_identity=True,
                 form_action=url_for("users.create"),
                 title="Create User",
                 submit_label="Create",
@@ -120,6 +137,9 @@ def create():
                 roles=roles,
                 selected_roles=selected_roles,
                 username_value=username_value,
+                printers=printers,
+                selected_printer_id=None,
+                can_manage_identity=True,
                 form_action=url_for("users.create"),
                 title="Create User",
                 submit_label="Create",
@@ -129,6 +149,14 @@ def create():
         user = User(username=username_value)
         user.set_password(password)
         user.roles = _selected_roles(role_ids)
+        selected_printer_id = request.form.get("default_printer_id", "").strip()
+        if selected_printer_id:
+            printer_id = _coerce_printer_id(selected_printer_id)
+            printer = ensure_printer_enabled(printer_id) if printer_id else None
+            if printer is None:
+                flash("Selected default printer is unavailable.", "warning")
+            else:
+                user.default_printer_id = printer.id
 
         try:
             User.commit_with_sequence_retry(user)
@@ -140,6 +168,9 @@ def create():
                 roles=roles,
                 selected_roles=selected_roles,
                 username_value=username_value,
+                printers=printers,
+                selected_printer_id=None,
+                can_manage_identity=True,
                 form_action=url_for("users.create"),
                 title="Create User",
                 submit_label="Create",
@@ -154,6 +185,9 @@ def create():
         roles=roles,
         selected_roles=selected_roles,
         username_value=username_value,
+        printers=printers,
+        selected_printer_id=None,
+        can_manage_identity=True,
         form_action=url_for("users.create"),
         title="Create User",
         submit_label="Create",
@@ -161,7 +195,7 @@ def create():
     )
 
 @bp.route("/<int:user_id>/edit", methods=["GET", "POST"])
-@superuser_required
+@page_access_required("users")
 def edit(user_id: int):
     if not _database_available():
         return _offline_user_admin_response()
@@ -169,6 +203,8 @@ def edit(user_id: int):
     user = User.query.get_or_404(user_id)
     admin_username = current_app.config.get("ADMIN_USER", "superuser")
     roles = Role.query.order_by(Role.name).all()
+    printers = list_available_printers()
+    can_manage_identity = is_superuser()
     selected_roles = (
         set(request.form.getlist("roles"))
         if request.method == "POST"
@@ -184,13 +220,16 @@ def edit(user_id: int):
                 roles=roles,
                 selected_roles=selected_roles,
                 username_value=username_value,
+                printers=printers,
+                selected_printer_id=user.default_printer_id,
+                can_manage_identity=can_manage_identity,
                 form_action=url_for("users.edit", user_id=user.id),
                 title="Edit User",
                 submit_label="Save Changes",
                 include_password=False,
             )
 
-        if (
+        if can_manage_identity and (
             username_value != user.username
             and User.query.filter_by(username=username_value).first()
         ):
@@ -200,13 +239,20 @@ def edit(user_id: int):
                 roles=roles,
                 selected_roles=selected_roles,
                 username_value=username_value,
+                printers=printers,
+                selected_printer_id=user.default_printer_id,
+                can_manage_identity=can_manage_identity,
                 form_action=url_for("users.edit", user_id=user.id),
                 title="Edit User",
                 submit_label="Save Changes",
                 include_password=False,
             )
 
-        if user.username == admin_username and username_value != admin_username:
+        if (
+            can_manage_identity
+            and user.username == admin_username
+            and username_value != admin_username
+        ):
             flash("The superuser username cannot be changed here.", "warning")
             username_value = user.username
             selected_roles = {str(role.id) for role in user.roles}
@@ -215,27 +261,45 @@ def edit(user_id: int):
                 roles=roles,
                 selected_roles=selected_roles,
                 username_value=username_value,
+                printers=printers,
+                selected_printer_id=user.default_printer_id,
+                can_manage_identity=can_manage_identity,
                 form_action=url_for("users.edit", user_id=user.id),
                 title="Edit User",
                 submit_label="Save Changes",
                 include_password=False,
             )
 
-        role_ids = _extract_role_ids(request.form.getlist("roles"))
-        if request.form.getlist("roles") and not role_ids:
-            return render_template(
-                "users/form.html",
-                roles=roles,
-                selected_roles=selected_roles,
-                username_value=username_value,
-                form_action=url_for("users.edit", user_id=user.id),
-                title="Edit User",
-                submit_label="Save Changes",
-                include_password=False,
-            )
+        role_ids: list[int] = []
+        if can_manage_identity:
+            role_ids = _extract_role_ids(request.form.getlist("roles"))
+            if request.form.getlist("roles") and not role_ids:
+                return render_template(
+                    "users/form.html",
+                    roles=roles,
+                    selected_roles=selected_roles,
+                    username_value=username_value,
+                    printers=printers,
+                    selected_printer_id=user.default_printer_id,
+                    can_manage_identity=can_manage_identity,
+                    form_action=url_for("users.edit", user_id=user.id),
+                    title="Edit User",
+                    submit_label="Save Changes",
+                    include_password=False,
+                )
+            user.username = username_value
+            user.roles = _selected_roles(role_ids)
 
-        user.username = username_value
-        user.roles = _selected_roles(role_ids)
+        selected_printer_id = request.form.get("default_printer_id", "").strip()
+        if selected_printer_id:
+            printer_id = _coerce_printer_id(selected_printer_id)
+            printer = ensure_printer_enabled(printer_id) if printer_id else None
+            if printer is None:
+                flash("Selected default printer is unavailable.", "warning")
+            else:
+                user.default_printer_id = printer.id
+        else:
+            user.default_printer_id = None
         db.session.commit()
         flash("User updated.", "success")
         return redirect(url_for("users.list_users"))
@@ -245,10 +309,52 @@ def edit(user_id: int):
         roles=roles,
         selected_roles=selected_roles,
         username_value=username_value,
+        printers=printers,
+        selected_printer_id=user.default_printer_id,
+        can_manage_identity=can_manage_identity,
         form_action=url_for("users.edit", user_id=user.id),
         title="Edit User",
         submit_label="Save Changes",
         include_password=False,
+    )
+
+
+@bp.route("/profile", methods=["GET", "POST"])
+@page_access_required("profile")
+def profile():
+    if not _database_available():
+        return _offline_user_admin_response()
+
+    printers = list_available_printers()
+    selected_printer_id = current_user.default_printer_id
+    if selected_printer_id:
+        printer = ensure_printer_enabled(selected_printer_id)
+        if printer is None:
+            flash("Your saved default printer is unavailable. Please choose another.", "warning")
+            selected_printer_id = None
+
+    if request.method == "POST":
+        selected_printer_id = request.form.get("default_printer_id", "").strip()
+        if selected_printer_id:
+            printer_id = _coerce_printer_id(selected_printer_id)
+            printer = ensure_printer_enabled(printer_id) if printer_id else None
+            if printer is None:
+                flash("Selected default printer is unavailable.", "warning")
+            else:
+                current_user.default_printer_id = printer.id
+                db.session.commit()
+                flash("Default printer updated.", "success")
+                return redirect(url_for("users.profile"))
+        else:
+            current_user.default_printer_id = None
+            db.session.commit()
+            flash("Default printer cleared.", "success")
+            return redirect(url_for("users.profile"))
+
+    return render_template(
+        "users/profile.html",
+        printers=printers,
+        selected_printer_id=selected_printer_id,
     )
 
 

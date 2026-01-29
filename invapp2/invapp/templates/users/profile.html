@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Your Profile</h2>
+<p class="page-intro">Manage personal settings that apply to your printing workflows.</p>
+
+<section class="card-section">
+    <h3>Printing</h3>
+    <form method="post" class="stacked-form">
+        <label for="default_printer_id">Default printer</label>
+        <div class="form-row">
+            <select id="default_printer_id" name="default_printer_id">
+                <option value="" {% if not selected_printer_id %}selected{% endif %}>None (use system default)</option>
+                {% for printer in printers %}
+                <option value="{{ printer.id }}" {% if selected_printer_id == printer.id %}selected{% endif %}>
+                    {{ printer.name }}{% if printer.location %} — {{ printer.location }}{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="action-btn">Save</button>
+        </div>
+        {% if not printers %}
+        <p class="field-note">No printers are available yet. Ask an administrator to register a printer.</p>
+        {% else %}
+        <p class="field-note">Your default printer is used automatically unless you override it during a print action.</p>
+        {% endif %}
+    </form>
+</section>
+{% endblock %}

@@ -379,6 +379,7 @@ class Printer(db.Model):
     location = db.Column(db.String(120), nullable=True)
     host = db.Column(db.String(255), nullable=False)
     port = db.Column(db.Integer, nullable=True)
+    enabled = db.Column(db.Boolean, nullable=False, default=True)
     notes = db.Column(db.String(255), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(
@@ -1145,6 +1146,9 @@ class User(UserMixin, PrimaryKeySequenceMixin, db.Model):
     updated_at = db.Column(
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
+    default_printer_id = db.Column(
+        db.Integer, db.ForeignKey("printer.id", ondelete="SET NULL"), nullable=True
+    )
 
     roles = db.relationship(
         "Role",
@@ -1152,6 +1156,7 @@ class User(UserMixin, PrimaryKeySequenceMixin, db.Model):
         back_populates="users",
         lazy="joined",
     )
+    default_printer = db.relationship("Printer", foreign_keys=[default_printer_id])
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)
