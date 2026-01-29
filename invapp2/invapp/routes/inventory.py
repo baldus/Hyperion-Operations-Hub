@@ -3133,10 +3133,21 @@ def print_location_label(location_id: int):
     location = Location.query.get_or_404(location_id)
 
     from invapp.printing.labels import build_location_label_context
+    from invapp.printing.printer_defaults import resolve_user_printer, set_user_default_printer
     from invapp.printing.zebra import print_label_for_process
 
+    requested_printer_name = request.form.get("printer_name", "").strip()
+    if requested_printer_name:
+        try:
+            selected_printer = set_user_default_printer(current_user, requested_printer_name)
+        except ValueError:
+            flash("The selected printer could not be found.", "danger")
+            return redirect(url_for("inventory.edit_location", location_id=location.id))
+    else:
+        selected_printer = resolve_user_printer(current_user)
+
     context = build_location_label_context(location)
-    if print_label_for_process("LocationLabel", context):
+    if print_label_for_process("LocationLabel", context, printer=selected_printer):
         flash(f"Label queued for location {location.code}.", "success")
     else:
         flash("Failed to print location label.", "warning")
@@ -4804,6 +4815,7 @@ def _print_batch_receipt_label(
     """
 
     from invapp.printing.labels import build_batch_label_context
+    from invapp.printing.printer_defaults import resolve_user_printer
     from invapp.printing.zebra import print_label_for_process
 
     lot_number = (
@@ -4829,7 +4841,8 @@ def _print_batch_receipt_label(
         po_number=po_number,
     )
 
-    return print_label_for_process("BatchCreated", context)
+    selected_printer = resolve_user_printer(current_user)
+    return print_label_for_process("BatchCreated", context, printer=selected_printer)
 
 ############################
 # MOVE / TRANSFER ROUTES

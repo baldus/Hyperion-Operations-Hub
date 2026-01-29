@@ -2,11 +2,15 @@
 
 from collections.abc import Mapping
 import socket
+from typing import TYPE_CHECKING
 from urllib.request import Request, urlopen
 
 from flask import current_app
 
 from .labels import build_receiving_label, render_label_for_process
+
+if TYPE_CHECKING:  # pragma: no cover - hints only
+    from invapp.models import Printer
 
 
 def send_zpl(
@@ -52,6 +56,9 @@ def print_receiving_label(
     location: object | None = None,
     po_number: str | None = None,
     lot_number: str | None = None,
+    printer: "Printer | None" = None,
+    host: str | None = None,
+    port: int | None = None,
 ) -> bool:
     """Generate and send a receiving (batch) label to the configured Zebra printer."""
 
@@ -64,10 +71,20 @@ def print_receiving_label(
         po_number=po_number,
         lot_number=lot_number,
     )
-    return send_zpl(zpl)
+    if printer is not None:
+        host = printer.host
+        port = printer.port
+    return send_zpl(zpl, host=host, port=port)
 
 
-def print_label_for_process(process: str, context: Mapping[str, object]) -> bool:
+def print_label_for_process(
+    process: str,
+    context: Mapping[str, object],
+    *,
+    printer: "Printer | None" = None,
+    host: str | None = None,
+    port: int | None = None,
+) -> bool:
     """Render the label assigned to ``process`` and send it to the printer."""
 
     try:
@@ -75,7 +92,10 @@ def print_label_for_process(process: str, context: Mapping[str, object]) -> bool
     except KeyError as exc:  # pragma: no cover - defensive logging
         current_app.logger.error("No label template for process '%s': %s", process, exc)
         return False
-    return send_zpl(zpl)
+    if printer is not None:
+        host = printer.host
+        port = printer.port
+    return send_zpl(zpl, host=host, port=port)
 
 
 def render_receiving_label_png(
@@ -91,4 +111,3 @@ def render_receiving_label_png(
     request = Request(url, data=zpl.encode("utf-8"), headers={"Accept": "image/png"})
     with urlopen(request) as response:
         return response.read()
-

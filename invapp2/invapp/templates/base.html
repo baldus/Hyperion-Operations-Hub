@@ -41,6 +41,7 @@
                 {% if emergency_access_active %}
                 <a href="{{ url_for('auth.login') }}" class="nav-btn">Login</a>
                 {% elif current_user.is_authenticated %}
+                <a href="{{ url_for('users.user_settings') }}" class="nav-btn">My Settings</a>
                 <a href="{{ url_for('auth.logout') }}" class="nav-btn">Logout</a>
                 {% else %}
                 <a href="{{ url_for('auth.login') }}" class="nav-btn">Login</a>

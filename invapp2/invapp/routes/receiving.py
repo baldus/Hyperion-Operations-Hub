@@ -8,9 +8,11 @@ from flask import (
     jsonify,
     Response,
 )
+from invapp.login import current_user
 from invapp.extensions import db
 from invapp.models import Receiving, Item, Stock, Location
 from invapp.services.item_locations import apply_smart_item_locations
+from invapp.printing.printer_defaults import resolve_user_printer, set_user_default_printer
 from invapp.printing.zebra import (
     print_receiving_label,
     render_receiving_label_png,
@@ -115,9 +117,21 @@ def print_label():
     description = data.get("description")
     qty = int(data.get("qty", 0))
     copies = int(data.get("copies", 1))
+    requested_printer_name = str(data.get("printer_name", "") or "").strip()
+
+    if requested_printer_name:
+        try:
+            selected_printer = set_user_default_printer(current_user, requested_printer_name)
+        except ValueError:
+            return jsonify({"printed": False, "error": "Invalid printer selection."}), 400
+    else:
+        selected_printer = resolve_user_printer(current_user)
 
     success = True
     for _ in range(copies):
-        success = print_receiving_label(sku, description, qty) and success
+        success = (
+            print_receiving_label(sku, description, qty, printer=selected_printer)
+            and success
+        )
 
     return jsonify({"printed": success})

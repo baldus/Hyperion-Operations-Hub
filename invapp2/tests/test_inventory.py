@@ -812,7 +812,7 @@ def test_receiving_prints_batch_label(client, app, monkeypatch):
 
     calls: list[tuple[str, dict]] = []
 
-    def fake_print_label(process, context):
+    def fake_print_label(process, context, **kwargs):
         calls.append((process, context))
         return True
 
@@ -904,7 +904,7 @@ def test_reprint_receiving_label_uses_batch_label(client, app, monkeypatch):
 
     calls: list[tuple[str, dict]] = []
 
-    def fake_print_label(process, context):
+    def fake_print_label(process, context, **kwargs):
         calls.append((process, context))
         return True
 
@@ -1018,7 +1018,7 @@ def test_print_location_label_uses_location_process(client, app, monkeypatch):
 
     calls: list[tuple[str, dict]] = []
 
-    def fake_print_label(process, context):
+    def fake_print_label(process, context, **kwargs):
         calls.append((process, context))
         return True
 

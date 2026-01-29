@@ -11,16 +11,17 @@ Hyperion Operations Hub is a Flask-based operations console for manufacturing te
 6. [Web / UI Layer (Templates, Frontend, Static)](#web--ui-layer-templates-frontend-static)
 7. [API / Routes](#api--routes)
 8. [Database](#database)
-9. [Permissions / Roles](#permissions--roles)
-10. [Background Tasks / Schedules](#background-tasks--schedules)
-11. [Backups & Restore](#backups--restore)
-12. [Logging, Errors, and Debugging](#logging-errors-and-debugging)
-13. [Testing](#testing)
-14. [Usage Analysis & Pruning](#usage-analysis--pruning)
-15. [Deployment Notes](#deployment-notes)
-16. [Network Stability & Self-Healing (Linux Host)](#network-stability--self-healing-linux-host)
-17. [Contributing / Development Conventions](#contributing--development-conventions)
-18. [How to Make Common Changes](#how-to-make-common-changes)
+9. [Per-user Default Printer](#per-user-default-printer)
+10. [Permissions / Roles](#permissions--roles)
+11. [Background Tasks / Schedules](#background-tasks--schedules)
+12. [Backups & Restore](#backups--restore)
+13. [Logging, Errors, and Debugging](#logging-errors-and-debugging)
+14. [Testing](#testing)
+15. [Usage Analysis & Pruning](#usage-analysis--pruning)
+16. [Deployment Notes](#deployment-notes)
+17. [Network Stability & Self-Healing (Linux Host)](#network-stability--self-healing-linux-host)
+18. [Contributing / Development Conventions](#contributing--development-conventions)
+19. [How to Make Common Changes](#how-to-make-common-changes)
 
 ---
 
@@ -359,6 +360,43 @@ Alembic reads `DB_URL` at runtime. See [`invapp2/migrations/env.py`](invapp2/mig
 ### Data integrity / constraints to know
 - **Batch soft deletes**: `Batch` uses `removed_at` with a custom query class to hide removed records by default. See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
 - **Sequence repair**: primary key sequences are repaired during startup and via CLI tooling to recover from manual data imports. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py) and [`invapp2/invapp/db_sanity_check.py`](invapp2/invapp/db_sanity_check.py).
+
+---
+
+## Per-user Default Printer
+
+Hyperion supports a per-user default printer selection that persists across sessions. The saved default is used to pre-select printer-enabled workflows and is isolated per user (no global side effects).
+
+### Data model changes
+- `User.default_printer` (nullable string) stores the printer identifier (printer name). See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+- Alembic migration `20250920_add_user_default_printer` adds the column with safe upgrade/downgrade. See [`invapp2/migrations/versions/20250920_add_user_default_printer.py`](invapp2/migrations/versions/20250920_add_user_default_printer.py).
+
+### UI behavior
+- Users set their default printer on **My Settings** (`/users/settings`), which is accessible after login.
+- Printer selection in the admin printer settings page also updates the logged-in user’s default.
+- On render, the dropdown pre-selects the saved default (when set). If no default exists, “Use system default” remains selected and the system fallback printer is displayed.
+- During print workflows, passing a printer selection updates the user’s stored default.
+
+### Feature contract / invariants
+- **Per-user only:** the selection is saved to the user record, not to global config.
+- **Last-selected wins:** changing the printer in settings or during a print action replaces the previous default.
+- **Safe fallback:** if a saved printer no longer exists, the value is cleared and printing falls back to the system default.
+
+### Developer guidance
+- **Default resolution:** use `resolve_user_printer(current_user)` from [`invapp2/invapp/printing/printer_defaults.py`](invapp2/invapp/printing/printer_defaults.py) to get the printer instance for the active user (including fallback logic).
+- **Setting defaults:** use `set_user_default_printer(current_user, printer_name)` to validate and persist updates, and to log the change.
+- **Adding printer support to new pages:**
+  1. Fetch printers with `list_available_printers()` for dropdowns.
+  2. Pre-select `current_user.default_printer` in the UI.
+  3. On POST, call `set_user_default_printer` if the user picked a printer.
+  4. Pass the resolved printer into `print_label_for_process(..., printer=...)` or `print_receiving_label(..., printer=...)`.
+
+### Testing notes
+- Primary coverage lives in `invapp2/tests/test_user_default_printer.py`.
+- Run the focused test file with:
+  ```bash
+  pytest invapp2/tests/test_user_default_printer.py
+  ```
 
 ---
 

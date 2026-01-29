@@ -14,6 +14,7 @@ from flask import (
 from sqlalchemy.exc import IntegrityError
 
 from invapp.extensions import db
+from invapp.login import current_user, login_required
 from invapp.models import Role, User
 from invapp.permissions import (
     get_known_pages,
@@ -21,6 +22,11 @@ from invapp.permissions import (
     update_page_permissions,
 )
 from invapp.offline import is_emergency_mode_active
+from invapp.printing.printer_defaults import (
+    list_available_printers,
+    resolve_user_printer,
+    set_user_default_printer,
+)
 from invapp.superuser import superuser_required
 
 bp = Blueprint("users", __name__, url_prefix="/users")
@@ -46,6 +52,36 @@ def list_users():
 
     users = User.query.order_by(User.username).all()
     return render_template("users/list.html", users=users)
+
+
+@bp.route("/settings", methods=["GET", "POST"])
+@login_required
+def user_settings():
+    if not _database_available():
+        return _offline_user_admin_response()
+
+    printers = list_available_printers()
+    selected_printer = resolve_user_printer(current_user)
+
+    if request.method == "POST":
+        default_printer = request.form.get("default_printer", "").strip()
+        try:
+            set_user_default_printer(current_user, default_printer or None)
+        except ValueError:
+            flash("The selected printer could not be found.", "danger")
+            return redirect(url_for("users.user_settings"))
+
+        if default_printer:
+            flash(f"Default printer set to {default_printer}.", "success")
+        else:
+            flash("Default printer cleared. Using system default.", "success")
+        return redirect(url_for("users.user_settings"))
+
+    return render_template(
+        "users/settings.html",
+        printers=printers,
+        selected_printer=selected_printer,
+    )
 
 
 def _extract_role_ids(raw_role_ids: Iterable[str]) -> list[int]:

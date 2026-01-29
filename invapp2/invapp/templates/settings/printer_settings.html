@@ -2,7 +2,7 @@
 
 {% block content %}
 <h2>Printer Settings</h2>
-<p class="page-intro">Manage the devices used for labels and reports, choose the active printer, and register new hardware.</p>
+<p class="page-intro">Manage the devices used for labels and reports, choose your default printer, and register new hardware.</p>
 
 {% if printers %}
 <section class="card-section">
@@ -10,6 +10,7 @@
     <form method="post" class="stacked-form">
         <input type="hidden" name="form_id" value="select">
         <label for="printer_id">Available printers</label>
+        <p class="form-hint">Your selection is saved as your personal default printer.</p>
         <div class="form-row">
             <select id="printer_id" name="printer_id" aria-label="Select printer">
                 <option value="" disabled {% if not selected_printer %}selected{% endif %}>Choose a printer…</option>

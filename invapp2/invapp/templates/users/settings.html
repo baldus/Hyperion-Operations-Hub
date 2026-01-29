@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>My Settings</h2>
+<p class="page-intro">Choose your personal defaults for printing and account preferences.</p>
+
+<section class="card">
+  <h3>Default Printer</h3>
+  <p class="form-hint">
+    This selection is saved to your account and used to pre-select printers in label workflows.
+  </p>
+  <form method="post">
+    <label for="default-printer">Default printer</label>
+    <select id="default-printer" name="default_printer">
+      <option value="" {% if not current_user.default_printer %}selected{% endif %}>Use system default</option>
+      {% for printer in printers %}
+      <option value="{{ printer.name }}" {% if current_user.default_printer == printer.name %}selected{% endif %}>
+        {{ printer.name }}{% if printer.location %} — {{ printer.location }}{% endif %}
+      </option>
+      {% endfor %}
+    </select>
+    {% if not current_user.default_printer and selected_printer %}
+    <p class="form-hint">System default: {{ selected_printer.name }}.</p>
+    {% endif %}
+    <button type="submit" class="action-btn">Save Default</button>
+  </form>
+</section>
+{% endblock %}

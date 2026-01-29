@@ -136,8 +136,12 @@ def test_save_layout_success_persists_to_database(client, app):
         assert assignment.template_id == template.id
 
 
-def test_trial_print_requires_selected_printer(client):
+def test_trial_print_requires_printer_configured(client, app):
     login_admin(client)
+    with app.app_context():
+        Printer.query.delete()
+        db.session.commit()
+
     payload = build_layout_payload()
     response = client.post("/settings/printers/designer/print-trial", json=payload)
     assert response.status_code == 400
@@ -154,7 +158,7 @@ def test_trial_print_succeeds_with_selected_printer(client, app, monkeypatch):
 
     printed = {}
 
-    def fake_print_label(process, context):
+    def fake_print_label(process, context, **kwargs):
         printed["process"] = process
         printed["context"] = context
         return True
@@ -163,14 +167,15 @@ def test_trial_print_succeeds_with_selected_printer(client, app, monkeypatch):
 
     with app.app_context():
         printer = Printer.query.filter_by(name="Test Printer").first()
-
-    with client.session_transaction() as sess:
-        sess["selected_printer_id"] = printer.id
+        user = User.query.filter_by(username="designer").first()
+        printer_name = printer.name
+        user.default_printer = printer_name
+        db.session.commit()
 
     response = client.post("/settings/printers/designer/print-trial", json=save_payload)
     assert response.status_code == 200
     data = response.get_json()
     assert data["ok"] is True
-    assert data["printer"] == printer.name
+    assert data["printer"] == printer_name
     assert printed["process"] == "BatchCreated"
     assert printed["context"]["Batch"]["LotNumber"]

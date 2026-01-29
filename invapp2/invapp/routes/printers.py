@@ -6,7 +6,6 @@ from flask import (
     redirect,
     render_template,
     request,
-    session,
     url_for,
 )
 from sqlalchemy.exc import IntegrityError
@@ -16,6 +15,11 @@ from invapp.extensions import db
 from invapp.login import current_user, login_required
 from invapp.models import LabelProcessAssignment, LabelTemplate, Printer
 from invapp.security import require_roles
+from invapp.printing.printer_defaults import (
+    list_available_printers,
+    resolve_user_printer,
+    set_user_default_printer,
+)
 from invapp.printing.labels import (
     build_designer_state,
     get_designer_label_config,
@@ -30,21 +34,12 @@ bp = Blueprint("printers", __name__, url_prefix="/settings/printers")
 bp.before_request(blueprint_page_guard("printers"))
 
 
-def _apply_printer_configuration(printer: Printer) -> None:
-    current_app.config["ZEBRA_PRINTER_HOST"] = printer.host
-    if printer.port is not None:
-        current_app.config["ZEBRA_PRINTER_PORT"] = printer.port
-
-
 @bp.route("/", methods=["GET", "POST"], strict_slashes=False)
 @login_required
 @require_roles("admin")
 def printer_settings():
-    printers = Printer.query.order_by(Printer.name.asc()).all()
-    selected_printer = None
-    selected_printer_id = session.get("selected_printer_id")
-    if selected_printer_id:
-        selected_printer = Printer.query.get(selected_printer_id)
+    printers = list_available_printers()
+    selected_printer = resolve_user_printer(current_user)
 
     if request.method == "POST":
         form_id = request.form.get("form_id")
@@ -60,8 +55,7 @@ def printer_settings():
                 if printer is None:
                     flash("The selected printer could not be found.", "danger")
                 else:
-                    session["selected_printer_id"] = printer.id
-                    _apply_printer_configuration(printer)
+                    set_user_default_printer(current_user, printer.name)
                     flash(f"Using {printer.name} for printing tasks.", "success")
             return redirect(url_for("printers.printer_settings"))
 
@@ -110,31 +104,11 @@ def printer_settings():
                     flash(f"Added printer '{printer.name}'.", "success")
                     if (
                         request.form.get("make_default") == "yes"
-                        or session.get("selected_printer_id") is None
+                        or current_user.default_printer is None
                     ):
-                        session["selected_printer_id"] = printer.id
-                        _apply_printer_configuration(printer)
+                        set_user_default_printer(current_user, printer.name)
                         flash(f"'{printer.name}' is now the active printer.", "info")
                 return redirect(url_for("printers.printer_settings"))
-
-    if selected_printer is None and selected_printer_id:
-        session.pop("selected_printer_id", None)
-
-    if selected_printer is None and printers:
-        configured_host = current_app.config.get("ZEBRA_PRINTER_HOST")
-        configured_port = current_app.config.get("ZEBRA_PRINTER_PORT")
-        if configured_host:
-            selected_printer = (
-                Printer.query.filter_by(host=configured_host, port=configured_port)
-                .order_by(Printer.updated_at.desc())
-                .first()
-            )
-        if selected_printer is None:
-            selected_printer = printers[0]
-
-    if selected_printer:
-        session.setdefault("selected_printer_id", selected_printer.id)
-        _apply_printer_configuration(selected_printer)
 
     return render_template(
         "settings/printer_settings.html",
@@ -150,18 +124,8 @@ def printer_settings():
 @login_required
 @require_roles("admin")
 def label_designer():
-    printers = Printer.query.order_by(Printer.name.asc()).all()
-    selected_printer = None
-    selected_printer_id = session.get("selected_printer_id")
-    if selected_printer_id:
-        selected_printer = Printer.query.get(selected_printer_id)
-
-    if selected_printer is None and printers:
-        selected_printer = printers[0]
-        session.setdefault("selected_printer_id", selected_printer.id)
-
-    if selected_printer:
-        _apply_printer_configuration(selected_printer)
+    printers = list_available_printers()
+    selected_printer = resolve_user_printer(current_user)
 
     designer_labels: list[dict[str, object]] = []
     for config in iter_designer_labels():
@@ -197,10 +161,17 @@ def label_designer_print_trial():
     if not label_id:
         return jsonify({"message": "Label identifier is required for a trial print."}), 400
 
-    selected_printer = None
-    selected_printer_id = session.get("selected_printer_id")
-    if selected_printer_id:
-        selected_printer = Printer.query.get(selected_printer_id)
+    requested_printer_name = payload.get("printer_name")
+    if requested_printer_name:
+        try:
+            selected_printer = set_user_default_printer(
+                current_user,
+                str(requested_printer_name),
+            )
+        except ValueError:
+            return jsonify({"message": "The selected printer could not be found."}), 400
+    else:
+        selected_printer = resolve_user_printer(current_user)
 
     if selected_printer is None:
         return (
@@ -220,7 +191,7 @@ def label_designer_print_trial():
         )
 
     context = get_designer_sample_context(label_id)
-    if not print_label_for_process(config.process, context):
+    if not print_label_for_process(config.process, context, printer=selected_printer):
         return (
             jsonify({"message": "Failed to queue the trial print with the active printer."}),
             500,
