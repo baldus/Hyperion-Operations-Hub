@@ -133,10 +133,12 @@ def _ensure_placeholder_location(loc_map: dict[str, "Location"]) -> "Location":
             db.session.flush()
         except IntegrityError as exc:  # pragma: no cover - exercised in tests
             db.session.rollback()
-            existing = Location.query.filter_by(
+            existing = Location.with_removed().filter_by(
                 code=UNASSIGNED_LOCATION_CODE
             ).one_or_none()
             if existing:
+                if existing.removed_at is not None:
+                    existing.removed_at = None
                 loc_map[UNASSIGNED_LOCATION_CODE] = existing
                 return existing
 
@@ -159,6 +161,12 @@ def _format_location_label(location: Location) -> str:
     return location.code
 
 
+def _normalize_location_code(value: str | None) -> str:
+    if value is None:
+        return ""
+    return value.strip().upper()
+
+
 def _resolve_location_from_form(value: str | None) -> Location | None:
     if not value:
         return None
@@ -173,11 +181,15 @@ def _resolve_location_from_form(value: str | None) -> Location | None:
         location_id = None
 
     if location_id is not None:
-        location = db.session.get(Location, location_id)
+        location = Location.active().filter_by(id=location_id).first()
         if location:
             return location
 
-    return Location.query.filter(func.lower(Location.code) == raw_value.lower()).first()
+    return (
+        Location.active()
+        .filter(func.lower(Location.code) == raw_value.lower())
+        .first()
+    )
 
 
 AUTO_SKU_START = 100000
@@ -534,6 +546,112 @@ def _prepare_location_import_mapping_context(
         selected_mappings=selected_mappings,
         token=token,
     )
+
+
+def _location_import_mappings_from_form(form: Mapping[str, str]) -> dict[str, str]:
+    selected_mappings: dict[str, str] = {}
+    for field_cfg in LOCATION_IMPORT_FIELDS:
+        selected_header = form.get(f"mapping_{field_cfg['field']}", "")
+        if selected_header:
+            selected_mappings[field_cfg["field"]] = selected_header
+    return selected_mappings
+
+
+def _extract_location_import_rows(
+    csv_text: str, selected_mappings: dict[str, str]
+) -> list[dict[str, str]]:
+    reader = csv.DictReader(io.StringIO(csv_text))
+    if not reader.fieldnames:
+        raise ValueError("Uploaded file does not contain a header row.")
+
+    invalid_columns = [
+        header for header in selected_mappings.values() if header not in reader.fieldnames
+    ]
+    if invalid_columns:
+        raise ValueError(
+            "Some selected columns could not be found in the file. "
+            "Please upload the file again."
+        )
+
+    def extract(row: dict[str, str], field: str) -> str:
+        header = selected_mappings.get(field)
+        if not header:
+            return ""
+        value = row.get(header)
+        return value if value is not None else ""
+
+    rows: list[dict[str, str]] = []
+    for row in reader:
+        raw_code = extract(row, "code")
+        normalized_code = _normalize_location_code(raw_code)
+        if not normalized_code:
+            continue
+        description = extract(row, "description").strip()
+        rows.append(
+            {
+                "code": raw_code.strip(),
+                "description": description,
+                "normalized_code": normalized_code,
+            }
+        )
+    return rows
+
+
+def _missing_locations_for_upload(upload_codes: set[str]) -> list[Location]:
+    missing = [
+        location
+        for location in Location.active().all()
+        if _normalize_location_code(location.code) not in upload_codes
+        and location.code != UNASSIGNED_LOCATION_CODE
+    ]
+    return sorted(missing, key=lambda location: location.code.lower())
+
+
+def _location_has_inventory(location_id: int) -> bool:
+    return bool(get_location_inventory_lines(location_id, include_pending=True))
+
+
+def _apply_location_import_changes(
+    import_rows: list[dict[str, str]],
+    remove_locations: list[Location] | None = None,
+) -> tuple[int, int, int, int]:
+    normalized_codes = {row["normalized_code"] for row in import_rows}
+    existing_locations = []
+    if normalized_codes:
+        existing_locations = (
+            Location.with_removed()
+            .filter(func.upper(Location.code).in_(normalized_codes))
+            .all()
+        )
+    existing_by_code = {
+        _normalize_location_code(location.code): location for location in existing_locations
+    }
+
+    count_new = 0
+    count_updated = 0
+    count_restored = 0
+    count_removed = len(remove_locations or [])
+
+    with db.session.begin_nested():
+        for row in import_rows:
+            existing = existing_by_code.get(row["normalized_code"])
+            if existing:
+                if existing.removed_at is not None:
+                    existing.removed_at = None
+                    count_restored += 1
+                if row["description"]:
+                    existing.description = row["description"]
+                count_updated += 1
+            else:
+                loc = Location(code=row["code"], description=row["description"])
+                db.session.add(loc)
+                count_new += 1
+
+        if remove_locations:
+            for location in remove_locations:
+                location.soft_delete()
+
+    return count_new, count_updated, count_restored, count_removed
 
 
 def _prepare_stock_import_mapping_context(csv_text, selected_mappings=None, token=None):
@@ -1777,8 +1895,10 @@ def search_locations_api():
     """Search locations for typeahead dropdowns."""
 
     query = (request.args.get("q") or "").strip()
-    base_query = Location.query.options(load_only(Location.id, Location.code, Location.description))
-    unassigned = Location.query.filter_by(code=UNASSIGNED_LOCATION_CODE).one_or_none()
+    base_query = Location.active().options(
+        load_only(Location.id, Location.code, Location.description)
+    )
+    unassigned = Location.active().filter_by(code=UNASSIGNED_LOCATION_CODE).one_or_none()
 
     if not query:
         results = []
@@ -1898,7 +2018,7 @@ def lookup_item_api(sku):
 @bp.route("/cycle-count", methods=["GET", "POST"])
 def cycle_count_home():
     items = Item.query.options(load_only(Item.id, Item.sku, Item.name)).all()
-    locations = Location.query.options(load_only(Location.id, Location.code)).all()
+    locations = Location.active().options(load_only(Location.id, Location.code)).all()
     batches = (
         Batch.active().options(load_only(Batch.id, Batch.lot_number))
         .all()
@@ -2139,7 +2259,7 @@ def view_item(item_id):
     locations = (
         {
             loc.id: loc
-            for loc in Location.query.filter(Location.id.in_(location_ids)).all()
+            for loc in Location.active().filter(Location.id.in_(location_ids)).all()
         }
         if location_ids
         else {}
@@ -2171,7 +2291,7 @@ def view_item(item_id):
 
 @bp.route("/item/add", methods=["GET", "POST"])
 def add_item():
-    locations = Location.query.order_by(Location.code.asc()).all()
+    locations = Location.active().order_by(Location.code.asc()).all()
 
     if request.method == "POST":
         next_sku = _next_auto_sku()
@@ -2209,7 +2329,7 @@ def add_item():
             if location_id is None:
                 location_errors.append(f"{label} selection is invalid.")
                 return None
-            location = Location.query.get(location_id)
+            location = Location.active().filter_by(id=location_id).first()
             if location is None:
                 location_errors.append(f"{label} not found.")
             return location
@@ -2288,7 +2408,7 @@ def edit_item(item_id):
     @guard
     def _edit_item(item_id):
         item = Item.query.get_or_404(item_id)
-        locations = Location.query.order_by(Location.code.asc()).all()
+        locations = Location.active().order_by(Location.code.asc()).all()
 
         if request.method == "POST":
             name_value = request.form.get("name", "").strip()
@@ -2328,7 +2448,7 @@ def edit_item(item_id):
                 if location_id is None:
                     location_errors.append(f"{label} selection is invalid.")
                     return None
-                location = Location.query.get(location_id)
+                location = Location.active().filter_by(id=location_id).first()
                 if location is None:
                     location_errors.append(f"{label} not found.")
                 return location
@@ -2717,7 +2837,7 @@ def import_items():
                 value = row.get(header)
                 return value if value is not None else ""
 
-            locations_by_id = {loc.id: loc for loc in Location.query.all()}
+            locations_by_id = {loc.id: loc for loc in Location.active().all()}
             locations_by_code = {loc.code: loc for loc in locations_by_id.values()}
 
             count_new, count_updated = 0, 0
@@ -3018,7 +3138,7 @@ def list_locations():
     like_pattern = f"%{search}%" if search else None
     description_pattern = f"%{description_query}%" if description_query else None
 
-    available_rows_query = Location.query.with_entities(Location.code).all()
+    available_rows_query = Location.active().with_entities(Location.code).all()
     available_rows = sorted(
         {
             parsed.row
@@ -3027,7 +3147,7 @@ def list_locations():
         }
     )
 
-    locations_query = Location.query
+    locations_query = Location.active()
     if like_pattern:
         matching_location_ids = (
             db.session.query(Movement.location_id)
@@ -3253,7 +3373,10 @@ def delete_all_locations():
                 synchronize_session=False,
             )
         )
-        deleted = Location.query.delete(synchronize_session=False)
+        active_locations = Location.active().all()
+        for location in active_locations:
+            location.soft_delete()
+        deleted = len(active_locations)
         db.session.commit()
     except SQLAlchemyError:
         db.session.rollback()
@@ -3289,7 +3412,7 @@ def add_location():
 @bp.route("/location/<int:location_id>/edit", methods=["GET", "POST"])
 @login_required
 def edit_location(location_id):
-    location = Location.query.get_or_404(location_id)
+    location = Location.active().filter_by(id=location_id).first_or_404()
     can_edit_location = current_user.is_authenticated and (
         current_user.has_any_role(("admin",)) or is_superuser()
     )
@@ -3297,7 +3420,7 @@ def edit_location(location_id):
     can_set_pending = current_user.is_authenticated
     can_move_pending = current_user.is_authenticated
 
-    all_locations = Location.query.order_by(Location.code).all()
+    all_locations = Location.active().order_by(Location.code).all()
 
     def load_location_lines():
         return get_location_inventory_lines(location_id, include_pending=True)
@@ -3313,8 +3436,8 @@ def edit_location(location_id):
         if not code:
             errors.append("Location code is required.")
         elif code != location.code:
-            existing = Location.query.filter_by(code=code).first()
-            if existing:
+            existing = Location.with_removed().filter_by(code=code).first()
+            if existing and existing.id != location.id:
                 errors.append("Another location with that code already exists.")
 
         if errors:
@@ -3360,7 +3483,7 @@ def edit_location(location_id):
 @bp.post("/location/<int:location_id>/remove-all-items")
 @require_admin_or_superuser
 def remove_all_items_from_location(location_id: int):
-    location = Location.query.get_or_404(location_id)
+    location = Location.active().filter_by(id=location_id).first_or_404()
     confirmation = (request.form.get("confirmation") or "").strip()
     reason = (request.form.get("reason") or "").strip()
     notes = (request.form.get("notes") or "").strip()
@@ -3425,7 +3548,7 @@ def remove_all_items_from_location(location_id: int):
 @bp.route("/location/<int:location_id>/print-label", methods=["POST"])
 @require_roles("admin")
 def print_location_label(location_id: int):
-    location = Location.query.get_or_404(location_id)
+    location = Location.active().filter_by(id=location_id).first_or_404()
 
     from invapp.printing.labels import build_location_label_context
     from invapp.printing.zebra import print_label_for_process
@@ -3445,7 +3568,7 @@ def print_location_label(location_id: int):
 @bp.route("/location/<int:location_id>/delete", methods=["POST"])
 @require_roles("admin")
 def delete_location(location_id):
-    location = Location.query.get_or_404(location_id)
+    location = Location.active().filter_by(id=location_id).first_or_404()
     has_movements = Movement.query.filter_by(location_id=location.id).first() is not None
 
     if has_movements:
@@ -3456,162 +3579,257 @@ def delete_location(location_id):
         return redirect(url_for("inventory.edit_location", location_id=location.id))
 
     code = location.code
-    db.session.delete(location)
+    location.soft_delete()
     db.session.commit()
-    flash(f"Location {code} deleted successfully.", "success")
+    flash(f"Location {code} removed successfully.", "success")
     return redirect(url_for("inventory.list_locations"))
 
 
 @bp.route("/locations/import", methods=["GET", "POST"])
 def import_locations():
     """
-    Import locations from CSV.
+    Import locations from CSV/TSV/XLSX.
     - If code exists → update description.
     - 'id' column is ignored.
     """
-    if request.method == "POST":
-        step = request.form.get("step")
-        if step == "mapping":
-            import_token = request.form.get("import_token", "")
+    edit_roles = resolve_edit_roles(
+        "inventory", default_roles=("editor", "admin", "inventory")
+    )
+    guard = require_any_role(edit_roles)
+
+    @guard
+    def _import_locations():
+        if request.method == "POST":
+            step = request.form.get("step")
+            remove_missing = request.form.get("remove_missing") == "1"
+
+            if step in {"mapping", "confirm_missing", "apply_missing"}:
+                import_token = request.form.get("import_token", "")
+                if not import_token:
+                    flash("No import data found. Please upload the file again.", "danger")
+                    return redirect(url_for("inventory.import_locations"))
+
+                csv_text = _load_import_csv("locations", import_token)
+                if csv_text is None:
+                    flash(
+                        "Could not read the uploaded data. Please upload the file again.",
+                        "danger",
+                    )
+                    _remove_import_csv("locations", import_token)
+                    return redirect(url_for("inventory.import_locations"))
+
+                selected_mappings = _location_import_mappings_from_form(request.form)
+
+                missing_required = [
+                    field_cfg["label"]
+                    for field_cfg in LOCATION_IMPORT_FIELDS
+                    if field_cfg["required"] and field_cfg["field"] not in selected_mappings
+                ]
+                if missing_required:
+                    flash(
+                        "Please select a column for: " + ", ".join(missing_required) + ".",
+                        "danger",
+                    )
+                    context = _prepare_location_import_mapping_context(
+                        csv_text,
+                        selected_mappings=selected_mappings,
+                        token=import_token,
+                    )
+                    context.update(
+                        {
+                            "mapping_title": "Map Location Columns",
+                            "submit_label": "Import Locations",
+                            "start_over_url": url_for("inventory.import_locations"),
+                            "remove_missing": remove_missing,
+                        }
+                    )
+                    return render_template("inventory/import_mapping.html", **context)
+
+                try:
+                    import_rows = _extract_location_import_rows(
+                        csv_text, selected_mappings
+                    )
+                except ValueError as exc:
+                    flash(str(exc), "danger")
+                    context = _prepare_location_import_mapping_context(
+                        csv_text,
+                        selected_mappings=selected_mappings,
+                        token=import_token,
+                    )
+                    context.update(
+                        {
+                            "mapping_title": "Map Location Columns",
+                            "submit_label": "Import Locations",
+                            "start_over_url": url_for("inventory.import_locations"),
+                            "remove_missing": remove_missing,
+                        }
+                    )
+                    return render_template("inventory/import_mapping.html", **context)
+
+                upload_codes = {row["normalized_code"] for row in import_rows}
+
+                if remove_missing and step == "mapping":
+                    missing_locations = _missing_locations_for_upload(upload_codes)
+                    if missing_locations:
+                        blocked_locations = [
+                            location
+                            for location in missing_locations
+                            if _location_has_inventory(location.id)
+                        ]
+                        return render_template(
+                            "inventory/import_locations_preview.html",
+                            import_token=import_token,
+                            selected_mappings=selected_mappings,
+                            remove_missing=remove_missing,
+                            missing_locations=missing_locations,
+                            blocked_locations=blocked_locations,
+                        )
+
+                if step == "confirm_missing":
+                    if not remove_missing:
+                        return redirect(url_for("inventory.import_locations"))
+                    missing_locations = _missing_locations_for_upload(upload_codes)
+                    blocked_locations = [
+                        location
+                        for location in missing_locations
+                        if _location_has_inventory(location.id)
+                    ]
+                    return render_template(
+                        "inventory/import_locations_confirm.html",
+                        import_token=import_token,
+                        selected_mappings=selected_mappings,
+                        remove_missing=remove_missing,
+                        missing_locations=missing_locations,
+                        blocked_locations=blocked_locations,
+                    )
+
+                if step == "apply_missing":
+                    if remove_missing:
+                        confirmation = (request.form.get("confirmation") or "").strip()
+                        if confirmation != "DELETE MISSING LOCATIONS":
+                            flash(
+                                "Confirmation phrase did not match. "
+                                "Type DELETE MISSING LOCATIONS to proceed.",
+                                "danger",
+                            )
+                            missing_locations = _missing_locations_for_upload(upload_codes)
+                            blocked_locations = [
+                                location
+                                for location in missing_locations
+                                if _location_has_inventory(location.id)
+                            ]
+                            return render_template(
+                                "inventory/import_locations_confirm.html",
+                                import_token=import_token,
+                                selected_mappings=selected_mappings,
+                                remove_missing=remove_missing,
+                                missing_locations=missing_locations,
+                                blocked_locations=blocked_locations,
+                            )
+
+                    remove_locations = (
+                        _missing_locations_for_upload(upload_codes) if remove_missing else []
+                    )
+                    blocked_locations = [
+                        location
+                        for location in remove_locations
+                        if _location_has_inventory(location.id)
+                    ]
+                    if blocked_locations:
+                        flash(
+                            "Cannot remove locations that still have inventory or pending receipts.",
+                            "danger",
+                        )
+                        return render_template(
+                            "inventory/import_locations_confirm.html",
+                            import_token=import_token,
+                            selected_mappings=selected_mappings,
+                            remove_missing=remove_missing,
+                            missing_locations=remove_locations,
+                            blocked_locations=blocked_locations,
+                        )
+
+                    try:
+                        count_new, count_updated, count_restored, count_removed = (
+                            _apply_location_import_changes(
+                                import_rows, remove_locations=remove_locations
+                            )
+                        )
+                        db.session.commit()
+                    except SQLAlchemyError:
+                        db.session.rollback()
+                        current_app.logger.exception("Failed to import locations.")
+                        flash("Failed to import locations. Please try again.", "danger")
+                        return redirect(url_for("inventory.import_locations"))
+
+                    _remove_import_csv("locations", import_token)
+                    summary = (
+                        f"Locations imported: {count_new} new, {count_updated} updated"
+                    )
+                    if count_restored:
+                        summary += f", {count_restored} reactivated"
+                    if count_removed:
+                        summary += f", {count_removed} removed"
+                    flash(summary, "success")
+                    return redirect(url_for("inventory.list_locations"))
+
+                try:
+                    count_new, count_updated, count_restored, count_removed = (
+                        _apply_location_import_changes(import_rows)
+                    )
+                    db.session.commit()
+                except SQLAlchemyError:
+                    db.session.rollback()
+                    current_app.logger.exception("Failed to import locations.")
+                    flash("Failed to import locations. Please try again.", "danger")
+                    return redirect(url_for("inventory.import_locations"))
+
+                _remove_import_csv("locations", import_token)
+                summary = f"Locations imported: {count_new} new, {count_updated} updated"
+                if count_restored:
+                    summary += f", {count_restored} reactivated"
+                if count_removed:
+                    summary += f", {count_removed} removed"
+                flash(summary, "success")
+                return redirect(url_for("inventory.list_locations"))
+
+            file = request.files.get("file")
+            if not file or file.filename == "":
+                flash("No file uploaded", "danger")
+                return redirect(request.url)
+
+            try:
+                csv_text = parse_tabular_upload(file)
+            except TabularImportError as exc:
+                flash(str(exc), "danger")
+                return redirect(request.url)
+
+            context = _prepare_location_import_mapping_context(csv_text)
+            context.update(
+                {
+                    "mapping_title": "Map Location Columns",
+                    "submit_label": "Import Locations",
+                    "start_over_url": url_for("inventory.import_locations"),
+                    "remove_missing": remove_missing,
+                }
+            )
+            import_token = context.get("import_token")
             if not import_token:
-                flash("No CSV data found. Please upload the file again.", "danger")
-                return redirect(url_for("inventory.import_locations"))
-
-            csv_text = _load_import_csv("locations", import_token)
-            if csv_text is None:
                 flash(
-                    "Could not read the uploaded CSV data. Please upload the file again.",
+                    "Could not prepare the uploaded data. Please try again.",
                     "danger",
                 )
+                return redirect(request.url)
+            if not context["headers"]:
                 _remove_import_csv("locations", import_token)
-                return redirect(url_for("inventory.import_locations"))
+                flash("Uploaded file does not contain a header row.", "danger")
+                return redirect(request.url)
 
-            selected_mappings = {}
-            for field_cfg in LOCATION_IMPORT_FIELDS:
-                selected_header = request.form.get(f"mapping_{field_cfg['field']}", "")
-                if selected_header:
-                    selected_mappings[field_cfg["field"]] = selected_header
+            return render_template("inventory/import_mapping.html", **context)
 
-            missing_required = [
-                field_cfg["label"]
-                for field_cfg in LOCATION_IMPORT_FIELDS
-                if field_cfg["required"] and field_cfg["field"] not in selected_mappings
-            ]
-            if missing_required:
-                flash(
-                    "Please select a column for: " + ", ".join(missing_required) + ".",
-                    "danger",
-                )
-                context = _prepare_location_import_mapping_context(
-                    csv_text,
-                    selected_mappings=selected_mappings,
-                    token=import_token,
-                )
-                context.update(
-                    {
-                        "mapping_title": "Map Location Columns",
-                        "submit_label": "Import Locations",
-                        "start_over_url": url_for("inventory.import_locations"),
-                    }
-                )
-                return render_template("inventory/import_mapping.html", **context)
+        return render_template("inventory/import_locations.html")
 
-            reader = csv.DictReader(io.StringIO(csv_text))
-            if not reader.fieldnames:
-                flash("Uploaded CSV does not contain a header row.", "danger")
-                _remove_import_csv("locations", import_token)
-                return redirect(url_for("inventory.import_locations"))
-
-            invalid_columns = [
-                header
-                for header in selected_mappings.values()
-                if header not in reader.fieldnames
-            ]
-            if invalid_columns:
-                flash(
-                    "Some selected columns could not be found in the file. Please upload the file again.",
-                    "danger",
-                )
-                context = _prepare_location_import_mapping_context(
-                    csv_text,
-                    selected_mappings=selected_mappings,
-                    token=import_token,
-                )
-                context.update(
-                    {
-                        "mapping_title": "Map Location Columns",
-                        "submit_label": "Import Locations",
-                        "start_over_url": url_for("inventory.import_locations"),
-                    }
-                )
-                return render_template("inventory/import_mapping.html", **context)
-
-            def extract(row, field):
-                header = selected_mappings.get(field)
-                if not header:
-                    return ""
-                value = row.get(header)
-                return value if value is not None else ""
-
-            count_new, count_updated = 0, 0
-            for row in reader:
-                code = extract(row, "code").strip()
-                if not code:
-                    continue
-                description = extract(row, "description").strip()
-
-                existing = Location.query.filter_by(code=code).first()
-                if existing:
-                    if description:
-                        existing.description = description
-                    count_updated += 1
-                else:
-                    loc = Location(code=code, description=description)
-                    db.session.add(loc)
-                    count_new += 1
-
-            db.session.commit()
-            _remove_import_csv("locations", import_token)
-            flash(
-                f"Locations imported: {count_new} new, {count_updated} updated",
-                "success",
-            )
-            return redirect(url_for("inventory.list_locations"))
-
-        file = request.files.get("file")
-        if not file or file.filename == "":
-            flash("No file uploaded", "danger")
-            return redirect(request.url)
-
-        try:
-            csv_text = file.stream.read().decode("utf-8-sig")
-        except UnicodeDecodeError:
-            flash("CSV import files must be UTF-8 encoded.", "danger")
-            return redirect(request.url)
-
-        context = _prepare_location_import_mapping_context(csv_text)
-        context.update(
-            {
-                "mapping_title": "Map Location Columns",
-                "submit_label": "Import Locations",
-                "start_over_url": url_for("inventory.import_locations"),
-            }
-        )
-        import_token = context.get("import_token")
-        if not import_token:
-            flash(
-                "Could not prepare the uploaded CSV. Please try again.",
-                "danger",
-            )
-            return redirect(request.url)
-        if not context["headers"]:
-            _remove_import_csv("locations", import_token)
-            flash("Uploaded CSV does not contain a header row.", "danger")
-            return redirect(request.url)
-
-        return render_template("inventory/import_mapping.html", **context)
-
-    return render_template("inventory/import_locations.html")
+    return _import_locations()
 
 
 @bp.route("/locations/export")
@@ -3619,7 +3837,7 @@ def export_locations():
     """
     Export locations to CSV (without id).
     """
-    locations = Location.query.all()
+    locations = Location.active().all()
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["code", "description"])
@@ -3902,7 +4120,7 @@ def list_stock():
         ) in pagination.items
     ]
 
-    locations = Location.query.order_by(Location.code).all()
+    locations = Location.active().order_by(Location.code).all()
 
     def build_stock_url(**overrides):
         args = request.args.to_dict()
@@ -3934,7 +4152,7 @@ def list_stock():
 @bp.route("/stock/<int:item_id>")
 def stock_detail(item_id: int):
     item = Item.query.get_or_404(item_id)
-    all_locations = Location.query.order_by(Location.code).all()
+    all_locations = Location.active().order_by(Location.code).all()
 
     stock_rows = (
         db.session.query(
@@ -4040,7 +4258,7 @@ def set_stock_quantity(item_id: int):
         flash("Select a valid location.", "danger")
         return redirect(url_for("inventory.stock_detail", item_id=item_id))
 
-    location = Location.query.get(location_id)
+    location = Location.active().filter_by(id=location_id).first()
     if location is None:
         flash("Location not found.", "danger")
         return redirect(url_for("inventory.stock_detail", item_id=item_id))
@@ -4096,8 +4314,8 @@ def transfer_stock(item_id: int):
         flash("Enter a transfer quantity greater than zero.", "danger")
         return redirect(url_for("inventory.stock_detail", item_id=item_id))
 
-    from_location = Location.query.get(from_location_id)
-    to_location = Location.query.get(to_location_id)
+    from_location = Location.active().filter_by(id=from_location_id).first()
+    to_location = Location.active().filter_by(id=to_location_id).first()
     if not from_location or not to_location:
         flash("Invalid transfer location selection.", "danger")
         return redirect(url_for("inventory.stock_detail", item_id=item_id))
@@ -4151,7 +4369,7 @@ def add_stock_location(item_id: int):
         flash("Select a location to add.", "danger")
         return redirect(url_for("inventory.stock_detail", item_id=item_id))
 
-    location = Location.query.get(location_id)
+    location = Location.active().filter_by(id=location_id).first()
     if location is None:
         flash("Location not found.", "danger")
         return redirect(url_for("inventory.stock_detail", item_id=item_id))
@@ -4200,7 +4418,7 @@ def remove_stock_location(item_id: int):
         flash("Select a location to remove.", "danger")
         return redirect(url_for("inventory.stock_detail", item_id=item_id))
 
-    location = Location.query.get(location_id)
+    location = Location.active().filter_by(id=location_id).first()
     if location is None:
         flash("Location not found.", "danger")
         return redirect(url_for("inventory.stock_detail", item_id=item_id))
@@ -4246,7 +4464,7 @@ def remove_from_location():
         return redirect(next_url)
 
     item = Item.query.get(item_id)
-    location = Location.query.get(location_id)
+    location = Location.active().filter_by(id=location_id).first()
     if item is None or location is None:
         flash("Item or location not found.", "danger")
         return redirect(next_url)
@@ -4405,7 +4623,7 @@ def move_pending_receipt(receipt_id: int):
         flash("Select a destination location.", "danger")
         return redirect(next_url)
 
-    to_location = Location.query.get(to_location_id)
+    to_location = Location.active().filter_by(id=to_location_id).first()
     if not to_location:
         flash("Destination location not found.", "danger")
         return redirect(next_url)
@@ -4414,7 +4632,7 @@ def move_pending_receipt(receipt_id: int):
         flash("Destination location must be different.", "danger")
         return redirect(next_url)
 
-    from_location = Location.query.get(receipt.location_id)
+    from_location = Location.active().filter_by(id=receipt.location_id).first()
     from_code = from_location.code if from_location else "Unknown"
 
     with db.session.begin_nested():
@@ -4486,7 +4704,7 @@ def delete_all_stock():
 @bp.route("/stock/adjust", methods=["GET", "POST"])
 def adjust_stock():
     items = Item.query.all()
-    locations = Location.query.all()
+    locations = Location.active().all()
 
     if request.method == "POST":
         sku = request.form["sku"].strip()
@@ -4648,7 +4866,7 @@ def import_stock():
             items = Item.query.all()
             item_map_by_sku = {i.sku: i for i in items}
             item_map_by_id = {i.id: i for i in items}
-            loc_map_by_code = {l.code: l for l in Location.query.all()}
+            loc_map_by_code = {l.code: l for l in Location.active().all()}
             loc_map_by_id = {l.id: l for l in loc_map_by_code.values()}
 
             placeholder_location = _ensure_placeholder_location(loc_map_by_code)
@@ -4809,7 +5027,7 @@ def export_stock():
     )
 
     items = {i.id: i for i in Item.query.all()}
-    locations = {l.id: l for l in Location.query.all()}
+    locations = {l.id: l for l in Location.active().all()}
     batches = {b.id: b for b in Batch.query.all()}
 
     def iter_rows():
@@ -4849,7 +5067,9 @@ def export_stock():
 ############################
 @bp.route("/receiving", methods=["GET", "POST"])
 def receiving():
-    placeholder_location = Location.query.filter_by(code=UNASSIGNED_LOCATION_CODE).one_or_none()
+    placeholder_location = (
+        Location.active().filter_by(code=UNASSIGNED_LOCATION_CODE).one_or_none()
+    )
     if not placeholder_location:
         placeholder_location = _ensure_placeholder_location({})
     form_defaults = {
@@ -4878,9 +5098,13 @@ def receiving():
     selected_location = None
     if form_defaults["location_id"]:
         try:
-            selected_location = db.session.get(Location, int(form_defaults["location_id"]))
+            selected_location = (
+                Location.active()
+                .filter_by(id=int(form_defaults["location_id"]))
+                .first()
+            )
         except (TypeError, ValueError):
-            selected_location = Location.query.filter(
+            selected_location = Location.active().filter(
                 func.lower(Location.code) == form_defaults["location_id"].lower()
             ).first()
     if selected_location is None:
@@ -5134,7 +5358,7 @@ def _print_batch_receipt_label(
 ############################
 @bp.get("/move/location/<int:location_id>/lines")
 def move_location_lines(location_id: int):
-    location = Location.query.get(location_id)
+    location = Location.active().filter_by(id=location_id).first()
     if location is None:
         abort(404)
 
@@ -5144,7 +5368,7 @@ def move_location_lines(location_id: int):
 
 @bp.route("/move", methods=["GET", "POST"])
 def move_home():
-    locations = Location.query.order_by(Location.code).all()
+    locations = Location.active().order_by(Location.code).all()
     location_ids = {location.id for location in locations}
     default_from_location_id = session.get("last_move_from_location_id")
     if default_from_location_id not in location_ids:
@@ -5231,7 +5455,7 @@ def move_home():
         .all()
     )
     items_map = {i.id: i for i in Item.query.all()}
-    locations_map = {l.id: l for l in Location.query.all()}
+    locations_map = {l.id: l for l in Location.active().all()}
     batches_map = {b.id: b for b in Batch.query.all()}
 
     return render_template(
@@ -5256,8 +5480,8 @@ def _print_transfer_labels_for_move(
 ) -> tuple[list[str], list[str]]:
     if not from_location_id or not to_location_id:
         return ["missing location details"], []
-    from_location = Location.query.get(from_location_id)
-    to_location = Location.query.get(to_location_id)
+    from_location = Location.active().filter_by(id=from_location_id).first()
+    to_location = Location.active().filter_by(id=to_location_id).first()
     if from_location is None or to_location is None:
         return ["unknown move locations"], []
 
@@ -5398,7 +5622,7 @@ def history_home():
         .all()
     )
     items = {i.id: i for i in Item.query.all()}
-    locations = {l.id: l for l in Location.query.all()}
+    locations = {l.id: l for l in Location.with_removed().all()}
     batches = {b.id: b for b in Batch.query.all()}
 
     return render_template(

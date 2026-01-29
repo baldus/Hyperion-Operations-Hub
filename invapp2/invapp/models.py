@@ -156,6 +156,9 @@ class SoftDeleteQuery(BaseQuery):
         return super().delete(synchronize_session=synchronize_session)
 
 
+db.Model.query_class = SoftDeleteQuery
+
+
 class AccessLog(db.Model):
     __tablename__ = "access_log"
 
@@ -536,9 +539,13 @@ class PhysicalInventorySnapshotLine(db.Model):
 
 class Location(db.Model):
     __tablename__ = "location"
+    query_class = SoftDeleteQuery
     id = db.Column(db.Integer, primary_key=True)
     code = db.Column(db.String, unique=True, nullable=False)
     description = db.Column(db.String)
+    removed_at = db.Column(db.DateTime, nullable=True)
+
+    __table_args__ = (db.Index("ix_location_removed_at", "removed_at"),)
 
     @property
     def parsed_code(self):
@@ -557,6 +564,21 @@ class Location(db.Model):
     @property
     def bay(self):
         return self.parsed_code.bay
+
+    @property
+    def is_removed(self) -> bool:
+        return self.removed_at is not None
+
+    @classmethod
+    def active(cls):
+        return cls.query.filter(cls.removed_at.is_(None))
+
+    @classmethod
+    def with_removed(cls):
+        return cls.query.with_removed()
+
+    def soft_delete(self, removed_at: datetime | None = None) -> None:
+        self.removed_at = removed_at or datetime.utcnow()
 
 
 class Batch(db.Model):

@@ -1,5 +1,6 @@
 import os
 import sys
+from datetime import datetime
 
 import pytest
 
@@ -76,3 +77,21 @@ def test_location_search_unassigned_default(client, app):
     assert response.status_code == 200
     data = response.get_json()
     assert data[0]["code"] == "UNASSIGNED"
+
+
+def test_location_search_excludes_removed(client, app):
+    with app.app_context():
+        db.session.add_all(
+            [
+                Location(code="ACTIVE", description="Active"),
+                Location(
+                    code="REMOVED", description="Removed", removed_at=datetime.utcnow()
+                ),
+            ]
+        )
+        db.session.commit()
+
+    response = client.get("/inventory/api/locations/search?q=REM")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert all(entry["code"] != "REMOVED" for entry in data)

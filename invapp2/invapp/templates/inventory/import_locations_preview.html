@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Preview Missing Locations</h2>
+<p>
+  {% if missing_locations %}
+    {{ missing_locations|length }} location{{ "s" if missing_locations|length != 1 else "" }}
+    will be removed if you continue.
+  {% else %}
+    No active locations are missing from this upload.
+  {% endif %}
+</p>
+
+{% if blocked_locations %}
+  <div class="alert alert-warning">
+    {{ blocked_locations|length }} location{{ "s" if blocked_locations|length != 1 else "" }}
+    cannot be removed because they still have inventory or pending receipts.
+  </div>
+{% endif %}
+
+{% if missing_locations %}
+  <div class="table-responsive">
+    <table class="table table-sm">
+      <thead>
+        <tr>
+          <th>Code</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for location in missing_locations %}
+          <tr>
+            <td>{{ location.code }}</td>
+            <td>{{ location.description or "" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+
+<form method="POST" class="mt-3">
+  <input type="hidden" name="step" value="confirm_missing">
+  <input type="hidden" name="import_token" value="{{ import_token|e }}">
+  <input type="hidden" name="remove_missing" value="1">
+  {% for field, header in selected_mappings.items() %}
+    <input type="hidden" name="mapping_{{ field }}" value="{{ header|e }}">
+  {% endfor %}
+  <button type="submit" class="btn btn-primary">Continue to Confirmation</button>
+  <a href="{{ url_for('inventory.import_locations') }}" class="btn btn-secondary">Start Over</a>
+</form>
+{% endblock %}

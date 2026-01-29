@@ -34,7 +34,7 @@ def receiving_home():
 
 @bp.route("/add", methods=["GET", "POST"])
 def add_receiving():
-    locations = Location.query.all()
+    locations = Location.active().all()
 
     if request.method == "POST":
         sku = request.form["sku"].strip()
