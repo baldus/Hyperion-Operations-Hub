@@ -55,7 +55,7 @@ def printer_settings():
                 if printer is None:
                     flash("The selected printer could not be found.", "danger")
                 else:
-                    set_user_default_printer(current_user, printer.name)
+                    set_user_default_printer(current_user, printer.id)
                     flash(f"Using {printer.name} for printing tasks.", "success")
             return redirect(url_for("printers.printer_settings"))
 
@@ -104,9 +104,9 @@ def printer_settings():
                     flash(f"Added printer '{printer.name}'.", "success")
                     if (
                         request.form.get("make_default") == "yes"
-                        or current_user.default_printer is None
+                        or current_user.default_printer_id is None
                     ):
-                        set_user_default_printer(current_user, printer.name)
+                        set_user_default_printer(current_user, printer.id)
                         flash(f"'{printer.name}' is now the active printer.", "info")
                 return redirect(url_for("printers.printer_settings"))
 
@@ -161,12 +161,12 @@ def label_designer_print_trial():
     if not label_id:
         return jsonify({"message": "Label identifier is required for a trial print."}), 400
 
-    requested_printer_name = payload.get("printer_name")
-    if requested_printer_name:
+    requested_printer_identifier = payload.get("printer_id") or payload.get("printer_name")
+    if requested_printer_identifier:
         try:
             selected_printer = set_user_default_printer(
                 current_user,
-                str(requested_printer_name),
+                requested_printer_identifier,
             )
         except ValueError:
             return jsonify({"message": "The selected printer could not be found."}), 400

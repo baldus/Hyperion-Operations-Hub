@@ -35,57 +35,59 @@ def get_user_default_printer(user: User | None) -> Printer | None:
     if user is None or not getattr(user, "is_authenticated", False):
         return None
 
-    printer_name = (user.default_printer or "").strip()
-    if not printer_name:
+    printer_id = getattr(user, "default_printer_id", None)
+    if not printer_id:
         return None
 
-    printer = Printer.query.filter_by(name=printer_name).first()
+    printer = db.session.get(Printer, printer_id)
     if printer is not None:
         return printer
 
     current_app.logger.warning(
-        "Default printer '%s' for user %s no longer exists. Clearing selection.",
-        printer_name,
+        "Default printer id '%s' for user %s no longer exists. Clearing selection.",
+        printer_id,
         getattr(user, "username", "unknown"),
     )
-    user.default_printer = None
+    user.default_printer_id = None
     db.session.add(user)
     db.session.commit()
     return None
 
 
-def set_user_default_printer(user: User, printer_name: str | None) -> Printer | None:
+def set_user_default_printer(
+    user: User,
+    printer_identifier: int | str | None,
+) -> Printer | None:
     if user is None or not getattr(user, "is_authenticated", False):
         return None
 
-    normalized = (printer_name or "").strip()
-    if not normalized:
-        previous = user.default_printer
+    if printer_identifier is None or str(printer_identifier).strip() == "":
+        previous = user.default_printer_id
         if previous:
             current_app.logger.info(
                 "Default printer updated for %s: %s -> none.",
                 getattr(user, "username", "unknown"),
                 previous,
             )
-        user.default_printer = None
+        user.default_printer_id = None
         db.session.add(user)
         db.session.commit()
         return None
 
-    printer = Printer.query.filter_by(name=normalized).first()
+    printer = _resolve_printer_identifier(printer_identifier)
     if printer is None:
         raise ValueError("Selected printer does not exist.")
 
-    previous = user.default_printer
-    if previous != normalized:
+    previous = user.default_printer_id
+    if previous != printer.id:
         current_app.logger.info(
             "Default printer updated for %s: %s -> %s.",
             getattr(user, "username", "unknown"),
             previous or "none",
-            normalized,
+            printer.id,
         )
 
-    user.default_printer = normalized
+    user.default_printer_id = printer.id
     db.session.add(user)
     db.session.commit()
     return printer
@@ -96,3 +98,20 @@ def resolve_user_printer(user: User | None) -> Printer | None:
     if printer is not None:
         return printer
     return resolve_fallback_printer()
+
+
+def _resolve_printer_identifier(printer_identifier: int | str | None) -> Printer | None:
+    if printer_identifier is None:
+        return None
+    try:
+        printer_id = int(printer_identifier)
+    except (TypeError, ValueError):
+        printer_id = None
+
+    if printer_id is not None:
+        return db.session.get(Printer, printer_id)
+
+    normalized = str(printer_identifier).strip()
+    if not normalized:
+        return None
+    return Printer.query.filter_by(name=normalized).first()

@@ -64,15 +64,21 @@ def user_settings():
     selected_printer = resolve_user_printer(current_user)
 
     if request.method == "POST":
-        default_printer = request.form.get("default_printer", "").strip()
+        default_printer_raw = request.form.get("default_printer", "").strip()
         try:
-            set_user_default_printer(current_user, default_printer or None)
+            selected_printer = set_user_default_printer(
+                current_user,
+                default_printer_raw or None,
+            )
         except ValueError:
             flash("The selected printer could not be found.", "danger")
             return redirect(url_for("users.user_settings"))
 
-        if default_printer:
-            flash(f"Default printer set to {default_printer}.", "success")
+        if default_printer_raw:
+            if selected_printer is not None:
+                flash(f"Default printer set to {selected_printer.name}.", "success")
+            else:
+                flash("Default printer updated.", "success")
         else:
             flash("Default printer cleared. Using system default.", "success")
         return redirect(url_for("users.user_settings"))

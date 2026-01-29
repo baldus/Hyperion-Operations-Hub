@@ -3136,10 +3136,13 @@ def print_location_label(location_id: int):
     from invapp.printing.printer_defaults import resolve_user_printer, set_user_default_printer
     from invapp.printing.zebra import print_label_for_process
 
-    requested_printer_name = request.form.get("printer_name", "").strip()
-    if requested_printer_name:
+    requested_printer_identifier = (
+        request.form.get("printer_id")
+        or request.form.get("printer_name", "").strip()
+    )
+    if requested_printer_identifier:
         try:
-            selected_printer = set_user_default_printer(current_user, requested_printer_name)
+            selected_printer = set_user_default_printer(current_user, requested_printer_identifier)
         except ValueError:
             flash("The selected printer could not be found.", "danger")
             return redirect(url_for("inventory.edit_location", location_id=location.id))

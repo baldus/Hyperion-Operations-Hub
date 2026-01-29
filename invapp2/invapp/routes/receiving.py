@@ -117,11 +117,14 @@ def print_label():
     description = data.get("description")
     qty = int(data.get("qty", 0))
     copies = int(data.get("copies", 1))
-    requested_printer_name = str(data.get("printer_name", "") or "").strip()
+    requested_printer_identifier = data.get("printer_id") or data.get("printer_name")
 
-    if requested_printer_name:
+    if requested_printer_identifier:
         try:
-            selected_printer = set_user_default_printer(current_user, requested_printer_name)
+            selected_printer = set_user_default_printer(
+                current_user,
+                requested_printer_identifier,
+            )
         except ValueError:
             return jsonify({"printed": False, "error": "Invalid printer selection."}), 400
     else:

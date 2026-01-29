@@ -12,14 +12,14 @@
   <form method="post">
     <label for="default-printer">Default printer</label>
     <select id="default-printer" name="default_printer">
-      <option value="" {% if not current_user.default_printer %}selected{% endif %}>Use system default</option>
+      <option value="" {% if not current_user.default_printer_id %}selected{% endif %}>Use system default</option>
       {% for printer in printers %}
-      <option value="{{ printer.name }}" {% if current_user.default_printer == printer.name %}selected{% endif %}>
+      <option value="{{ printer.id }}" {% if current_user.default_printer_id == printer.id %}selected{% endif %}>
         {{ printer.name }}{% if printer.location %} — {{ printer.location }}{% endif %}
       </option>
       {% endfor %}
     </select>
-    {% if not current_user.default_printer and selected_printer %}
+    {% if not current_user.default_printer_id and selected_printer %}
     <p class="form-hint">System default: {{ selected_printer.name }}.</p>
     {% endif %}
     <button type="submit" class="action-btn">Save Default</button>

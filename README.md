@@ -368,8 +368,8 @@ Alembic reads `DB_URL` at runtime. See [`invapp2/migrations/env.py`](invapp2/mig
 Hyperion supports a per-user default printer selection that persists across sessions. The saved default is used to pre-select printer-enabled workflows and is isolated per user (no global side effects).
 
 ### Data model changes
-- `User.default_printer` (nullable string) stores the printer identifier (printer name). See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
-- Alembic migration `20250920_add_user_default_printer` adds the column with safe upgrade/downgrade. See [`invapp2/migrations/versions/20250920_add_user_default_printer.py`](invapp2/migrations/versions/20250920_add_user_default_printer.py).
+- `User.default_printer_id` (nullable FK) stores the printer reference (`printer.id`). See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+- Alembic migration `20250920_add_user_default_printer` adds the column and FK with safe upgrade/downgrade. See [`invapp2/migrations/versions/20250920_add_user_default_printer.py`](invapp2/migrations/versions/20250920_add_user_default_printer.py).
 
 ### UI behavior
 - Users set their default printer on **My Settings** (`/users/settings`), which is accessible after login.
@@ -384,10 +384,10 @@ Hyperion supports a per-user default printer selection that persists across sess
 
 ### Developer guidance
 - **Default resolution:** use `resolve_user_printer(current_user)` from [`invapp2/invapp/printing/printer_defaults.py`](invapp2/invapp/printing/printer_defaults.py) to get the printer instance for the active user (including fallback logic).
-- **Setting defaults:** use `set_user_default_printer(current_user, printer_name)` to validate and persist updates, and to log the change.
+- **Setting defaults:** use `set_user_default_printer(current_user, printer_id)` to validate and persist updates, and to log the change.
 - **Adding printer support to new pages:**
   1. Fetch printers with `list_available_printers()` for dropdowns.
-  2. Pre-select `current_user.default_printer` in the UI.
+  2. Pre-select `current_user.default_printer_id` in the UI.
   3. On POST, call `set_user_default_printer` if the user picked a printer.
   4. Pass the resolved printer into `print_label_for_process(..., printer=...)` or `print_receiving_label(..., printer=...)`.
 
@@ -397,6 +397,13 @@ Hyperion supports a per-user default printer selection that persists across sess
   ```bash
   pytest invapp2/tests/test_user_default_printer.py
   ```
+
+### Schema mismatch troubleshooting
+If you see: `Database schema out of date. Run: cd invapp2 && alembic -c alembic.ini upgrade head`, apply migrations:
+```bash
+cd invapp2
+alembic -c alembic.ini upgrade head
+```
 
 ---
 

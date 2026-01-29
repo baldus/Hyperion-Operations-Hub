@@ -98,6 +98,30 @@ def _ensure_superuser_account(admin_username: str, admin_password: str) -> None:
             db.session.rollback()
             if attempt == 2:
                 raise
+        except SQLAlchemyError as exc:
+            db.session.rollback()
+            if _log_default_printer_schema_warning(exc):
+                return
+            raise
+
+
+def _is_default_printer_schema_error(exc: SQLAlchemyError) -> bool:
+    message = str(getattr(exc, "orig", exc)).lower()
+    return "default_printer_id" in message and (
+        "does not exist" in message or "no such column" in message
+    )
+
+
+def _log_default_printer_schema_warning(exc: SQLAlchemyError) -> bool:
+    if not _is_default_printer_schema_error(exc):
+        return False
+
+    if not current_app.config.get("DEFAULT_PRINTER_SCHEMA_WARNING_EMITTED"):
+        current_app.logger.warning(
+            "Database schema out of date. Run: cd invapp2 && alembic -c alembic.ini upgrade head"
+        )
+        current_app.config["DEFAULT_PRINTER_SCHEMA_WARNING_EMITTED"] = True
+    return True
 
 
 def _ensure_core_roles() -> None:
@@ -771,6 +795,11 @@ def create_app(config_override=None):
                 "Skipped user lookup during login_manager load because the database is unavailable."
             )
             return None
+        except SQLAlchemyError as exc:
+            if _log_default_printer_schema_warning(exc):
+                db.session.rollback()
+                return None
+            raise
 
     database_available = True
     database_error_message: str | None = None

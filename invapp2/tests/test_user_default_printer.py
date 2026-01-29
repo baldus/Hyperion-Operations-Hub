@@ -97,20 +97,23 @@ def test_user_without_default_uses_system_fallback(app):
 def test_missing_default_printer_clears_and_falls_back(app):
     with app.app_context():
         user = User.query.filter_by(username="printer-user").first()
-        user.default_printer = "Ghost"
+        user.default_printer_id = 9999
         db.session.commit()
 
         printer = resolve_user_printer(user)
 
         assert printer is not None
-        assert user.default_printer is None
+        assert user.default_printer_id is None
 
 
 def test_save_default_printer_via_settings(client, app):
     login(client)
+    with app.app_context():
+        printer = Printer.query.filter_by(name="Alpha").first()
+
     response = client.post(
         "/users/settings",
-        data={"default_printer": "Alpha"},
+        data={"default_printer": str(printer.id)},
         follow_redirects=True,
     )
     assert response.status_code == 200
@@ -118,19 +121,21 @@ def test_save_default_printer_via_settings(client, app):
 
     with app.app_context():
         user = User.query.filter_by(username="printer-user").first()
-        assert user.default_printer == "Alpha"
+        assert user.default_printer_id == printer.id
 
 
 def test_default_printer_is_preselected(client, app):
     with app.app_context():
         user = User.query.filter_by(username="printer-user").first()
-        user.default_printer = "Beta"
+        printer = Printer.query.filter_by(name="Beta").first()
+        printer_id = printer.id
+        user.default_printer_id = printer_id
         db.session.commit()
 
     login(client)
     response = client.get("/users/settings")
     assert response.status_code == 200
-    assert b'value="Beta" selected' in response.data
+    assert f'value="{printer_id}" selected'.encode() in response.data
 
 
 def test_print_action_updates_default_printer(client, app, monkeypatch):
@@ -143,12 +148,15 @@ def test_print_action_updates_default_printer(client, app, monkeypatch):
 
     monkeypatch.setattr("invapp.routes.printers.print_label_for_process", fake_print_label)
 
+    with app.app_context():
+        printer = Printer.query.filter_by(name="Beta").first()
+
     response = client.post(
         "/settings/printers/designer/print-trial",
-        json={**save_payload, "printer_name": "Beta"},
+        json={**save_payload, "printer_id": printer.id},
     )
     assert response.status_code == 200
 
     with app.app_context():
         user = User.query.filter_by(username="printer-user").first()
-        assert user.default_printer == "Beta"
+        assert user.default_printer_id == printer.id

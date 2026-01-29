@@ -17,8 +17,20 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("user", sa.Column("default_printer", sa.String(length=120), nullable=True))
+    op.add_column(
+        "user",
+        sa.Column("default_printer_id", sa.Integer(), nullable=True),
+    )
+    op.create_foreign_key(
+        "user_default_printer_id_fkey",
+        "user",
+        "printer",
+        ["default_printer_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
 
 
 def downgrade() -> None:
-    op.drop_column("user", "default_printer")
+    op.drop_constraint("user_default_printer_id_fkey", "user", type_="foreignkey")
+    op.drop_column("user", "default_printer_id")

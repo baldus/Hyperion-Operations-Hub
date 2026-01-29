@@ -169,7 +169,7 @@ def test_trial_print_succeeds_with_selected_printer(client, app, monkeypatch):
         printer = Printer.query.filter_by(name="Test Printer").first()
         user = User.query.filter_by(username="designer").first()
         printer_name = printer.name
-        user.default_printer = printer_name
+        user.default_printer_id = printer.id
         db.session.commit()
 
     response = client.post("/settings/printers/designer/print-trial", json=save_payload)

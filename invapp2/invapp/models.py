@@ -1141,7 +1141,7 @@ class User(UserMixin, PrimaryKeySequenceMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(255), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
-    default_printer = db.Column(db.String(120), nullable=True)
+    default_printer_id = db.Column(db.Integer, db.ForeignKey("printer.id"), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
@@ -1151,6 +1151,12 @@ class User(UserMixin, PrimaryKeySequenceMixin, db.Model):
         "Role",
         secondary=user_roles,
         back_populates="users",
+        lazy="joined",
+    )
+
+    default_printer = db.relationship(
+        "Printer",
+        foreign_keys=[default_printer_id],
         lazy="joined",
     )
 
