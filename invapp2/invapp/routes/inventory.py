@@ -38,6 +38,7 @@ from sqlalchemy.orm.exc import DetachedInstanceError
 from invapp.auth import blueprint_page_guard
 from invapp.login import current_user, login_required
 from invapp.permissions import resolve_edit_roles
+from invapp.printing.service import print_item_label, print_transfer_label
 from invapp.security import require_admin_or_superuser, require_any_role, require_roles
 from invapp.superuser import is_superuser, superuser_required
 from invapp.models import (
@@ -5151,6 +5152,7 @@ def move_home():
         to_loc_id = request.form.get("to_location_id", type=int)
         reference = request.form.get("reference", "Stock Transfer").strip() or "Stock Transfer"
         raw_lines = request.form.get("lines", "").strip()
+        print_after_move = bool(request.form.get("print_label_after_move"))
 
         try:
             payload = json.loads(raw_lines) if raw_lines else []
@@ -5200,6 +5202,19 @@ def move_home():
             f"Moved {result['total_qty']} total units across {result['total_lines']} lines.",
             "success",
         )
+        if print_after_move:
+            print_errors = _print_transfer_labels_for_move(
+                lines=lines,
+                from_location_id=from_loc_id,
+                to_location_id=to_loc_id,
+                reference=reference,
+                person=_movement_person(),
+            )
+            if print_errors:
+                flash(
+                    f"Transfer completed but printing failed: {'; '.join(print_errors)}",
+                    "warning",
+                )
         return redirect(url_for("inventory.move_home"))
 
     # Recent moves
@@ -5222,7 +5237,139 @@ def move_home():
         items_map=items_map,
         locations_map=locations_map,
         batches_map=batches_map,
+        auto_print_default=current_app.config.get("INVENTORY_MOVE_AUTO_PRINT_DEFAULT", False),
     )
+
+
+def _print_transfer_labels_for_move(
+    *,
+    lines: list[MoveLineRequest],
+    from_location_id: int | None,
+    to_location_id: int | None,
+    reference: str | None,
+    person: str | None,
+) -> list[str]:
+    if not from_location_id or not to_location_id:
+        return ["missing location details"]
+    from_location = Location.query.get(from_location_id)
+    to_location = Location.query.get(to_location_id)
+    if from_location is None or to_location is None:
+        return ["unknown move locations"]
+
+    item_ids = {line.item_id for line in lines}
+    batch_ids = {line.batch_id for line in lines if line.batch_id is not None}
+    items = {item.id: item for item in Item.query.filter(Item.id.in_(item_ids)).all()}
+    batches = (
+        {batch.id: batch for batch in Batch.query.filter(Batch.id.in_(batch_ids)).all()}
+        if batch_ids
+        else {}
+    )
+
+    errors: list[str] = []
+    for line in lines:
+        item = items.get(line.item_id)
+        if item is None:
+            errors.append("missing item data")
+            continue
+        batch = batches.get(line.batch_id) if line.batch_id else None
+        result = print_transfer_label(
+            item=item,
+            quantity=line.quantity,
+            batch=batch,
+            from_location=from_location,
+            to_location=to_location,
+            reference=reference,
+            person=person,
+            moved_at=datetime.utcnow(),
+        )
+        if not result.ok:
+            errors.append(result.error or result.message)
+    return errors
+
+
+def _find_matching_transfer_movement(movement: Movement) -> Movement | None:
+    if movement.movement_type not in {"MOVE_OUT", "MOVE_IN"}:
+        return None
+    target_type = "MOVE_IN" if movement.movement_type == "MOVE_OUT" else "MOVE_OUT"
+    quantity = abs(movement.quantity or 0)
+    expected_quantity = quantity if target_type == "MOVE_IN" else -quantity
+
+    query = Movement.query.filter(
+        Movement.movement_type == target_type,
+        Movement.item_id == movement.item_id,
+        Movement.batch_id == movement.batch_id,
+        Movement.reference == movement.reference,
+        Movement.person == movement.person,
+        Movement.quantity == expected_quantity,
+    )
+
+    if movement.date:
+        start = movement.date - timedelta(minutes=5)
+        end = movement.date + timedelta(minutes=5)
+        query = query.filter(Movement.date.between(start, end))
+
+    candidates = query.order_by(Movement.date.desc()).all()
+    if not candidates:
+        return None
+    if not movement.date:
+        return candidates[0]
+    return min(
+        candidates,
+        key=lambda candidate: abs((candidate.date - movement.date).total_seconds())
+        if candidate.date
+        else 0,
+    )
+
+
+@bp.post("/move/<int:movement_id>/print-label")
+def reprint_move_label(movement_id: int):
+    movement = Movement.query.get(movement_id)
+    if movement is None or movement.movement_type not in {"MOVE_OUT", "MOVE_IN"}:
+        flash("Transfer record not found.", "warning")
+        return redirect(url_for("inventory.move_home"))
+
+    match = _find_matching_transfer_movement(movement)
+    if movement.movement_type == "MOVE_OUT":
+        from_location = movement.location
+        to_location = match.location if match else None
+    else:
+        to_location = movement.location
+        from_location = match.location if match else None
+
+    result = print_transfer_label(
+        item=movement.item,
+        quantity=abs(movement.quantity or 0),
+        batch=movement.batch,
+        from_location=from_location,
+        to_location=to_location,
+        reference=movement.reference,
+        person=movement.person,
+        moved_at=movement.date,
+    )
+
+    if result.ok:
+        flash("Transfer label reprinted.", "success")
+    else:
+        flash(f"Unable to print transfer label: {result.error or result.message}", "warning")
+
+    return redirect(url_for("inventory.move_home"))
+
+
+@bp.post("/item/<int:item_id>/print-label")
+def print_item_label_route(item_id: int):
+    item = Item.query.get(item_id)
+    if item is None:
+        flash("Item not found.", "warning")
+        return redirect(url_for("inventory.list_items"))
+
+    copies = request.form.get("copies", type=int) or 1
+    result = print_item_label(item, copies=copies)
+    if result.ok:
+        flash("Item label sent to the printer.", "success")
+    else:
+        flash(f"Unable to print item label: {result.error or result.message}", "warning")
+
+    return redirect(url_for("inventory.view_item", item_id=item_id))
 
 
 ############################

@@ -536,6 +536,344 @@ LOCATION_DEFAULT_LAYOUT = {
     "fields": deepcopy(LOCATION_DEFAULT_FIELDS),
 }
 
+ITEM_SAMPLE_DATA = {
+    "sku": "ITEM-204",
+    "name": "Valve Assembly",
+    "description": "Stainless steel valve assembly",
+    "unit": "ea",
+}
+
+
+ITEM_FIELD_BINDINGS: tuple[DesignerFieldBinding, ...] = (
+    DesignerFieldBinding("sku", "SKU", "{{Item.SKU}}"),
+    DesignerFieldBinding("name", "Item Name", "{{Item.Name}}"),
+    DesignerFieldBinding("description", "Description", "{{Item.Description}}"),
+    DesignerFieldBinding("unit", "Unit", "{{Item.Unit}}"),
+)
+
+
+ITEM_SAMPLE_CONTEXT = {
+    "Item": {
+        "SKU": ITEM_SAMPLE_DATA["sku"],
+        "Name": ITEM_SAMPLE_DATA["name"],
+        "Description": ITEM_SAMPLE_DATA["description"],
+        "Unit": ITEM_SAMPLE_DATA["unit"],
+    }
+}
+
+
+ITEM_DEFAULT_FIELDS = [
+    {
+        "id": "field-item-title",
+        "label": "Item Label",
+        "bindingKey": None,
+        "type": "text",
+        "x": 60,
+        "y": 40,
+        "width": 692,
+        "height": 64,
+        "rotation": 0,
+        "fontSize": 48,
+        "align": "center",
+    },
+    {
+        "id": "field-item-sku",
+        "label": "SKU",
+        "bindingKey": "sku",
+        "type": "text",
+        "x": 60,
+        "y": 140,
+        "width": 692,
+        "height": 60,
+        "rotation": 0,
+        "fontSize": 52,
+        "align": "left",
+    },
+    {
+        "id": "field-item-name",
+        "label": "Item Name",
+        "bindingKey": "name",
+        "type": "text",
+        "x": 60,
+        "y": 220,
+        "width": 692,
+        "height": 50,
+        "rotation": 0,
+        "fontSize": 36,
+        "align": "left",
+    },
+    {
+        "id": "field-item-description",
+        "label": "Description",
+        "bindingKey": "description",
+        "type": "text",
+        "x": 60,
+        "y": 290,
+        "width": 692,
+        "height": 48,
+        "rotation": 0,
+        "fontSize": 30,
+        "align": "left",
+    },
+    {
+        "id": "field-item-unit",
+        "label": "Unit",
+        "bindingKey": "unit",
+        "type": "text",
+        "x": 60,
+        "y": 360,
+        "width": 300,
+        "height": 44,
+        "rotation": 0,
+        "fontSize": 28,
+        "align": "left",
+    },
+    {
+        "id": "field-item-barcode",
+        "label": "Item Barcode",
+        "bindingKey": "sku",
+        "type": "barcode",
+        "x": 80,
+        "y": 430,
+        "width": 652,
+        "height": 200,
+        "rotation": 0,
+        "fontSize": 18,
+        "align": "center",
+        "showValue": True,
+    },
+]
+
+
+ITEM_DEFAULT_LAYOUT = {
+    "id": "item-label",
+    "name": "Item Label",
+    "description": "Standard inventory item identification label.",
+    "size": {"width": LABEL_WIDTH, "height": 700},
+    "dataFields": _build_data_field_list(ITEM_FIELD_BINDINGS),
+    "sampleData": dict(ITEM_SAMPLE_DATA),
+    "fields": deepcopy(ITEM_DEFAULT_FIELDS),
+}
+
+
+TRANSFER_SAMPLE_DATA = {
+    "sku": "ITEM-204",
+    "name": "Valve Assembly",
+    "lot_number": "LOT-882",
+    "quantity": "12",
+    "unit": "ea",
+    "from_location": "STG-01",
+    "to_location": "LINE-04",
+    "reference": "Stock Transfer",
+    "person": "j.smith",
+    "timestamp": "2024-05-21 14:22",
+}
+
+
+TRANSFER_FIELD_BINDINGS: tuple[DesignerFieldBinding, ...] = (
+    DesignerFieldBinding("sku", "SKU", "{{Item.SKU}}"),
+    DesignerFieldBinding("name", "Item Name", "{{Item.Name}}"),
+    DesignerFieldBinding("lot_number", "Lot / Batch", "{{Transfer.LotNumber}}"),
+    DesignerFieldBinding("quantity", "Quantity", "{{Transfer.Quantity}}"),
+    DesignerFieldBinding("unit", "Unit", "{{Transfer.Unit}}"),
+    DesignerFieldBinding("from_location", "From Location", "{{Transfer.FromLocation}}"),
+    DesignerFieldBinding("to_location", "To Location", "{{Transfer.ToLocation}}"),
+    DesignerFieldBinding("reference", "Reference", "{{Transfer.Reference}}"),
+    DesignerFieldBinding("person", "Person", "{{Transfer.Person}}"),
+    DesignerFieldBinding("timestamp", "Timestamp", "{{Transfer.Timestamp}}"),
+)
+
+
+TRANSFER_SAMPLE_CONTEXT = {
+    "Item": {
+        "SKU": TRANSFER_SAMPLE_DATA["sku"],
+        "Name": TRANSFER_SAMPLE_DATA["name"],
+        "Description": TRANSFER_SAMPLE_DATA["name"],
+    },
+    "Transfer": {
+        "LotNumber": TRANSFER_SAMPLE_DATA["lot_number"],
+        "Quantity": TRANSFER_SAMPLE_DATA["quantity"],
+        "Unit": TRANSFER_SAMPLE_DATA["unit"],
+        "FromLocation": TRANSFER_SAMPLE_DATA["from_location"],
+        "ToLocation": TRANSFER_SAMPLE_DATA["to_location"],
+        "Reference": TRANSFER_SAMPLE_DATA["reference"],
+        "Person": TRANSFER_SAMPLE_DATA["person"],
+        "Timestamp": TRANSFER_SAMPLE_DATA["timestamp"],
+    },
+}
+
+
+TRANSFER_DEFAULT_FIELDS = [
+    {
+        "id": "field-transfer-title",
+        "label": "Transfer Label",
+        "bindingKey": None,
+        "type": "text",
+        "x": 60,
+        "y": 40,
+        "width": 692,
+        "height": 64,
+        "rotation": 0,
+        "fontSize": 48,
+        "align": "center",
+    },
+    {
+        "id": "field-transfer-sku",
+        "label": "SKU",
+        "bindingKey": "sku",
+        "type": "text",
+        "x": 60,
+        "y": 140,
+        "width": 692,
+        "height": 50,
+        "rotation": 0,
+        "fontSize": 40,
+        "align": "left",
+    },
+    {
+        "id": "field-transfer-name",
+        "label": "Item Name",
+        "bindingKey": "name",
+        "type": "text",
+        "x": 60,
+        "y": 200,
+        "width": 692,
+        "height": 46,
+        "rotation": 0,
+        "fontSize": 32,
+        "align": "left",
+    },
+    {
+        "id": "field-transfer-lot",
+        "label": "Lot / Batch",
+        "bindingKey": "lot_number",
+        "type": "text",
+        "x": 60,
+        "y": 260,
+        "width": 360,
+        "height": 40,
+        "rotation": 0,
+        "fontSize": 28,
+        "align": "left",
+    },
+    {
+        "id": "field-transfer-qty",
+        "label": "Qty",
+        "bindingKey": "quantity",
+        "type": "text",
+        "x": 440,
+        "y": 260,
+        "width": 140,
+        "height": 40,
+        "rotation": 0,
+        "fontSize": 28,
+        "align": "left",
+    },
+    {
+        "id": "field-transfer-unit",
+        "label": "Unit",
+        "bindingKey": "unit",
+        "type": "text",
+        "x": 600,
+        "y": 260,
+        "width": 152,
+        "height": 40,
+        "rotation": 0,
+        "fontSize": 28,
+        "align": "left",
+    },
+    {
+        "id": "field-transfer-from",
+        "label": "From",
+        "bindingKey": "from_location",
+        "type": "text",
+        "x": 60,
+        "y": 320,
+        "width": 330,
+        "height": 36,
+        "rotation": 0,
+        "fontSize": 26,
+        "align": "left",
+    },
+    {
+        "id": "field-transfer-to",
+        "label": "To",
+        "bindingKey": "to_location",
+        "type": "text",
+        "x": 420,
+        "y": 320,
+        "width": 332,
+        "height": 36,
+        "rotation": 0,
+        "fontSize": 26,
+        "align": "left",
+    },
+    {
+        "id": "field-transfer-reference",
+        "label": "Reference",
+        "bindingKey": "reference",
+        "type": "text",
+        "x": 60,
+        "y": 370,
+        "width": 692,
+        "height": 36,
+        "rotation": 0,
+        "fontSize": 24,
+        "align": "left",
+    },
+    {
+        "id": "field-transfer-person",
+        "label": "Person",
+        "bindingKey": "person",
+        "type": "text",
+        "x": 60,
+        "y": 420,
+        "width": 360,
+        "height": 36,
+        "rotation": 0,
+        "fontSize": 24,
+        "align": "left",
+    },
+    {
+        "id": "field-transfer-timestamp",
+        "label": "Timestamp",
+        "bindingKey": "timestamp",
+        "type": "text",
+        "x": 420,
+        "y": 420,
+        "width": 332,
+        "height": 36,
+        "rotation": 0,
+        "fontSize": 24,
+        "align": "left",
+    },
+    {
+        "id": "field-transfer-barcode",
+        "label": "Item Barcode",
+        "bindingKey": "sku",
+        "type": "barcode",
+        "x": 80,
+        "y": 470,
+        "width": 652,
+        "height": 200,
+        "rotation": 0,
+        "fontSize": 18,
+        "align": "center",
+        "showValue": True,
+    },
+]
+
+
+TRANSFER_DEFAULT_LAYOUT = {
+    "id": "transfer-label",
+    "name": "Transfer Label",
+    "description": "Inventory move label with from/to location details.",
+    "size": {"width": LABEL_WIDTH, "height": 700},
+    "dataFields": _build_data_field_list(TRANSFER_FIELD_BINDINGS),
+    "sampleData": dict(TRANSFER_SAMPLE_DATA),
+    "fields": deepcopy(TRANSFER_DEFAULT_FIELDS),
+}
+
 
 BATCH_LABEL_CONFIG = DesignerLabelConfig(
     id="batch-label",
@@ -575,11 +913,38 @@ LOCATION_LABEL_CONFIG = DesignerLabelConfig(
     default_layout=deepcopy(LOCATION_DEFAULT_LAYOUT),
 )
 
+ITEM_LABEL_CONFIG = DesignerLabelConfig(
+    id="item-label",
+    name="Item Label",
+    description="Label for identifying inventory items by SKU.",
+    template_name="InventoryItemLabelTemplate",
+    process="ItemLabel",
+    data_fields=ITEM_FIELD_BINDINGS,
+    sample_data=dict(ITEM_SAMPLE_DATA),
+    sample_context=deepcopy(ITEM_SAMPLE_CONTEXT),
+    default_layout=deepcopy(ITEM_DEFAULT_LAYOUT),
+)
+
+
+TRANSFER_LABEL_CONFIG = DesignerLabelConfig(
+    id="transfer-label",
+    name="Transfer Label",
+    description="Label for recording inventory moves between locations.",
+    template_name="InventoryTransferLabelTemplate",
+    process="InventoryTransferLabel",
+    data_fields=TRANSFER_FIELD_BINDINGS,
+    sample_data=dict(TRANSFER_SAMPLE_DATA),
+    sample_context=deepcopy(TRANSFER_SAMPLE_CONTEXT),
+    default_layout=deepcopy(TRANSFER_DEFAULT_LAYOUT),
+)
+
 
 DESIGNER_LABELS: dict[str, DesignerLabelConfig] = {
     BATCH_LABEL_CONFIG.id: BATCH_LABEL_CONFIG,
     ORDER_LABEL_CONFIG.id: ORDER_LABEL_CONFIG,
     LOCATION_LABEL_CONFIG.id: LOCATION_LABEL_CONFIG,
+    ITEM_LABEL_CONFIG.id: ITEM_LABEL_CONFIG,
+    TRANSFER_LABEL_CONFIG.id: TRANSFER_LABEL_CONFIG,
 }
 
 CONFIG_BY_TEMPLATE = {config.template_name: config for config in DESIGNER_LABELS.values()}
@@ -841,6 +1206,23 @@ def _format_date(value: Any) -> str:
     return str(value)
 
 
+def _format_timestamp(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d %H:%M")
+    try:
+        from datetime import date
+
+        if isinstance(value, date):
+            return value.strftime("%Y-%m-%d")
+    except ImportError:  # pragma: no cover - fallback when datetime lacks date
+        pass
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
 def build_batch_label_context(
     batch: "Batch" | Mapping[str, Any],
     *,
@@ -909,6 +1291,76 @@ def build_location_label_context(location: "Location" | Mapping[str, Any]) -> di
     description = _get(location, "description", "")
 
     return {"Location": {"Code": code, "Description": description}}
+
+
+def build_item_label_context(item: "Item" | Mapping[str, Any]) -> dict[str, Any]:
+    def _get(obj, attribute, default=""):
+        if obj is None:
+            return default
+        if isinstance(obj, Mapping):
+            return obj.get(attribute, default)
+        return getattr(obj, attribute, default)
+
+    sku = _get(item, "sku", "")
+    name = _get(item, "name", "")
+    description = _get(item, "description", name)
+    unit = _get(item, "unit", "")
+
+    return {
+        "Item": {
+            "SKU": sku,
+            "Name": name,
+            "Description": description,
+            "Unit": unit,
+        }
+    }
+
+
+def build_transfer_label_context(
+    item: "Item" | Mapping[str, Any],
+    *,
+    quantity: Any = None,
+    batch: "Batch" | Mapping[str, Any] | None = None,
+    from_location: "Location" | Mapping[str, Any] | None = None,
+    to_location: "Location" | Mapping[str, Any] | None = None,
+    reference: str | None = None,
+    person: str | None = None,
+    moved_at: Any = None,
+) -> dict[str, Any]:
+    def _get(obj, attribute, default=""):
+        if obj is None:
+            return default
+        if isinstance(obj, Mapping):
+            return obj.get(attribute, default)
+        return getattr(obj, attribute, default)
+
+    item_name = _get(item, "name", "")
+    sku = _get(item, "sku", "")
+    description = _get(item, "description", item_name)
+    unit = _get(item, "unit", "")
+
+    lot_number = _get(batch, "lot_number", "")
+    from_code = _get(from_location, "code", "")
+    to_code = _get(to_location, "code", "")
+
+    return {
+        "Item": {
+            "SKU": sku,
+            "Name": item_name,
+            "Description": description,
+            "Unit": unit,
+        },
+        "Transfer": {
+            "LotNumber": lot_number,
+            "Quantity": "" if quantity is None else quantity,
+            "Unit": unit,
+            "FromLocation": from_code,
+            "ToLocation": to_code,
+            "Reference": reference or "",
+            "Person": person or "",
+            "Timestamp": _format_timestamp(moved_at),
+        },
+    }
 
 
 def register_label_definition(template: LabelDefinition, *, override: bool = True) -> None:
@@ -1213,7 +1665,9 @@ __all__ = [
     "LabelDefinition",
     "assign_template_to_process",
     "build_batch_label_context",
+    "build_item_label_context",
     "build_location_label_context",
+    "build_transfer_label_context",
     "build_designer_state",
     "build_receiving_label",
     "deserialize_designer_layout",

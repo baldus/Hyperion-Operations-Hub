@@ -7,6 +7,17 @@
   {% if can_edit %}
     <a href="{{ url_for('inventory.edit_item', item_id=item.id) }}" class="bubble-btn">Edit Item</a>
   {% endif %}
+  <form method="post" class="inline-form" action="{{ url_for('inventory.print_item_label_route', item_id=item.id) }}">
+    <label class="sr-only" for="label-copies">Label copies</label>
+    <input
+      type="number"
+      min="1"
+      name="copies"
+      id="label-copies"
+      value="1"
+    >
+    <button type="submit" class="bubble-btn">Print label</button>
+  </form>
 </div>
 
 <section class="item-details">

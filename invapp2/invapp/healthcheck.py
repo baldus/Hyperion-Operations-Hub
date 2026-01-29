@@ -2,8 +2,11 @@ import argparse
 import datetime as dt
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
+from alembic.config import Config as AlembicConfig
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.exc import SQLAlchemyError
@@ -67,9 +70,41 @@ def _sequence_repair(engine, logger: logging.Logger, dry_run: bool) -> dict[str,
         return {"repaired": 0, "skipped": 0, "failed": 1, "details": [], "error": str(exc)}
 
 
-def _overall_status(database_ok: bool, sequence_summary: dict[str, Any]) -> str:
+def _check_migrations(engine, logger: logging.Logger) -> tuple[bool, str | None]:
+    alembic_path = Path(__file__).resolve().parents[1] / "alembic.ini"
+    if not alembic_path.exists():
+        logger.warning("Alembic config not found at %s", alembic_path)
+        return False, "Alembic config missing"
+
+    try:
+        config = AlembicConfig(str(alembic_path))
+        script = ScriptDirectory.from_config(config)
+        head_revisions = set(script.get_heads())
+    except Exception as exc:
+        logger.warning("Unable to load Alembic config: %s", exc)
+        return False, "Unable to load Alembic config"
+
+    try:
+        with engine.connect() as connection:
+            rows = connection.execute(text("SELECT version_num FROM alembic_version"))
+            current_revisions = {row[0] for row in rows}
+    except SQLAlchemyError as exc:
+        logger.warning("Unable to read alembic_version: %s", exc)
+        return False, "Alembic version table missing or unreadable"
+
+    pending = head_revisions - current_revisions
+    if pending:
+        return False, f"Pending migrations: {', '.join(sorted(pending))}"
+    return True, None
+
+
+def _overall_status(
+    database_ok: bool, sequence_summary: dict[str, Any], migration_ok: bool
+) -> str:
     if not database_ok:
         return "FAIL"
+    if not migration_ok:
+        return "WARN"
     if sequence_summary.get("failed"):
         return "WARN"
     return "OK"
@@ -89,8 +124,11 @@ def run_healthcheck(nonfatal: bool, dry_run: bool) -> int:
         if not database_ok
         else _sequence_repair(engine, logger, dry_run)
     )
+    migration_ok, migration_message = (
+        (True, None) if not database_ok else _check_migrations(engine, logger)
+    )
 
-    status = _overall_status(database_ok, sequence_summary)
+    status = _overall_status(database_ok, sequence_summary, migration_ok)
     timestamp = dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     host = os.getenv("HOST", "0.0.0.0")
     port = os.getenv("PORT", os.getenv("GUNICORN_PORT", "8000"))
@@ -100,6 +138,7 @@ def run_healthcheck(nonfatal: bool, dry_run: bool) -> int:
         f"Hyperion Operations Console Health Check — {timestamp}",
         f"App boot status: {status}",
         f"DB connection: {'OK' if database_ok else 'FAIL'}",
+        f"Migrations: {'OK' if migration_ok else 'PENDING'}",
         f"Sequence repair: repaired={sequence_summary.get('repaired', 0)} "
         f"skipped={sequence_summary.get('skipped', 0)} failed={sequence_summary.get('failed', 0)}",
         f"DB_URL: {masked_url}",
@@ -108,12 +147,16 @@ def run_healthcheck(nonfatal: bool, dry_run: bool) -> int:
 
     if error_message:
         lines.append(f"DB error: {error_message}")
+    if migration_message:
+        lines.append(f"Migration warning: {migration_message}")
     if dry_run:
         lines.append("Sequence repair ran in dry-run mode")
 
     print(_render_banner(lines))
 
     if status == "FAIL" and not nonfatal:
+        return 1
+    if not migration_ok and not nonfatal:
         return 1
     if sequence_summary.get("failed") and not nonfatal:
         return 1

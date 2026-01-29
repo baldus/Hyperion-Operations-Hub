@@ -34,6 +34,18 @@
     </div>
 
     <div class="form-field">
+      <label class="checkbox-inline" for="print-label-after-move">
+        <input
+          type="checkbox"
+          name="print_label_after_move"
+          id="print-label-after-move"
+          {% if auto_print_default %}checked{% endif %}
+        >
+        Print label after move
+      </label>
+    </div>
+
+    <div class="form-field">
       <label class="field-label" for="line-filter">Filter items</label>
       <input type="text" id="line-filter" placeholder="Search SKU, item, or lot">
     </div>
@@ -98,6 +110,7 @@
         <th>Person</th>
         <th>Reference</th>
         <th>Type</th>
+        <th>Actions</th>
       </tr>
     </thead>
     <tbody>
@@ -112,6 +125,11 @@
         <td>{{ rec.person or "-" }}</td>
         <td>{{ rec.reference or "-" }}</td>
         <td>{{ rec.movement_type }}</td>
+        <td>
+          <form method="post" class="inline-form" action="{{ url_for('inventory.reprint_move_label', movement_id=rec.id) }}">
+            <button type="submit" class="action-btn secondary">Reprint label</button>
+          </form>
+        </td>
       </tr>
       {% endfor %}
     </tbody>
