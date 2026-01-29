@@ -1915,6 +1915,219 @@ def test_import_locations_mapping_flow(client, app):
         assert created.description == "Side Location"
 
 
+def test_import_locations_without_remove_missing(client, app):
+    with app.app_context():
+        db.session.add_all(
+            [
+                Location(code="KEEP", description="Keep"),
+                Location(code="DROP", description="Drop"),
+            ]
+        )
+        db.session.commit()
+
+    csv_text = "code,description\nKEEP,Keep\n"
+    upload_response = client.post(
+        "/inventory/locations/import",
+        data={"file": (io.BytesIO(csv_text.encode("utf-8")), "locations.csv")},
+        content_type="multipart/form-data",
+    )
+    assert upload_response.status_code == 200
+
+    upload_page = upload_response.get_data(as_text=True)
+    token_match = re.search(r'name=\"import_token\" value=\"([^\"]+)\"', upload_page)
+    assert token_match
+    import_token = token_match.group(1)
+
+    mapping_payload = {
+        "step": "mapping",
+        "import_token": import_token,
+        "mapping_code": "code",
+        "mapping_description": "description",
+    }
+    response = client.post("/inventory/locations/import", data=mapping_payload)
+    assert response.status_code == 302
+
+    with app.app_context():
+        missing = Location.with_removed().filter_by(code="DROP").one()
+        assert missing.removed_at is None
+
+
+def test_import_locations_preview_missing(client, app):
+    with app.app_context():
+        db.session.add_all(
+            [
+                Location(code="KEEP", description="Keep"),
+                Location(code="DROP", description="Drop"),
+            ]
+        )
+        db.session.commit()
+
+    csv_text = "code,description\nKEEP,Keep\n"
+    upload_response = client.post(
+        "/inventory/locations/import",
+        data={
+            "file": (io.BytesIO(csv_text.encode("utf-8")), "locations.csv"),
+            "remove_missing": "1",
+        },
+        content_type="multipart/form-data",
+    )
+    assert upload_response.status_code == 200
+
+    upload_page = upload_response.get_data(as_text=True)
+    token_match = re.search(r'name=\"import_token\" value=\"([^\"]+)\"', upload_page)
+    assert token_match
+    import_token = token_match.group(1)
+
+    mapping_payload = {
+        "step": "mapping",
+        "import_token": import_token,
+        "mapping_code": "code",
+        "mapping_description": "description",
+        "remove_missing": "1",
+    }
+    response = client.post("/inventory/locations/import", data=mapping_payload)
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "Preview Missing Locations" in page
+    assert "DROP" in page
+
+    with app.app_context():
+        missing = Location.with_removed().filter_by(code="DROP").one()
+        assert missing.removed_at is None
+
+
+def test_import_locations_confirmation_required(client, app):
+    with app.app_context():
+        db.session.add_all(
+            [
+                Location(code="KEEP", description="Keep"),
+                Location(code="DROP", description="Drop"),
+            ]
+        )
+        db.session.commit()
+
+    csv_text = "code,description\nKEEP,Keep\n"
+    upload_response = client.post(
+        "/inventory/locations/import",
+        data={
+            "file": (io.BytesIO(csv_text.encode("utf-8")), "locations.csv"),
+            "remove_missing": "1",
+        },
+        content_type="multipart/form-data",
+    )
+    assert upload_response.status_code == 200
+
+    upload_page = upload_response.get_data(as_text=True)
+    token_match = re.search(r'name=\"import_token\" value=\"([^\"]+)\"', upload_page)
+    assert token_match
+    import_token = token_match.group(1)
+
+    mapping_payload = {
+        "step": "mapping",
+        "import_token": import_token,
+        "mapping_code": "code",
+        "mapping_description": "description",
+        "remove_missing": "1",
+    }
+    response = client.post("/inventory/locations/import", data=mapping_payload)
+    assert response.status_code == 200
+
+    confirm_payload = {
+        "step": "confirm_missing",
+        "import_token": import_token,
+        "mapping_code": "code",
+        "mapping_description": "description",
+        "remove_missing": "1",
+    }
+    confirm_response = client.post(
+        "/inventory/locations/import", data=confirm_payload
+    )
+    assert confirm_response.status_code == 200
+    assert "Confirm Location Removal" in confirm_response.get_data(as_text=True)
+
+    apply_payload = {
+        "step": "apply_missing",
+        "import_token": import_token,
+        "mapping_code": "code",
+        "mapping_description": "description",
+        "remove_missing": "1",
+        "confirmation": "NOPE",
+    }
+    apply_response = client.post("/inventory/locations/import", data=apply_payload)
+    assert apply_response.status_code == 200
+
+    with app.app_context():
+        missing = Location.with_removed().filter_by(code="DROP").one()
+        assert missing.removed_at is None
+
+    apply_payload["confirmation"] = "DELETE MISSING LOCATIONS"
+    apply_response = client.post("/inventory/locations/import", data=apply_payload)
+    assert apply_response.status_code == 302
+
+    with app.app_context():
+        missing = Location.with_removed().filter_by(code="DROP").one()
+        assert missing.removed_at is not None
+
+
+def test_import_locations_removal_blocked_with_inventory(client, app):
+    with app.app_context():
+        keep = Location(code="KEEP", description="Keep")
+        blocked = Location(code="BLOCKED", description="Blocked")
+        item = Item(sku="SKU-1", name="Widget")
+        db.session.add_all([keep, blocked, item])
+        db.session.commit()
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                location_id=blocked.id,
+                quantity=5,
+                movement_type="ADJUST",
+            )
+        )
+        db.session.commit()
+
+    csv_text = "code,description\nKEEP,Keep\n"
+    upload_response = client.post(
+        "/inventory/locations/import",
+        data={
+            "file": (io.BytesIO(csv_text.encode("utf-8")), "locations.csv"),
+            "remove_missing": "1",
+        },
+        content_type="multipart/form-data",
+    )
+    assert upload_response.status_code == 200
+
+    upload_page = upload_response.get_data(as_text=True)
+    token_match = re.search(r'name=\"import_token\" value=\"([^\"]+)\"', upload_page)
+    assert token_match
+    import_token = token_match.group(1)
+
+    mapping_payload = {
+        "step": "mapping",
+        "import_token": import_token,
+        "mapping_code": "code",
+        "mapping_description": "description",
+        "remove_missing": "1",
+    }
+    response = client.post("/inventory/locations/import", data=mapping_payload)
+    assert response.status_code == 200
+
+    apply_payload = {
+        "step": "apply_missing",
+        "import_token": import_token,
+        "mapping_code": "code",
+        "mapping_description": "description",
+        "remove_missing": "1",
+        "confirmation": "DELETE MISSING LOCATIONS",
+    }
+    apply_response = client.post("/inventory/locations/import", data=apply_payload)
+    assert apply_response.status_code == 200
+
+    with app.app_context():
+        blocked_location = Location.with_removed().filter_by(code="BLOCKED").one()
+        assert blocked_location.removed_at is None
+
+
 def test_import_stock_mapping_flow(client, app):
     with app.app_context():
         item = Item(sku="SKU-1", name="Widget")

@@ -794,6 +794,30 @@ Screenshot placeholder (replace with a real screenshot when available):
 - Row filtering only matches parsed rows; invalid codes are excluded when a row filter is active.
 - Filtering happens in SQL where possible (description), while row parsing/sorting relies on application logic.
 
+### Bulk location sync (imports + optional removals)
+Use this when updating the bulk location import flow or the soft-delete behavior for locations.
+
+**Soft-delete invariant**
+- Locations are never hard deleted. `Location.removed_at` stores the soft-delete timestamp and active locations are `removed_at IS NULL`. See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+- `Location.is_removed` and `Location.active()` are the helper APIs for checking active status and querying active rows. See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+
+**Import behavior**
+- Uploads accept CSV, TSV, or XLSX and still require mapping the `code` column (plus optional `description`). See the import routes in [`invapp2/invapp/routes/inventory.py`](invapp2/invapp/routes/inventory.py).
+- Imports always add new locations and update existing ones. If a removed location is re-imported, it is reactivated (its `removed_at` is cleared).
+
+**Optional removal flow**
+- The “Remove locations not present in this upload” checkbox is off by default.
+- When enabled, the flow is:
+  1. Preview the missing locations (code + description) and the count.
+  2. Confirm by typing `DELETE MISSING LOCATIONS` before applying removals.
+- Missing locations are computed by normalizing codes (trim + uppercase) and comparing against *active* locations only.
+- Removals are blocked if the location still has inventory or pending receipts; no partial removals are applied.
+- All removals are applied in a single transaction alongside the import updates.
+
+**Restoring a location**
+- Re-importing a location code automatically reactivates it (clears `removed_at`).
+- Alternatively, an admin can manually clear `removed_at` in the database if needed.
+
 ### Batch Label selectable fields
 Use this when adding or adjusting fields available in the Batch Label designer.
 

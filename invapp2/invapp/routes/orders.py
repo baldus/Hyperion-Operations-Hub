@@ -183,10 +183,16 @@ def _inventory_options(item_id: int):
         batch.id: batch
         for batch in Batch.query.filter(Batch.id.in_(batch_ids)).all()
     } if batch_ids else {}
-    locations = {
-        location.id: location
-        for location in Location.query.filter(Location.id.in_(location_ids)).all()
-    } if location_ids else {}
+    locations = (
+        {
+            location.id: location
+            for location in Location.active()
+            .filter(Location.id.in_(location_ids))
+            .all()
+        }
+        if location_ids
+        else {}
+    )
 
     options = []
     for batch_id, location_id, on_hand in rows:

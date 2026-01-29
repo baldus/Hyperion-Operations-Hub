@@ -258,7 +258,7 @@ def generate_reports():
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(["code", "description"])
-        for location in Location.query.all():
+        for location in Location.active().all():
             writer.writerow([location.code, location.description])
         zf.writestr("locations.csv", output.getvalue())
 

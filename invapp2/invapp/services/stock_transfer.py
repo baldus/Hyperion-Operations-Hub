@@ -136,8 +136,8 @@ def move_inventory_lines(
     if not lines:
         raise ValueError("Select at least one line with a move quantity.")
 
-    from_location = Location.query.get(from_location_id)
-    to_location = Location.query.get(to_location_id)
+    from_location = Location.active().filter_by(id=from_location_id).first()
+    to_location = Location.active().filter_by(id=to_location_id).first()
     if from_location is None or to_location is None:
         raise ValueError("Invalid move location selection.")
 
