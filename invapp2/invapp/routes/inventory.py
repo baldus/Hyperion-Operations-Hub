@@ -2171,6 +2171,9 @@ def list_items():
     )
 
 
+bp.add_url_rule("/items", endpoint="items", view_func=list_items)
+
+
 @bp.route("/item/<int:item_id>")
 def view_item(item_id):
     item = Item.query.options(joinedload(Item.attachments)).get_or_404(item_id)
@@ -3265,6 +3268,9 @@ def list_locations():
     )
 
 
+bp.add_url_rule("/locations", endpoint="locations", view_func=list_locations)
+
+
 @bp.route("/locations/delete-all", methods=["POST"])
 @superuser_required
 def delete_all_locations():
@@ -4131,6 +4137,9 @@ def list_stock():
         locations=locations,
         build_stock_url=build_stock_url,
     )
+
+
+bp.add_url_rule("/stock", endpoint="stock", view_func=list_stock)
 
 
 @bp.route("/stock/<int:item_id>")
@@ -5610,6 +5619,9 @@ def history_home():
         locations=locations,
         batches=batches
     )
+
+
+bp.add_url_rule("/history", endpoint="history", view_func=history_home)
 
 
 @bp.route("/history/delete-all", methods=["POST"])

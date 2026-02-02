@@ -69,7 +69,7 @@ def test_page_permission_override_allows_new_role(client, app):
     assert login_response.status_code == 200
 
     home = client.get("/")
-    assert b'class="nav-btn">Inventory<' not in home.data
+    assert b'nav-dropdown-trigger' not in home.data
     denied = client.get("/inventory/", follow_redirects=False)
     assert denied.status_code == 403
 
@@ -79,6 +79,19 @@ def test_page_permission_override_allows_new_role(client, app):
 
     # Reload session to pick up new permissions
     home_after = client.get("/")
-    assert b'class="nav-btn">Inventory<' in home_after.data
+    assert b'nav-dropdown-trigger' in home_after.data
     allowed = client.get("/inventory/", follow_redirects=False)
     assert allowed.status_code == 200
+
+
+def test_inventory_nav_renders_for_authorized_user(client, app):
+    with app.app_context():
+        _ensure_role("inventory")
+        _create_user("inventory_user", "pw123", role_names=["inventory"])
+
+    login_response = _login(client, "inventory_user", "pw123")
+    assert login_response.status_code == 200
+
+    home = client.get("/")
+    assert home.status_code == 200
+    assert b'nav-dropdown-trigger' in home.data
