@@ -4,6 +4,12 @@
 <form method="POST" enctype="multipart/form-data">
     <label class="form-label">Upload CSV File:</label>
     <input type="file" class="form-control" name="file" accept=".csv" required>
+    <div class="form-check mt-3">
+        <input class="form-check-input" type="checkbox" id="delete-missing-locations" name="delete_missing" value="1">
+        <label class="form-check-label" for="delete-missing-locations">
+            Delete locations not present in this upload
+        </label>
+    </div>
     <div class="mt-3">
         <button type="submit" class="btn btn-primary">Continue</button>
     </div>

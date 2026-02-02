@@ -159,6 +159,55 @@ def _format_location_label(location: Location) -> str:
     return location.code
 
 
+def _normalize_location_code(code: str) -> str:
+    return (code or "").strip().upper()
+
+
+def _blocked_location_codes(locations: list[Location]) -> list[str]:
+    if not locations:
+        return []
+
+    location_ids = [location.id for location in locations]
+    blocked_ids = {
+        location_id
+        for (location_id,) in db.session.query(Movement.location_id)
+        .filter(Movement.location_id.in_(location_ids))
+        .distinct()
+    }
+
+    item_rows = (
+        db.session.query(
+            Item.default_location_id,
+            Item.secondary_location_id,
+            Item.point_of_use_location_id,
+        )
+        .filter(
+            or_(
+                Item.default_location_id.in_(location_ids),
+                Item.secondary_location_id.in_(location_ids),
+                Item.point_of_use_location_id.in_(location_ids),
+            )
+        )
+        .all()
+    )
+
+    for default_id, secondary_id, point_of_use_id in item_rows:
+        if default_id in location_ids:
+            blocked_ids.add(default_id)
+        if secondary_id in location_ids:
+            blocked_ids.add(secondary_id)
+        if point_of_use_id in location_ids:
+            blocked_ids.add(point_of_use_id)
+
+    return sorted({location.code for location in locations if location.id in blocked_ids})
+
+
+class LocationDeleteError(RuntimeError):
+    def __init__(self, blocked_codes: list[str]):
+        super().__init__("Location delete blocked")
+        self.blocked_codes = blocked_codes
+
+
 def _resolve_location_from_form(value: str | None) -> Location | None:
     if not value:
         return None
@@ -3469,149 +3518,201 @@ def import_locations():
     - If code exists → update description.
     - 'id' column is ignored.
     """
-    if request.method == "POST":
-        step = request.form.get("step")
-        if step == "mapping":
-            import_token = request.form.get("import_token", "")
+    edit_roles = resolve_edit_roles(
+        "inventory", default_roles=("editor", "admin", "inventory")
+    )
+    guard = require_any_role(edit_roles)
+
+    @guard
+    def _import_locations():
+        if request.method == "POST":
+            step = request.form.get("step")
+            delete_missing = request.form.get("delete_missing") == "1"
+            if step == "mapping":
+                import_token = request.form.get("import_token", "")
+                if not import_token:
+                    flash("No CSV data found. Please upload the file again.", "danger")
+                    return redirect(url_for("inventory.import_locations"))
+
+                csv_text = _load_import_csv("locations", import_token)
+                if csv_text is None:
+                    flash(
+                        "Could not read the uploaded CSV data. Please upload the file again.",
+                        "danger",
+                    )
+                    _remove_import_csv("locations", import_token)
+                    return redirect(url_for("inventory.import_locations"))
+
+                selected_mappings = {}
+                for field_cfg in LOCATION_IMPORT_FIELDS:
+                    selected_header = request.form.get(
+                        f"mapping_{field_cfg['field']}", ""
+                    )
+                    if selected_header:
+                        selected_mappings[field_cfg["field"]] = selected_header
+
+                missing_required = [
+                    field_cfg["label"]
+                    for field_cfg in LOCATION_IMPORT_FIELDS
+                    if field_cfg["required"]
+                    and field_cfg["field"] not in selected_mappings
+                ]
+                if missing_required:
+                    flash(
+                        "Please select a column for: "
+                        + ", ".join(missing_required)
+                        + ".",
+                        "danger",
+                    )
+                    context = _prepare_location_import_mapping_context(
+                        csv_text,
+                        selected_mappings=selected_mappings,
+                        token=import_token,
+                    )
+                    context.update(
+                        {
+                            "mapping_title": "Map Location Columns",
+                            "submit_label": "Import Locations",
+                            "start_over_url": url_for("inventory.import_locations"),
+                            "delete_missing": delete_missing,
+                        }
+                    )
+                    return render_template("inventory/import_mapping.html", **context)
+
+                reader = csv.DictReader(io.StringIO(csv_text))
+                if not reader.fieldnames:
+                    flash("Uploaded CSV does not contain a header row.", "danger")
+                    _remove_import_csv("locations", import_token)
+                    return redirect(url_for("inventory.import_locations"))
+
+                invalid_columns = [
+                    header
+                    for header in selected_mappings.values()
+                    if header not in reader.fieldnames
+                ]
+                if invalid_columns:
+                    flash(
+                        "Some selected columns could not be found in the file. Please upload the file again.",
+                        "danger",
+                    )
+                    context = _prepare_location_import_mapping_context(
+                        csv_text,
+                        selected_mappings=selected_mappings,
+                        token=import_token,
+                    )
+                    context.update(
+                        {
+                            "mapping_title": "Map Location Columns",
+                            "submit_label": "Import Locations",
+                            "start_over_url": url_for("inventory.import_locations"),
+                            "delete_missing": delete_missing,
+                        }
+                    )
+                    return render_template("inventory/import_mapping.html", **context)
+
+                def extract(row, field):
+                    header = selected_mappings.get(field)
+                    if not header:
+                        return ""
+                    value = row.get(header)
+                    return value if value is not None else ""
+
+                count_new, count_updated, count_deleted = 0, 0, 0
+                upload_codes: set[str] = set()
+
+                try:
+                    with db.session.begin_nested():
+                        for row in reader:
+                            code = extract(row, "code").strip()
+                            if not code:
+                                continue
+                            description = extract(row, "description").strip()
+                            upload_codes.add(_normalize_location_code(code))
+
+                            existing = Location.query.filter_by(code=code).first()
+                            if existing:
+                                if description:
+                                    existing.description = description
+                                count_updated += 1
+                            else:
+                                loc = Location(code=code, description=description)
+                                db.session.add(loc)
+                                count_new += 1
+
+                        db.session.flush()
+
+                        if delete_missing:
+                            locations = Location.query.all()
+                            to_delete = [
+                                location
+                                for location in locations
+                                if _normalize_location_code(location.code)
+                                not in upload_codes
+                            ]
+                            blocked_codes = _blocked_location_codes(to_delete)
+                            if blocked_codes:
+                                raise LocationDeleteError(blocked_codes)
+                            for location in to_delete:
+                                db.session.delete(location)
+                            count_deleted = len(to_delete)
+                    db.session.commit()
+                except LocationDeleteError as exc:
+                    db.session.rollback()
+                    _remove_import_csv("locations", import_token)
+                    blocked = ", ".join(exc.blocked_codes)
+                    flash(
+                        "Could not delete locations because they are referenced elsewhere: "
+                        f"{blocked}. Remove references and retry.",
+                        "danger",
+                    )
+                    return redirect(url_for("inventory.import_locations"))
+
+                _remove_import_csv("locations", import_token)
+                message = (
+                    f"Locations imported: {count_new} new, {count_updated} updated"
+                )
+                if delete_missing:
+                    message = f"{message}, {count_deleted} deleted"
+                flash(message, "success")
+                return redirect(url_for("inventory.list_locations"))
+
+            file = request.files.get("file")
+            if not file or file.filename == "":
+                flash("No file uploaded", "danger")
+                return redirect(request.url)
+
+            try:
+                csv_text = file.stream.read().decode("utf-8-sig")
+            except UnicodeDecodeError:
+                flash("CSV import files must be UTF-8 encoded.", "danger")
+                return redirect(request.url)
+
+            context = _prepare_location_import_mapping_context(csv_text)
+            context.update(
+                {
+                    "mapping_title": "Map Location Columns",
+                    "submit_label": "Import Locations",
+                    "start_over_url": url_for("inventory.import_locations"),
+                    "delete_missing": delete_missing,
+                }
+            )
+            import_token = context.get("import_token")
             if not import_token:
-                flash("No CSV data found. Please upload the file again.", "danger")
-                return redirect(url_for("inventory.import_locations"))
-
-            csv_text = _load_import_csv("locations", import_token)
-            if csv_text is None:
                 flash(
-                    "Could not read the uploaded CSV data. Please upload the file again.",
+                    "Could not prepare the uploaded CSV. Please try again.",
                     "danger",
                 )
+                return redirect(request.url)
+            if not context["headers"]:
                 _remove_import_csv("locations", import_token)
-                return redirect(url_for("inventory.import_locations"))
-
-            selected_mappings = {}
-            for field_cfg in LOCATION_IMPORT_FIELDS:
-                selected_header = request.form.get(f"mapping_{field_cfg['field']}", "")
-                if selected_header:
-                    selected_mappings[field_cfg["field"]] = selected_header
-
-            missing_required = [
-                field_cfg["label"]
-                for field_cfg in LOCATION_IMPORT_FIELDS
-                if field_cfg["required"] and field_cfg["field"] not in selected_mappings
-            ]
-            if missing_required:
-                flash(
-                    "Please select a column for: " + ", ".join(missing_required) + ".",
-                    "danger",
-                )
-                context = _prepare_location_import_mapping_context(
-                    csv_text,
-                    selected_mappings=selected_mappings,
-                    token=import_token,
-                )
-                context.update(
-                    {
-                        "mapping_title": "Map Location Columns",
-                        "submit_label": "Import Locations",
-                        "start_over_url": url_for("inventory.import_locations"),
-                    }
-                )
-                return render_template("inventory/import_mapping.html", **context)
-
-            reader = csv.DictReader(io.StringIO(csv_text))
-            if not reader.fieldnames:
                 flash("Uploaded CSV does not contain a header row.", "danger")
-                _remove_import_csv("locations", import_token)
-                return redirect(url_for("inventory.import_locations"))
+                return redirect(request.url)
 
-            invalid_columns = [
-                header
-                for header in selected_mappings.values()
-                if header not in reader.fieldnames
-            ]
-            if invalid_columns:
-                flash(
-                    "Some selected columns could not be found in the file. Please upload the file again.",
-                    "danger",
-                )
-                context = _prepare_location_import_mapping_context(
-                    csv_text,
-                    selected_mappings=selected_mappings,
-                    token=import_token,
-                )
-                context.update(
-                    {
-                        "mapping_title": "Map Location Columns",
-                        "submit_label": "Import Locations",
-                        "start_over_url": url_for("inventory.import_locations"),
-                    }
-                )
-                return render_template("inventory/import_mapping.html", **context)
+            return render_template("inventory/import_mapping.html", **context)
 
-            def extract(row, field):
-                header = selected_mappings.get(field)
-                if not header:
-                    return ""
-                value = row.get(header)
-                return value if value is not None else ""
+        return render_template("inventory/import_locations.html")
 
-            count_new, count_updated = 0, 0
-            for row in reader:
-                code = extract(row, "code").strip()
-                if not code:
-                    continue
-                description = extract(row, "description").strip()
-
-                existing = Location.query.filter_by(code=code).first()
-                if existing:
-                    if description:
-                        existing.description = description
-                    count_updated += 1
-                else:
-                    loc = Location(code=code, description=description)
-                    db.session.add(loc)
-                    count_new += 1
-
-            db.session.commit()
-            _remove_import_csv("locations", import_token)
-            flash(
-                f"Locations imported: {count_new} new, {count_updated} updated",
-                "success",
-            )
-            return redirect(url_for("inventory.list_locations"))
-
-        file = request.files.get("file")
-        if not file or file.filename == "":
-            flash("No file uploaded", "danger")
-            return redirect(request.url)
-
-        try:
-            csv_text = file.stream.read().decode("utf-8-sig")
-        except UnicodeDecodeError:
-            flash("CSV import files must be UTF-8 encoded.", "danger")
-            return redirect(request.url)
-
-        context = _prepare_location_import_mapping_context(csv_text)
-        context.update(
-            {
-                "mapping_title": "Map Location Columns",
-                "submit_label": "Import Locations",
-                "start_over_url": url_for("inventory.import_locations"),
-            }
-        )
-        import_token = context.get("import_token")
-        if not import_token:
-            flash(
-                "Could not prepare the uploaded CSV. Please try again.",
-                "danger",
-            )
-            return redirect(request.url)
-        if not context["headers"]:
-            _remove_import_csv("locations", import_token)
-            flash("Uploaded CSV does not contain a header row.", "danger")
-            return redirect(request.url)
-
-        return render_template("inventory/import_mapping.html", **context)
-
-    return render_template("inventory/import_locations.html")
+    return _import_locations()
 
 
 @bp.route("/locations/export")
