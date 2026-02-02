@@ -114,6 +114,47 @@ body.light .access-indicator--emergency {
     white-space: nowrap;
 }
 
+.nav-dropdown {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.nav-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    display: none;
+    flex-direction: column;
+    min-width: 180px;
+    padding: 8px;
+    background-color: #2b2b2b;
+    border-radius: 12px;
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
+    z-index: 1000;
+}
+
+.nav-dropdown:hover .nav-dropdown-menu,
+.nav-dropdown:focus-within .nav-dropdown-menu {
+    display: flex;
+}
+
+.nav-dropdown-link {
+    display: block;
+    padding: 8px 12px;
+    border-radius: 10px;
+    color: #fff;
+    text-decoration: none;
+    font-weight: 600;
+    transition: background-color 0.2s;
+}
+
+.nav-dropdown-link:hover,
+.nav-dropdown-link:focus {
+    background-color: #444;
+    outline: none;
+}
+
 @media (max-width: 900px) {
     header {
         padding: 12px 18px;
@@ -183,6 +224,20 @@ body.light button,
 body.light .icon-btn {
     background-color: #ddd;
     color: #000;
+}
+
+body.light .nav-dropdown-menu {
+    background-color: #f0f0f0;
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
+}
+
+body.light .nav-dropdown-link {
+    color: #000;
+}
+
+body.light .nav-dropdown-link:hover,
+body.light .nav-dropdown-link:focus {
+    background-color: #d8d8d8;
 }
 
 body.light .nav-btn:hover,

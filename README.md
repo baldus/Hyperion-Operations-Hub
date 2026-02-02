@@ -989,6 +989,26 @@ The receiving location picker is a progressive enhancement on the inventory rece
 1. Add the page to `NAVIGATION_PAGES` in `invapp2/invapp/__init__.py`. See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
 2. Ensure there is a corresponding permission rule in `DEFAULT_PAGE_ACCESS`. See [`invapp2/invapp/permissions.py`](invapp2/invapp/permissions.py).
 
+### Inventory navigation dropdown (hover + focus)
+The top navigation is rendered in the base layout template, and its entries are assembled by the `navigation_links()` context processor that filters `NAVIGATION_PAGES` based on `can_access_page()`. See [`invapp2/invapp/templates/base.html`](invapp2/invapp/templates/base.html) and [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py).
+
+**Behavior**
+- The Inventory nav item is still a direct link to `/inventory/`, but it reveals a submenu on hover or focus. See the dropdown markup in [`invapp2/invapp/templates/base.html`](invapp2/invapp/templates/base.html).
+- The dropdown styling and focus/hover behavior are handled entirely via CSS (`:hover`, `:focus-within`) in [`invapp2/invapp/static/style.css`](invapp2/invapp/static/style.css). This keeps the menu as a progressive enhancement.
+- Submenu links render only when `can_access_page("inventory")` is true, which reuses existing permission helpers without duplicating authorization rules. See [`invapp2/invapp/templates/base.html`](invapp2/invapp/templates/base.html) and [`invapp2/invapp/permissions.py`](invapp2/invapp/permissions.py).
+
+**UI pattern for extending dropdowns**
+1. Wrap the target nav item in a `.nav-dropdown` container in `base.html`.
+2. Keep the main anchor clickable (do not replace it with a button).
+3. Add a `.nav-dropdown-menu` sibling containing submenu links.
+4. Use `can_access_page(<page_name>)` for permission-aware rendering.
+5. Add any new styling to `invapp2/invapp/static/style.css`, mirroring the existing dropdown styles.
+
+**Invariants**
+- Clicking Inventory still routes to `/inventory/`.
+- Backend guards remain authoritative (nav visibility does not grant access).
+- The dropdown is a progressive enhancement: no JavaScript is required for basic use.
+
 ### Add a new user role restriction
 1. Add (or ensure) the role exists in the database (see role creation in `invapp2/invapp/__init__.py` and `invapp2/invapp/routes/users.py`). See [`invapp2/invapp/__init__.py`](invapp2/invapp/__init__.py) and [`invapp2/invapp/routes/users.py`](invapp2/invapp/routes/users.py).
 2. Update `DEFAULT_PAGE_ACCESS` with the new role where appropriate. See [`invapp2/invapp/permissions.py`](invapp2/invapp/permissions.py).

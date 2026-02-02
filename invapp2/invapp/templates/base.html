@@ -17,7 +17,22 @@
                 </a>
                 <nav class="navbar" aria-label="Primary">
                     {% for link in navigation_links() %}
+                    {% if link.page_name == "inventory" %}
+                    <div class="nav-item nav-dropdown">
+                        <a href="{{ link.href }}" class="nav-btn nav-dropdown-trigger" aria-haspopup="true">{{ link.label }}</a>
+                        {% if can_access_page("inventory") %}
+                        <div class="nav-dropdown-menu" role="menu">
+                            <a href="{{ url_for('inventory.items') }}" class="nav-dropdown-link" role="menuitem">Items</a>
+                            <a href="{{ url_for('inventory.locations') }}" class="nav-dropdown-link" role="menuitem">Locations</a>
+                            <a href="{{ url_for('inventory.stock') }}" class="nav-dropdown-link" role="menuitem">Stock</a>
+                            <a href="{{ url_for('inventory.history') }}" class="nav-dropdown-link" role="menuitem">History</a>
+                            <a href="{{ url_for('inventory.receiving') }}" class="nav-dropdown-link" role="menuitem">Receiving</a>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% else %}
                     <a href="{{ link.href }}" class="nav-btn">{{ link.label }}</a>
+                    {% endif %}
                     {% endfor %}
                     <a href="{{ url_for('mdi.meeting_view') }}" class="nav-btn">MDI Dashboards</a>
                 </nav>
