@@ -794,6 +794,51 @@ Screenshot placeholder (replace with a real screenshot when available):
 - Row filtering only matches parsed rows; invalid codes are excluded when a row filter is active.
 - Filtering happens in SQL where possible (description), while row parsing/sorting relies on application logic.
 
+### Location Edit: Stock Links + Inline Adjustments
+Use this when updating the Location Edit page to link to item stock or to adjust stock in-place.
+
+**Routes**
+- **GET** `/inventory/location/<location_id>/edit` renders the Location Edit view. See [`invapp2/invapp/routes/inventory.py`](invapp2/invapp/routes/inventory.py).
+- **POST** `/inventory/location/<location_id>/adjust` submits an inline stock adjustment and redirects back to the edit view. See [`invapp2/invapp/routes/inventory.py`](invapp2/invapp/routes/inventory.py).
+
+**Template**
+- [`invapp2/invapp/templates/inventory/edit_location.html`](invapp2/invapp/templates/inventory/edit_location.html)
+  - SKU, Item, and Lot/Batch values link to the stock detail route via `url_for("inventory.stock_detail", item_id=...)`.
+  - Empty batch values render as `—` (no link).
+
+**Inline adjustment form contract**
+- `adjustment_qty` (required): integer (positive or negative).
+- `reason` (optional): short text used for the movement reference.
+- `item_id` (required): hidden; the stock row’s item id.
+- `batch_id` (optional): hidden; empty for unbatched stock.
+- `location_id` is implicit from the URL.
+
+**Validation rules**
+- `adjustment_qty` must be a non-zero integer with `abs(qty) <= 1,000,000`.
+- `item_id` must exist.
+- `batch_id`, if provided, must exist and belong to the item.
+- Adjustments that would make on-hand negative at the location/batch are rejected.
+- Invalid submissions flash an error and redirect back to the edit page.
+
+**Permissions**
+- View access follows the inventory page guard rules.
+- Adjustments require inventory edit roles from `resolve_edit_roles("inventory")` (editor/admin/inventory by default) or a superuser.
+- Users without edit permission do not see the inline form; POSTs return 403.
+
+**Audit / movement behavior**
+- Adjustments create a `Movement` row with:
+  - `movement_type="ADJUST"`.
+  - `location_id` set to the edited location.
+  - `person` from `_movement_person()`.
+  - `reference` from `reason` or a default of `"Location adjustment"`.
+- The adjustment is committed in one transaction; failures roll back with a flash message.
+
+**Tests**
+- `invapp2/tests/test_inventory.py`
+  - `test_location_adjustment_requires_editor` (permission enforcement).
+  - `test_location_adjustment_creates_movement_and_updates_balance` (movement + balance change).
+  - `test_location_adjustment_rejects_invalid_qty` (invalid qtys rejected).
+
 ### Bulk location import (optional deletion)
 The **Bulk Import Locations** workflow includes an optional checkbox labeled **"Delete locations not present in this upload."** When checked, any existing locations not included in the uploaded CSV are permanently deleted after the import runs.
 

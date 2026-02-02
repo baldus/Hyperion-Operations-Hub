@@ -3339,8 +3339,14 @@ def add_location():
 @login_required
 def edit_location(location_id):
     location = Location.query.get_or_404(location_id)
+    edit_roles = resolve_edit_roles(
+        "inventory", default_roles=("editor", "admin", "inventory")
+    )
     can_edit_location = current_user.is_authenticated and (
         current_user.has_any_role(("admin",)) or is_superuser()
+    )
+    can_adjust_stock = current_user.is_authenticated and (
+        current_user.has_any_role(edit_roles) or is_superuser()
     )
     can_remove = can_edit_location
     can_set_pending = current_user.is_authenticated
@@ -3377,6 +3383,7 @@ def edit_location(location_id):
                 inventory_lines=load_location_lines(),
                 can_remove=can_remove,
                 can_edit_location=can_edit_location,
+                can_adjust_stock=can_adjust_stock,
                 can_set_pending=can_set_pending,
                 can_move_pending=can_move_pending,
                 all_locations=all_locations,
@@ -3398,12 +3405,106 @@ def edit_location(location_id):
         inventory_lines=load_location_lines(),
         can_remove=can_remove,
         can_edit_location=can_edit_location,
+        can_adjust_stock=can_adjust_stock,
         can_set_pending=can_set_pending,
         can_move_pending=can_move_pending,
         all_locations=all_locations,
         remove_reasons=_get_remove_reasons(),
         next_url=url_for("inventory.edit_location", location_id=location_id),
     )
+
+
+@bp.post("/location/<int:location_id>/adjust")
+@login_required
+def adjust_location_stock(location_id: int):
+    location = Location.query.get_or_404(location_id)
+    edit_roles = resolve_edit_roles(
+        "inventory", default_roles=("editor", "admin", "inventory")
+    )
+    if not (current_user.has_any_role(edit_roles) or is_superuser()):
+        abort(403)
+
+    item_id = request.form.get("item_id", type=int)
+    raw_batch_id = (request.form.get("batch_id") or "").strip()
+    raw_qty = (request.form.get("adjustment_qty") or "").strip()
+    reason = (request.form.get("reason") or "").strip()
+    next_url = url_for("inventory.edit_location", location_id=location_id)
+
+    if item_id is None:
+        flash("Select a valid item to adjust.", "danger")
+        return redirect(next_url)
+
+    try:
+        adjustment_qty = int(raw_qty)
+    except (TypeError, ValueError):
+        flash("Adjustment quantity must be an integer.", "danger")
+        return redirect(next_url)
+
+    if adjustment_qty == 0:
+        flash("Adjustment quantity must be non-zero.", "danger")
+        return redirect(next_url)
+    if abs(adjustment_qty) > 1_000_000:
+        flash("Adjustment quantity exceeds the allowed limit.", "danger")
+        return redirect(next_url)
+
+    item = Item.query.get(item_id)
+    if item is None:
+        flash("Item not found.", "danger")
+        return redirect(next_url)
+
+    batch = None
+    batch_id = None
+    if raw_batch_id:
+        try:
+            batch_id = int(raw_batch_id)
+        except (TypeError, ValueError):
+            flash("Select a valid batch.", "danger")
+            return redirect(next_url)
+        batch = (
+            Batch.query.filter(
+                Batch.id == batch_id,
+                Batch.item_id == item_id,
+                Batch.removed_at.is_(None),
+            )
+            .one_or_none()
+        )
+        if batch is None:
+            flash("Batch not found for the selected item.", "danger")
+            return redirect(next_url)
+
+    current_qty = _get_location_on_hand_by_batch(item_id, location_id, batch_id)
+    if current_qty + Decimal(adjustment_qty) < 0:
+        flash("Adjustment would result in negative on-hand at this location.", "danger")
+        return redirect(next_url)
+
+    reference = reason or "Location adjustment"
+    try:
+        with db.session.begin_nested():
+            db.session.add(
+                Movement(
+                    item_id=item_id,
+                    batch_id=batch_id,
+                    location_id=location_id,
+                    quantity=Decimal(adjustment_qty),
+                    movement_type="ADJUST",
+                    person=_movement_person(),
+                    reference=reference,
+                )
+            )
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        current_app.logger.exception("Failed to adjust stock for location.")
+        flash("Failed to adjust stock. Please try again.", "danger")
+        return redirect(next_url)
+
+    batch_label = batch.lot_number if batch and batch.lot_number else "unbatched"
+    item_label = f"{item.sku} / {batch_label}"
+    flash(
+        f"Adjusted stock for {item_label} by {adjustment_qty} at {location.code}.",
+        "success",
+    )
+    return redirect(next_url)
 
 
 @bp.post("/location/<int:location_id>/remove-all-items")

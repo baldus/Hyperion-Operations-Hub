@@ -249,6 +249,105 @@ def test_delete_all_locations_does_not_call_session_begin(client, app, monkeypat
     assert response.status_code == 200
 
 
+def _create_location_stock(app, *, qty=10):
+    with app.app_context():
+        location = Location(code="ADJ-LOC")
+        item = Item(sku="ADJ-ITEM", name="Adjustable Item")
+        db.session.add_all([location, item])
+        db.session.commit()
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                location_id=location.id,
+                quantity=qty,
+                movement_type="ADJUST",
+            )
+        )
+        db.session.commit()
+        return location.id, item.id
+
+
+def test_location_adjustment_requires_editor(app):
+    location_id, item_id = _create_location_stock(app)
+    create_user(app, username="viewer", role_names=("viewer",))
+
+    client = app.test_client()
+    login(client, username="viewer")
+
+    response = client.post(
+        f"/inventory/location/{location_id}/adjust",
+        data={
+            "item_id": item_id,
+            "batch_id": "",
+            "adjustment_qty": "1",
+            "reason": "Count correction",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 403
+
+
+def test_location_adjustment_creates_movement_and_updates_balance(app):
+    location_id, item_id = _create_location_stock(app, qty=10)
+    create_user(app, username="editor_user", role_names=("editor",))
+
+    client = app.test_client()
+    login(client, username="editor_user")
+
+    response = client.post(
+        f"/inventory/location/{location_id}/adjust",
+        data={
+            "item_id": item_id,
+            "batch_id": "",
+            "adjustment_qty": "-3",
+            "reason": "Cycle count",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+
+    with app.app_context():
+        movement_count = Movement.query.filter_by(
+            item_id=item_id, location_id=location_id
+        ).count()
+        total = (
+            db.session.query(func.coalesce(func.sum(Movement.quantity), 0))
+            .filter(Movement.item_id == item_id, Movement.location_id == location_id)
+            .scalar()
+        )
+        assert movement_count == 2
+        assert Decimal(total or 0) == Decimal("7")
+
+
+def test_location_adjustment_rejects_invalid_qty(app):
+    location_id, item_id = _create_location_stock(app, qty=5)
+    create_user(app, username="editor_invalid", role_names=("editor",))
+
+    client = app.test_client()
+    login(client, username="editor_invalid")
+
+    with app.app_context():
+        original_count = Movement.query.count()
+
+    for bad_qty in ("0", "not-a-number"):
+        response = client.post(
+            f"/inventory/location/{location_id}/adjust",
+            data={
+                "item_id": item_id,
+                "batch_id": "",
+                "adjustment_qty": bad_qty,
+                "reason": "Bad qty",
+            },
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+
+    with app.app_context():
+        assert Movement.query.count() == original_count
+
+
 def test_list_stock_includes_location_metadata(client, app):
     with app.app_context():
         primary = Location(code="PRIMARY")

@@ -38,6 +38,9 @@
             <th>Item</th>
             <th>Lot/Batch</th>
             <th>On Hand</th>
+            {% if can_adjust_stock %}
+              <th>Adjust Stock</th>
+            {% endif %}
             {% if can_set_pending or can_remove %}
               <th>Actions</th>
             {% endif %}
@@ -46,9 +49,25 @@
         <tbody>
           {% for line in inventory_lines %}
             <tr>
-              <td>{{ line.sku }}</td>
-              <td>{{ line.name }}</td>
-              <td>{{ line.lot_number or "Unbatched" }}</td>
+              <td>
+                <a href="{{ url_for('inventory.stock_detail', item_id=line.item_id) }}">
+                  {{ line.sku }}
+                </a>
+              </td>
+              <td>
+                <a href="{{ url_for('inventory.stock_detail', item_id=line.item_id) }}">
+                  {{ line.name }}
+                </a>
+              </td>
+              <td>
+                {% if line.lot_number %}
+                  <a href="{{ url_for('inventory.stock_detail', item_id=line.item_id) }}">
+                    {{ line.lot_number }}
+                  </a>
+                {% else %}
+                  —
+                {% endif %}
+              </td>
               <td>
                 {% if line.pending_qty %}
                   <span class="badge">Qty Pending</span>
@@ -56,6 +75,31 @@
                   {{ line.on_hand }}
                 {% endif %}
               </td>
+              {% if can_adjust_stock %}
+                <td>
+                  <form method="post" action="{{ url_for('inventory.adjust_location_stock', location_id=location.id) }}">
+                    <input type="hidden" name="item_id" value="{{ line.item_id }}">
+                    <input type="hidden" name="batch_id" value="{{ line.batch_id if line.batch_id is not none else '' }}">
+                    <label class="sr-only" for="adjust-qty-{{ loop.index }}">Adjust (+/-)</label>
+                    <input
+                      id="adjust-qty-{{ loop.index }}"
+                      type="number"
+                      name="adjustment_qty"
+                      step="1"
+                      required
+                      placeholder="Adjust (+/-)"
+                    >
+                    <label class="sr-only" for="adjust-reason-{{ loop.index }}">Reason</label>
+                    <input
+                      id="adjust-reason-{{ loop.index }}"
+                      type="text"
+                      name="reason"
+                      placeholder="Reason (optional)"
+                    >
+                    <button type="submit" class="bubble-btn">Adjust</button>
+                  </form>
+                </td>
+              {% endif %}
               {% if can_set_pending or can_remove %}
                 <td>
                   {% if line.pending_qty and can_set_pending %}
