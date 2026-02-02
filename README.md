@@ -794,6 +794,17 @@ Screenshot placeholder (replace with a real screenshot when available):
 - Row filtering only matches parsed rows; invalid codes are excluded when a row filter is active.
 - Filtering happens in SQL where possible (description), while row parsing/sorting relies on application logic.
 
+### Bulk location import (optional deletion)
+The **Bulk Import Locations** workflow includes an optional checkbox labeled **"Delete locations not present in this upload."** When checked, any existing locations not included in the uploaded CSV are permanently deleted after the import runs.
+
+**Important behavior**
+- **Default is off**: locations are only deleted when the checkbox is explicitly checked.
+- **Permanent deletion**: this is a hard delete on the `Location` table (no soft delete).
+- **Normalization**: comparisons use normalized location codes (trim whitespace + uppercase).
+- **Deletion can fail** if a location is referenced elsewhere (e.g., movements or item default/secondary/POU locations). In that case, the delete is aborted and no deletions occur.
+
+**⚠️ Warning:** Checking this option permanently deletes locations that are not present in the upload. Make sure the CSV contains every location you want to keep.
+
 ### Batch Label selectable fields
 Use this when adding or adjusting fields available in the Batch Label designer.
 

@@ -1915,6 +1915,120 @@ def test_import_locations_mapping_flow(client, app):
         assert created.description == "Side Location"
 
 
+def _start_location_import(client, csv_text):
+    upload_response = client.post(
+        "/inventory/locations/import",
+        data={"file": (io.BytesIO(csv_text.encode("utf-8")), "locations.csv")},
+        content_type="multipart/form-data",
+    )
+    assert upload_response.status_code == 200
+    upload_page = upload_response.get_data(as_text=True)
+    token_match = re.search(r'name="import_token" value="([^"]+)"', upload_page)
+    assert token_match
+    return token_match.group(1)
+
+
+def test_import_locations_without_delete_keeps_missing(client, app):
+    with app.app_context():
+        db.session.add_all(
+            [
+                Location(code="MAIN", description="Existing"),
+                Location(code="SIDE", description="Side"),
+            ]
+        )
+        db.session.commit()
+
+    csv_text = "code,description\nMAIN,Updated Main\n"
+    import_token = _start_location_import(client, csv_text)
+
+    response = client.post(
+        "/inventory/locations/import",
+        data={
+            "step": "mapping",
+            "import_token": import_token,
+            "mapping_code": "code",
+            "mapping_description": "description",
+        },
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        assert Location.query.filter_by(code="MAIN").count() == 1
+        assert Location.query.filter_by(code="SIDE").count() == 1
+
+
+def test_import_locations_with_delete_removes_missing(client, app):
+    with app.app_context():
+        db.session.add_all(
+            [
+                Location(code="MAIN", description="Existing"),
+                Location(code="SIDE", description="Side"),
+            ]
+        )
+        db.session.commit()
+
+    csv_text = "code,description\nMAIN,Updated Main\n"
+    import_token = _start_location_import(client, csv_text)
+
+    response = client.post(
+        "/inventory/locations/import",
+        data={
+            "step": "mapping",
+            "import_token": import_token,
+            "mapping_code": "code",
+            "mapping_description": "description",
+            "delete_missing": "1",
+        },
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        assert Location.query.filter_by(code="MAIN").count() == 1
+        assert Location.query.filter_by(code="SIDE").count() == 0
+
+
+def test_import_locations_delete_failure_shows_error(client, app):
+    with app.app_context():
+        item = Item(sku="SKU-1", name="Widget")
+        main = Location(code="MAIN", description="Existing")
+        blocked = Location(code="BLOCKED", description="Blocked")
+        db.session.add_all([item, main, blocked])
+        db.session.commit()
+
+        movement = Movement(
+            item_id=item.id,
+            location_id=blocked.id,
+            quantity=Decimal("1"),
+            movement_type="RECEIPT",
+        )
+        db.session.add(movement)
+        db.session.commit()
+
+    csv_text = "code,description\nMAIN,Updated Main\n"
+    import_token = _start_location_import(client, csv_text)
+
+    response = client.post(
+        "/inventory/locations/import",
+        data={
+            "step": "mapping",
+            "import_token": import_token,
+            "mapping_code": "code",
+            "mapping_description": "description",
+            "delete_missing": "1",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "Could not delete locations" in page
+
+    with app.app_context():
+        main_location = Location.query.filter_by(code="MAIN").one()
+        blocked_location = Location.query.filter_by(code="BLOCKED").one()
+        assert main_location.description == "Existing"
+        assert blocked_location.description == "Blocked"
+
+
 def test_import_stock_mapping_flow(client, app):
     with app.app_context():
         item = Item(sku="SKU-1", name="Widget")
