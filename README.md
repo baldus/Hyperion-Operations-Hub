@@ -859,6 +859,31 @@ Use this when extending the Item Shortage detail page (`/purchasing/<id>`) with 
 **UI layout note**
 - The top action buttons on the shortage detail page use `.purchasing-detail-actions` for a wrapping flex layout (`display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px`) in [`invapp2/invapp/static/style.css`](invapp2/invapp/static/style.css). Reuse this class for other detail headers to prevent button overlap.
 
+### Purchasing Item Shortages: Per-User Columns
+Use this when updating the Item Shortages list page (`/purchasing/`) to allow users to select which columns are visible.
+
+**Feature overview**
+- Each user can save a preferred set of columns for the Item Shortages table. Preferences persist across sessions/devices.
+- Defaults match the existing column set when no preference is saved.
+- Invalid or outdated preferences are ignored so the page never errors.
+
+**Data storage**
+- **Model/Table:** `User.purchasing_shortage_columns` (nullable JSON list). See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+- **Migration:** `invapp2/migrations/versions/20251012_add_user_purchasing_shortage_columns.py` adds/removes the column.
+
+**Routes**
+- **GET** `/purchasing/` renders the Item Shortages table with the user’s saved columns (or defaults). See [`invapp2/invapp/routes/purchasing.py`](invapp2/invapp/routes/purchasing.py).
+- **POST** `/purchasing/shortages/columns` saves or resets the column preferences. See [`invapp2/invapp/routes/purchasing.py`](invapp2/invapp/routes/purchasing.py).
+
+**UI behavior**
+- A **Columns** dropdown on the Item Shortages page lists all `PurchaseRequest` fields (derived via model introspection) with checkboxes.
+- **Save** persists the chosen column order; **Reset** clears the preference and restores defaults.
+- Long text values are truncated with a tooltip for full content.
+
+**Invariants**
+- The page must never 500 due to invalid or stale preferences.
+- Only fields on the `PurchaseRequest` model are selectable; extra invalid keys are ignored.
+
 ### Bulk location import (optional deletion)
 The **Bulk Import Locations** workflow includes an optional checkbox labeled **"Delete locations not present in this upload."** When checked, any existing locations not included in the uploaded CSV are permanently deleted after the import runs.
 

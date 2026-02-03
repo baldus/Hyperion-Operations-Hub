@@ -316,3 +316,77 @@ def test_delete_requires_superuser(app):
 def test_delete_missing_request_returns_404(app, client):
     response = client.post("/purchasing/999/delete")
     assert response.status_code == 404
+
+
+def test_purchasing_home_uses_default_columns(app, client):
+    with app.app_context():
+        request_record = PurchaseRequest(title="Widget", requested_by="Ops")
+        db.session.add(request_record)
+        db.session.commit()
+
+    response = client.get("/purchasing/")
+
+    assert response.status_code == 200
+    assert b'<th scope="col">Item / Description</th>' in response.data
+    assert b'<th scope="col">Requested By</th>' in response.data
+    assert b'<th scope="col">Description</th>' not in response.data
+
+
+def test_purchasing_columns_preference_saves(app, client):
+    with app.app_context():
+        request_record = PurchaseRequest(title="Bearings", requested_by="Ops")
+        db.session.add(request_record)
+        db.session.commit()
+
+    response = client.post(
+        "/purchasing/shortages/columns",
+        data={"columns": ["status", "needed_by"]},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b'<th scope="col">Status</th>' in response.data
+    assert b'<th scope="col">Needed By</th>' in response.data
+    assert b'<th scope="col">Item / Description</th>' not in response.data
+
+
+def test_purchasing_columns_invalid_keys_are_ignored(app, client):
+    with app.app_context():
+        request_record = PurchaseRequest(title="Gasket", requested_by="Ops")
+        db.session.add(request_record)
+        db.session.commit()
+
+    response = client.post(
+        "/purchasing/shortages/columns",
+        data={"columns": ["not_a_field", "status"]},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b'<th scope="col">Status</th>' in response.data
+    assert b'<th scope="col">Item / Description</th>' not in response.data
+
+
+def test_purchasing_columns_reset_clears_preference(app, client):
+    with app.app_context():
+        request_record = PurchaseRequest(title="Cable", requested_by="Ops")
+        db.session.add(request_record)
+        db.session.commit()
+
+    client.post(
+        "/purchasing/shortages/columns",
+        data={"columns": ["status"]},
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/purchasing/shortages/columns",
+        data={"action": "reset"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b'<th scope="col">Item / Description</th>' in response.data
+    with app.app_context():
+        user = User.query.filter_by(username="superuser").first()
+        assert user.purchasing_shortage_columns is None

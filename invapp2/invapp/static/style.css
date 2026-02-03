@@ -1653,6 +1653,59 @@ body.light .status-filter-form select {
     border-color: rgba(0, 0, 0, 0.18);
 }
 
+.column-chooser {
+    position: relative;
+}
+
+.column-chooser summary {
+    list-style: none;
+}
+
+.column-chooser summary::-webkit-details-marker {
+    display: none;
+}
+
+.column-chooser-panel {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    z-index: 10;
+    background: rgba(20, 20, 20, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    padding: 14px;
+    min-width: 220px;
+    max-width: 320px;
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.2);
+}
+
+body.light .column-chooser-panel {
+    background: #fff;
+    border-color: rgba(0, 0, 0, 0.12);
+}
+
+.column-chooser-list {
+    display: grid;
+    gap: 8px;
+    max-height: 240px;
+    overflow: auto;
+    padding-right: 6px;
+}
+
+.column-choice {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 0.9rem;
+}
+
+.column-chooser-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+}
+
 .status-summary-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
