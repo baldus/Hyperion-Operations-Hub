@@ -643,6 +643,7 @@ class PurchaseRequest(PrimaryKeySequenceMixin, db.Model):
     supplier_name = db.Column(db.String(255), nullable=True)
     supplier_contact = db.Column(db.String(255), nullable=True)
     eta_date = db.Column(db.Date, nullable=True)
+    shipped_from_supplier_date = db.Column(db.Date, nullable=True)
     purchase_order_number = db.Column(db.String(64), nullable=True)
     notes = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

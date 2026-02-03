@@ -327,6 +327,8 @@ def _ensure_purchasing_schema(engine):
         columns_to_add.append(("item_id", "INTEGER"))
     if "item_number" not in purchase_request_columns:
         columns_to_add.append(("item_number", "VARCHAR(255)"))
+    if "shipped_from_supplier_date" not in purchase_request_columns:
+        columns_to_add.append(("shipped_from_supplier_date", "DATE"))
 
     if columns_to_add:
         with engine.begin() as conn:

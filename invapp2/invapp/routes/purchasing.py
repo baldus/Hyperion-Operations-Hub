@@ -24,8 +24,9 @@ from flask import (
 )
 from werkzeug.routing import BuildError
 from werkzeug.utils import secure_filename
-from sqlalchemy import func
+from sqlalchemy import func, inspect
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm.exc import DetachedInstanceError
 
 from invapp.auth import blueprint_page_guard
 from invapp.extensions import login_manager
@@ -35,6 +36,7 @@ from invapp.models import (
     PurchaseRequest,
     PurchaseRequestAttachment,
     PurchaseRequestDeleteAudit,
+    User,
     db,
 )
 from invapp.permissions import resolve_edit_roles
@@ -215,10 +217,42 @@ def _require_purchasing_edit(view_func):
     return wrapped
 
 
-def _current_actor() -> str:
+def _current_username() -> str | None:
     if not current_user.is_authenticated:
-        return "system"
-    return getattr(current_user, "username", None) or "system"
+        return None
+    try:
+        return getattr(current_user, "username", None)
+    except DetachedInstanceError:
+        identity = inspect(current_user).identity
+        if not identity:
+            return None
+        user = db.session.get(User, identity[0])
+        return getattr(user, "username", None) if user else None
+    except Exception:
+        user_id = _current_user_id()
+        if user_id is None:
+            return None
+        user = db.session.get(User, user_id)
+        return getattr(user, "username", None) if user else None
+
+
+def _current_actor() -> str:
+    return _current_username() or "system"
+
+
+def _current_user_id() -> int | None:
+    if not current_user.is_authenticated:
+        return None
+    try:
+        user_id = current_user.get_id()
+    except Exception:
+        return None
+    if user_id is None:
+        return None
+    try:
+        return int(user_id)
+    except (TypeError, ValueError):
+        return None
 
 
 def _allowed_purchase_attachment(filename: str) -> bool:
@@ -481,8 +515,8 @@ def delete_request(request_id: int):
         item_number=purchase_request.item_number,
         requested_by=purchase_request.requested_by,
         attachment_count=len(purchase_request.attachments),
-        deleted_by_user_id=getattr(current_user, "id", None),
-        deleted_by_username=getattr(current_user, "username", None),
+        deleted_by_user_id=_current_user_id(),
+        deleted_by_username=_current_username(),
         delete_reason=delete_reason,
     )
     upload_folder = current_app.config.get("PURCHASING_ATTACHMENT_UPLOAD_FOLDER")
@@ -565,6 +599,15 @@ def update_request(request_id: int):
         errors.append(eta_error)
     else:
         purchase_request.eta_date = eta_value
+
+    shipped_date_value, shipped_date_error = _parse_date(
+        request.form.get("shipped_from_supplier_date", ""),
+        field_label="the shipped from supplier date",
+    )
+    if shipped_date_error:
+        errors.append(shipped_date_error)
+    else:
+        purchase_request.shipped_from_supplier_date = shipped_date_value
 
     if errors:
         for message in errors:

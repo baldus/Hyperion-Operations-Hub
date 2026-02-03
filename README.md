@@ -839,6 +839,26 @@ Use this when updating the Location Edit page to link to item stock or to adjust
   - `test_location_adjustment_creates_movement_and_updates_balance` (movement + balance change).
   - `test_location_adjustment_rejects_invalid_qty` (invalid qtys rejected).
 
+### Purchasing Item Shortage: Shipped from Supplier Date
+Use this when extending the Item Shortage detail page (`/purchasing/<id>`) with shipment timing updates.
+
+**Data storage**
+- **Model/Table:** `PurchaseRequest` (`purchase_request`) now includes `shipped_from_supplier_date` (nullable `Date`). See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+- **Migration:** `invapp2/migrations/versions/20251010_add_shipped_from_supplier_date_to_purchase_request.py` adds/removes the column.
+
+**Routes + templates**
+- **GET** `/purchasing/<id>` renders the shortage detail summary. See [`invapp2/invapp/routes/purchasing.py`](invapp2/invapp/routes/purchasing.py) and [`invapp2/invapp/templates/purchasing/detail.html`](invapp2/invapp/templates/purchasing/detail.html).
+- **POST** `/purchasing/<id>/update` handles form updates and validation for `shipped_from_supplier_date`. See [`invapp2/invapp/routes/purchasing.py`](invapp2/invapp/routes/purchasing.py).
+
+**Form field contract**
+- Field name: `shipped_from_supplier_date`
+- Input format: `YYYY-MM-DD` from `<input type="date">`
+- Nullable: empty string clears the date (stored as `NULL`)
+- Invalid values: flash an error and do not commit updates
+
+**UI layout note**
+- The top action buttons on the shortage detail page use `.purchasing-detail-actions` for a wrapping flex layout (`display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px`) in [`invapp2/invapp/static/style.css`](invapp2/invapp/static/style.css). Reuse this class for other detail headers to prevent button overlap.
+
 ### Bulk location import (optional deletion)
 The **Bulk Import Locations** workflow includes an optional checkbox labeled **"Delete locations not present in this upload."** When checked, any existing locations not included in the uploaded CSV are permanently deleted after the import runs.
 

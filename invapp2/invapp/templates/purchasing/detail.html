@@ -88,6 +88,15 @@
                 {% endif %}
             </dd>
 
+            <dt>Shipped from Supplier Date</dt>
+            <dd>
+                {% if purchase_request.shipped_from_supplier_date %}
+                    {{ purchase_request.shipped_from_supplier_date.isoformat() }}
+                {% else %}
+                    <span class="muted">—</span>
+                {% endif %}
+            </dd>
+
             <dt>Purchase order</dt>
             <dd>
                 {% if purchase_request.purchase_order_number %}
@@ -197,6 +206,17 @@
 
     <div class="form-row two-col">
         <div>
+            <label for="shipped_from_supplier_date">Shipped from Supplier Date</label>
+            <input type="date" id="shipped_from_supplier_date" name="shipped_from_supplier_date" value="{{ purchase_request.shipped_from_supplier_date.isoformat() if purchase_request.shipped_from_supplier_date else '' }}">
+        </div>
+        <div>
+            <label for="purchase_order_number">Purchase order</label>
+            <input type="text" id="purchase_order_number" name="purchase_order_number" value="{{ purchase_request.purchase_order_number or '' }}">
+        </div>
+    </div>
+
+    <div class="form-row two-col">
+        <div>
             <label for="supplier_name">Supplier</label>
             <input type="text" id="supplier_name" name="supplier_name" value="{{ purchase_request.supplier_name or '' }}">
         </div>
@@ -204,11 +224,6 @@
             <label for="supplier_contact">Supplier contact</label>
             <input type="text" id="supplier_contact" name="supplier_contact" value="{{ purchase_request.supplier_contact or '' }}">
         </div>
-    </div>
-
-    <div class="form-row">
-        <label for="purchase_order_number">Purchase order</label>
-        <input type="text" id="purchase_order_number" name="purchase_order_number" value="{{ purchase_request.purchase_order_number or '' }}">
     </div>
 
     <div class="form-row">
