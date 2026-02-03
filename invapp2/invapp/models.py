@@ -1150,6 +1150,7 @@ class User(UserMixin, PrimaryKeySequenceMixin, db.Model):
     default_printer_id = db.Column(
         db.Integer, db.ForeignKey("printer.id", ondelete="SET NULL"), nullable=True
     )
+    user_settings = db.Column(db.JSON, nullable=True)
 
     roles = db.relationship(
         "Role",

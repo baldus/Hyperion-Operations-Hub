@@ -21,6 +21,28 @@
         </select>
         <button type="submit">Apply</button>
     </form>
+    <div class="columns-dropdown" data-dropdown>
+        <button type="button" class="action-btn dropdown-toggle" data-dropdown-toggle>
+            Columns &#9662;
+        </button>
+        <div class="dropdown-menu" data-dropdown-menu>
+            <form method="post" action="{{ url_for('purchasing.shortage_columns') }}" class="stacked-form">
+                <input type="hidden" name="return_to" value="{{ request.full_path }}">
+                <div class="dropdown-menu-scroll">
+                    {% for column in allowed_column_choices %}
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="columns" value="{{ column.key }}" {% if column.key in visible_columns %}checked{% endif %}>
+                            {{ column.label }}
+                        </label>
+                    {% endfor %}
+                </div>
+                <div class="columns-panel-actions">
+                    <button type="submit" name="action" value="save">Save</button>
+                    <button type="submit" name="action" value="reset" class="subtle-action">Reset</button>
+                </div>
+            </form>
+        </div>
+    </div>
 </div>
 
 <div class="status-summary-grid">
@@ -41,15 +63,9 @@
         <table class="data-table purchasing-table">
             <thead>
                 <tr>
-                    <th scope="col">ID</th>
-                    <th scope="col">Item / Description</th>
-                    <th scope="col">Quantity</th>
-                    <th scope="col">Needed By</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Supplier</th>
-                    <th scope="col">ETA</th>
-                    <th scope="col">Requested By</th>
-                    <th scope="col">Updated</th>
+                    {% for column_key in visible_columns %}
+                        <th scope="col">{{ column_labels.get(column_key, column_key) }}</th>
+                    {% endfor %}
                     {% if is_superuser() %}
                         <th scope="col">Actions</th>
                     {% endif %}
@@ -58,57 +74,32 @@
             <tbody>
                 {% for req in requests %}
                     <tr>
-                        <td data-label="ID">
-                            <a href="{{ url_for('purchasing.view_request', request_id=req.id) }}">PR-{{ "%04d" | format(req.id) }}</a>
-                        </td>
-                        <td data-label="Item / Description">
-                            <strong>{{ req.title }}</strong>
-                            {% if req.description %}
-                                <div class="secondary-text">{{ req.description }}</div>
-                            {% endif %}
-                        </td>
-                        <td data-label="Quantity">
-                            {% if req.quantity is not none %}
-                                {{ "{:.2f}".format(req.quantity) }}{% if req.unit %} {{ req.unit }}{% endif %}
-                            {% elif req.unit %}
-                                {{ req.unit }}
-                            {% else %}
-                                &mdash;
-                            {% endif %}
-                        </td>
-                        <td data-label="Needed By">
-                            {% if req.needed_by %}
-                                {{ req.needed_by.isoformat() }}
-                            {% else %}
-                                &mdash;
-                            {% endif %}
-                        </td>
-                        <td data-label="Status">
-                            <span class="status-pill status-{{ req.status }}">{{ status_labels.get(req.status, req.status) }}</span>
-                        </td>
-                        <td data-label="Supplier">
-                            {% if req.supplier_name %}
-                                {{ req.supplier_name }}
-                                {% if req.purchase_order_number %}
-                                    <div class="secondary-text">PO {{ req.purchase_order_number }}</div>
-                                {% endif %}
-                            {% else %}
-                                {% if req.purchase_order_number %}
-                                    PO {{ req.purchase_order_number }}
-                                {% else %}
+                        {% for column_key in visible_columns %}
+                            {% set value = req|attr(column_key) %}
+                            <td data-label="{{ column_labels.get(column_key, column_key) }}">
+                                {% if column_key == 'id' %}
+                                    <a href="{{ url_for('purchasing.view_request', request_id=req.id) }}">PR-{{ "%04d" | format(value) }}</a>
+                                {% elif column_key == 'status' %}
+                                    {% if value %}
+                                        <span class="status-pill status-{{ value }}">{{ status_labels.get(value, value) }}</span>
+                                    {% else %}
+                                        &mdash;
+                                    {% endif %}
+                                {% elif value is none or value == "" %}
                                     &mdash;
+                                {% elif column_type_map.get(column_key) == 'date' %}
+                                    {{ value.isoformat() }}
+                                {% elif column_type_map.get(column_key) == 'datetime' %}
+                                    {{ value.strftime('%Y-%m-%d') }}
+                                {% elif column_type_map.get(column_key) == 'bool' %}
+                                    {{ "Yes" if value else "No" }}
+                                {% elif value is string and value|length > 60 %}
+                                    <span title="{{ value }}">{{ value[:60] }}&hellip;</span>
+                                {% else %}
+                                    {{ value }}
                                 {% endif %}
-                            {% endif %}
-                        </td>
-                        <td data-label="ETA">
-                            {% if req.eta_date %}
-                                {{ req.eta_date.isoformat() }}
-                            {% else %}
-                                &mdash;
-                            {% endif %}
-                        </td>
-                        <td data-label="Requested By">{{ req.requested_by }}</td>
-                        <td data-label="Updated">{{ req.updated_at.strftime('%Y-%m-%d') }}</td>
+                            </td>
+                        {% endfor %}
                         {% if is_superuser() %}
                             <td data-label="Actions">
                                 <a class="link-btn danger" href="{{ url_for('purchasing.confirm_delete_request', request_id=req.id) }}">Delete</a>
@@ -127,4 +118,34 @@
         {% endif %}
     </div>
 {% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    (() => {
+        const dropdown = document.querySelector('[data-dropdown]');
+        if (!dropdown) {
+            return;
+        }
+        const toggle = dropdown.querySelector('[data-dropdown-toggle]');
+        const menu = dropdown.querySelector('[data-dropdown-menu]');
+        if (!toggle || !menu) {
+            return;
+        }
+        const closeMenu = () => dropdown.classList.remove('is-open');
+        toggle.addEventListener('click', () => {
+            dropdown.classList.toggle('is-open');
+        });
+        document.addEventListener('click', (event) => {
+            if (!dropdown.contains(event.target)) {
+                closeMenu();
+            }
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                closeMenu();
+            }
+        });
+    })();
+</script>
 {% endblock %}

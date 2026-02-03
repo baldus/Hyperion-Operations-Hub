@@ -490,6 +490,9 @@ def _ensure_user_schema(engine) -> None:
         if "default_printer_id" not in user_columns and user_columns:
             conn.execute(text('ALTER TABLE "user" ADD COLUMN default_printer_id INTEGER'))
 
+        if "user_settings" not in user_columns and user_columns:
+            conn.execute(text('ALTER TABLE "user" ADD COLUMN user_settings JSON'))
+
     if not user_columns:
         return
 
