@@ -1653,6 +1653,54 @@ body.light .status-filter-form select {
     border-color: rgba(0, 0, 0, 0.18);
 }
 
+.columns-panel {
+    position: relative;
+}
+
+.columns-panel > summary {
+    cursor: pointer;
+    list-style: none;
+}
+
+.columns-panel > summary::-webkit-details-marker {
+    display: none;
+}
+
+.columns-panel form {
+    margin-top: 10px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.04);
+    min-width: 280px;
+}
+
+body.light .columns-panel form {
+    border-color: rgba(0, 0, 0, 0.12);
+    background: rgba(0, 0, 0, 0.03);
+}
+
+.columns-panel-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 8px 16px;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 500;
+}
+
+.columns-panel-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 12px;
+}
+
 .status-summary-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));

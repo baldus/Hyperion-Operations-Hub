@@ -859,6 +859,20 @@ Use this when extending the Item Shortage detail page (`/purchasing/<id>`) with 
 **UI layout note**
 - The top action buttons on the shortage detail page use `.purchasing-detail-actions` for a wrapping flex layout (`display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px`) in [`invapp2/invapp/static/style.css`](invapp2/invapp/static/style.css). Reuse this class for other detail headers to prevent button overlap.
 
+### Purchasing Item Shortages: Visible Columns (per-user)
+The Item Shortages list (`/purchasing/`) lets each user choose which `PurchaseRequest` columns are visible.
+
+**Data storage**
+- **User field:** `User.user_settings` (nullable JSON). Column preferences live under `user_settings["purchasing"]["shortages_visible_columns"]` as an ordered list of `PurchaseRequest` column keys. See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+
+**Routes**
+- **POST** `/purchasing/shortages/columns` saves or clears the current user’s visible column list. See [`invapp2/invapp/routes/purchasing.py`](invapp2/invapp/routes/purchasing.py).
+
+**Default behavior + safety**
+- If no preference is saved, the list view falls back to the default column set shown before this feature.
+- If stored preferences are malformed or include unknown columns, they are ignored and defaults are used instead.
+- The view must never 500 because of bad stored preferences. See [`invapp2/invapp/routes/purchasing.py`](invapp2/invapp/routes/purchasing.py).
+
 ### Bulk location import (optional deletion)
 The **Bulk Import Locations** workflow includes an optional checkbox labeled **"Delete locations not present in this upload."** When checked, any existing locations not included in the uploaded CSV are permanently deleted after the import runs.
 

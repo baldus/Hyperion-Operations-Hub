@@ -9,6 +9,7 @@ import uuid
 from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Iterable
+from urllib.parse import urlparse
 
 from flask import (
     Blueprint,
@@ -52,6 +53,131 @@ CLOSED_STATUSES = {
     PurchaseRequest.STATUS_RECEIVED,
     PurchaseRequest.STATUS_CANCELLED,
 }
+
+SHORTAGE_COLUMN_PREF_KEY = "shortages_visible_columns"
+SHORTAGE_DEFAULT_COLUMNS = (
+    "id",
+    "title",
+    "quantity",
+    "needed_by",
+    "status",
+    "supplier_name",
+    "eta_date",
+    "requested_by",
+    "updated_at",
+)
+
+
+def _purchase_request_column_keys() -> list[str]:
+    return [column.key for column in PurchaseRequest.__table__.columns]
+
+
+def _purchase_request_column_labels(column_keys: Iterable[str]) -> dict[str, str]:
+    label_overrides = {
+        "id": "ID",
+        "item_id": "Item ID",
+        "item_number": "Item Number",
+        "needed_by": "Needed By",
+        "eta_date": "ETA",
+        "purchase_order_number": "PO Number",
+        "supplier_contact": "Supplier Contact",
+        "requested_by": "Requested By",
+        "created_at": "Created",
+        "updated_at": "Updated",
+        "shipped_from_supplier_date": "Shipped From Supplier",
+    }
+    labels: dict[str, str] = {}
+    for key in column_keys:
+        labels[key] = label_overrides.get(key, key.replace("_", " ").title())
+    return labels
+
+
+def _coerce_user_settings(user: User | None) -> dict:
+    if user is None:
+        return {}
+    try:
+        settings = user.user_settings
+    except DetachedInstanceError:
+        identity = inspect(user).identity
+        if not identity:
+            return {}
+        refreshed = db.session.get(User, identity[0])
+        if refreshed is None:
+            return {}
+        settings = refreshed.user_settings
+    if isinstance(settings, dict):
+        return settings
+    return {}
+
+
+def _refresh_user_for_settings(user: User) -> User:
+    try:
+        state = inspect(user)
+    except (TypeError, ValueError):
+        return user
+    if state.detached:
+        identity = state.identity
+        if identity:
+            refreshed = db.session.get(User, identity[0])
+            if refreshed is not None:
+                return refreshed
+    return user
+
+
+def _read_shortage_visible_columns(
+    *,
+    user: User | None,
+    allowed_columns: list[str],
+    default_columns: tuple[str, ...],
+) -> list[str]:
+    settings = _coerce_user_settings(user)
+    purchasing_settings = settings.get("purchasing")
+    if not isinstance(purchasing_settings, dict):
+        return list(default_columns)
+    raw_pref = purchasing_settings.get(SHORTAGE_COLUMN_PREF_KEY)
+    if not isinstance(raw_pref, list):
+        return list(default_columns)
+    allowed_set = set(allowed_columns)
+    filtered: list[str] = []
+    for key in raw_pref:
+        if key in allowed_set and key not in filtered:
+            filtered.append(key)
+    if not filtered:
+        return list(default_columns)
+    return filtered
+
+
+def _write_shortage_visible_columns(
+    *,
+    user: User,
+    columns: list[str] | None,
+) -> None:
+    user = _refresh_user_for_settings(user)
+    settings = _coerce_user_settings(user)
+    purchasing_settings = settings.get("purchasing")
+    if not isinstance(purchasing_settings, dict):
+        purchasing_settings = {}
+        settings["purchasing"] = purchasing_settings
+    if columns is None:
+        purchasing_settings.pop(SHORTAGE_COLUMN_PREF_KEY, None)
+        if not purchasing_settings:
+            settings.pop("purchasing", None)
+    else:
+        purchasing_settings[SHORTAGE_COLUMN_PREF_KEY] = columns
+    user.user_settings = settings or None
+
+
+def _safe_return_target(raw_target: str) -> str | None:
+    if not raw_target:
+        return None
+    parsed = urlparse(raw_target)
+    if parsed.netloc:
+        return None
+    if not parsed.path.startswith("/purchasing"):
+        return None
+    if parsed.query:
+        return f"{parsed.path}?{parsed.query}"
+    return parsed.path
 
 
 def _parse_decimal(value: str) -> tuple[Decimal | None, str | None]:
@@ -396,6 +522,20 @@ def purchasing_home():
         count for status, count in status_counts.items() if status not in CLOSED_STATUSES
     )
 
+    allowed_columns = _purchase_request_column_keys()
+    default_columns = tuple(
+        key for key in SHORTAGE_DEFAULT_COLUMNS if key in set(allowed_columns)
+    )
+    column_labels = _purchase_request_column_labels(allowed_columns)
+    visible_columns = _read_shortage_visible_columns(
+        user=current_user if current_user.is_authenticated else None,
+        allowed_columns=allowed_columns,
+        default_columns=default_columns,
+    )
+    allowed_column_choices = [
+        {"key": key, "label": column_labels.get(key, key)} for key in allowed_columns
+    ]
+
     return render_template(
         "purchasing/home.html",
         requests=requests,
@@ -404,7 +544,34 @@ def purchasing_home():
         status_counts=status_counts,
         open_count=open_count,
         status_labels=dict(PurchaseRequest.STATUS_CHOICES),
+        column_labels=column_labels,
+        visible_columns=visible_columns,
+        allowed_column_choices=allowed_column_choices,
     )
+
+
+@bp.route("/shortages/columns", methods=["POST"])
+def shortage_columns():
+    if not current_user.is_authenticated:
+        abort(403)
+    allowed_columns = _purchase_request_column_keys()
+    allowed_set = set(allowed_columns)
+    action = (request.form.get("action") or "save").strip().lower()
+    return_target = _safe_return_target(request.form.get("return_to", ""))
+    if action == "reset":
+        _write_shortage_visible_columns(user=current_user, columns=None)
+        db.session.commit()
+        flash("Column preferences cleared.", "success")
+        return redirect(return_target or url_for("purchasing.purchasing_home"))
+
+    selected = [key for key in request.form.getlist("visible_columns") if key in allowed_set]
+    if not selected:
+        flash("Select at least one column to save your preference.", "warning")
+        return redirect(return_target or url_for("purchasing.purchasing_home"))
+    _write_shortage_visible_columns(user=current_user, columns=selected)
+    db.session.commit()
+    flash("Column preferences saved.", "success")
+    return redirect(return_target or url_for("purchasing.purchasing_home"))
 
 
 @bp.route("/new", methods=["GET", "POST"])

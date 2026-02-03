@@ -249,6 +249,87 @@ def test_purchase_request_receive_link_prefills_receiving(app, client):
     assert b"po_number=PO-1234" in response.data
 
 
+def _create_shortage(app, *, title: str = "Widgets") -> None:
+    with app.app_context():
+        request_record = PurchaseRequest(title=title, requested_by="Ops")
+        db.session.add(request_record)
+        db.session.commit()
+
+
+def _get_superuser() -> User:
+    return User.query.filter_by(username="superuser").one()
+
+
+def _has_header(response_data: bytes, label: str) -> bool:
+    pattern = rb"<th[^>]*>\s*%s\s*</th>" % re.escape(label.encode())
+    return re.search(pattern, response_data) is not None
+
+
+def test_shortage_columns_default_visible(app, client):
+    _create_shortage(app, title="Default Columns")
+
+    response = client.get("/purchasing/")
+
+    assert response.status_code == 200
+    assert _has_header(response.data, "ID")
+    assert _has_header(response.data, "Title")
+    assert _has_header(response.data, "Quantity")
+    assert _has_header(response.data, "Needed By")
+    assert _has_header(response.data, "Status")
+    assert _has_header(response.data, "Supplier Name")
+    assert _has_header(response.data, "ETA")
+    assert _has_header(response.data, "Requested By")
+    assert _has_header(response.data, "Updated")
+
+
+def test_shortage_columns_save_preference(app, client):
+    _create_shortage(app, title="Custom Columns")
+
+    response = client.post(
+        "/purchasing/shortages/columns",
+        data={"visible_columns": ["id", "status"], "action": "save"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Column preferences saved" in response.data
+    assert _has_header(response.data, "ID")
+    assert _has_header(response.data, "Status")
+    assert not _has_header(response.data, "Title")
+
+
+def test_shortage_columns_invalid_preference_falls_back(app, client):
+    _create_shortage(app, title="Bad Pref")
+    with app.app_context():
+        user = _get_superuser()
+        user.user_settings = {"purchasing": {"shortages_visible_columns": "not-a-list"}}
+        db.session.commit()
+
+    response = client.get("/purchasing/")
+
+    assert response.status_code == 200
+    assert _has_header(response.data, "Title")
+    assert _has_header(response.data, "Quantity")
+
+
+def test_shortage_columns_reset_preference(app, client):
+    _create_shortage(app, title="Reset Pref")
+    with app.app_context():
+        user = _get_superuser()
+        user.user_settings = {"purchasing": {"shortages_visible_columns": ["id"]}}
+        db.session.commit()
+
+    response = client.post(
+        "/purchasing/shortages/columns",
+        data={"action": "reset"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Column preferences cleared" in response.data
+    assert _has_header(response.data, "Title")
+
+
 def test_delete_purchase_request_as_superuser(app, client):
     with app.app_context():
         initial_count = PurchaseRequest.query.count()

@@ -21,6 +21,24 @@
         </select>
         <button type="submit">Apply</button>
     </form>
+    <details class="columns-panel">
+        <summary class="action-btn">Columns</summary>
+        <form method="post" action="{{ url_for('purchasing.shortage_columns') }}" class="stacked-form">
+            <input type="hidden" name="return_to" value="{{ request.full_path }}">
+            <div class="columns-panel-grid">
+                {% for column in allowed_column_choices %}
+                    <label class="checkbox-label">
+                        <input type="checkbox" name="visible_columns" value="{{ column.key }}" {% if column.key in visible_columns %}checked{% endif %}>
+                        {{ column.label }}
+                    </label>
+                {% endfor %}
+            </div>
+            <div class="columns-panel-actions">
+                <button type="submit" name="action" value="save">Save</button>
+                <button type="submit" name="action" value="reset" class="subtle-action">Reset</button>
+            </div>
+        </form>
+    </details>
 </div>
 
 <div class="status-summary-grid">
@@ -41,15 +59,9 @@
         <table class="data-table purchasing-table">
             <thead>
                 <tr>
-                    <th scope="col">ID</th>
-                    <th scope="col">Item / Description</th>
-                    <th scope="col">Quantity</th>
-                    <th scope="col">Needed By</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Supplier</th>
-                    <th scope="col">ETA</th>
-                    <th scope="col">Requested By</th>
-                    <th scope="col">Updated</th>
+                    {% for column_key in visible_columns %}
+                        <th scope="col">{{ column_labels.get(column_key, column_key) }}</th>
+                    {% endfor %}
                     {% if is_superuser() %}
                         <th scope="col">Actions</th>
                     {% endif %}
@@ -58,57 +70,68 @@
             <tbody>
                 {% for req in requests %}
                     <tr>
-                        <td data-label="ID">
-                            <a href="{{ url_for('purchasing.view_request', request_id=req.id) }}">PR-{{ "%04d" | format(req.id) }}</a>
-                        </td>
-                        <td data-label="Item / Description">
-                            <strong>{{ req.title }}</strong>
-                            {% if req.description %}
-                                <div class="secondary-text">{{ req.description }}</div>
-                            {% endif %}
-                        </td>
-                        <td data-label="Quantity">
-                            {% if req.quantity is not none %}
-                                {{ "{:.2f}".format(req.quantity) }}{% if req.unit %} {{ req.unit }}{% endif %}
-                            {% elif req.unit %}
-                                {{ req.unit }}
-                            {% else %}
-                                &mdash;
-                            {% endif %}
-                        </td>
-                        <td data-label="Needed By">
-                            {% if req.needed_by %}
-                                {{ req.needed_by.isoformat() }}
-                            {% else %}
-                                &mdash;
-                            {% endif %}
-                        </td>
-                        <td data-label="Status">
-                            <span class="status-pill status-{{ req.status }}">{{ status_labels.get(req.status, req.status) }}</span>
-                        </td>
-                        <td data-label="Supplier">
-                            {% if req.supplier_name %}
-                                {{ req.supplier_name }}
-                                {% if req.purchase_order_number %}
-                                    <div class="secondary-text">PO {{ req.purchase_order_number }}</div>
-                                {% endif %}
-                            {% else %}
-                                {% if req.purchase_order_number %}
-                                    PO {{ req.purchase_order_number }}
+                        {% for column_key in visible_columns %}
+                            <td data-label="{{ column_labels.get(column_key, column_key) }}">
+                                {% if column_key == 'id' %}
+                                    <a href="{{ url_for('purchasing.view_request', request_id=req.id) }}">PR-{{ "%04d" | format(req.id) }}</a>
+                                {% elif column_key == 'title' %}
+                                    <strong>{{ req.title }}</strong>
+                                    {% if req.description and 'description' not in visible_columns %}
+                                        <div class="secondary-text">{{ req.description }}</div>
+                                    {% endif %}
+                                {% elif column_key == 'description' %}
+                                    {% if req.description %}
+                                        {{ req.description }}
+                                    {% else %}
+                                        &mdash;
+                                    {% endif %}
+                                {% elif column_key == 'quantity' %}
+                                    {% if req.quantity is not none %}
+                                        {{ "{:.2f}".format(req.quantity) }}{% if req.unit and 'unit' not in visible_columns %} {{ req.unit }}{% endif %}
+                                    {% elif req.unit and 'unit' not in visible_columns %}
+                                        {{ req.unit }}
+                                    {% else %}
+                                        &mdash;
+                                    {% endif %}
+                                {% elif column_key == 'unit' %}
+                                    {{ req.unit or "—" }}
+                                {% elif column_key == 'needed_by' %}
+                                    {{ req.needed_by.isoformat() if req.needed_by else "—" }}
+                                {% elif column_key == 'status' %}
+                                    <span class="status-pill status-{{ req.status }}">{{ status_labels.get(req.status, req.status) }}</span>
+                                {% elif column_key == 'supplier_name' %}
+                                    {% if req.supplier_name %}
+                                        {{ req.supplier_name }}
+                                        {% if req.purchase_order_number and 'purchase_order_number' not in visible_columns %}
+                                            <div class="secondary-text">PO {{ req.purchase_order_number }}</div>
+                                        {% endif %}
+                                    {% else %}
+                                        {% if req.purchase_order_number and 'purchase_order_number' not in visible_columns %}
+                                            PO {{ req.purchase_order_number }}
+                                        {% else %}
+                                            &mdash;
+                                        {% endif %}
+                                    {% endif %}
+                                {% elif column_key == 'supplier_contact' %}
+                                    {{ req.supplier_contact or "—" }}
+                                {% elif column_key == 'eta_date' %}
+                                    {{ req.eta_date.isoformat() if req.eta_date else "—" }}
+                                {% elif column_key == 'shipped_from_supplier_date' %}
+                                    {{ req.shipped_from_supplier_date.isoformat() if req.shipped_from_supplier_date else "—" }}
+                                {% elif column_key == 'requested_by' %}
+                                    {{ req.requested_by or "—" }}
+                                {% elif column_key == 'purchase_order_number' %}
+                                    {{ req.purchase_order_number or "—" }}
+                                {% elif column_key == 'created_at' %}
+                                    {{ req.created_at.strftime('%Y-%m-%d') if req.created_at else "—" }}
+                                {% elif column_key == 'updated_at' %}
+                                    {{ req.updated_at.strftime('%Y-%m-%d') if req.updated_at else "—" }}
                                 {% else %}
-                                    &mdash;
+                                    {% set value = req|attr(column_key) %}
+                                    {{ value if value is not none and value != "" else "—" }}
                                 {% endif %}
-                            {% endif %}
-                        </td>
-                        <td data-label="ETA">
-                            {% if req.eta_date %}
-                                {{ req.eta_date.isoformat() }}
-                            {% else %}
-                                &mdash;
-                            {% endif %}
-                        </td>
-                        <td data-label="Requested By">{{ req.requested_by }}</td>
-                        <td data-label="Updated">{{ req.updated_at.strftime('%Y-%m-%d') }}</td>
+                            </td>
+                        {% endfor %}
                         {% if is_superuser() %}
                             <td data-label="Actions">
                                 <a class="link-btn danger" href="{{ url_for('purchasing.confirm_delete_request', request_id=req.id) }}">Delete</a>
