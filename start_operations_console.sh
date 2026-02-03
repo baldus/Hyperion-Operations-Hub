@@ -201,6 +201,14 @@ else
     echo "✅ Using DB_URL=$DB_URL"
 fi
 
+if [ "${RUN_MIGRATIONS:-0}" -eq 1 ]; then
+    echo "🔹 Running Alembic migrations (RUN_MIGRATIONS=1)"
+    alembic -c alembic.ini upgrade head
+else
+    echo "ℹ️ Skipping Alembic migrations (set RUN_MIGRATIONS=1 to apply migrations)"
+    echo "   To apply manually: cd invapp2 && alembic -c alembic.ini upgrade head"
+fi
+
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 WORKERS="${GUNICORN_WORKERS:-2}"

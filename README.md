@@ -365,6 +365,12 @@ cd invapp2
 export DB_URL="postgresql+psycopg2://USER:PASSWORD@localhost/invdb"
 alembic -c alembic.ini upgrade head
 ```
+- Optional startup automation:
+  ```bash
+  RUN_MIGRATIONS=1 ./start_operations_console.sh
+  ```
+  When `RUN_MIGRATIONS=1` is set, the startup script runs `alembic -c alembic.ini upgrade head`
+  before the health check. Defaults to **off** for safety.
 - Create a new migration:
   ```bash
   alembic -c alembic.ini revision --autogenerate -m "add_new_field"
@@ -864,7 +870,7 @@ Use this when adjusting which columns are shown on the Item Shortages list page 
 
 **Data storage**
 - **Model/Table:** `User` (`user`) includes `purchasing_shortage_columns` (nullable JSON list of column keys). See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
-- **Migration:** `invapp2/migrations/versions/20251015_add_user_purchasing_shortage_columns.py` adds/removes the column.
+- **Migration:** `invapp2/migrations/versions/20251016_add_user_purchasing_shortage_columns.py` adds/removes the column.
 
 **Routes**
 - **GET** `/purchasing/` renders the Item Shortages list using the saved column preference (or defaults if none). See [`invapp2/invapp/routes/purchasing.py`](invapp2/invapp/routes/purchasing.py).

@@ -26,7 +26,7 @@ from flask import (
 from werkzeug.routing import BuildError
 from werkzeug.utils import secure_filename
 from sqlalchemy import func, inspect
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm.exc import DetachedInstanceError
 
 from invapp.auth import blueprint_page_guard
@@ -353,7 +353,13 @@ def _current_user_purchase_columns() -> object | None:
         user_id = None
     if user_id is None:
         return None
-    user = db.session.get(User, user_id)
+    try:
+        user = db.session.get(User, user_id)
+    except ProgrammingError:
+        current_app.logger.error(
+            "Database schema is behind. Run `cd invapp2 && alembic -c alembic.ini upgrade head`."
+        )
+        return None
     return user.purchasing_shortage_columns if user else None
 
 
@@ -535,7 +541,13 @@ def save_shortage_columns():
         user_id = int(user_id) if user_id is not None else None
     except (TypeError, ValueError):
         user_id = None
-    user = db.session.get(User, user_id) if user_id is not None else None
+    try:
+        user = db.session.get(User, user_id) if user_id is not None else None
+    except ProgrammingError:
+        current_app.logger.error(
+            "Database schema is behind. Run `cd invapp2 && alembic -c alembic.ini upgrade head`."
+        )
+        abort(500)
 
     if user is None:
         abort(403)

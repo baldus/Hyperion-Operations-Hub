@@ -8,7 +8,13 @@ import click
 
 from flask import Flask, current_app, jsonify, render_template, request, session, url_for
 from sqlalchemy import func, inspect, text
-from sqlalchemy.exc import IntegrityError, NoSuchTableError, OperationalError, SQLAlchemyError
+from sqlalchemy.exc import (
+    IntegrityError,
+    NoSuchTableError,
+    OperationalError,
+    ProgrammingError,
+    SQLAlchemyError,
+)
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm.exc import DetachedInstanceError
 
@@ -818,6 +824,11 @@ def create_app(config_override=None):
             return models.User.query.get(int(user_id))
         except (TypeError, ValueError):
             return None
+        except ProgrammingError:
+            current_app.logger.error(
+                "Database schema is behind. Run `cd invapp2 && alembic -c alembic.ini upgrade head`."
+            )
+            return None
         except OperationalError:
             current_app.logger.warning(
                 "Skipped user lookup during login_manager load because the database is unavailable."
@@ -894,10 +905,16 @@ def create_app(config_override=None):
                     )
             except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
                 database_available = False
-                database_error_message = (
-                    "The database schema could not be initialized. Review the logs "
-                    "for details and re-run the startup script once resolved."
-                )
+                if isinstance(exc, ProgrammingError):
+                    database_error_message = (
+                        "Database schema is behind. Run `cd invapp2 && alembic -c "
+                        "alembic.ini upgrade head` and restart the console."
+                    )
+                else:
+                    database_error_message = (
+                        "The database schema could not be initialized. Review the logs "
+                        "for details and re-run the startup script once resolved."
+                    )
                 current_app.logger.exception("Database initialization error")
                 db.session.remove()
 
