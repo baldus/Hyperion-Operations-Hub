@@ -1843,6 +1843,14 @@ body.light .table-enhancer__columns {
     gap: 6px;
 }
 
+.purchasing-detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
 .purchasing-detail-grid {
     display: grid;
     gap: 18px;

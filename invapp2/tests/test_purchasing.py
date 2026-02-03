@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -61,7 +62,7 @@ def test_create_purchase_request_flow(app, client):
     assert b"Item shortage logged" in response.data
 
     with app.app_context():
-        stored = PurchaseRequest.query.one()
+        stored = PurchaseRequest.query.filter_by(title="Aluminum Plate").one()
         assert stored.title == "Aluminum Plate"
         assert stored.status == PurchaseRequest.STATUS_NEW
         assert stored.requested_by == "Production"
@@ -143,6 +144,91 @@ def test_update_requires_edit_role(app):
         assert refreshed.notes == "Confirmed delivery"
 
 
+def test_update_shipped_from_supplier_date_persists(app, client):
+    with app.app_context():
+        request_record = PurchaseRequest(title="Tape", requested_by="Ops")
+        db.session.add(request_record)
+        db.session.commit()
+        request_id = request_record.id
+
+    response = client.post(
+        f"/purchasing/{request_id}/update",
+        data={
+            "status": PurchaseRequest.STATUS_NEW,
+            "title": "Tape",
+            "requested_by": "Ops",
+            "shipped_from_supplier_date": "2024-07-15",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Item shortage updated" in response.data
+
+    with app.app_context():
+        refreshed = db.session.get(PurchaseRequest, request_id)
+        assert refreshed.shipped_from_supplier_date.isoformat() == "2024-07-15"
+
+
+def test_update_shipped_from_supplier_date_blank_clears(app, client):
+    with app.app_context():
+        request_record = PurchaseRequest(
+            title="Film",
+            requested_by="Ops",
+            shipped_from_supplier_date=date(2024, 7, 10),
+        )
+        db.session.add(request_record)
+        db.session.commit()
+        request_id = request_record.id
+
+    response = client.post(
+        f"/purchasing/{request_id}/update",
+        data={
+            "status": PurchaseRequest.STATUS_NEW,
+            "title": "Film",
+            "requested_by": "Ops",
+            "shipped_from_supplier_date": "",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+
+    with app.app_context():
+        refreshed = db.session.get(PurchaseRequest, request_id)
+        assert refreshed.shipped_from_supplier_date is None
+
+
+def test_update_shipped_from_supplier_date_invalid_rejected(app, client):
+    with app.app_context():
+        request_record = PurchaseRequest(
+            title="Foam",
+            requested_by="Ops",
+            shipped_from_supplier_date=date(2024, 7, 1),
+        )
+        db.session.add(request_record)
+        db.session.commit()
+        request_id = request_record.id
+
+    response = client.post(
+        f"/purchasing/{request_id}/update",
+        data={
+            "status": PurchaseRequest.STATUS_NEW,
+            "title": "Foam",
+            "requested_by": "Ops",
+            "shipped_from_supplier_date": "2024-13-40",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Enter the shipped from supplier date in YYYY-MM-DD format." in response.data
+
+    with app.app_context():
+        refreshed = db.session.get(PurchaseRequest, request_id)
+        assert refreshed.shipped_from_supplier_date == date(2024, 7, 1)
+
+
 def test_purchase_request_receive_link_prefills_receiving(app, client):
     with app.app_context():
         request_record = PurchaseRequest(
@@ -165,6 +251,7 @@ def test_purchase_request_receive_link_prefills_receiving(app, client):
 
 def test_delete_purchase_request_as_superuser(app, client):
     with app.app_context():
+        initial_count = PurchaseRequest.query.count()
         request_record = PurchaseRequest(
             title="Delete Me",
             item_number="DEL-100",
@@ -190,7 +277,7 @@ def test_delete_purchase_request_as_superuser(app, client):
     assert delete_response.status_code == 302
 
     with app.app_context():
-        assert PurchaseRequest.query.count() == 0
+        assert PurchaseRequest.query.count() == initial_count
         audit = PurchaseRequestDeleteAudit.query.one()
         assert audit.purchase_request_id == request_id
         assert audit.item_number == "DEL-100"
