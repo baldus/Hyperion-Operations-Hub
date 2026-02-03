@@ -1,5 +1,30 @@
 {% extends "base.html" %}
 
+{% macro format_cell(pr, column_key, column_type_map, status_labels) %}
+    {% set value = pr|attr(column_key) %}
+    {% if column_key == 'id' %}
+        <a href="{{ url_for('purchasing.view_request', request_id=pr.id) }}">PR-{{ "%04d" | format(value) }}</a>
+    {% elif column_key == 'status' %}
+        {% if value %}
+            <span class="status-pill status-{{ value }}">{{ status_labels.get(value, value) }}</span>
+        {% else %}
+            &mdash;
+        {% endif %}
+    {% elif value is none or value == "" %}
+        &mdash;
+    {% elif column_type_map.get(column_key) == 'date' %}
+        {{ value.isoformat() }}
+    {% elif column_type_map.get(column_key) == 'datetime' %}
+        {{ value.strftime('%Y-%m-%d') }}
+    {% elif column_type_map.get(column_key) == 'bool' %}
+        {{ "Yes" if value else "No" }}
+    {% elif value is string and value|length > 60 %}
+        <span title="{{ value }}">{{ value[:60] }}&hellip;</span>
+    {% else %}
+        {{ value }}
+    {% endif %}
+{% endmacro %}
+
 {% block content %}
 <h2>Item Shortages</h2>
 
@@ -29,7 +54,7 @@
             <form method="post" action="{{ url_for('purchasing.shortage_columns') }}" class="stacked-form">
                 <input type="hidden" name="return_to" value="{{ request.full_path }}">
                 <div class="dropdown-menu-scroll">
-                    {% for column in allowed_column_choices %}
+                    {% for column in available_columns %}
                         <label class="checkbox-label">
                             <input type="checkbox" name="columns" value="{{ column.key }}" {% if column.key in visible_columns %}checked{% endif %}>
                             {{ column.label }}
@@ -75,29 +100,8 @@
                 {% for req in requests %}
                     <tr>
                         {% for column_key in visible_columns %}
-                            {% set value = req|attr(column_key) %}
                             <td data-label="{{ column_labels.get(column_key, column_key) }}">
-                                {% if column_key == 'id' %}
-                                    <a href="{{ url_for('purchasing.view_request', request_id=req.id) }}">PR-{{ "%04d" | format(value) }}</a>
-                                {% elif column_key == 'status' %}
-                                    {% if value %}
-                                        <span class="status-pill status-{{ value }}">{{ status_labels.get(value, value) }}</span>
-                                    {% else %}
-                                        &mdash;
-                                    {% endif %}
-                                {% elif value is none or value == "" %}
-                                    &mdash;
-                                {% elif column_type_map.get(column_key) == 'date' %}
-                                    {{ value.isoformat() }}
-                                {% elif column_type_map.get(column_key) == 'datetime' %}
-                                    {{ value.strftime('%Y-%m-%d') }}
-                                {% elif column_type_map.get(column_key) == 'bool' %}
-                                    {{ "Yes" if value else "No" }}
-                                {% elif value is string and value|length > 60 %}
-                                    <span title="{{ value }}">{{ value[:60] }}&hellip;</span>
-                                {% else %}
-                                    {{ value }}
-                                {% endif %}
+                                {{ format_cell(req, column_key, column_type_map, status_labels) }}
                             </td>
                         {% endfor %}
                         {% if is_superuser() %}

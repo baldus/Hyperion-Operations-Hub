@@ -302,6 +302,21 @@ def test_shortage_columns_save_preference(app, client):
     assert not _has_header(response.data, "Title")
 
 
+def test_shortage_columns_table_updates_with_preference(app, client):
+    _create_shortage(app, title="Visible Column Update")
+
+    response = client.post(
+        "/purchasing/shortages/columns",
+        data={"columns": ["item_number", "requested_by"], "action": "save"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert _has_header(response.data, "Item Number")
+    assert _has_header(response.data, "Requested By")
+    assert not _has_header(response.data, "Title")
+
+
 def test_shortage_columns_save_all_columns(app, client):
     _create_shortage(app, title="All Columns")
     all_columns = [column.key for column in PurchaseRequest.__table__.columns]

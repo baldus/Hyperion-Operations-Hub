@@ -535,7 +535,7 @@ def purchasing_home():
         allowed_columns=allowed_columns,
         default_columns=default_columns,
     )
-    allowed_column_choices = [
+    available_columns = [
         {"key": key, "label": column_labels.get(key, key)} for key in allowed_columns
     ]
 
@@ -550,7 +550,7 @@ def purchasing_home():
         column_labels=column_labels,
         column_type_map=column_type_map,
         visible_columns=visible_columns,
-        allowed_column_choices=allowed_column_choices,
+        available_columns=available_columns,
     )
 
 
