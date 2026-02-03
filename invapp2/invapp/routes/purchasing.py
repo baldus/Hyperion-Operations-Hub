@@ -25,7 +25,7 @@ from flask import (
 )
 from werkzeug.routing import BuildError
 from werkzeug.utils import secure_filename
-from sqlalchemy import func, inspect
+from sqlalchemy import Boolean, Date, DateTime, func, inspect
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm.exc import DetachedInstanceError
 
@@ -72,24 +72,28 @@ def _purchase_request_column_keys() -> list[str]:
     return [column.key for column in PurchaseRequest.__table__.columns]
 
 
-def _purchase_request_column_labels(column_keys: Iterable[str]) -> dict[str, str]:
-    label_overrides = {
-        "id": "ID",
-        "item_id": "Item ID",
-        "item_number": "Item Number",
-        "needed_by": "Needed By",
-        "eta_date": "ETA",
-        "purchase_order_number": "PO Number",
-        "supplier_contact": "Supplier Contact",
-        "requested_by": "Requested By",
-        "created_at": "Created",
-        "updated_at": "Updated",
-        "shipped_from_supplier_date": "Shipped From Supplier",
-    }
+def _purchase_request_column_label(key: str) -> str:
+    return key.replace("_", " ").title()
+
+
+def _purchase_request_column_meta() -> tuple[list[str], dict[str, str], dict[str, str]]:
+    keys: list[str] = []
     labels: dict[str, str] = {}
-    for key in column_keys:
-        labels[key] = label_overrides.get(key, key.replace("_", " ").title())
-    return labels
+    type_map: dict[str, str] = {}
+    for column in PurchaseRequest.__table__.columns:
+        key = column.key
+        keys.append(key)
+        labels[key] = _purchase_request_column_label(key)
+        column_type = column.type
+        if isinstance(column_type, Date):
+            type_map[key] = "date"
+        elif isinstance(column_type, DateTime):
+            type_map[key] = "datetime"
+        elif isinstance(column_type, Boolean):
+            type_map[key] = "bool"
+        else:
+            type_map[key] = "text"
+    return keys, labels, type_map
 
 
 def _coerce_user_settings(user: User | None) -> dict:
@@ -522,11 +526,10 @@ def purchasing_home():
         count for status, count in status_counts.items() if status not in CLOSED_STATUSES
     )
 
-    allowed_columns = _purchase_request_column_keys()
+    allowed_columns, column_labels, column_type_map = _purchase_request_column_meta()
     default_columns = tuple(
         key for key in SHORTAGE_DEFAULT_COLUMNS if key in set(allowed_columns)
     )
-    column_labels = _purchase_request_column_labels(allowed_columns)
     visible_columns = _read_shortage_visible_columns(
         user=current_user if current_user.is_authenticated else None,
         allowed_columns=allowed_columns,
@@ -545,6 +548,7 @@ def purchasing_home():
         open_count=open_count,
         status_labels=dict(PurchaseRequest.STATUS_CHOICES),
         column_labels=column_labels,
+        column_type_map=column_type_map,
         visible_columns=visible_columns,
         allowed_column_choices=allowed_column_choices,
     )
@@ -564,11 +568,15 @@ def shortage_columns():
         flash("Column preferences cleared.", "success")
         return redirect(return_target or url_for("purchasing.purchasing_home"))
 
-    selected = [key for key in request.form.getlist("visible_columns") if key in allowed_set]
+    selected = [key for key in request.form.getlist("columns") if key in allowed_set]
     if not selected:
-        flash("Select at least one column to save your preference.", "warning")
+        _write_shortage_visible_columns(user=current_user, columns=None)
+        db.session.commit()
+        flash("Column preferences reset to defaults.", "success")
         return redirect(return_target or url_for("purchasing.purchasing_home"))
-    _write_shortage_visible_columns(user=current_user, columns=selected)
+    selected_set = set(selected)
+    ordered_selected = [key for key in allowed_columns if key in selected_set]
+    _write_shortage_visible_columns(user=current_user, columns=ordered_selected)
     db.session.commit()
     flash("Column preferences saved.", "success")
     return redirect(return_target or url_for("purchasing.purchasing_home"))

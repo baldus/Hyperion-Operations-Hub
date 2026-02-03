@@ -870,6 +870,7 @@ The Item Shortages list (`/purchasing/`) lets each user choose which `PurchaseRe
 
 **Default behavior + safety**
 - If no preference is saved, the list view falls back to the default column set shown before this feature.
+- Submitting the column form with nothing selected resets the preference to defaults.
 - If stored preferences are malformed or include unknown columns, they are ignored and defaults are used instead.
 - The view must never 500 because of bad stored preferences. See [`invapp2/invapp/routes/purchasing.py`](invapp2/invapp/routes/purchasing.py).
 

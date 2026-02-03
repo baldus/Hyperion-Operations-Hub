@@ -265,21 +265,25 @@ def _has_header(response_data: bytes, label: str) -> bool:
     return re.search(pattern, response_data) is not None
 
 
+def _label_for(key: str) -> str:
+    return key.replace("_", " ").title()
+
+
 def test_shortage_columns_default_visible(app, client):
     _create_shortage(app, title="Default Columns")
 
     response = client.get("/purchasing/")
 
     assert response.status_code == 200
-    assert _has_header(response.data, "ID")
+    assert _has_header(response.data, "Id")
     assert _has_header(response.data, "Title")
     assert _has_header(response.data, "Quantity")
     assert _has_header(response.data, "Needed By")
     assert _has_header(response.data, "Status")
     assert _has_header(response.data, "Supplier Name")
-    assert _has_header(response.data, "ETA")
+    assert _has_header(response.data, "Eta Date")
     assert _has_header(response.data, "Requested By")
-    assert _has_header(response.data, "Updated")
+    assert _has_header(response.data, "Updated At")
 
 
 def test_shortage_columns_save_preference(app, client):
@@ -287,15 +291,31 @@ def test_shortage_columns_save_preference(app, client):
 
     response = client.post(
         "/purchasing/shortages/columns",
-        data={"visible_columns": ["id", "status"], "action": "save"},
+        data={"columns": ["id", "status"], "action": "save"},
         follow_redirects=True,
     )
 
     assert response.status_code == 200
     assert b"Column preferences saved" in response.data
-    assert _has_header(response.data, "ID")
+    assert _has_header(response.data, "Id")
     assert _has_header(response.data, "Status")
     assert not _has_header(response.data, "Title")
+
+
+def test_shortage_columns_save_all_columns(app, client):
+    _create_shortage(app, title="All Columns")
+    all_columns = [column.key for column in PurchaseRequest.__table__.columns]
+
+    response = client.post(
+        "/purchasing/shortages/columns",
+        data={"columns": all_columns, "action": "save"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Column preferences saved" in response.data
+    for column_key in all_columns:
+        assert _has_header(response.data, _label_for(column_key))
 
 
 def test_shortage_columns_invalid_preference_falls_back(app, client):
@@ -310,6 +330,23 @@ def test_shortage_columns_invalid_preference_falls_back(app, client):
     assert response.status_code == 200
     assert _has_header(response.data, "Title")
     assert _has_header(response.data, "Quantity")
+
+
+def test_shortage_columns_unknown_keys_ignored(app, client):
+    _create_shortage(app, title="Unknown Keys")
+    with app.app_context():
+        user = _get_superuser()
+        user.user_settings = {
+            "purchasing": {"shortages_visible_columns": ["id", "bogus_key", "title"]}
+        }
+        db.session.commit()
+
+    response = client.get("/purchasing/")
+
+    assert response.status_code == 200
+    assert _has_header(response.data, "Id")
+    assert _has_header(response.data, "Title")
+    assert not _has_header(response.data, "Bogus Key")
 
 
 def test_shortage_columns_reset_preference(app, client):

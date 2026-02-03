@@ -21,24 +21,28 @@
         </select>
         <button type="submit">Apply</button>
     </form>
-    <details class="columns-panel">
-        <summary class="action-btn">Columns</summary>
-        <form method="post" action="{{ url_for('purchasing.shortage_columns') }}" class="stacked-form">
-            <input type="hidden" name="return_to" value="{{ request.full_path }}">
-            <div class="columns-panel-grid">
-                {% for column in allowed_column_choices %}
-                    <label class="checkbox-label">
-                        <input type="checkbox" name="visible_columns" value="{{ column.key }}" {% if column.key in visible_columns %}checked{% endif %}>
-                        {{ column.label }}
-                    </label>
-                {% endfor %}
-            </div>
-            <div class="columns-panel-actions">
-                <button type="submit" name="action" value="save">Save</button>
-                <button type="submit" name="action" value="reset" class="subtle-action">Reset</button>
-            </div>
-        </form>
-    </details>
+    <div class="columns-dropdown" data-dropdown>
+        <button type="button" class="action-btn dropdown-toggle" data-dropdown-toggle>
+            Columns &#9662;
+        </button>
+        <div class="dropdown-menu" data-dropdown-menu>
+            <form method="post" action="{{ url_for('purchasing.shortage_columns') }}" class="stacked-form">
+                <input type="hidden" name="return_to" value="{{ request.full_path }}">
+                <div class="dropdown-menu-scroll">
+                    {% for column in allowed_column_choices %}
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="columns" value="{{ column.key }}" {% if column.key in visible_columns %}checked{% endif %}>
+                            {{ column.label }}
+                        </label>
+                    {% endfor %}
+                </div>
+                <div class="columns-panel-actions">
+                    <button type="submit" name="action" value="save">Save</button>
+                    <button type="submit" name="action" value="reset" class="subtle-action">Reset</button>
+                </div>
+            </form>
+        </div>
+    </div>
 </div>
 
 <div class="status-summary-grid">
@@ -71,64 +75,28 @@
                 {% for req in requests %}
                     <tr>
                         {% for column_key in visible_columns %}
+                            {% set value = req|attr(column_key) %}
                             <td data-label="{{ column_labels.get(column_key, column_key) }}">
                                 {% if column_key == 'id' %}
-                                    <a href="{{ url_for('purchasing.view_request', request_id=req.id) }}">PR-{{ "%04d" | format(req.id) }}</a>
-                                {% elif column_key == 'title' %}
-                                    <strong>{{ req.title }}</strong>
-                                    {% if req.description and 'description' not in visible_columns %}
-                                        <div class="secondary-text">{{ req.description }}</div>
-                                    {% endif %}
-                                {% elif column_key == 'description' %}
-                                    {% if req.description %}
-                                        {{ req.description }}
-                                    {% else %}
-                                        &mdash;
-                                    {% endif %}
-                                {% elif column_key == 'quantity' %}
-                                    {% if req.quantity is not none %}
-                                        {{ "{:.2f}".format(req.quantity) }}{% if req.unit and 'unit' not in visible_columns %} {{ req.unit }}{% endif %}
-                                    {% elif req.unit and 'unit' not in visible_columns %}
-                                        {{ req.unit }}
-                                    {% else %}
-                                        &mdash;
-                                    {% endif %}
-                                {% elif column_key == 'unit' %}
-                                    {{ req.unit or "—" }}
-                                {% elif column_key == 'needed_by' %}
-                                    {{ req.needed_by.isoformat() if req.needed_by else "—" }}
+                                    <a href="{{ url_for('purchasing.view_request', request_id=req.id) }}">PR-{{ "%04d" | format(value) }}</a>
                                 {% elif column_key == 'status' %}
-                                    <span class="status-pill status-{{ req.status }}">{{ status_labels.get(req.status, req.status) }}</span>
-                                {% elif column_key == 'supplier_name' %}
-                                    {% if req.supplier_name %}
-                                        {{ req.supplier_name }}
-                                        {% if req.purchase_order_number and 'purchase_order_number' not in visible_columns %}
-                                            <div class="secondary-text">PO {{ req.purchase_order_number }}</div>
-                                        {% endif %}
+                                    {% if value %}
+                                        <span class="status-pill status-{{ value }}">{{ status_labels.get(value, value) }}</span>
                                     {% else %}
-                                        {% if req.purchase_order_number and 'purchase_order_number' not in visible_columns %}
-                                            PO {{ req.purchase_order_number }}
-                                        {% else %}
-                                            &mdash;
-                                        {% endif %}
+                                        &mdash;
                                     {% endif %}
-                                {% elif column_key == 'supplier_contact' %}
-                                    {{ req.supplier_contact or "—" }}
-                                {% elif column_key == 'eta_date' %}
-                                    {{ req.eta_date.isoformat() if req.eta_date else "—" }}
-                                {% elif column_key == 'shipped_from_supplier_date' %}
-                                    {{ req.shipped_from_supplier_date.isoformat() if req.shipped_from_supplier_date else "—" }}
-                                {% elif column_key == 'requested_by' %}
-                                    {{ req.requested_by or "—" }}
-                                {% elif column_key == 'purchase_order_number' %}
-                                    {{ req.purchase_order_number or "—" }}
-                                {% elif column_key == 'created_at' %}
-                                    {{ req.created_at.strftime('%Y-%m-%d') if req.created_at else "—" }}
-                                {% elif column_key == 'updated_at' %}
-                                    {{ req.updated_at.strftime('%Y-%m-%d') if req.updated_at else "—" }}
+                                {% elif value is none or value == "" %}
+                                    &mdash;
+                                {% elif column_type_map.get(column_key) == 'date' %}
+                                    {{ value.isoformat() }}
+                                {% elif column_type_map.get(column_key) == 'datetime' %}
+                                    {{ value.strftime('%Y-%m-%d') }}
+                                {% elif column_type_map.get(column_key) == 'bool' %}
+                                    {{ "Yes" if value else "No" }}
+                                {% elif value is string and value|length > 60 %}
+                                    <span title="{{ value }}">{{ value[:60] }}&hellip;</span>
                                 {% else %}
-                                    {% set value = req|attr(column_key) %}
-                                    {{ value if value is not none and value != "" else "—" }}
+                                    {{ value }}
                                 {% endif %}
                             </td>
                         {% endfor %}
@@ -150,4 +118,34 @@
         {% endif %}
     </div>
 {% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    (() => {
+        const dropdown = document.querySelector('[data-dropdown]');
+        if (!dropdown) {
+            return;
+        }
+        const toggle = dropdown.querySelector('[data-dropdown-toggle]');
+        const menu = dropdown.querySelector('[data-dropdown-menu]');
+        if (!toggle || !menu) {
+            return;
+        }
+        const closeMenu = () => dropdown.classList.remove('is-open');
+        toggle.addEventListener('click', () => {
+            dropdown.classList.toggle('is-open');
+        });
+        document.addEventListener('click', (event) => {
+            if (!dropdown.contains(event.target)) {
+                closeMenu();
+            }
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                closeMenu();
+            }
+        });
+    })();
+</script>
 {% endblock %}

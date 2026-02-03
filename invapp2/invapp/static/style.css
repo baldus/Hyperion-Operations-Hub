@@ -1653,37 +1653,47 @@ body.light .status-filter-form select {
     border-color: rgba(0, 0, 0, 0.18);
 }
 
-.columns-panel {
+.columns-dropdown {
     position: relative;
 }
 
-.columns-panel > summary {
-    cursor: pointer;
-    list-style: none;
+.dropdown-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
 }
 
-.columns-panel > summary::-webkit-details-marker {
+.dropdown-menu {
     display: none;
-}
-
-.columns-panel form {
-    margin-top: 10px;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    min-width: 260px;
+    z-index: 10;
     padding: 12px 14px;
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.18);
-    background: rgba(255, 255, 255, 0.04);
-    min-width: 280px;
+    background: rgba(20, 20, 20, 0.98);
+    box-shadow: 0 16px 32px rgba(0, 0, 0, 0.35);
 }
 
-body.light .columns-panel form {
+.columns-dropdown.is-open .dropdown-menu {
+    display: block;
+}
+
+body.light .dropdown-menu {
     border-color: rgba(0, 0, 0, 0.12);
-    background: rgba(0, 0, 0, 0.03);
+    background: #f7f7f7;
+    box-shadow: 0 16px 32px rgba(0, 0, 0, 0.12);
 }
 
-.columns-panel-grid {
+.dropdown-menu-scroll {
+    max-height: 260px;
+    overflow-y: auto;
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 8px 16px;
+    padding-right: 6px;
 }
 
 .checkbox-label {
