@@ -316,3 +316,96 @@ def test_delete_requires_superuser(app):
 def test_delete_missing_request_returns_404(app, client):
     response = client.post("/purchasing/999/delete")
     assert response.status_code == 404
+
+
+def test_purchasing_shortage_columns_defaults(app, client):
+    with app.app_context():
+        request_record = PurchaseRequest(title="Bolts", requested_by="Ops")
+        db.session.add(request_record)
+        db.session.commit()
+
+    response = client.get("/purchasing/")
+
+    assert response.status_code == 200
+    assert b"<th scope=\"col\">Item / Description</th>" in response.data
+    assert b"<th scope=\"col\">Quantity</th>" in response.data
+    assert b"<th scope=\"col\">Status</th>" in response.data
+
+
+def test_purchasing_shortage_columns_save_and_reset(app, client):
+    with app.app_context():
+        request_record = PurchaseRequest(title="Widgets", requested_by="Ops")
+        db.session.add(request_record)
+        db.session.commit()
+
+    client.post(
+        "/auth/login",
+        data={"username": "superuser", "password": "joshbaldus"},
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/purchasing/shortages/columns",
+        data={"columns": ["id", "status"], "action": "save"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"<th scope=\"col\">ID</th>" in response.data
+    assert b"<th scope=\"col\">Status</th>" in response.data
+    assert b"<th scope=\"col\">Item / Description</th>" not in response.data
+
+    with app.app_context():
+        user = User.query.filter_by(username="superuser").one()
+        assert user.purchasing_shortage_columns == ["id", "status"]
+
+    response = client.post(
+        "/purchasing/shortages/columns",
+        data={"action": "reset"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        user = User.query.filter_by(username="superuser").one()
+        assert user.purchasing_shortage_columns is None
+
+
+def test_purchasing_shortage_columns_invalid_keys_ignored(app, client):
+    with app.app_context():
+        request_record = PurchaseRequest(title="Gaskets", requested_by="Ops")
+        db.session.add(request_record)
+        db.session.commit()
+
+    client.post(
+        "/auth/login",
+        data={"username": "superuser", "password": "joshbaldus"},
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/purchasing/shortages/columns",
+        data={"columns": ["id", "not_a_column"], "action": "save"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"<th scope=\"col\">ID</th>" in response.data
+
+    with app.app_context():
+        user = User.query.filter_by(username="superuser").one()
+        assert user.purchasing_shortage_columns == ["id"]
+
+
+def test_purchasing_shortage_columns_invalid_pref_falls_back(app, client):
+    with app.app_context():
+        request_record = PurchaseRequest(title="Brackets", requested_by="Ops")
+        db.session.add(request_record)
+        user = User.query.filter_by(username="superuser").one()
+        user.purchasing_shortage_columns = "not-json"
+        db.session.commit()
+
+    response = client.get("/purchasing/")
+
+    assert response.status_code == 200
+    assert b"<th scope=\"col\">Item / Description</th>" in response.data

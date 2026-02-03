@@ -859,6 +859,25 @@ Use this when extending the Item Shortage detail page (`/purchasing/<id>`) with 
 **UI layout note**
 - The top action buttons on the shortage detail page use `.purchasing-detail-actions` for a wrapping flex layout (`display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px`) in [`invapp2/invapp/static/style.css`](invapp2/invapp/static/style.css). Reuse this class for other detail headers to prevent button overlap.
 
+### Purchasing Item Shortages: Per-User Column Preferences
+Use this when adjusting which columns are shown on the Item Shortages list page (`/purchasing/`).
+
+**Data storage**
+- **Model/Table:** `User` (`user`) includes `purchasing_shortage_columns` (nullable JSON list of column keys). See [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
+- **Migration:** `invapp2/migrations/versions/20251015_add_user_purchasing_shortage_columns.py` adds/removes the column.
+
+**Routes**
+- **GET** `/purchasing/` renders the Item Shortages list using the saved column preference (or defaults if none). See [`invapp2/invapp/routes/purchasing.py`](invapp2/invapp/routes/purchasing.py).
+- **POST** `/purchasing/shortages/columns` saves or resets the preference for the current user. See [`invapp2/invapp/routes/purchasing.py`](invapp2/invapp/routes/purchasing.py).
+
+**UI behavior**
+- The list page includes a **Columns** dropdown with checkboxes for every `PurchaseRequest` column (sourced from SQLAlchemy model introspection).
+- **Defaults:** If a user has no saved preference, the page shows the original columns (ID, Item/Description, Quantity, Needed By, Status, Supplier, ETA, Requested By, Updated).
+- **Reset** clears the preference and returns to defaults.
+
+**Invariants**
+- Bad or stale preference values are ignored (the page always falls back to defaults and must never 500 due to invalid JSON or unknown columns).
+
 ### Bulk location import (optional deletion)
 The **Bulk Import Locations** workflow includes an optional checkbox labeled **"Delete locations not present in this upload."** When checked, any existing locations not included in the uploaded CSV are permanently deleted after the import runs.
 

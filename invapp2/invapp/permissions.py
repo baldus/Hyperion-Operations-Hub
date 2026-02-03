@@ -275,6 +275,9 @@ def ensure_page_access(
             return None
         abort(403)
 
+    if request.endpoint == "purchasing.save_shortage_columns" or request.path == "/purchasing/shortages/columns":
+        return None
+
     if permissions.edit_roles and current_user.has_any_role(permissions.edit_roles):
         return None
 

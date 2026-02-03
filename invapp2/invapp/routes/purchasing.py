@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+import json
 import os
 import secrets
 import uuid
@@ -30,7 +31,7 @@ from sqlalchemy.orm.exc import DetachedInstanceError
 
 from invapp.auth import blueprint_page_guard
 from invapp.extensions import login_manager
-from invapp.login import current_user
+from invapp.login import current_user, login_required
 from invapp.models import (
     Item,
     PurchaseRequest,
@@ -52,6 +53,95 @@ CLOSED_STATUSES = {
     PurchaseRequest.STATUS_RECEIVED,
     PurchaseRequest.STATUS_CANCELLED,
 }
+
+DEFAULT_VISIBLE_COLUMNS = (
+    "id",
+    "title",
+    "quantity",
+    "needed_by",
+    "status",
+    "supplier_name",
+    "eta_date",
+    "requested_by",
+    "updated_at",
+)
+
+COLUMN_LABEL_OVERRIDES = {
+    "id": "ID",
+    "title": "Item / Description",
+    "item_id": "Item ID",
+    "item_number": "Item Number",
+    "needed_by": "Needed By",
+    "status": "Status",
+    "supplier_name": "Supplier",
+    "supplier_contact": "Supplier Contact",
+    "eta_date": "ETA",
+    "shipped_from_supplier_date": "Shipped From Supplier",
+    "purchase_order_number": "PO Number",
+    "requested_by": "Requested By",
+    "created_at": "Created",
+    "updated_at": "Updated",
+}
+
+
+def _purchase_request_column_label(column_key: str) -> str:
+    if column_key in COLUMN_LABEL_OVERRIDES:
+        return COLUMN_LABEL_OVERRIDES[column_key]
+    return column_key.replace("_", " ").title()
+
+
+def _purchase_request_column_defs() -> list[dict[str, str]]:
+    return [
+        {"key": column.name, "label": _purchase_request_column_label(column.name)}
+        for column in PurchaseRequest.__table__.columns
+    ]
+
+
+def _coerce_user_column_pref(
+    raw_value: object,
+    allowed_keys: set[str],
+    default_keys: Iterable[str],
+) -> list[str]:
+    if not raw_value:
+        return list(default_keys)
+
+    parsed: object
+    if isinstance(raw_value, (list, tuple)):
+        parsed = list(raw_value)
+    elif isinstance(raw_value, str):
+        try:
+            parsed = json.loads(raw_value)
+        except json.JSONDecodeError:
+            return list(default_keys)
+    else:
+        return list(default_keys)
+
+    if not isinstance(parsed, list):
+        return list(default_keys)
+
+    filtered: list[str] = []
+    for item in parsed:
+        if not isinstance(item, str):
+            continue
+        key = item.strip()
+        if key and key in allowed_keys and key not in filtered:
+            filtered.append(key)
+
+    return filtered or list(default_keys)
+
+
+def _format_purchase_request_value(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return _format_decimal_for_number_field(value)
+    return str(value)
 
 
 def _parse_decimal(value: str) -> tuple[Decimal | None, str | None]:
@@ -255,6 +345,18 @@ def _current_user_id() -> int | None:
         return None
 
 
+def _current_user_purchase_columns() -> object | None:
+    user_id = session.get("_user_id")
+    try:
+        user_id = int(user_id) if user_id is not None else None
+    except (TypeError, ValueError):
+        user_id = None
+    if user_id is None:
+        return None
+    user = db.session.get(User, user_id)
+    return user.purchasing_shortage_columns if user else None
+
+
 def _allowed_purchase_attachment(filename: str) -> bool:
     if not filename or "." not in filename:
         return False
@@ -396,6 +498,14 @@ def purchasing_home():
         count for status, count in status_counts.items() if status not in CLOSED_STATUSES
     )
 
+    column_defs = _purchase_request_column_defs()
+    allowed_keys = {column["key"] for column in column_defs}
+    default_visible = [key for key in DEFAULT_VISIBLE_COLUMNS if key in allowed_keys]
+    user_pref = _current_user_purchase_columns()
+    visible_columns = _coerce_user_column_pref(user_pref, allowed_keys, default_visible)
+    column_labels = {column["key"]: column["label"] for column in column_defs}
+    return_url = url_for("purchasing.purchasing_home", **request.args)
+
     return render_template(
         "purchasing/home.html",
         requests=requests,
@@ -404,7 +514,50 @@ def purchasing_home():
         status_counts=status_counts,
         open_count=open_count,
         status_labels=dict(PurchaseRequest.STATUS_CHOICES),
+        available_columns=column_defs,
+        visible_columns=visible_columns,
+        column_labels=column_labels,
+        format_purchase_request_value=_format_purchase_request_value,
+        return_url=return_url,
     )
+
+
+@bp.route("/shortages/columns", methods=["POST"])
+@login_required
+def save_shortage_columns():
+    column_defs = _purchase_request_column_defs()
+    allowed_keys = {column["key"] for column in column_defs}
+    selected_columns = [value for value in request.form.getlist("columns") if value]
+    action = (request.form.get("action") or "save").strip().lower()
+
+    user_id = session.get("_user_id")
+    try:
+        user_id = int(user_id) if user_id is not None else None
+    except (TypeError, ValueError):
+        user_id = None
+    user = db.session.get(User, user_id) if user_id is not None else None
+
+    if user is None:
+        abort(403)
+
+    if action == "reset" or not selected_columns:
+        user.purchasing_shortage_columns = None
+        flash("Shortage columns reset to defaults.", "success")
+    else:
+        filtered_columns = [key for key in selected_columns if key in allowed_keys]
+        if not filtered_columns:
+            user.purchasing_shortage_columns = None
+            flash("No valid columns selected. Defaults restored.", "warning")
+        else:
+            user.purchasing_shortage_columns = filtered_columns
+            flash("Shortage columns updated.", "success")
+
+    db.session.commit()
+
+    next_url = (request.form.get("next") or "").strip()
+    if not next_url.startswith("/"):
+        next_url = url_for("purchasing.purchasing_home")
+    return redirect(next_url)
 
 
 @bp.route("/new", methods=["GET", "POST"])

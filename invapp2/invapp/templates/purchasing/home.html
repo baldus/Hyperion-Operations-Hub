@@ -9,6 +9,29 @@
             <a class="action-btn primary-action" href="{{ url_for('purchasing.new_request') }}">Log Item Shortage</a>
         {% endif %}
         <a class="action-btn" href="{{ url_for('mdi.meeting_view', category='Materials') }}">View on MDI</a>
+        <details class="column-chooser">
+            <summary class="action-btn">Columns</summary>
+            <form method="post" action="{{ url_for('purchasing.save_shortage_columns') }}" class="column-chooser-panel">
+                <input type="hidden" name="next" value="{{ return_url }}">
+                <div class="column-chooser-list">
+                    {% for column in available_columns %}
+                        <label class="column-chooser-option">
+                            <input
+                                type="checkbox"
+                                name="columns"
+                                value="{{ column.key }}"
+                                {% if column.key in visible_columns %}checked{% endif %}
+                            >
+                            <span>{{ column.label }}</span>
+                        </label>
+                    {% endfor %}
+                </div>
+                <div class="column-chooser-actions">
+                    <button type="submit" name="action" value="save" class="action-btn">Save</button>
+                    <button type="submit" name="action" value="reset" class="action-btn secondary">Reset</button>
+                </div>
+            </form>
+        </details>
     </div>
     <form method="get" class="status-filter-form">
         <label for="status" class="sr-only">Filter by status</label>
@@ -41,15 +64,9 @@
         <table class="data-table purchasing-table">
             <thead>
                 <tr>
-                    <th scope="col">ID</th>
-                    <th scope="col">Item / Description</th>
-                    <th scope="col">Quantity</th>
-                    <th scope="col">Needed By</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Supplier</th>
-                    <th scope="col">ETA</th>
-                    <th scope="col">Requested By</th>
-                    <th scope="col">Updated</th>
+                    {% for column_key in visible_columns %}
+                        <th scope="col">{{ column_labels.get(column_key, column_key) }}</th>
+                    {% endfor %}
                     {% if is_superuser() %}
                         <th scope="col">Actions</th>
                     {% endif %}
@@ -58,57 +75,104 @@
             <tbody>
                 {% for req in requests %}
                     <tr>
-                        <td data-label="ID">
-                            <a href="{{ url_for('purchasing.view_request', request_id=req.id) }}">PR-{{ "%04d" | format(req.id) }}</a>
-                        </td>
-                        <td data-label="Item / Description">
-                            <strong>{{ req.title }}</strong>
-                            {% if req.description %}
-                                <div class="secondary-text">{{ req.description }}</div>
-                            {% endif %}
-                        </td>
-                        <td data-label="Quantity">
-                            {% if req.quantity is not none %}
-                                {{ "{:.2f}".format(req.quantity) }}{% if req.unit %} {{ req.unit }}{% endif %}
-                            {% elif req.unit %}
-                                {{ req.unit }}
-                            {% else %}
-                                &mdash;
-                            {% endif %}
-                        </td>
-                        <td data-label="Needed By">
-                            {% if req.needed_by %}
-                                {{ req.needed_by.isoformat() }}
-                            {% else %}
-                                &mdash;
-                            {% endif %}
-                        </td>
-                        <td data-label="Status">
-                            <span class="status-pill status-{{ req.status }}">{{ status_labels.get(req.status, req.status) }}</span>
-                        </td>
-                        <td data-label="Supplier">
-                            {% if req.supplier_name %}
-                                {{ req.supplier_name }}
-                                {% if req.purchase_order_number %}
-                                    <div class="secondary-text">PO {{ req.purchase_order_number }}</div>
-                                {% endif %}
-                            {% else %}
-                                {% if req.purchase_order_number %}
-                                    PO {{ req.purchase_order_number }}
+                        {% set show_description_inline = "description" not in visible_columns %}
+                        {% set show_po_inline = "purchase_order_number" not in visible_columns %}
+                        {% set show_unit_inline = "unit" not in visible_columns %}
+                        {% for column_key in visible_columns %}
+                            <td data-label="{{ column_labels.get(column_key, column_key) }}">
+                                {% if column_key == "id" %}
+                                    <a href="{{ url_for('purchasing.view_request', request_id=req.id) }}">PR-{{ "%04d" | format(req.id) }}</a>
+                                {% elif column_key == "title" %}
+                                    <strong>{{ req.title }}</strong>
+                                    {% if show_description_inline and req.description %}
+                                        <div class="secondary-text">{{ req.description }}</div>
+                                    {% endif %}
+                                {% elif column_key == "description" %}
+                                    {% set display_value = format_purchase_request_value(req.description) %}
+                                    {% if display_value %}
+                                        {% if display_value|length > 80 %}
+                                            <span title="{{ display_value }}">{{ display_value[:80] }}&hellip;</span>
+                                        {% else %}
+                                            {{ display_value }}
+                                        {% endif %}
+                                    {% else %}
+                                        &mdash;
+                                    {% endif %}
+                                {% elif column_key == "quantity" %}
+                                    {% if req.quantity is not none %}
+                                        {{ "{:.2f}".format(req.quantity) }}{% if show_unit_inline and req.unit %} {{ req.unit }}{% endif %}
+                                    {% elif show_unit_inline and req.unit %}
+                                        {{ req.unit }}
+                                    {% else %}
+                                        &mdash;
+                                    {% endif %}
+                                {% elif column_key == "unit" %}
+                                    {% if req.unit %}
+                                        {{ req.unit }}
+                                    {% else %}
+                                        &mdash;
+                                    {% endif %}
+                                {% elif column_key == "needed_by" %}
+                                    {% if req.needed_by %}
+                                        {{ req.needed_by.isoformat() }}
+                                    {% else %}
+                                        &mdash;
+                                    {% endif %}
+                                {% elif column_key == "status" %}
+                                    <span class="status-pill status-{{ req.status }}">{{ status_labels.get(req.status, req.status) }}</span>
+                                {% elif column_key == "supplier_name" %}
+                                    {% if req.supplier_name %}
+                                        {{ req.supplier_name }}
+                                        {% if show_po_inline and req.purchase_order_number %}
+                                            <div class="secondary-text">PO {{ req.purchase_order_number }}</div>
+                                        {% endif %}
+                                    {% else %}
+                                        {% if show_po_inline and req.purchase_order_number %}
+                                            PO {{ req.purchase_order_number }}
+                                        {% else %}
+                                            &mdash;
+                                        {% endif %}
+                                    {% endif %}
+                                {% elif column_key == "purchase_order_number" %}
+                                    {% if req.purchase_order_number %}
+                                        {{ req.purchase_order_number }}
+                                    {% else %}
+                                        &mdash;
+                                    {% endif %}
+                                {% elif column_key == "eta_date" %}
+                                    {% if req.eta_date %}
+                                        {{ req.eta_date.isoformat() }}
+                                    {% else %}
+                                        &mdash;
+                                    {% endif %}
+                                {% elif column_key == "requested_by" %}
+                                    {{ req.requested_by }}
+                                {% elif column_key == "updated_at" %}
+                                    {{ req.updated_at.strftime('%Y-%m-%d') }}
+                                {% elif column_key == "created_at" %}
+                                    {{ req.created_at.strftime('%Y-%m-%d') }}
+                                {% elif column_key == "item_number" %}
+                                    {% if req.item_number %}
+                                        {{ req.item_number }}
+                                    {% elif req.item %}
+                                        {{ req.item.sku }}
+                                    {% else %}
+                                        &mdash;
+                                    {% endif %}
                                 {% else %}
-                                    &mdash;
+                                    {% set display_value = format_purchase_request_value(getattr(req, column_key)) %}
+                                    {% if display_value %}
+                                        {% if display_value|length > 80 %}
+                                            <span title="{{ display_value }}">{{ display_value[:80] }}&hellip;</span>
+                                        {% else %}
+                                            {{ display_value }}
+                                        {% endif %}
+                                    {% else %}
+                                        &mdash;
+                                    {% endif %}
                                 {% endif %}
-                            {% endif %}
-                        </td>
-                        <td data-label="ETA">
-                            {% if req.eta_date %}
-                                {{ req.eta_date.isoformat() }}
-                            {% else %}
-                                &mdash;
-                            {% endif %}
-                        </td>
-                        <td data-label="Requested By">{{ req.requested_by }}</td>
-                        <td data-label="Updated">{{ req.updated_at.strftime('%Y-%m-%d') }}</td>
+                            </td>
+                        {% endfor %}
                         {% if is_superuser() %}
                             <td data-label="Actions">
                                 <a class="link-btn danger" href="{{ url_for('purchasing.confirm_delete_request', request_id=req.id) }}">Delete</a>

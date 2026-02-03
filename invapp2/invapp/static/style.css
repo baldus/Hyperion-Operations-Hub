@@ -1629,6 +1629,63 @@ body.light .info-callout {
     margin-bottom: 20px;
 }
 
+.column-chooser {
+    position: relative;
+}
+
+.column-chooser summary {
+    list-style: none;
+}
+
+.column-chooser summary::-webkit-details-marker {
+    display: none;
+}
+
+.column-chooser-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: min(360px, 90vw);
+    padding: 16px;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+body.light .column-chooser-panel {
+    background: #fff;
+    border-color: rgba(15, 23, 42, 0.12);
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
+}
+
+.column-chooser-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 8px;
+    max-height: 260px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.column-chooser-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+}
+
+.column-chooser-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+
 .status-filter-form {
     display: inline-flex;
     align-items: center;
