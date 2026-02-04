@@ -1774,6 +1774,11 @@ body.light .data-table thead th {
     border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
 
+.data-table th.is-hidden,
+.data-table td.is-hidden {
+    display: none;
+}
+
 body.light .data-table th,
 body.light .data-table td {
     border-color: rgba(0, 0, 0, 0.1);

@@ -867,6 +867,7 @@ The Item Shortages list (`/purchasing/`) lets each user choose which `PurchaseRe
 
 **Routes**
 - **POST** `/purchasing/shortages/columns` saves or clears the current user’s visible column list. See [`invapp2/invapp/routes/purchasing.py`](invapp2/invapp/routes/purchasing.py).
+- The list page uses a **Columns** dropdown with checkboxes that live-update the table and auto-save to `/purchasing/shortages/columns` (no reload). All columns are rendered in the HTML and toggled client-side for any combination. See [`invapp2/invapp/templates/purchasing/home.html`](invapp2/invapp/templates/purchasing/home.html) and [`invapp2/invapp/static/js/purchasing-shortage-columns.js`](invapp2/invapp/static/js/purchasing-shortage-columns.js).
 
 **Default behavior + safety**
 - If no preference is saved, the list view falls back to the default column set shown before this feature.

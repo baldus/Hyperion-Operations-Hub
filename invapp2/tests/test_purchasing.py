@@ -11,6 +11,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from invapp import create_app
 from invapp.extensions import db
 from invapp.models import PurchaseRequest, PurchaseRequestDeleteAudit, Role, User
+from invapp.routes.purchasing import SHORTAGE_DEFAULT_COLUMNS
 
 
 @pytest.fixture
@@ -260,30 +261,34 @@ def _get_superuser() -> User:
     return User.query.filter_by(username="superuser").one()
 
 
-def _has_header(response_data: bytes, label: str) -> bool:
-    pattern = rb"<th[^>]*>\s*%s\s*</th>" % re.escape(label.encode())
-    return re.search(pattern, response_data) is not None
+def _column_tag(response_data: bytes, key: str) -> re.Match | None:
+    pattern = rb"<th[^>]*data-col=\"%s\"[^>]*>" % re.escape(key.encode())
+    return re.search(pattern, response_data)
 
 
-def _label_for(key: str) -> str:
-    return key.replace("_", " ").title()
+def _column_is_visible(response_data: bytes, key: str) -> bool:
+    match = _column_tag(response_data, key)
+    return match is not None and b"is-hidden" not in match.group(0)
+
+
+def _column_is_hidden(response_data: bytes, key: str) -> bool:
+    match = _column_tag(response_data, key)
+    return match is not None and b"is-hidden" in match.group(0)
 
 
 def test_shortage_columns_default_visible(app, client):
     _create_shortage(app, title="Default Columns")
+    all_columns = [column.key for column in PurchaseRequest.__table__.columns]
+    default_columns = [key for key in SHORTAGE_DEFAULT_COLUMNS if key in set(all_columns)]
 
     response = client.get("/purchasing/")
 
     assert response.status_code == 200
-    assert _has_header(response.data, "Id")
-    assert _has_header(response.data, "Title")
-    assert _has_header(response.data, "Quantity")
-    assert _has_header(response.data, "Needed By")
-    assert _has_header(response.data, "Status")
-    assert _has_header(response.data, "Supplier Name")
-    assert _has_header(response.data, "Eta Date")
-    assert _has_header(response.data, "Requested By")
-    assert _has_header(response.data, "Updated At")
+    for column_key in default_columns:
+        assert _column_is_visible(response.data, column_key)
+    hidden_candidates = [key for key in all_columns if key not in default_columns]
+    if hidden_candidates:
+        assert _column_is_hidden(response.data, hidden_candidates[0])
 
 
 def test_shortage_columns_save_preference(app, client):
@@ -297,9 +302,31 @@ def test_shortage_columns_save_preference(app, client):
 
     assert response.status_code == 200
     assert b"Column preferences saved" in response.data
-    assert _has_header(response.data, "Id")
-    assert _has_header(response.data, "Status")
-    assert not _has_header(response.data, "Title")
+    assert _column_is_visible(response.data, "id")
+    assert _column_is_visible(response.data, "status")
+    assert _column_is_hidden(response.data, "title")
+
+
+def test_shortage_columns_json_invalid_keys(app, client):
+    _create_shortage(app, title="Invalid JSON Columns")
+    allowed_columns = [column.key for column in PurchaseRequest.__table__.columns]
+
+    response = client.post(
+        "/purchasing/shortages/columns",
+        json={"visible_columns": ["id", "bogus", "status"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    expected = [key for key in allowed_columns if key in {"id", "status"}]
+    assert payload["visible_columns"] == expected
+
+    with app.app_context():
+        user = _get_superuser()
+        assert (
+            user.user_settings["purchasing"]["shortages_visible_columns"] == expected
+        )
 
 
 def test_shortage_columns_save_all_columns(app, client):
@@ -315,7 +342,7 @@ def test_shortage_columns_save_all_columns(app, client):
     assert response.status_code == 200
     assert b"Column preferences saved" in response.data
     for column_key in all_columns:
-        assert _has_header(response.data, _label_for(column_key))
+        assert _column_is_visible(response.data, column_key)
 
 
 def test_shortage_columns_invalid_preference_falls_back(app, client):
@@ -324,12 +351,16 @@ def test_shortage_columns_invalid_preference_falls_back(app, client):
         user = _get_superuser()
         user.user_settings = {"purchasing": {"shortages_visible_columns": "not-a-list"}}
         db.session.commit()
+        all_columns = [column.key for column in PurchaseRequest.__table__.columns]
+        default_columns = [
+            key for key in SHORTAGE_DEFAULT_COLUMNS if key in set(all_columns)
+        ]
 
     response = client.get("/purchasing/")
 
     assert response.status_code == 200
-    assert _has_header(response.data, "Title")
-    assert _has_header(response.data, "Quantity")
+    for column_key in default_columns:
+        assert _column_is_visible(response.data, column_key)
 
 
 def test_shortage_columns_unknown_keys_ignored(app, client):
@@ -344,9 +375,9 @@ def test_shortage_columns_unknown_keys_ignored(app, client):
     response = client.get("/purchasing/")
 
     assert response.status_code == 200
-    assert _has_header(response.data, "Id")
-    assert _has_header(response.data, "Title")
-    assert not _has_header(response.data, "Bogus Key")
+    assert _column_is_visible(response.data, "id")
+    assert _column_is_visible(response.data, "title")
+    assert _column_tag(response.data, "bogus_key") is None
 
 
 def test_shortage_columns_reset_preference(app, client):
@@ -364,7 +395,7 @@ def test_shortage_columns_reset_preference(app, client):
 
     assert response.status_code == 200
     assert b"Column preferences cleared" in response.data
-    assert _has_header(response.data, "Title")
+    assert _column_is_visible(response.data, "title")
 
 
 def test_delete_purchase_request_as_superuser(app, client):
