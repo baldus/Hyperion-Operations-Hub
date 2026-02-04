@@ -16,6 +16,7 @@ from flask import (
     abort,
     current_app,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -549,7 +550,9 @@ def purchasing_home():
         status_labels=dict(PurchaseRequest.STATUS_CHOICES),
         column_labels=column_labels,
         column_type_map=column_type_map,
+        all_columns=allowed_columns,
         visible_columns=visible_columns,
+        default_columns=list(default_columns),
         allowed_column_choices=allowed_column_choices,
     )
 
@@ -560,24 +563,40 @@ def shortage_columns():
         abort(403)
     allowed_columns = _purchase_request_column_keys()
     allowed_set = set(allowed_columns)
-    action = (request.form.get("action") or "save").strip().lower()
+    default_columns = tuple(
+        key for key in SHORTAGE_DEFAULT_COLUMNS if key in allowed_set
+    )
+    payload = request.get_json(silent=True) if request.is_json else None
     return_target = _safe_return_target(request.form.get("return_to", ""))
-    if action == "reset":
+    wants_json = request.is_json or request.accept_mimetypes.best == "application/json"
+    if payload and isinstance(payload, dict):
+        action = str(payload.get("action") or "save").strip().lower()
+        raw_columns = payload.get("visible_columns", payload.get("columns", []))
+        if isinstance(raw_columns, list):
+            selected = [key for key in raw_columns if key in allowed_set]
+        else:
+            selected = []
+    else:
+        action = (request.form.get("action") or "save").strip().lower()
+        selected = [key for key in request.form.getlist("columns") if key in allowed_set]
+
+    if action == "reset" or not selected:
         _write_shortage_visible_columns(user=current_user, columns=None)
         db.session.commit()
-        flash("Column preferences cleared.", "success")
+        if wants_json:
+            return jsonify(ok=True, visible_columns=list(default_columns))
+        if action == "reset":
+            flash("Column preferences cleared.", "success")
+        else:
+            flash("Column preferences reset to defaults.", "success")
         return redirect(return_target or url_for("purchasing.purchasing_home"))
 
-    selected = [key for key in request.form.getlist("columns") if key in allowed_set]
-    if not selected:
-        _write_shortage_visible_columns(user=current_user, columns=None)
-        db.session.commit()
-        flash("Column preferences reset to defaults.", "success")
-        return redirect(return_target or url_for("purchasing.purchasing_home"))
     selected_set = set(selected)
     ordered_selected = [key for key in allowed_columns if key in selected_set]
     _write_shortage_visible_columns(user=current_user, columns=ordered_selected)
     db.session.commit()
+    if wants_json:
+        return jsonify(ok=True, visible_columns=ordered_selected)
     flash("Column preferences saved.", "success")
     return redirect(return_target or url_for("purchasing.purchasing_home"))
 

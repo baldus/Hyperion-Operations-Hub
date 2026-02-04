@@ -26,7 +26,7 @@
             Columns &#9662;
         </button>
         <div class="dropdown-menu" data-dropdown-menu>
-            <form method="post" action="{{ url_for('purchasing.shortage_columns') }}" class="stacked-form">
+            <form method="post" action="{{ url_for('purchasing.shortage_columns') }}" class="stacked-form" data-columns-form>
                 <input type="hidden" name="return_to" value="{{ request.full_path }}">
                 <div class="dropdown-menu-scroll">
                     {% for column in allowed_column_choices %}
@@ -60,11 +60,20 @@
 
 {% if requests %}
     <div class="table-scroll">
-        <table class="data-table purchasing-table">
+        <table
+            class="data-table purchasing-table"
+            data-shortages-table
+            data-all-columns='{{ all_columns | tojson }}'
+            data-default-columns='{{ default_columns | tojson }}'
+            data-save-url="{{ url_for('purchasing.shortage_columns') }}"
+        >
             <thead>
                 <tr>
-                    {% for column_key in visible_columns %}
-                        <th scope="col">{{ column_labels.get(column_key, column_key) }}</th>
+                    {% for column_key in all_columns %}
+                        {% set is_hidden = column_key not in visible_columns %}
+                        <th scope="col" data-col="{{ column_key }}" {% if is_hidden %}class="is-hidden"{% endif %}>
+                            {{ column_labels.get(column_key, column_key) }}
+                        </th>
                     {% endfor %}
                     {% if is_superuser() %}
                         <th scope="col">Actions</th>
@@ -74,9 +83,10 @@
             <tbody>
                 {% for req in requests %}
                     <tr>
-                        {% for column_key in visible_columns %}
+                        {% for column_key in all_columns %}
+                            {% set is_hidden = column_key not in visible_columns %}
                             {% set value = req|attr(column_key) %}
-                            <td data-label="{{ column_labels.get(column_key, column_key) }}">
+                            <td data-label="{{ column_labels.get(column_key, column_key) }}" data-col="{{ column_key }}" {% if is_hidden %}class="is-hidden"{% endif %}>
                                 {% if column_key == 'id' %}
                                     <a href="{{ url_for('purchasing.view_request', request_id=req.id) }}">PR-{{ "%04d" | format(value) }}</a>
                                 {% elif column_key == 'status' %}
@@ -121,31 +131,14 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script>
-    (() => {
-        const dropdown = document.querySelector('[data-dropdown]');
-        if (!dropdown) {
-            return;
+<script src="{{ url_for('static', filename='js/purchasing-shortage-columns.js') }}"></script>
+<noscript>
+    <style>
+        .columns-dropdown .dropdown-menu {
+            display: block;
+            position: static;
+            margin-top: 12px;
         }
-        const toggle = dropdown.querySelector('[data-dropdown-toggle]');
-        const menu = dropdown.querySelector('[data-dropdown-menu]');
-        if (!toggle || !menu) {
-            return;
-        }
-        const closeMenu = () => dropdown.classList.remove('is-open');
-        toggle.addEventListener('click', () => {
-            dropdown.classList.toggle('is-open');
-        });
-        document.addEventListener('click', (event) => {
-            if (!dropdown.contains(event.target)) {
-                closeMenu();
-            }
-        });
-        document.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape') {
-                closeMenu();
-            }
-        });
-    })();
-</script>
+    </style>
+</noscript>
 {% endblock %}
