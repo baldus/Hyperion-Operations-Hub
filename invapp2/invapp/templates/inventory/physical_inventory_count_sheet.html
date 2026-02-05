@@ -15,12 +15,12 @@
       </tr>
     </thead>
     <tbody>
-      {% for line in lines %}
+      {% for row in rows %}
       <tr>
-        <td>{{ line.item.default_location.code if line.item and line.item.default_location else 'UNLOCATED' }}</td>
-        <td>{{ line.item.name if line.item else 'Unknown Item' }}</td>
-        <td>{{ line.item.description if line.item else '' }}</td>
-        <td>{{ line.erp_quantity }}</td>
+        <td>{{ row.location_code }}</td>
+        <td>{{ row.item_name }}</td>
+        <td>{{ row.item_description }}</td>
+        <td>{{ row.erp_quantity if row.erp_quantity is not none else '' }}</td>
         <td></td>
         <td></td>
       </tr>

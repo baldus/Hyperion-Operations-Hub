@@ -10,7 +10,13 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from invapp import create_app
 from invapp.extensions import db
-from invapp.models import Item, Location, PhysicalInventorySnapshot, PhysicalInventorySnapshotLine
+from invapp.models import (
+    Item,
+    Location,
+    Movement,
+    PhysicalInventorySnapshot,
+    PhysicalInventorySnapshotLine,
+)
 from invapp.utils.physical_inventory_aisle import UNKNOWN_AISLE, get_location_aisle
 
 
@@ -42,33 +48,41 @@ def client(app):
     return client
 
 
-def _create_snapshot_with_line():
+def _create_snapshot_with_stock(*, include_line: bool = True, source_filename: str | None = "erp.csv"):
     location = Location(code="1-A-1", description="Rack A1")
     item = Item(sku="SKU-1", name="Widget", description="Widget desc")
-    item.default_location = location
     snapshot = PhysicalInventorySnapshot(
-        source_filename="erp.csv",
-        primary_upload_column="Item",
+        source_filename=source_filename,
+        primary_upload_column="Item" if source_filename else "(none)",
         primary_item_field="name",
         secondary_upload_column=None,
         secondary_item_field=None,
-        quantity_column="Qty",
+        quantity_column="Qty" if source_filename else "(none)",
         normalization_options={},
         duplicate_strategy="sum",
-        total_rows=1,
-        matched_rows=1,
+        total_rows=1 if source_filename else 0,
+        matched_rows=1 if include_line else 0,
         unmatched_rows=0,
         ambiguous_rows=0,
     )
     db.session.add_all([location, item, snapshot])
     db.session.flush()
-    line = PhysicalInventorySnapshotLine(
-        snapshot_id=snapshot.id,
-        item_id=item.id,
-        erp_quantity=Decimal("10"),
-        counted_quantity=None,
+    db.session.add(
+        Movement(
+            item_id=item.id,
+            location_id=location.id,
+            quantity=Decimal("7"),
+            movement_type="RECEIPT",
+        )
     )
-    db.session.add(line)
+    if include_line:
+        line = PhysicalInventorySnapshotLine(
+            snapshot_id=snapshot.id,
+            item_id=item.id,
+            erp_quantity=Decimal("10"),
+            counted_quantity=None,
+        )
+        db.session.add(line)
     db.session.commit()
     return snapshot.id
 
@@ -105,7 +119,7 @@ def test_get_location_aisle_invalid_code():
 
 def test_count_sheets_by_aisle_html(client, app):
     with app.app_context():
-        snapshot_id = _create_snapshot_with_line()
+        snapshot_id = _create_snapshot_with_stock()
 
     response = client.get(
         f"/inventory/physical-inventory/{snapshot_id}/count-sheets-by-aisle"
@@ -119,7 +133,7 @@ def test_count_sheets_by_aisle_html(client, app):
 
 def test_count_sheets_by_aisle_zip_export(client, app):
     with app.app_context():
-        snapshot_id = _create_snapshot_with_line()
+        snapshot_id = _create_snapshot_with_stock()
 
     response = client.get(
         f"/inventory/physical-inventory/{snapshot_id}/export-count-sheets-by-aisle"
@@ -134,3 +148,67 @@ def test_count_sheets_by_aisle_zip_export(client, app):
         with archive.open(expected_name) as csv_file:
             header = csv_file.readline().decode("utf-8").strip()
             assert header.startswith("Aisle,Location Code,Location Description")
+
+
+def test_count_sheets_work_without_erp_upload(client, app):
+    with app.app_context():
+        snapshot_id = _create_snapshot_with_stock(include_line=False, source_filename=None)
+
+    html_response = client.get(
+        f"/inventory/physical-inventory/{snapshot_id}/count-sheets-by-aisle"
+    )
+    assert html_response.status_code == 200
+    page = html_response.get_data(as_text=True)
+    assert "Widget" in page
+    assert "1-A-1" in page
+
+    zip_response = client.get(
+        f"/inventory/physical-inventory/{snapshot_id}/export-count-sheets-by-aisle"
+    )
+    assert zip_response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(zip_response.data)) as archive:
+        expected_name = f"count_sheet_snapshot_{snapshot_id}_aisle_A.csv"
+        with archive.open(expected_name) as csv_file:
+            csv_text = csv_file.read().decode("utf-8")
+            assert "Widget" in csv_text
+            assert "1-A-1" in csv_text
+
+
+def test_count_sheets_include_ops_stock_when_erp_unmatched(client, app):
+    with app.app_context():
+        location = Location(code="1-A-1", description="Rack A1")
+        item = Item(sku="SKU-UNMATCHED", name="Ops Only Widget", description="Not in ERP")
+        snapshot = PhysicalInventorySnapshot(
+            source_filename="erp.csv",
+            primary_upload_column="Item",
+            primary_item_field="name",
+            secondary_upload_column=None,
+            secondary_item_field=None,
+            quantity_column="Qty",
+            normalization_options={},
+            duplicate_strategy="sum",
+            total_rows=1,
+            matched_rows=0,
+            unmatched_rows=1,
+            ambiguous_rows=0,
+        )
+        db.session.add_all([location, item, snapshot])
+        db.session.flush()
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                location_id=location.id,
+                quantity=Decimal("5"),
+                movement_type="RECEIPT",
+            )
+        )
+        db.session.commit()
+        snapshot_id = snapshot.id
+
+    response = client.get(
+        f"/inventory/physical-inventory/{snapshot_id}/count-sheets-by-aisle"
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "Ops Only Widget" in page
+    assert "1-A-1" in page
