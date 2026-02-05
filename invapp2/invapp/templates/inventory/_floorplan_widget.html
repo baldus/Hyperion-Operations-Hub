@@ -1,17 +1,20 @@
 {% if floorplan_exists and floorplan_url %}
-<section class="floorplan-panel" aria-label="Inventory floorplan">
-  <h3>Inventory Floorplan</h3>
-  <p class="muted">Click the preview to open a larger view. Use built-in browser PDF controls to zoom.</p>
-  <button type="button" class="floorplan-trigger" data-floorplan-modal-open>
+<div class="floorplan-panel" aria-label="Inventory floorplan">
+  <div class="floorplan-header">
+    <h3>Inventory Floorplan</h3>
+    <small>Click to enlarge</small>
+  </div>
+
+  <button type="button" class="floorplan-thumb-btn" data-floorplan-open="1" aria-label="Open floorplan">
     <embed src="{{ floorplan_url }}#toolbar=0&navpanes=0&scrollbar=0" type="application/pdf" class="floorplan-thumb">
   </button>
-</section>
 
-<div class="floorplan-modal" data-floorplan-modal hidden>
-  <div class="floorplan-modal-backdrop" data-floorplan-modal-close></div>
-  <div class="floorplan-modal-dialog" role="dialog" aria-modal="true" aria-label="Inventory floorplan viewer">
-    <button type="button" class="floorplan-close" data-floorplan-modal-close aria-label="Close floorplan">&times;</button>
-    <iframe src="{{ floorplan_url }}" class="floorplan-frame" title="Inventory floorplan"></iframe>
+  <div class="floorplan-modal" data-floorplan-modal="1" hidden>
+    <div class="floorplan-modal-backdrop" data-floorplan-close="1"></div>
+    <div class="floorplan-modal-card" role="dialog" aria-modal="true" aria-label="Floorplan">
+      <button type="button" class="floorplan-modal-close" data-floorplan-close="1" aria-label="Close floorplan">✕</button>
+      <iframe class="floorplan-modal-frame" src="{{ floorplan_url }}" title="Inventory Floorplan"></iframe>
+    </div>
   </div>
 </div>
 {% endif %}
