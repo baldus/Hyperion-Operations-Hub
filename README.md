@@ -279,11 +279,20 @@ The inventory module supports a shared **Inventory Floorplan PDF** that authenti
 
 **UI patterns**
 - Partial: `invapp2/invapp/templates/inventory/_floorplan_widget.html`
+  - Uses a real button click target (`.floorplan-thumb-btn` with `data-floorplan-open="1"`) wrapping the `<embed>` preview so click handling is reliable on pages where browser PDF preview layers can otherwise absorb pointer input.
+  - The modal container lives in the same widget (`.floorplan-modal` with `data-floorplan-modal="1"` and `hidden` by default) so each widget instance is self-contained.
+  - Close targets (`data-floorplan-close="1"`) are provided on both the backdrop and the close button.
 - Included in:
   - `invapp2/invapp/templates/inventory/list_locations.html`
   - `invapp2/invapp/templates/inventory/receiving.html`
-- Styling: `invapp2/invapp/static/style.css` (`.floorplan-panel`, `.floorplan-thumb`, modal classes)
-- Behavior: `invapp2/invapp/static/js/floorplan-modal.js` (open/close, backdrop close, ESC close)
+- Behavior script: `invapp2/invapp/static/js/floorplan-modal.js`
+  - Loaded globally from `invapp2/invapp/templates/base.html` so both inventory pages always have modal behavior.
+  - Uses delegated event handling to support multiple floorplan widgets on the same page.
+  - Opens on `[data-floorplan-open]`, closes on `[data-floorplan-close]`, and closes the active modal on `Escape`.
+  - Adds/removes `body.floorplan-modal-open` to prevent background scrolling while modal is open.
+- Styling: `invapp2/invapp/static/style.css`
+  - Uses `.floorplan-thumb-btn`, `.floorplan-modal`, `.floorplan-modal-backdrop`, `.floorplan-modal-card`, `.floorplan-modal-close`, `.floorplan-modal-frame`.
+  - **Invariant:** `.floorplan-thumb` must keep `pointer-events: none;` so the button wrapper always receives the click instead of the PDF embed surface.
 
 **Testing expectations**
 - `invapp2/tests/test_inventory.py` includes coverage for:
