@@ -46,6 +46,7 @@ from invapp.routes.inventory import (
 @pytest.fixture
 def app():
     upload_dir = tempfile.mkdtemp()
+    instance_dir = tempfile.mkdtemp()
     app = create_app(
         {
             "TESTING": True,
@@ -54,12 +55,14 @@ def app():
             "ITEM_ATTACHMENT_ALLOWED_EXTENSIONS": {"pdf"},
         }
     )
+    app.instance_path = instance_dir
     with app.app_context():
         db.create_all()
         yield app
         db.session.remove()
         db.drop_all()
     shutil.rmtree(upload_dir, ignore_errors=True)
+    shutil.rmtree(instance_dir, ignore_errors=True)
 
 
 @pytest.fixture
@@ -2466,3 +2469,38 @@ def test_move_inventory_lines_rolls_back_on_invalid_line(client, app):
     with app.app_context():
         assert Movement.query.filter_by(item_id=item_a_id).count() == 1
         assert Movement.query.filter_by(item_id=item_b_id).count() == 1
+
+
+def test_inventory_floorplan_missing_returns_404(client):
+    response = client.get("/inventory/floorplan")
+
+    assert response.status_code == 404
+
+
+def test_floorplan_settings_requires_admin(anon_client, app):
+    create_user(app, username="operator", password="password", role_names=("inventory",))
+    login(anon_client)
+
+    response = anon_client.post(
+        "/settings/floorplan",
+        data={"floorplan_pdf": (io.BytesIO(b"%PDF-1.4\n"), "floorplan.pdf")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 403
+
+
+def test_floorplan_upload_and_view(client):
+    upload_response = client.post(
+        "/settings/floorplan",
+        data={"floorplan_pdf": (io.BytesIO(b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n"), "floorplan.pdf")},
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+
+    assert upload_response.status_code == 302
+
+    response = client.get("/inventory/floorplan")
+
+    assert response.status_code == 200
+    assert response.mimetype == "application/pdf"

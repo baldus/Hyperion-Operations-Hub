@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Inventory Floorplan</h2>
+<p class="page-intro">Upload or replace the shared inventory floorplan PDF used on inventory pages.</p>
+
+<section class="card-section settings-card">
+  <h3>Upload PDF</h3>
+  <form method="post" enctype="multipart/form-data" class="stacked-form">
+    <label for="floorplan_pdf">Floorplan PDF</label>
+    <input id="floorplan_pdf" type="file" name="floorplan_pdf" accept="application/pdf" required>
+    <button type="submit" class="action-btn">Upload Floorplan</button>
+  </form>
+</section>
+
+<section class="card-section settings-card">
+  <h3>Current File</h3>
+  {% if floorplan_exists %}
+    <p>A floorplan is currently available to authenticated users.</p>
+    <a class="action-btn" href="{{ url_for('inventory.inventory_floorplan') }}" target="_blank" rel="noopener">Open Current Floorplan</a>
+    <form method="post" class="stacked-form" onsubmit="return confirm('Remove the current floorplan?');">
+      <input type="hidden" name="action" value="delete">
+      <button type="submit" class="action-btn danger">Remove Floorplan</button>
+    </form>
+  {% else %}
+    <p>No floorplan has been uploaded yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

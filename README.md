@@ -253,6 +253,46 @@ These are pulled directly from environment variables or startup scripts:
 - Static files live in `invapp2/invapp/static/` (global) and `invapp2/invapp/static/mdi/` (MDI-specific CSS/JS). See [`invapp2/invapp/static`](invapp2/invapp/static) and [`invapp2/invapp/static/mdi`](invapp2/invapp/static/mdi).
 - Uploaded files (work instructions, item attachments, purchasing attachments, quality attachments) are configured to be stored under `invapp2/invapp/static/` subfolders by default. See [`invapp2/config.py`](invapp2/config.py).
 
+### Inventory Floorplan PDF Widget
+
+The inventory module supports a shared **Inventory Floorplan PDF** that authenticated users can view as a small preview and open in a larger modal viewer.
+
+**Feature contract**
+- Locations page (`GET /inventory/locations`) and Receiving page (`GET /inventory/receiving`) include the reusable partial `invapp2/invapp/templates/inventory/_floorplan_widget.html`.
+- The widget renders only when a floorplan file exists; if no file exists, the pages continue rendering normally without any floorplan UI.
+- Clicking the preview opens a modal containing an `<iframe>` of the same PDF so users can use built-in browser PDF controls (including zoom).
+- The PDF file is served from `GET /inventory/floorplan` and is not exposed under `/static`.
+
+**Permissions / guards**
+- `GET /inventory/floorplan` requires an authenticated session.
+- Floorplan upload and delete are managed at `GET/POST /settings/floorplan`.
+- Only admins or the configured superuser can access `GET/POST /settings/floorplan` (non-admin users receive `403`).
+
+**Storage and path invariants**
+- Floorplans are stored in the Flask instance path so uploads survive code updates:
+  - `<instance_path>/site_uploads/inventory_floorplan.pdf`
+- Helper functions live in `invapp2/invapp/services/floorplan.py`:
+  - `floorplan_dir()`
+  - `floorplan_path()`
+  - `floorplan_exists()`
+- Invariant: missing floorplan files must never cause inventory pages to 500; floorplan route returns `404` when missing.
+
+**UI patterns**
+- Partial: `invapp2/invapp/templates/inventory/_floorplan_widget.html`
+- Included in:
+  - `invapp2/invapp/templates/inventory/list_locations.html`
+  - `invapp2/invapp/templates/inventory/receiving.html`
+- Styling: `invapp2/invapp/static/style.css` (`.floorplan-panel`, `.floorplan-thumb`, modal classes)
+- Behavior: `invapp2/invapp/static/js/floorplan-modal.js` (open/close, backdrop close, ESC close)
+
+**Testing expectations**
+- `invapp2/tests/test_inventory.py` includes coverage for:
+  1. `GET /inventory/floorplan` returns `404` when no file exists.
+  2. `POST /settings/floorplan` rejects non-admin users (`403`).
+  3. Admin upload of a small PDF succeeds and then `GET /inventory/floorplan` returns `200` with `application/pdf`.
+- Run with:
+  - `pytest invapp2/tests/test_inventory.py -k floorplan`
+
 ### Mobile / Responsive UI
 This app uses a single shared template layout with responsive CSS (no separate mobile templates or builds).
 
