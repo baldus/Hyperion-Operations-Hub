@@ -46,6 +46,12 @@
             <li><a href="{{ url_for('admin.auto_backups') }}" class="link-item">Auto Backups</a></li>
         </ul>
     </section>
+
+    <section class="card-section settings-card">
+        <h3>Inventory Floorplan</h3>
+        <p>Upload or replace the shared floorplan used on inventory screens.</p>
+        <a href="{{ url_for('settings.floorplan_settings') }}" class="action-btn">Manage Floorplan</a>
+    </section>
     {% endif %}
 </div>
 {% endblock %}

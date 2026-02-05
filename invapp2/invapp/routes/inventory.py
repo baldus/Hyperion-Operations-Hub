@@ -26,6 +26,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_file,
     send_from_directory,
     session,
     url_for,
@@ -76,6 +77,7 @@ from invapp.services.stock_transfer import (
     pending_receipt_case,
 )
 from invapp.services.item_locations import apply_smart_item_locations
+from invapp.services.floorplan import floorplan_exists, floorplan_path
 from invapp.utils.csv_export import export_rows_to_csv
 from invapp.utils.csv_schema import (
     ITEMS_CSV_COLUMNS,
@@ -228,6 +230,32 @@ def _resolve_location_from_form(value: str | None) -> Location | None:
 
     return Location.query.filter(func.lower(Location.code) == raw_value.lower()).first()
 
+
+
+
+def _inventory_floorplan_context() -> dict[str, object]:
+    """Return floorplan visibility values for inventory templates."""
+
+    exists = floorplan_exists()
+    return {
+        "floorplan_exists": exists,
+        "floorplan_url": url_for("inventory.inventory_floorplan") if exists else None,
+    }
+
+
+@bp.route("/floorplan")
+@login_required
+def inventory_floorplan():
+    pdf_path = floorplan_path()
+    if not os.path.exists(pdf_path):
+        abort(404)
+
+    return send_file(
+        pdf_path,
+        mimetype="application/pdf",
+        as_attachment=False,
+        download_name="inventory_floorplan.pdf",
+    )
 
 AUTO_SKU_START = 100000
 
@@ -3265,6 +3293,7 @@ def list_locations():
         },
         balances_by_location=balances_by_location,
         pending_count_by_location=pending_count_by_location,
+        **_inventory_floorplan_context(),
     )
 
 
@@ -5258,6 +5287,7 @@ def receiving():
             if placeholder_location
             else UNASSIGNED_LOCATION_CODE
         ),
+        **_inventory_floorplan_context(),
     )
 
 

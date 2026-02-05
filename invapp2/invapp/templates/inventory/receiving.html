@@ -3,6 +3,8 @@
 {% set defaults = form_defaults or {} %}
 <h2>Receiving</h2>
 
+{% include "inventory/_floorplan_widget.html" %}
+
 <section class="card">
   <h3>Item Lookup</h3>
   <p>Search by item name or SKU, then apply the result to the form.</p>
@@ -135,6 +137,7 @@
 {% endblock %}
 
 {% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/floorplan-modal.js') }}"></script>
 <script src="{{ url_for('static', filename='js/receiving-location-picker.js') }}"></script>
 <script>
   document.addEventListener('DOMContentLoaded', function () {
