@@ -31,7 +31,7 @@ from flask import (
     session,
     url_for,
 )
-from sqlalchemy import asc, case, desc, false, func, inspect, or_, select
+from sqlalchemy import asc, case, desc, func, inspect, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import aliased, joinedload, lazyload, load_only
 from sqlalchemy.orm.exc import DetachedInstanceError
@@ -888,6 +888,35 @@ def inventory_home():
 def physical_inventory_import():
     if request.method == "POST":
         step = request.form.get("step") or "upload"
+        if step == "create_without_erp":
+            snapshot = PhysicalInventorySnapshot(
+                created_by_user_id=current_user.id if current_user else None,
+                source_filename=None,
+                primary_upload_column="(none)",
+                primary_item_field="name",
+                secondary_upload_column=None,
+                secondary_item_field=None,
+                quantity_column="(none)",
+                normalization_options={},
+                duplicate_strategy="sum",
+                total_rows=0,
+                matched_rows=0,
+                unmatched_rows=0,
+                ambiguous_rows=0,
+                unmatched_details=[],
+                ambiguous_details=[],
+            )
+            db.session.add(snapshot)
+            db.session.commit()
+            flash(
+                "Physical inventory snapshot created without ERP totals. "
+                "Count sheets are based on Ops Console stock.",
+                "success",
+            )
+            return redirect(
+                url_for("inventory.physical_inventory_snapshot", snapshot_id=snapshot.id)
+            )
+
         if step == "mapping":
             import_token = request.form.get("import_token", "")
             if not import_token:
@@ -1245,17 +1274,11 @@ def physical_inventory_counts(snapshot_id: int):
 @superuser_required
 def physical_inventory_count_sheet(snapshot_id: int):
     snapshot = PhysicalInventorySnapshot.query.get_or_404(snapshot_id)
-    lines = (
-        PhysicalInventorySnapshotLine.query.options(
-            joinedload(PhysicalInventorySnapshotLine.item).joinedload(Item.default_location)
-        )
-        .filter_by(snapshot_id=snapshot_id)
-        .all()
-    )
+    rows = _get_ops_console_count_sheet_rows(snapshot_id)
     return render_template(
         "inventory/physical_inventory_count_sheet.html",
         snapshot=snapshot,
-        lines=lines,
+        rows=rows,
     )
 
 
@@ -1279,57 +1302,46 @@ def _get_snapshot_or_404(snapshot_id: int) -> PhysicalInventorySnapshot:
     return snapshot
 
 
-def _build_snapshot_aisle_index(snapshot_id: int):
-    location_rows = (
-        db.session.query(Location.id, Location.code, Location.description)
-        .select_from(PhysicalInventorySnapshotLine)
-        .join(Item, Item.id == PhysicalInventorySnapshotLine.item_id)
-        .outerjoin(Location, Item.default_location_id == Location.id)
-        .filter(PhysicalInventorySnapshotLine.snapshot_id == snapshot_id)
-        .distinct()
-        .all()
-    )
-    aisles: set[str] = set()
-    aisle_by_location_id: dict[int, str] = {}
-    has_unlocated = False
-    location_details: dict[int, dict[str, str]] = {}
-    for location_id, code, description in location_rows:
-        if location_id is None:
-            has_unlocated = True
-            continue
-        aisle = get_location_aisle(make_location_stub(code), current_app.config)
-        aisle_by_location_id[location_id] = aisle
-        aisles.add(aisle)
-        location_details[location_id] = {
-            "code": code or "",
-            "description": description or "",
-        }
-    if has_unlocated:
-        aisles.add(UNKNOWN_AISLE)
-
-    return {
-        "aisles": sort_aisle_keys(aisles),
-        "aisle_by_location_id": aisle_by_location_id,
-        "has_unlocated": has_unlocated,
-        "location_details": location_details,
-    }
+def _build_snapshot_aisle_index(rows: list[dict[str, object]]):
+    aisles = {str(row.get("aisle") or UNKNOWN_AISLE) for row in rows}
+    return {"aisles": sort_aisle_keys(aisles)}
 
 
-def _count_sheet_row(line: PhysicalInventorySnapshotLine) -> dict[str, object]:
-    item = line.item
-    location = item.default_location if item else None
-    code = location.code if location else "UNLOCATED"
-    description = location.description if location else ""
+def _build_count_sheet_row_from_stock_record(
+    record, line_by_item_id: dict[int, PhysicalInventorySnapshotLine]
+) -> dict[str, object]:
+    (
+        _location_id,
+        location_code,
+        location_description,
+        item_id,
+        item_name,
+        item_description,
+        sku,
+        _batch_id,
+        lot_number,
+        system_qty,
+    ) = record
+    line = line_by_item_id.get(item_id)
+    location = make_location_stub(location_code) if location_code else None
     aisle = get_location_aisle(location, current_app.config)
+    rendered_description = item_description or ""
+    if lot_number:
+        rendered_description = (
+            f"{rendered_description} (Lot: {lot_number})"
+            if rendered_description
+            else f"Lot: {lot_number}"
+        )
     return {
         "aisle": aisle,
-        "location_code": code,
-        "location_description": description,
-        "item_name": item.name if item else "Unknown Item",
-        "item_description": item.description if item else "",
-        "sku": item.sku if item else "",
-        "erp_quantity": line.erp_quantity,
-        "counted_quantity": line.counted_quantity,
+        "location_code": location_code or "UNLOCATED",
+        "location_description": location_description or "",
+        "item_name": item_name,
+        "item_description": rendered_description,
+        "sku": sku or "",
+        "erp_quantity": line.erp_quantity if line else None,
+        "counted_quantity": line.counted_quantity if line else None,
+        "system_qty": Decimal(system_qty or 0),
         "notes": "",
     }
 
@@ -1338,6 +1350,7 @@ def _count_sheet_sort_key(row: dict[str, object]) -> tuple:
     return (
         location_sort_key(str(row.get("location_code") or "")),
         str(row.get("item_name") or "").lower(),
+        str(row.get("item_description") or "").lower(),
     )
 
 
@@ -1346,12 +1359,57 @@ def _sanitize_aisle_filename(aisle: str) -> str:
     return sanitized or UNKNOWN_AISLE
 
 
+def _get_ops_console_count_sheet_rows(snapshot_id: int) -> list[dict[str, object]]:
+    line_by_item_id = {
+        line.item_id: line
+        for line in PhysicalInventorySnapshotLine.query.filter_by(snapshot_id=snapshot_id).all()
+    }
+    stock_rows = (
+        db.session.query(
+            Movement.location_id,
+            Location.code,
+            Location.description,
+            Movement.item_id,
+            Item.name,
+            Item.description,
+            Item.sku,
+            Movement.batch_id,
+            Batch.lot_number,
+            func.coalesce(func.sum(Movement.quantity), 0).label("system_qty"),
+        )
+        .join(Item, Item.id == Movement.item_id)
+        .join(Location, Location.id == Movement.location_id)
+        .outerjoin(Batch, Batch.id == Movement.batch_id)
+        .filter(or_(Movement.batch_id.is_(None), Batch.removed_at.is_(None)))
+        .group_by(
+            Movement.location_id,
+            Location.code,
+            Location.description,
+            Movement.item_id,
+            Item.name,
+            Item.description,
+            Item.sku,
+            Movement.batch_id,
+            Batch.lot_number,
+        )
+        .all()
+    )
+    rows = [
+        _build_count_sheet_row_from_stock_record(stock_record, line_by_item_id)
+        for stock_record in stock_rows
+        if Decimal(stock_record.system_qty or 0) != 0
+    ]
+    rows.sort(key=_count_sheet_sort_key)
+    return rows
+
+
 @bp.route("/physical-inventory/<int:snapshot_id>/count-sheets-by-aisle")
 @superuser_required
 def physical_inventory_count_sheets_by_aisle(snapshot_id: int):
     snapshot = _get_snapshot_or_404(snapshot_id)
     try:
-        aisle_index = _build_snapshot_aisle_index(snapshot_id)
+        all_rows = _get_ops_console_count_sheet_rows(snapshot_id)
+        aisle_index = _build_snapshot_aisle_index(all_rows)
     except SQLAlchemyError as exc:
         current_app.logger.exception(
             "Failed to load aisle index for snapshot %s: %s", snapshot_id, exc
@@ -1377,48 +1435,8 @@ def physical_inventory_count_sheets_by_aisle(snapshot_id: int):
     error_message = None
     if selected_aisle:
         try:
-            aisle_by_location_id = aisle_index["aisle_by_location_id"]
-            location_ids = [
-                location_id
-                for location_id, aisle in aisle_by_location_id.items()
-                if aisle == selected_aisle
-            ]
-            lines_query = (
-                PhysicalInventorySnapshotLine.query.options(
-                    joinedload(PhysicalInventorySnapshotLine.item).joinedload(
-                        Item.default_location
-                    )
-                )
-                .join(Item, Item.id == PhysicalInventorySnapshotLine.item_id)
-                .filter(PhysicalInventorySnapshotLine.snapshot_id == snapshot_id)
-            )
-            if selected_aisle == UNKNOWN_AISLE:
-                location_filters = []
-                if location_ids:
-                    location_filters.append(Item.default_location_id.in_(location_ids))
-                if aisle_index["has_unlocated"]:
-                    location_filters.append(Item.default_location_id.is_(None))
-                if location_filters:
-                    lines_query = lines_query.filter(or_(*location_filters))
-                else:
-                    lines_query = lines_query.filter(false())
-            else:
-                if location_ids:
-                    lines_query = lines_query.filter(Item.default_location_id.in_(location_ids))
-                else:
-                    lines_query = lines_query.filter(false())
-
-            lines = lines_query.all()
-            if any(line.item is None for line in lines):
-                current_app.logger.error(
-                    "Snapshot %s has snapshot lines missing items.", snapshot_id
-                )
-                error_message = (
-                    "Snapshot data is incomplete. Some items are missing."
-                )
-            else:
-                rows = [_count_sheet_row(line) for line in lines]
-                rows.sort(key=_count_sheet_sort_key)
+            rows = [row for row in all_rows if row.get("aisle") == selected_aisle]
+            rows.sort(key=_count_sheet_sort_key)
         except SQLAlchemyError as exc:
             current_app.logger.exception(
                 "Failed to load count sheet rows for snapshot %s: %s",
@@ -1442,7 +1460,8 @@ def physical_inventory_count_sheets_by_aisle(snapshot_id: int):
 def physical_inventory_export_count_sheets_by_aisle(snapshot_id: int):
     snapshot = _get_snapshot_or_404(snapshot_id)
     try:
-        aisle_index = _build_snapshot_aisle_index(snapshot_id)
+        all_rows = _get_ops_console_count_sheet_rows(snapshot_id)
+        aisle_index = _build_snapshot_aisle_index(all_rows)
     except SQLAlchemyError as exc:
         current_app.logger.exception(
             "Failed to load aisle index for snapshot %s: %s", snapshot_id, exc
@@ -1461,54 +1480,7 @@ def physical_inventory_export_count_sheets_by_aisle(snapshot_id: int):
                 aisle_key = _sanitize_aisle_filename(aisle)
                 csv_filename = f"count_sheet_snapshot_{snapshot_id}_aisle_{aisle_key}.csv"
                 csv_path = os.path.join(staging_dir, csv_filename)
-                aisle_by_location_id = aisle_index["aisle_by_location_id"]
-                location_ids = [
-                    location_id
-                    for location_id, aisle_value in aisle_by_location_id.items()
-                    if aisle_value == aisle
-                ]
-                lines_query = (
-                    PhysicalInventorySnapshotLine.query.options(
-                        joinedload(PhysicalInventorySnapshotLine.item).joinedload(
-                            Item.default_location
-                        )
-                    )
-                    .join(Item, Item.id == PhysicalInventorySnapshotLine.item_id)
-                    .filter(PhysicalInventorySnapshotLine.snapshot_id == snapshot_id)
-                )
-                if aisle == UNKNOWN_AISLE:
-                    location_filters = []
-                    if location_ids:
-                        location_filters.append(Item.default_location_id.in_(location_ids))
-                    if aisle_index["has_unlocated"]:
-                        location_filters.append(Item.default_location_id.is_(None))
-                    if location_filters:
-                        lines_query = lines_query.filter(or_(*location_filters))
-                    else:
-                        lines_query = lines_query.filter(false())
-                else:
-                    if location_ids:
-                        lines_query = lines_query.filter(Item.default_location_id.in_(location_ids))
-                    else:
-                        lines_query = lines_query.filter(false())
-
-                lines = lines_query.all()
-                if any(line.item is None for line in lines):
-                    current_app.logger.error(
-                        "Snapshot %s has snapshot lines missing items.", snapshot_id
-                    )
-                    flash(
-                        "Snapshot data is incomplete. Some items are missing.",
-                        "danger",
-                    )
-                    return redirect(
-                        url_for(
-                            "inventory.physical_inventory_snapshot",
-                            snapshot_id=snapshot_id,
-                        )
-                    )
-
-                rows = [_count_sheet_row(line) for line in lines]
+                rows = [row for row in all_rows if row.get("aisle") == aisle]
                 rows.sort(key=_count_sheet_sort_key)
                 with open(csv_path, "w", newline="", encoding="utf-8") as csv_file:
                     writer = csv.writer(csv_file)

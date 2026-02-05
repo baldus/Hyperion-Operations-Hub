@@ -4,7 +4,7 @@
 <p class="field-note">
   Upload ERP inventory totals to start a physical inventory snapshot. The file
   should contain Item names and total quantities (no locations). Supported
-  formats: .csv, .tsv, .xlsx.
+  formats: .csv, .tsv, .xlsx. ERP upload is optional for count-sheet generation.
 </p>
 <form method="POST" enctype="multipart/form-data">
   <label class="form-label">Upload ERP Totals File:</label>
@@ -13,5 +13,8 @@
     <button type="submit" class="btn btn-primary">Continue to Mapping</button>
     <a href="{{ url_for('inventory.physical_inventory_snapshots') }}" class="btn btn-secondary">View Snapshots</a>
   </div>
+  <hr>
+  <p class="field-note mb-2">No ERP totals? You can still create a snapshot and generate Ops Console-based count sheets.</p>
+  <button type="submit" name="step" value="create_without_erp" class="btn btn-outline-secondary" formnovalidate>Create Snapshot Without ERP Upload</button>
 </form>
 {% endblock %}

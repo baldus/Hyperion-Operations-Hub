@@ -29,6 +29,9 @@
     <p class="field-note">
       Created {{ snapshot.created_at.strftime('%Y-%m-%d %H:%M') }}{% if snapshot.source_filename %} from {{ snapshot.source_filename }}{% endif %}.
     </p>
+    {% if not snapshot.source_filename %}
+    <p class="field-note">No ERP totals uploaded — displaying Ops Console stock rows only.</p>
+    {% endif %}
   </div>
   <div class="no-print">
     <button type="button" class="btn btn-outline-primary" onclick="window.print()">Print this aisle</button>

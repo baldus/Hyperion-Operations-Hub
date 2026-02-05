@@ -2,6 +2,9 @@
 {% block content %}
 <h2>Physical Inventory Snapshot #{{ snapshot.id }}</h2>
 <p class="field-note">Created {{ snapshot.created_at.strftime('%Y-%m-%d %H:%M') }}{% if snapshot.source_filename %} from {{ snapshot.source_filename }}{% endif %}.</p>
+{% if not snapshot.source_filename %}
+<div class="alert alert-info">No ERP totals uploaded — count sheets are generated from Ops Console stock only.</div>
+{% endif %}
 <div class="mb-3">
   <a href="{{ url_for('inventory.physical_inventory_count_sheet', snapshot_id=snapshot.id) }}" class="btn btn-outline-primary">Location Count Sheet</a>
   <a href="{{ url_for('inventory.physical_inventory_count_sheets_by_aisle', snapshot_id=snapshot.id) }}" class="btn btn-outline-primary">Count Sheets (By Aisle)</a>

@@ -48,7 +48,7 @@ Hyperion is **not** the system of record for inventory totals. Physical inventor
 **Workflow**
 1. Upload ERP inventory totals (no locations).
 2. Explicitly map upload columns to Item DB fields for matching.
-3. Generate location-based count sheets.
+3. Generate location-based count sheets (driven by Ops Console stock; ERP upload optional).
 4. Enter physical counts.
 5. Review reconciliation summary (ERP totals vs counted totals).
 
@@ -56,6 +56,8 @@ Hyperion is **not** the system of record for inventory totals. Physical inventor
 - HTML (by location): `/inventory/physical-inventory/<snapshot_id>/count-sheet`
 - HTML (by aisle): `/inventory/physical-inventory/<snapshot_id>/count-sheets-by-aisle`
 - ZIP export (one CSV per aisle): `/inventory/physical-inventory/<snapshot_id>/export-count-sheets-by-aisle`
+
+ERP upload is optional for generating count sheets; count sheets are based on Ops Console stock, while ERP upload is used for reconciliation totals.
 
 **Aisle derivation modes (count sheets by aisle)**
 - `PHYS_INV_AISLE_MODE=row` (default): uses `Location.row` parsed from `Location.code` (e.g., `1-A-1` → `A`).
