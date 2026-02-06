@@ -9,7 +9,9 @@
         <th>Location</th>
         <th>Item Name</th>
         <th>Description</th>
+        <th>System Qty</th>
         <th>ERP Total Qty</th>
+        <th>Expected</th>
         <th>Counted Qty</th>
         <th>Notes</th>
       </tr>
@@ -19,8 +21,10 @@
       <tr>
         <td>{{ row.location_code }}</td>
         <td>{{ row.item_name }}</td>
-        <td>{{ row.item_description }}</td>
+        <td>{{ row.item_description if row.item_name else row.notes }}</td>
+        <td>{{ row.system_qty }}</td>
         <td>{{ row.erp_quantity if row.erp_quantity is not none else '' }}</td>
+        <td>{{ row.expected }}</td>
         <td></td>
         <td></td>
       </tr>

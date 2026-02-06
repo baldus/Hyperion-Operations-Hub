@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
-from sqlalchemy import String, Text
+from sqlalchemy import String, Text, func
 from sqlalchemy.orm import load_only
 
 from invapp.extensions import db
@@ -95,6 +95,20 @@ def _parse_quantity(value: object | None) -> Decimal:
 def _load_items_for_matching(fields: Iterable[str]) -> list[Item]:
     load_fields = [Item.id] + [getattr(Item, field) for field in fields]
     return Item.query.options(load_only(*load_fields)).all()
+
+
+def items_assigned_to_location(location_id: int) -> list[Item]:
+    """Return distinct items assigned to a location by any location reference field."""
+
+    return (
+        Item.query.filter(
+            (Item.default_location_id == location_id)
+            | (Item.secondary_location_id == location_id)
+            | (Item.point_of_use_location_id == location_id)
+        )
+        .order_by(func.lower(Item.name), Item.id)
+        .all()
+    )
 
 
 def match_upload_rows(

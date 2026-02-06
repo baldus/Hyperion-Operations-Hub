@@ -30,7 +30,7 @@
       Created {{ snapshot.created_at.strftime('%Y-%m-%d %H:%M') }}{% if snapshot.source_filename %} from {{ snapshot.source_filename }}{% endif %}.
     </p>
     {% if not snapshot.source_filename %}
-    <p class="field-note">No ERP totals uploaded — displaying Ops Console stock rows only.</p>
+    <p class="field-note">No ERP totals uploaded — count sheets still include all locations and assigned items from Ops Console.</p>
     {% endif %}
   </div>
   <div class="no-print">
@@ -73,7 +73,9 @@
         <th>Item Name</th>
         <th>Item Description</th>
         <th>SKU</th>
+        <th>System Qty</th>
         <th>ERP Total Qty</th>
+        <th>Expected</th>
         <th>Counted Qty</th>
         <th>Notes</th>
       </tr>
@@ -81,7 +83,7 @@
     {% for location_group in rows|groupby('location_code') %}
     <tbody class="location-section">
       <tr class="table-secondary">
-        <td colspan="9">
+        <td colspan="11">
           <strong>Location {{ location_group.grouper }}</strong>
           {% if location_group.list[0].location_description %}
           — {{ location_group.list[0].location_description }}
@@ -94,9 +96,11 @@
         <td>{{ row.location_code }}</td>
         <td>{{ row.location_description }}</td>
         <td>{{ row.item_name }}</td>
-        <td>{{ row.item_description }}</td>
+        <td>{{ row.item_description if row.item_name else row.notes }}</td>
         <td>{{ row.sku }}</td>
-        <td>{{ row.erp_quantity }}</td>
+        <td>{{ row.system_qty }}</td>
+        <td>{{ row.erp_quantity if row.erp_quantity is not none else '' }}</td>
+        <td>{{ row.expected }}</td>
         <td>{{ row.counted_quantity if row.counted_quantity is not none else '' }}</td>
         <td></td>
       </tr>
