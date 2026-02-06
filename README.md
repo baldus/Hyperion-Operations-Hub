@@ -60,12 +60,12 @@ Hyperion is **not** the system of record for inventory totals. Physical inventor
 ERP upload is optional for generating count sheets; count sheets are based on Ops Console stock, while ERP upload is used for reconciliation totals.
 
 **Aisle derivation modes (count sheets by aisle)**
-- `PHYS_INV_AISLE_MODE=row` (default): uses `Location.row` parsed from `Location.code` (e.g., `1-A-1` → `A`).
+- `PHYS_INV_AISLE_MODE=row` (default): derives aisle from `Location.code` by `split("-")[1]`, then normalizes to uppercase (e.g., `1-A-1` → `A`, `1-v-1` → `V`, `1-ctrl-1` → `CTRL`).
 - `PHYS_INV_AISLE_MODE=level`: uses `Location.level` parsed from `Location.code` (e.g., `1-A-1` → `1`).
 - `PHYS_INV_AISLE_MODE=prefix`: uses `PHYS_INV_AISLE_REGEX` to extract an aisle key from `Location.code`.
   - First regex match wins. If your regex defines `(?P<aisle>...)`, that named group is used.
 
-**Note:** Count sheets by aisle are export/view-only and do not require or introduce any migrations.
+**Note:** Count sheets by aisle are export/view-only and do not require or introduce any migrations. Aisle keys are normalized consistently (uppercase) across the HTML selector and ZIP export grouping.
 
 **Upload formats**
 - `.csv`
@@ -805,8 +805,9 @@ Use this when adjusting how the Inventory **Locations** page parses codes, filte
 - **Computed model properties:** `Location.level`, `Location.row`, `Location.bay` in [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
 
 **Parsing rules (Level-Row-Bay)**
-- Expected format: `Level-Row-Bay` (e.g., `1-A-1`, `01-A-12`, `2-B-03`).
-- Whitespace is trimmed and row is uppercased.
+- Expected format: `Level-Row-Bay` (e.g., `1-A-1`, `01-A-12`, `2-B-03`, `1-CTRL-1`, `1-SLCTR-1`).
+- Aisle/Row is derived from `Location.code` by splitting on `"-"` and taking token index `1` (`LEVEL-ROW-LOCATION`).
+- The derived aisle token is trimmed and normalized to uppercase for canonical filtering/grouping/display.
 - If the code does **not** match the pattern, `level`, `row`, and `bay` are `None`.
 - Examples:
   - `1-A-1` ➜ level `1`, row `A`, bay `1`
@@ -815,7 +816,7 @@ Use this when adjusting how the Inventory **Locations** page parses codes, filte
   - `A-1` or `1A1` ➜ all `None`
 
 **Query params and behavior**
-- `row`: exact row match (`A`, `B`, etc.). Values are normalized to uppercase.
+- `row`: exact row match against normalized row keys (case-insensitive input, canonical uppercase behavior).
 - `q`: description filter (case-insensitive substring match).
 - `sort`: `code` (default), `row`, `description`, `level`, or `bay`.
 - `dir`: `asc` or `desc`.
@@ -833,7 +834,7 @@ Examples:
 - **Description sort:** Case-insensitive, with code order as the secondary tiebreaker.
 
 **Filters UI**
-- Row dropdown is populated from distinct parsed rows in current `Location.code` values.
+- Row dropdown is populated from all distinct aisle tokens found after the first hyphen in `Location.code`, normalized to uppercase.
 - Description filter is a text input that updates the `q` query parameter.
 - Clear Filters removes row/description/sort params.
 

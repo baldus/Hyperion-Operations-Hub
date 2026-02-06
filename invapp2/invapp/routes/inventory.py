@@ -88,6 +88,7 @@ from invapp.utils.csv_schema import (
     resolve_import_mappings,
 )
 from invapp.utils.tabular_import import TabularImportError, parse_tabular_upload, preview_csv_text
+from invapp.utils.location_code import aisle_from_location_code, normalize_aisle_key
 from invapp.utils.location_parser import parse_location_code
 from invapp.utils.physical_inventory_aisle import (
     UNKNOWN_AISLE,
@@ -3058,8 +3059,7 @@ def list_locations():
     page = request.args.get("page", 1, type=int)
     size = request.args.get("size", 20, type=int)
     search = (request.args.get("search") or "").strip()
-    row_filter_raw = (request.args.get("row") or "").strip()
-    row_filter = row_filter_raw.upper() or None
+    row_filter = normalize_aisle_key(request.args.get("row"))
     description_query = (request.args.get("q") or "").strip()
     sort_param = (request.args.get("sort") or "code").strip().lower()
     sort_dir = (request.args.get("dir") or "asc").strip().lower()
@@ -3069,15 +3069,6 @@ def list_locations():
         sort_dir = "asc"
     like_pattern = f"%{search}%" if search else None
     description_pattern = f"%{description_query}%" if description_query else None
-
-    available_rows_query = Location.query.with_entities(Location.code).all()
-    available_rows = sorted(
-        {
-            parsed.row
-            for (code,) in available_rows_query
-            if (parsed := parse_location_code(code)).row
-        }
-    )
 
     locations_query = Location.query
     if like_pattern:
@@ -3107,6 +3098,13 @@ def list_locations():
         )
 
     locations = locations_query.all()
+    available_rows = sorted(
+        {
+            aisle
+            for location in locations
+            if (aisle := aisle_from_location_code(location.code))
+        }
+    )
     parsed_by_location = {
         location.id: parse_location_code(location.code) for location in locations
     }
@@ -3115,7 +3113,7 @@ def list_locations():
         locations = [
             location
             for location in locations
-            if parsed_by_location.get(location.id).row == row_filter
+            if aisle_from_location_code(location.code) == row_filter
         ]
 
     def natural_code_key(location: Location) -> tuple:
@@ -3126,7 +3124,7 @@ def list_locations():
 
     def row_sort_key(location: Location) -> tuple:
         parsed = parsed_by_location.get(location.id)
-        row = parsed.row if parsed else None
+        row = aisle_from_location_code(location.code)
         level = parsed.level if parsed else None
         bay = parsed.bay if parsed else None
         return (
@@ -3149,7 +3147,7 @@ def list_locations():
         return (
             level is None,
             level or 0,
-            parsed.row if parsed else "",
+            aisle_from_location_code(location.code) or "",
             parsed.bay if parsed else 0,
             (location.code or "").lower(),
         )
@@ -3160,7 +3158,7 @@ def list_locations():
         return (
             bay is None,
             bay or 0,
-            parsed.row if parsed else "",
+            aisle_from_location_code(location.code) or "",
             parsed.level if parsed else 0,
             (location.code or "").lower(),
         )
@@ -3253,7 +3251,7 @@ def list_locations():
         description_query=description_query,
         sort=sort_param,
         sort_dir=sort_dir,
-        available_rows=available_rows,
+        row_options=available_rows,
         total_locations=total_locations,
         query_params={
             "search": search or None,
