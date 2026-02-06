@@ -4,14 +4,15 @@ import re
 from types import SimpleNamespace
 from typing import Iterable
 
-from invapp.utils.location_parser import normalize_row_key, parse_location_code
+from invapp.utils.location_code import aisle_from_location_code, normalize_aisle_key
+from invapp.utils.location_parser import parse_location_code
 
 
 UNKNOWN_AISLE = "UNKNOWN"
 
 
 def _normalize_aisle(value: object | None) -> str:
-    row_key = normalize_row_key(None if value is None else str(value))
+    row_key = normalize_aisle_key(None if value is None else str(value))
     if row_key is None:
         return UNKNOWN_AISLE
     return row_key
@@ -49,10 +50,7 @@ def get_location_aisle(location, app_config) -> str:
             parsed = parse_location_code(code)
             value = parsed.level
     else:
-        value = getattr(location, "row", None)
-        if value is None and code:
-            parsed = parse_location_code(code)
-            value = parsed.row if parsed else None
+        value = aisle_from_location_code(code)
 
     return _normalize_aisle(value)
 

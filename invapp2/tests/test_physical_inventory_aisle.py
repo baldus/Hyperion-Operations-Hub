@@ -283,3 +283,83 @@ def test_count_sheets_by_aisle_supports_multiletter_and_normalized_rows(client, 
         for aisle in ["CTRL", "SLCTR", "V"]:
             expected_name = f"count_sheet_snapshot_{snapshot_id}_aisle_{aisle}.csv"
             assert expected_name in filenames
+
+
+def test_count_sheets_by_aisle_includes_all_required_aisle_groups(client, app):
+    required_rows = [
+        "A", "AL", "B", "C", "Controllers", "COP", "CTRL", "D", "DF", "E", "F", "g",
+        "Gates", "H", "Hinges", "I", "J", "K", "L", "LOCK", "Locks", "M", "n", "O",
+        "OPER", "Operators", "P", "Packaging", "Q", "S", "Selector", "SHF", "SLCTR", "v",
+        "VA", "VB", "VF", "VO", "W", "WO", "X", "Y", "Z",
+    ]
+    expected = {
+        "A", "AL", "B", "C", "CONTROLLERS", "COP", "CTRL", "D", "DF", "E", "F", "G",
+        "GATES", "H", "HINGES", "I", "J", "K", "L", "LOCK", "LOCKS", "M", "N", "O",
+        "OPER", "OPERATORS", "P", "PACKAGING", "Q", "S", "SELECTOR", "SHF", "SLCTR", "V",
+        "VA", "VB", "VF", "VO", "W", "WO", "X", "Y", "Z",
+    }
+
+    with app.app_context():
+        snapshot = PhysicalInventorySnapshot(
+            source_filename="erp.csv",
+            primary_upload_column="Item",
+            primary_item_field="name",
+            secondary_upload_column=None,
+            secondary_item_field=None,
+            quantity_column="Qty",
+            normalization_options={},
+            duplicate_strategy="sum",
+            total_rows=len(required_rows),
+            matched_rows=len(required_rows),
+            unmatched_rows=0,
+            ambiguous_rows=0,
+        )
+        db.session.add(snapshot)
+        db.session.flush()
+
+        for idx, row_token in enumerate(required_rows, start=1):
+            location = Location(code=f"1-{row_token}-001", description=f"Row {row_token}")
+            item = Item(sku=f"SKU-{idx:03d}", name=f"Widget {idx}", description="Widget")
+            db.session.add_all([location, item])
+            db.session.flush()
+            db.session.add(
+                Movement(
+                    item_id=item.id,
+                    location_id=location.id,
+                    quantity=Decimal("1"),
+                    movement_type="RECEIPT",
+                )
+            )
+            db.session.add(
+                PhysicalInventorySnapshotLine(
+                    snapshot_id=snapshot.id,
+                    item_id=item.id,
+                    erp_quantity=Decimal("1"),
+                    counted_quantity=None,
+                )
+            )
+
+        db.session.commit()
+        snapshot_id = snapshot.id
+
+    response = client.get(f"/inventory/physical-inventory/{snapshot_id}/count-sheets-by-aisle")
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+
+    found = {
+        aisle
+        for aisle in expected
+        if f'<option value="{aisle}"' in page
+    }
+    assert found == expected
+
+    zip_response = client.get(
+        f"/inventory/physical-inventory/{snapshot_id}/export-count-sheets-by-aisle"
+    )
+    assert zip_response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(zip_response.data)) as archive:
+        filenames = set(archive.namelist())
+        expected_names = {
+            f"count_sheet_snapshot_{snapshot_id}_aisle_{aisle}.csv" for aisle in expected
+        }
+        assert expected_names.issubset(filenames)

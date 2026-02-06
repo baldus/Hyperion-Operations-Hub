@@ -60,7 +60,7 @@ Hyperion is **not** the system of record for inventory totals. Physical inventor
 ERP upload is optional for generating count sheets; count sheets are based on Ops Console stock, while ERP upload is used for reconciliation totals.
 
 **Aisle derivation modes (count sheets by aisle)**
-- `PHYS_INV_AISLE_MODE=row` (default): uses normalized `Location.row` parsed from `Location.code` (e.g., `1-A-1` → `A`, `1-v-1` → `V`, `1-ctrl-1` → `CTRL`).
+- `PHYS_INV_AISLE_MODE=row` (default): derives aisle from `Location.code` by `split("-")[1]`, then normalizes to uppercase (e.g., `1-A-1` → `A`, `1-v-1` → `V`, `1-ctrl-1` → `CTRL`).
 - `PHYS_INV_AISLE_MODE=level`: uses `Location.level` parsed from `Location.code` (e.g., `1-A-1` → `1`).
 - `PHYS_INV_AISLE_MODE=prefix`: uses `PHYS_INV_AISLE_REGEX` to extract an aisle key from `Location.code`.
   - First regex match wins. If your regex defines `(?P<aisle>...)`, that named group is used.
@@ -806,8 +806,8 @@ Use this when adjusting how the Inventory **Locations** page parses codes, filte
 
 **Parsing rules (Level-Row-Bay)**
 - Expected format: `Level-Row-Bay` (e.g., `1-A-1`, `01-A-12`, `2-B-03`, `1-CTRL-1`, `1-SLCTR-1`).
-- Row parsing supports multi-letter alphabetic row tokens (`[A-Za-z]+`) and normalizes to uppercase.
-- Whitespace is trimmed and row keys are normalized to canonical uppercase for filtering/grouping.
+- Aisle/Row is derived from `Location.code` by splitting on `"-"` and taking token index `1` (`LEVEL-ROW-LOCATION`).
+- The derived aisle token is trimmed and normalized to uppercase for canonical filtering/grouping/display.
 - If the code does **not** match the pattern, `level`, `row`, and `bay` are `None`.
 - Examples:
   - `1-A-1` ➜ level `1`, row `A`, bay `1`
@@ -834,7 +834,7 @@ Examples:
 - **Description sort:** Case-insensitive, with code order as the secondary tiebreaker.
 
 **Filters UI**
-- Row dropdown is populated from all distinct parsed rows in current `Location.code` values after normalization (uppercase).
+- Row dropdown is populated from all distinct aisle tokens found after the first hyphen in `Location.code`, normalized to uppercase.
 - Description filter is a text input that updates the `q` query parameter.
 - Clear Filters removes row/description/sort params.
 

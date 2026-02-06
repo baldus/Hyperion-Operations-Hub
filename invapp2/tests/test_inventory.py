@@ -652,6 +652,42 @@ def test_locations_row_dropdown_includes_normalized_multiletter_rows(client, app
     assert "1-v-1" in filtered_page
     assert "1-VA-1" not in filtered_page
 
+
+
+def test_locations_row_dropdown_includes_all_required_aisles_from_code(client, app):
+    required_rows = [
+        "A", "AL", "B", "C", "Controllers", "COP", "CTRL", "D", "DF", "E", "F", "g",
+        "Gates", "H", "Hinges", "I", "J", "K", "L", "LOCK", "Locks", "M", "n", "O",
+        "OPER", "Operators", "P", "Packaging", "Q", "S", "Selector", "SHF", "SLCTR", "v",
+        "VA", "VB", "VF", "VO", "W", "WO", "X", "Y", "Z",
+    ]
+    expected = {
+        "A", "AL", "B", "C", "CONTROLLERS", "COP", "CTRL", "D", "DF", "E", "F", "G",
+        "GATES", "H", "HINGES", "I", "J", "K", "L", "LOCK", "LOCKS", "M", "N", "O",
+        "OPER", "OPERATORS", "P", "PACKAGING", "Q", "S", "SELECTOR", "SHF", "SLCTR", "V",
+        "VA", "VB", "VF", "VO", "W", "WO", "X", "Y", "Z",
+    }
+
+    with app.app_context():
+        db.session.add_all(
+            [
+                Location(code=f"1-{row_token}-001", description=f"Row {row_token}")
+                for row_token in required_rows
+            ]
+        )
+        db.session.commit()
+
+    response = client.get("/inventory/locations?size=200")
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+
+    found = {
+        row
+        for row in expected
+        if f'<option value="{row}"' in page
+    }
+    assert found == expected
+
 def test_locations_description_filter_case_insensitive(client, app):
     with app.app_context():
         locations = [

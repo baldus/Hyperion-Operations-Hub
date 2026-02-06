@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import re
 from typing import Optional
 
-
-_LOCATION_CODE_PATTERN = re.compile(r"^\s*(\d+)\s*-\s*([A-Za-z]+)\s*-\s*(\d+)\s*$")
+from invapp.utils.location_code import aisle_from_location_code
 
 
 @dataclass(frozen=True)
@@ -16,27 +14,28 @@ class ParsedLocation:
 
 
 def normalize_row_key(value: str | None) -> str | None:
-    if value is None:
-        return None
-    normalized = " ".join(str(value).split()).strip()
-    if not normalized:
-        return None
-    return normalized.upper()
+    # Backward-compatible alias for callers still importing this helper.
+    from invapp.utils.location_code import normalize_aisle_key
+
+    return normalize_aisle_key(value)
 
 
 def parse_location_code(code: str | None) -> ParsedLocation:
     if not code:
         return ParsedLocation(level=None, row=None, bay=None)
 
-    match = _LOCATION_CODE_PATTERN.match(code)
-    if not match:
+    parts = str(code).strip().split("-")
+    if len(parts) < 3:
         return ParsedLocation(level=None, row=None, bay=None)
 
-    level_raw, row_raw, bay_raw = match.groups()
+    level_raw = parts[0].strip()
+    bay_raw = parts[2].strip()
+    row = aisle_from_location_code(code)
+
     try:
         level = int(level_raw)
         bay = int(bay_raw)
     except ValueError:
         return ParsedLocation(level=None, row=None, bay=None)
 
-    return ParsedLocation(level=level, row=normalize_row_key(row_raw), bay=bay)
+    return ParsedLocation(level=level, row=row, bay=bay)
