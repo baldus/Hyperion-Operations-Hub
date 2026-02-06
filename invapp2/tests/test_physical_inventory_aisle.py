@@ -212,3 +212,90 @@ def test_count_sheets_include_ops_stock_when_erp_unmatched(client, app):
     page = response.get_data(as_text=True)
     assert "Ops Only Widget" in page
     assert "1-A-1" in page
+
+
+def test_count_sheets_include_assigned_zero_items_and_all_locations(client, app):
+    with app.app_context():
+        loc_a = Location(code="1-A-1", description="Rack A1")
+        loc_ctrl = Location(code="1-CTRL-1", description="Control")
+
+        item_stocked = Item(sku="SKU-STOCK", name="Stocked Item", description="Has stock")
+        item_assigned_zero = Item(
+            sku="SKU-ZERO",
+            name="Assigned Zero Item",
+            description="Assigned to A",
+            default_location=loc_a,
+        )
+        item_assigned_other = Item(
+            sku="SKU-CTRL",
+            name="Control Assigned Item",
+            description="Assigned to CTRL",
+            default_location=loc_ctrl,
+        )
+
+        snapshot = PhysicalInventorySnapshot(
+            source_filename=None,
+            primary_upload_column="(none)",
+            primary_item_field="name",
+            secondary_upload_column=None,
+            secondary_item_field=None,
+            quantity_column="(none)",
+            normalization_options={},
+            duplicate_strategy="sum",
+            total_rows=0,
+            matched_rows=0,
+            unmatched_rows=0,
+            ambiguous_rows=0,
+        )
+
+        db.session.add_all([loc_a, loc_ctrl, item_stocked, item_assigned_zero, item_assigned_other, snapshot])
+        db.session.flush()
+
+        db.session.add(
+            Movement(
+                item_id=item_stocked.id,
+                location_id=loc_a.id,
+                quantity=Decimal("4"),
+                movement_type="RECEIPT",
+            )
+        )
+        db.session.commit()
+        snapshot_id = snapshot.id
+
+    by_location = client.get(f"/inventory/physical-inventory/{snapshot_id}/count-sheet")
+    assert by_location.status_code == 200
+    by_location_page = by_location.get_data(as_text=True)
+    assert "Stocked Item" in by_location_page
+    assert "Assigned Zero Item" in by_location_page
+    assert ">0<" in by_location_page
+
+    by_aisle = client.get(f"/inventory/physical-inventory/{snapshot_id}/count-sheets-by-aisle")
+    assert by_aisle.status_code == 200
+    by_aisle_page = by_aisle.get_data(as_text=True)
+    assert '<option value="A" selected>' in by_aisle_page
+    assert '<option value="CTRL"' in by_aisle_page
+
+    ctrl_aisle = client.get(
+        f"/inventory/physical-inventory/{snapshot_id}/count-sheets-by-aisle?aisle=CTRL"
+    )
+    ctrl_page = ctrl_aisle.get_data(as_text=True)
+    assert "Control Assigned Item" in ctrl_page
+
+    zip_response = client.get(
+        f"/inventory/physical-inventory/{snapshot_id}/export-count-sheets-by-aisle"
+    )
+    assert zip_response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(zip_response.data)) as archive:
+        filenames = archive.namelist()
+        assert f"count_sheet_snapshot_{snapshot_id}_aisle_A.csv" in filenames
+        assert f"count_sheet_snapshot_{snapshot_id}_aisle_CTRL.csv" in filenames
+
+        with archive.open(f"count_sheet_snapshot_{snapshot_id}_aisle_A.csv") as csv_file:
+            csv_text = csv_file.read().decode("utf-8")
+            assert "Assigned Zero Item" in csv_text
+            assert ",0," in csv_text
+
+        with archive.open(f"count_sheet_snapshot_{snapshot_id}_aisle_CTRL.csv") as csv_file:
+            csv_text = csv_file.read().decode("utf-8")
+            assert "Control Assigned Item" in csv_text
+            assert ",0," in csv_text

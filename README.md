@@ -57,7 +57,7 @@ Hyperion is **not** the system of record for inventory totals. Physical inventor
 - HTML (by aisle): `/inventory/physical-inventory/<snapshot_id>/count-sheets-by-aisle`
 - ZIP export (one CSV per aisle): `/inventory/physical-inventory/<snapshot_id>/export-count-sheets-by-aisle`
 
-ERP upload is optional for generating count sheets; count sheets are based on Ops Console stock, while ERP upload is used for reconciliation totals.
+ERP upload is optional for generating count sheets and does not affect sheet completeness. Count sheets are always driven by Ops Console data and include every location, every stocked item at that location, and every item assigned to that location even when no stock row exists (shown with qty 0). ERP upload is only used for reconciliation totals.
 
 **Aisle derivation modes (count sheets by aisle)**
 - `PHYS_INV_AISLE_MODE=row` (default): uses `Location.row` parsed from `Location.code` (e.g., `1-A-1` → `A`).

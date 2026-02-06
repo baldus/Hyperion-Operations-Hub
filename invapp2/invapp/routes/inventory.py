@@ -68,6 +68,7 @@ from invapp.services.physical_inventory import (
     get_item_field_samples,
     get_item_text_fields,
     match_upload_rows,
+    items_assigned_to_location,
 )
 from invapp.services.stock_transfer import (
     MoveLineRequest,
@@ -93,7 +94,6 @@ from invapp.utils.physical_inventory_aisle import (
     UNKNOWN_AISLE,
     get_location_aisle,
     location_sort_key,
-    make_location_stub,
     sort_aisle_keys,
 )
 from werkzeug.utils import secure_filename
@@ -1289,7 +1289,9 @@ COUNT_SHEET_COLUMNS = [
     ("item_name", "Item Name"),
     ("item_description", "Item Description"),
     ("sku", "SKU"),
+    ("system_qty", "System Qty"),
     ("erp_quantity", "ERP Total Qty"),
+    ("expected", "Expected"),
     ("counted_quantity", "Counted Qty"),
     ("notes", "Notes"),
 ]
@@ -1307,42 +1309,40 @@ def _build_snapshot_aisle_index(rows: list[dict[str, object]]):
     return {"aisles": sort_aisle_keys(aisles)}
 
 
-def _build_count_sheet_row_from_stock_record(
-    record, line_by_item_id: dict[int, PhysicalInventorySnapshotLine]
+def _build_count_sheet_row_for_item(
+    *,
+    location: Location,
+    item: Item | None,
+    line_by_item_id: dict[int, PhysicalInventorySnapshotLine],
+    system_qty: Decimal,
+    lot_number: str | None = None,
+    assigned_zero: bool = False,
+    location_empty: bool = False,
 ) -> dict[str, object]:
-    (
-        _location_id,
-        location_code,
-        location_description,
-        item_id,
-        item_name,
-        item_description,
-        sku,
-        _batch_id,
-        lot_number,
-        system_qty,
-    ) = record
-    line = line_by_item_id.get(item_id)
-    location = make_location_stub(location_code) if location_code else None
+    line = line_by_item_id.get(item.id) if item else None
     aisle = get_location_aisle(location, current_app.config)
-    rendered_description = item_description or ""
+    rendered_description = item.description if item and item.description else ""
     if lot_number:
         rendered_description = (
             f"{rendered_description} (Lot: {lot_number})"
             if rendered_description
             else f"Lot: {lot_number}"
         )
+
     return {
         "aisle": aisle,
-        "location_code": location_code or "UNLOCATED",
-        "location_description": location_description or "",
-        "item_name": item_name,
+        "location_code": location.code or "UNLOCATED",
+        "location_description": location.description or "",
+        "item_name": item.name if item else "",
         "item_description": rendered_description,
-        "sku": sku or "",
+        "sku": (item.sku or "") if item else "",
         "erp_quantity": line.erp_quantity if line else None,
         "counted_quantity": line.counted_quantity if line else None,
         "system_qty": Decimal(system_qty or 0),
-        "notes": "",
+        "assigned_zero": assigned_zero,
+        "location_empty": location_empty,
+        "expected": "Assigned" if assigned_zero else "",
+        "notes": "No items currently associated" if location_empty else "",
     }
 
 
@@ -1364,41 +1364,77 @@ def _get_ops_console_count_sheet_rows(snapshot_id: int) -> list[dict[str, object
         line.item_id: line
         for line in PhysicalInventorySnapshotLine.query.filter_by(snapshot_id=snapshot_id).all()
     }
+
+    all_locations = Location.query.order_by(Location.code, Location.id).all()
     stock_rows = (
         db.session.query(
             Movement.location_id,
-            Location.code,
-            Location.description,
             Movement.item_id,
-            Item.name,
-            Item.description,
-            Item.sku,
             Movement.batch_id,
             Batch.lot_number,
             func.coalesce(func.sum(Movement.quantity), 0).label("system_qty"),
         )
         .join(Item, Item.id == Movement.item_id)
-        .join(Location, Location.id == Movement.location_id)
         .outerjoin(Batch, Batch.id == Movement.batch_id)
         .filter(or_(Movement.batch_id.is_(None), Batch.removed_at.is_(None)))
         .group_by(
             Movement.location_id,
-            Location.code,
-            Location.description,
             Movement.item_id,
-            Item.name,
-            Item.description,
-            Item.sku,
             Movement.batch_id,
             Batch.lot_number,
         )
         .all()
     )
-    rows = [
-        _build_count_sheet_row_from_stock_record(stock_record, line_by_item_id)
-        for stock_record in stock_rows
-        if Decimal(stock_record.system_qty or 0) != 0
-    ]
+
+    item_by_id = {item.id: item for item in Item.query.all()}
+    stock_by_location: dict[int, list] = defaultdict(list)
+    for stock_row in stock_rows:
+        stock_by_location[stock_row.location_id].append(stock_row)
+
+    rows: list[dict[str, object]] = []
+    for location in all_locations:
+        location_stock_rows = stock_by_location.get(location.id, [])
+        stock_item_ids = {row.item_id for row in location_stock_rows}
+
+        for stock_row in location_stock_rows:
+            item = item_by_id.get(stock_row.item_id)
+            if item is None:
+                continue
+            rows.append(
+                _build_count_sheet_row_for_item(
+                    location=location,
+                    item=item,
+                    line_by_item_id=line_by_item_id,
+                    system_qty=Decimal(stock_row.system_qty or 0),
+                    lot_number=stock_row.lot_number,
+                )
+            )
+
+        assigned_items = items_assigned_to_location(location.id)
+        assigned_only_items = [item for item in assigned_items if item.id not in stock_item_ids]
+
+        for item in assigned_only_items:
+            rows.append(
+                _build_count_sheet_row_for_item(
+                    location=location,
+                    item=item,
+                    line_by_item_id=line_by_item_id,
+                    system_qty=Decimal(0),
+                    assigned_zero=True,
+                )
+            )
+
+        if not location_stock_rows and not assigned_items:
+            rows.append(
+                _build_count_sheet_row_for_item(
+                    location=location,
+                    item=None,
+                    line_by_item_id=line_by_item_id,
+                    system_qty=Decimal(0),
+                    location_empty=True,
+                )
+            )
+
     rows.sort(key=_count_sheet_sort_key)
     return rows
 
