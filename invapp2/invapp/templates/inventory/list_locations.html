@@ -31,7 +31,7 @@
   <label for="row-filter" class="field-label">Row</label>
   <select id="row-filter" name="row">
     <option value="">All Rows</option>
-    {% for row in available_rows %}
+    {% for row in row_options %}
       <option value="{{ row }}" {% if row == row_filter %}selected{% endif %}>{{ row }}</option>
     {% endfor %}
   </select>

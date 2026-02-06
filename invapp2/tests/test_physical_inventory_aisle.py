@@ -20,14 +20,21 @@ from invapp.models import (
 from invapp.utils.physical_inventory_aisle import UNKNOWN_AISLE, get_location_aisle
 
 
+REQUIRED_AISLES_INPUT = [
+    "A", "AL", "B", "C", "Controllers", "COP", "CTRL", "D", "DF", "E", "F", "g",
+    "Gates", "H", "Hinges", "I", "J", "K", "L", "LOCK", "Locks", "M", "n", "O",
+    "OPER", "Operators", "P", "Packaging", "Q", "S", "Selector", "SHF", "SLCTR", "v",
+    "VA", "VB", "VF", "VO", "W", "WO", "X", "Y", "Z",
+]
+REQUIRED_AISLES_NORMALIZED = sorted({aisle.upper() for aisle in REQUIRED_AISLES_INPUT})
+
+
 @pytest.fixture
 def app():
     app = create_app(
         {
             "TESTING": True,
             "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
-            "PHYS_INV_AISLE_MODE": "row",
-            "PHYS_INV_AISLE_REGEX": r"(?P<aisle>\d+)",
         }
     )
     with app.app_context():
@@ -87,33 +94,51 @@ def _create_snapshot_with_stock(*, include_line: bool = True, source_filename: s
     return snapshot.id
 
 
-def test_get_location_aisle_row_mode():
-    location = Location(code="1-A-1")
-    aisle = get_location_aisle(location, {"PHYS_INV_AISLE_MODE": "row"})
-    assert aisle == "A"
-
-
-def test_get_location_aisle_level_mode():
-    location = Location(code="1-A-1")
-    aisle = get_location_aisle(location, {"PHYS_INV_AISLE_MODE": "level"})
-    assert aisle == "1"
-
-
-def test_get_location_aisle_prefix_mode():
-    location = Location(code="12-XX-9")
-    aisle = get_location_aisle(
-        location,
-        {
-            "PHYS_INV_AISLE_MODE": "prefix",
-            "PHYS_INV_AISLE_REGEX": r"^(?P<aisle>\d+)",
-        },
+def _create_snapshot_for_required_aisles() -> int:
+    snapshot = PhysicalInventorySnapshot(
+        source_filename=None,
+        primary_upload_column="(none)",
+        primary_item_field="name",
+        secondary_upload_column=None,
+        secondary_item_field=None,
+        quantity_column="(none)",
+        normalization_options={},
+        duplicate_strategy="sum",
+        total_rows=0,
+        matched_rows=0,
+        unmatched_rows=0,
+        ambiguous_rows=0,
     )
-    assert aisle == "12"
+    db.session.add(snapshot)
+    db.session.flush()
+
+    for index, aisle in enumerate(REQUIRED_AISLES_INPUT, start=1):
+        location = Location(code=f"1-{aisle}-001", description=f"Aisle {aisle}")
+        item = Item(sku=f"SKU-{index:03d}", name=f"Widget {index}", description=f"Desc {index}")
+        db.session.add_all([location, item])
+        db.session.flush()
+        db.session.add(
+            Movement(
+                item_id=item.id,
+                location_id=location.id,
+                quantity=Decimal("1"),
+                movement_type="RECEIPT",
+            )
+        )
+
+    db.session.commit()
+    return snapshot.id
+
+
+def test_get_location_aisle_from_code_token_after_first_hyphen():
+    location = Location(code="1-ctrl-1")
+    aisle = get_location_aisle(location, {})
+    assert aisle == "CTRL"
 
 
 def test_get_location_aisle_invalid_code():
     location = Location(code="BAD")
-    aisle = get_location_aisle(location, {"PHYS_INV_AISLE_MODE": "row"})
+    aisle = get_location_aisle(location, {})
     assert aisle == UNKNOWN_AISLE
 
 
@@ -212,3 +237,28 @@ def test_count_sheets_include_ops_stock_when_erp_unmatched(client, app):
     page = response.get_data(as_text=True)
     assert "Ops Only Widget" in page
     assert "1-A-1" in page
+
+
+def test_required_aisles_appear_in_count_sheet_groupings(client, app):
+    with app.app_context():
+        snapshot_id = _create_snapshot_for_required_aisles()
+
+    html_response = client.get(
+        f"/inventory/physical-inventory/{snapshot_id}/count-sheets-by-aisle"
+    )
+    assert html_response.status_code == 200
+    html = html_response.get_data(as_text=True)
+
+    for aisle in REQUIRED_AISLES_NORMALIZED:
+        assert f'<option value="{aisle}"' in html
+
+    zip_response = client.get(
+        f"/inventory/physical-inventory/{snapshot_id}/export-count-sheets-by-aisle"
+    )
+    assert zip_response.status_code == 200
+
+    with zipfile.ZipFile(io.BytesIO(zip_response.data)) as archive:
+        filenames = set(archive.namelist())
+        for aisle in REQUIRED_AISLES_NORMALIZED:
+            expected_name = f"count_sheet_snapshot_{snapshot_id}_aisle_{aisle}.csv"
+            assert expected_name in filenames

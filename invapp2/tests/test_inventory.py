@@ -666,6 +666,32 @@ def test_locations_sorting_by_row_and_description(client, app):
     assert description_order == sorted(description_order)
 
 
+def test_locations_row_dropdown_includes_required_aisles_from_code(client, app):
+    required_aisles_input = [
+        "A", "AL", "B", "C", "Controllers", "COP", "CTRL", "D", "DF", "E", "F", "g",
+        "Gates", "H", "Hinges", "I", "J", "K", "L", "LOCK", "Locks", "M", "n", "O",
+        "OPER", "Operators", "P", "Packaging", "Q", "S", "Selector", "SHF", "SLCTR", "v",
+        "VA", "VB", "VF", "VO", "W", "WO", "X", "Y", "Z",
+    ]
+    expected_rows = sorted({aisle.upper() for aisle in required_aisles_input})
+
+    with app.app_context():
+        db.session.add_all(
+            [
+                Location(code=f"1-{aisle}-001", description=f"Row {aisle}")
+                for aisle in required_aisles_input
+            ]
+        )
+        db.session.commit()
+
+    response = client.get("/inventory/locations?size=200")
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+
+    for row in expected_rows:
+        assert f'<option value="{row}"' in page
+
+
 def test_pending_receipt_set_qty_updates_stock(client, app):
     pending = _create_pending_receipt(app, sku="PEND-SET", location_code="PEND-SET-LOC")
 
