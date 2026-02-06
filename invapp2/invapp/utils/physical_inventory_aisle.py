@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import re
 from types import SimpleNamespace
 from typing import Iterable
 
+from invapp.utils.location_code import aisle_from_location_code
 from invapp.utils.location_parser import parse_location_code
 
 
@@ -19,44 +19,14 @@ def _normalize_aisle(value: object | None) -> str:
     return text
 
 
-def get_location_aisle(location, app_config) -> str:
-    """Return the aisle key for a Location based on configuration rules."""
+def get_location_aisle(location, app_config=None) -> str:
+    """Return the aisle key for a Location derived from code token index 1."""
 
     if location is None:
         return UNKNOWN_AISLE
 
-    mode = (app_config.get("PHYS_INV_AISLE_MODE") or "row").lower()
     code = getattr(location, "code", None)
-
-    if mode == "prefix":
-        pattern = app_config.get("PHYS_INV_AISLE_REGEX")
-        if not pattern or not code:
-            return UNKNOWN_AISLE
-        try:
-            matcher = re.compile(pattern)
-        except re.error:
-            return UNKNOWN_AISLE
-        match = matcher.search(str(code))
-        if not match:
-            return UNKNOWN_AISLE
-        group_dict = match.groupdict()
-        if "aisle" in group_dict:
-            return _normalize_aisle(group_dict["aisle"])
-        return _normalize_aisle(match.group(0))
-
-    parsed = None
-    if mode == "level":
-        value = getattr(location, "level", None)
-        if value is None and code:
-            parsed = parse_location_code(code)
-            value = parsed.level
-    else:
-        value = getattr(location, "row", None)
-        if value is None and code:
-            parsed = parse_location_code(code)
-            value = parsed.row if parsed else None
-
-    return _normalize_aisle(value)
+    return _normalize_aisle(aisle_from_location_code(code))
 
 
 def sort_aisle_keys(aisles: Iterable[str]) -> list[str]:

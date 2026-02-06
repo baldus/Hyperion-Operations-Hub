@@ -59,11 +59,10 @@ Hyperion is **not** the system of record for inventory totals. Physical inventor
 
 ERP upload is optional for generating count sheets; count sheets are based on Ops Console stock, while ERP upload is used for reconciliation totals.
 
-**Aisle derivation modes (count sheets by aisle)**
-- `PHYS_INV_AISLE_MODE=row` (default): uses `Location.row` parsed from `Location.code` (e.g., `1-A-1` → `A`).
-- `PHYS_INV_AISLE_MODE=level`: uses `Location.level` parsed from `Location.code` (e.g., `1-A-1` → `1`).
-- `PHYS_INV_AISLE_MODE=prefix`: uses `PHYS_INV_AISLE_REGEX` to extract an aisle key from `Location.code`.
-  - First regex match wins. If your regex defines `(?P<aisle>...)`, that named group is used.
+**Aisle derivation invariant (count sheets by aisle)**
+- Aisle/Row is always derived from `Location.code` by splitting on `"-"` and taking token index `1`.
+- Values are normalized to uppercase for consistency and deduplication (`2-g-07` → `G`, `1-Locks-12` → `LOCKS`).
+- If a code is missing tokens (not at least `LEVEL-ROW-LOCATION`), aisle resolves to `UNKNOWN` in exports/views.
 
 **Note:** Count sheets by aisle are export/view-only and do not require or introduce any migrations.
 
@@ -801,21 +800,22 @@ Use this when adjusting how the Inventory **Locations** page parses codes, filte
 **Where the page lives**
 - **Route:** `GET /inventory/locations` in [`invapp2/invapp/routes/inventory.py`](invapp2/invapp/routes/inventory.py).
 - **Template:** [`invapp2/invapp/templates/inventory/list_locations.html`](invapp2/invapp/templates/inventory/list_locations.html).
-- **Parser helper:** [`invapp2/invapp/utils/location_parser.py`](invapp2/invapp/utils/location_parser.py).
+- **Aisle helper:** [`invapp2/invapp/utils/location_code.py`](invapp2/invapp/utils/location_code.py).
+- **Parser helper (for level/bay sorting):** [`invapp2/invapp/utils/location_parser.py`](invapp2/invapp/utils/location_parser.py).
 - **Computed model properties:** `Location.level`, `Location.row`, `Location.bay` in [`invapp2/invapp/models.py`](invapp2/invapp/models.py).
 
-**Parsing rules (Level-Row-Bay)**
-- Expected format: `Level-Row-Bay` (e.g., `1-A-1`, `01-A-12`, `2-B-03`).
-- Whitespace is trimmed and row is uppercased.
-- If the code does **not** match the pattern, `level`, `row`, and `bay` are `None`.
+**Row derivation rules (Locations filter + dropdown)**
+- Row/Aisle is derived from `Location.code` by `split("-")[1]` and uppercased.
+- This supports single-letter, multi-letter, and word rows (for example `CTRL`, `LOCKS`, `CONTROLLERS`).
+- If a code does not contain at least 3 hyphen-delimited tokens, no row value is produced for filtering/dropdown.
 - Examples:
-  - `1-A-1` ➜ level `1`, row `A`, bay `1`
-  - `01-a-12` ➜ level `1`, row `A`, bay `12`
-  - ` 2 - B - 03 ` ➜ level `2`, row `B`, bay `3`
-  - `A-1` or `1A1` ➜ all `None`
+  - `1-A-1` ➜ row `A`
+  - `01-a-12` ➜ row `A`
+  - `2-Controllers-03` ➜ row `CONTROLLERS`
+  - `A-1` or `1A1` ➜ no derived row
 
 **Query params and behavior**
-- `row`: exact row match (`A`, `B`, etc.). Values are normalized to uppercase.
+- `row`: exact row/aisle match after uppercase normalization.
 - `q`: description filter (case-insensitive substring match).
 - `sort`: `code` (default), `row`, `description`, `level`, or `bay`.
 - `dir`: `asc` or `desc`.
@@ -833,7 +833,7 @@ Examples:
 - **Description sort:** Case-insensitive, with code order as the secondary tiebreaker.
 
 **Filters UI**
-- Row dropdown is populated from distinct parsed rows in current `Location.code` values.
+- Row dropdown is populated from distinct derived aisle tokens from current `Location.code` values (`split("-")[1]`, uppercased).
 - Description filter is a text input that updates the `q` query parameter.
 - Clear Filters removes row/description/sort params.
 
