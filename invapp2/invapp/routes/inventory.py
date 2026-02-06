@@ -88,7 +88,7 @@ from invapp.utils.csv_schema import (
     resolve_import_mappings,
 )
 from invapp.utils.tabular_import import TabularImportError, parse_tabular_upload, preview_csv_text
-from invapp.utils.location_parser import parse_location_code
+from invapp.utils.location_parser import normalize_row_key, parse_location_code
 from invapp.utils.physical_inventory_aisle import (
     UNKNOWN_AISLE,
     get_location_aisle,
@@ -3058,8 +3058,7 @@ def list_locations():
     page = request.args.get("page", 1, type=int)
     size = request.args.get("size", 20, type=int)
     search = (request.args.get("search") or "").strip()
-    row_filter_raw = (request.args.get("row") or "").strip()
-    row_filter = row_filter_raw.upper() or None
+    row_filter = normalize_row_key(request.args.get("row"))
     description_query = (request.args.get("q") or "").strip()
     sort_param = (request.args.get("sort") or "code").strip().lower()
     sort_dir = (request.args.get("dir") or "asc").strip().lower()
@@ -3073,7 +3072,7 @@ def list_locations():
     available_rows_query = Location.query.with_entities(Location.code).all()
     available_rows = sorted(
         {
-            parsed.row
+            normalize_row_key(parsed.row)
             for (code,) in available_rows_query
             if (parsed := parse_location_code(code)).row
         }
@@ -3115,7 +3114,7 @@ def list_locations():
         locations = [
             location
             for location in locations
-            if parsed_by_location.get(location.id).row == row_filter
+            if normalize_row_key(parsed_by_location.get(location.id).row) == row_filter
         ]
 
     def natural_code_key(location: Location) -> tuple:
@@ -3126,7 +3125,7 @@ def list_locations():
 
     def row_sort_key(location: Location) -> tuple:
         parsed = parsed_by_location.get(location.id)
-        row = parsed.row if parsed else None
+        row = normalize_row_key(parsed.row if parsed else None)
         level = parsed.level if parsed else None
         bay = parsed.bay if parsed else None
         return (
@@ -3149,7 +3148,7 @@ def list_locations():
         return (
             level is None,
             level or 0,
-            parsed.row if parsed else "",
+            normalize_row_key(parsed.row if parsed else None) or "",
             parsed.bay if parsed else 0,
             (location.code or "").lower(),
         )
@@ -3160,7 +3159,7 @@ def list_locations():
         return (
             bay is None,
             bay or 0,
-            parsed.row if parsed else "",
+            normalize_row_key(parsed.row if parsed else None) or "",
             parsed.level if parsed else 0,
             (location.code or "").lower(),
         )

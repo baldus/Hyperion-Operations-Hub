@@ -15,6 +15,15 @@ class ParsedLocation:
     bay: Optional[int]
 
 
+def normalize_row_key(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = " ".join(str(value).split()).strip()
+    if not normalized:
+        return None
+    return normalized.upper()
+
+
 def parse_location_code(code: str | None) -> ParsedLocation:
     if not code:
         return ParsedLocation(level=None, row=None, bay=None)
@@ -30,4 +39,4 @@ def parse_location_code(code: str | None) -> ParsedLocation:
     except ValueError:
         return ParsedLocation(level=None, row=None, bay=None)
 
-    return ParsedLocation(level=level, row=row_raw.upper(), bay=bay)
+    return ParsedLocation(level=level, row=normalize_row_key(row_raw), bay=bay)

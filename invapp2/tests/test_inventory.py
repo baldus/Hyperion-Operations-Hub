@@ -624,6 +624,34 @@ def test_locations_row_filter(client, app):
     assert "NOPE" not in page
 
 
+
+
+def test_locations_row_dropdown_includes_normalized_multiletter_rows(client, app):
+    with app.app_context():
+        locations = [
+            Location(code="1-AL-1", description="Row AL"),
+            Location(code="1-CTRL-1", description="Row CTRL"),
+            Location(code="1-SLCTR-1", description="Row SLCTR"),
+            Location(code="1-VA-1", description="Row VA"),
+            Location(code="1-v-1", description="Row v"),
+            Location(code="1-g-1", description="Row g"),
+            Location(code="1-n-1", description="Row n"),
+        ]
+        db.session.add_all(locations)
+        db.session.commit()
+
+    response = client.get("/inventory/locations?size=100")
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    for row in ["AL", "CTRL", "SLCTR", "VA", "V", "G", "N"]:
+        assert f'<option value="{row}"' in page
+
+    response = client.get("/inventory/locations?row=v&size=100")
+    assert response.status_code == 200
+    filtered_page = response.get_data(as_text=True)
+    assert "1-v-1" in filtered_page
+    assert "1-VA-1" not in filtered_page
+
 def test_locations_description_filter_case_insensitive(client, app):
     with app.app_context():
         locations = [

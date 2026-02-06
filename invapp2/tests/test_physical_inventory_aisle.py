@@ -212,3 +212,74 @@ def test_count_sheets_include_ops_stock_when_erp_unmatched(client, app):
     page = response.get_data(as_text=True)
     assert "Ops Only Widget" in page
     assert "1-A-1" in page
+
+
+def test_count_sheets_by_aisle_supports_multiletter_and_normalized_rows(client, app):
+    with app.app_context():
+        snapshot = PhysicalInventorySnapshot(
+            source_filename="erp.csv",
+            primary_upload_column="Item",
+            primary_item_field="name",
+            secondary_upload_column=None,
+            secondary_item_field=None,
+            quantity_column="Qty",
+            normalization_options={},
+            duplicate_strategy="sum",
+            total_rows=3,
+            matched_rows=3,
+            unmatched_rows=0,
+            ambiguous_rows=0,
+        )
+        db.session.add(snapshot)
+
+        locations = [
+            Location(code="1-CTRL-1", description="Controllers"),
+            Location(code="1-SLCTR-1", description="Selector"),
+            Location(code="1-v-1", description="Lowercase v"),
+        ]
+        items = [
+            Item(sku="SKU-CTRL", name="Widget CTRL", description="Widget"),
+            Item(sku="SKU-SLCTR", name="Widget SLCTR", description="Widget"),
+            Item(sku="SKU-V", name="Widget V", description="Widget"),
+        ]
+        db.session.add_all(locations + items)
+        db.session.flush()
+
+        for location, item in zip(locations, items):
+            db.session.add(
+                Movement(
+                    item_id=item.id,
+                    location_id=location.id,
+                    quantity=Decimal("1"),
+                    movement_type="RECEIPT",
+                )
+            )
+            db.session.add(
+                PhysicalInventorySnapshotLine(
+                    snapshot_id=snapshot.id,
+                    item_id=item.id,
+                    erp_quantity=Decimal("1"),
+                    counted_quantity=None,
+                )
+            )
+        db.session.commit()
+        snapshot_id = snapshot.id
+
+    response = client.get(
+        f"/inventory/physical-inventory/{snapshot_id}/count-sheets-by-aisle"
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    for aisle in ["CTRL", "SLCTR", "V"]:
+        assert f'<option value="{aisle}"' in page
+
+    zip_response = client.get(
+        f"/inventory/physical-inventory/{snapshot_id}/export-count-sheets-by-aisle"
+    )
+    assert zip_response.status_code == 200
+
+    with zipfile.ZipFile(io.BytesIO(zip_response.data)) as archive:
+        filenames = archive.namelist()
+        for aisle in ["CTRL", "SLCTR", "V"]:
+            expected_name = f"count_sheet_snapshot_{snapshot_id}_aisle_{aisle}.csv"
+            assert expected_name in filenames

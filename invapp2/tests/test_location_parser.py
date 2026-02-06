@@ -3,7 +3,7 @@ import sys
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
-from invapp.utils.location_parser import parse_location_code
+from invapp.utils.location_parser import normalize_row_key, parse_location_code
 
 
 def test_parse_location_code_valid():
@@ -42,3 +42,18 @@ def test_parse_location_code_invalid():
     assert parsed.level is None
     assert parsed.row is None
     assert parsed.bay is None
+
+
+def test_parse_location_code_multiletter_row():
+    parsed = parse_location_code("1-slctr-1")
+    assert parsed.level == 1
+    assert parsed.row == "SLCTR"
+    assert parsed.bay == 1
+
+
+def test_normalize_row_key():
+    assert normalize_row_key(" g ") == "G"
+    assert normalize_row_key("Controllers") == "CONTROLLERS"
+    assert normalize_row_key("  SL  CTR  ") == "SL CTR"
+    assert normalize_row_key("") is None
+    assert normalize_row_key(None) is None
